@@ -36,3 +36,7 @@ include(":kiteimage-compose")
 // KiteAsyncImage() renders the result with our frame loop so animation works on
 // every target, not just Android.
 include(":kiteimage-coil")
+
+// :sample — desktop-first gallery app: every decodable format through the
+// KiteImage() composable. ./gradlew :sample:run
+include(":sample")
