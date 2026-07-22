@@ -2,7 +2,7 @@
 
 Updated 2026-07-22 (GIF, Compose, Coil interop, baseline AND progressive JPEG all
 landed same day; JPX/JBIG2/CCITT absorbed from KitePDF in the codec consolidation). Tests:
-core 78 on JVM + 57 on JS/Node, compose 2, coil 6 — 143 total. KitePDF now
+core 103 on JVM + 79 on JS/Node, compose 2, coil 7 — 191 total. KitePDF now
 depends on kiteimage (its 697 tests exercise these codecs daily).
 JPEG common vectors assert BIT-IDENTICAL output vs clang-compiled stb_image. Core targets: Android,
 iosArm64, iosSimulatorArm64, iosX64, macosArm64, JVM, JS (browser+node), wasmJs.
@@ -16,7 +16,7 @@ Compose targets: the CMP 1.11 set (no Intel-Apple variants).
 | | color types 0/2/3/4/6, depths 1/2/4/8/16 | ✅ (16-bit → high byte) | |
 | | filters None/Sub/Up/Average/Paeth | ✅ | |
 | | `tRNS` (palette alpha + color-key 0/2) | ✅ | |
-| | Adam7 interlace | ❌ next — clean `UnsupportedImageException` today | |
+| | Adam7 interlace (7-pass, per-pass filtering, sub-byte passes) | ✅ | |
 | | `CgBI` (Apple) | ❌ detected + named, out of scope for now | |
 | | ancillary color chunks (gAMA/iCCP/sRGB) | skipped, raw samples returned | |
 | **BMP** | BITMAPINFOHEADER/V4/V5, BI_RGB 8/24/32-bit | ✅ | stb_image / commons-imaging |
@@ -39,13 +39,22 @@ Compose targets: the CMP 1.11 set (no Intel-Apple variants).
 | **JBIG2** | generic-region arithmetic + MMR paths, embedded streams w/ globals | ✅ moved from KitePDF; parameterized `Jbig2Decoder` API (no container to sniff) | KitePDF |
 | **CCITT G3/G4** | T.4 1D + T.6 2D fax; TIFF compressions 3/4 groundwork | ✅ moved from KitePDF; parameterized `CcittFax` API | KitePDF |
 | **WebP** | VP8/VP8L | ❌ phase 2, sniffed today | libwebp |
-| **TIFF** | baseline subset | ❌ phase 2, sniffed today | commons-imaging |
+| **TIFF** | II/MM, strips, raw/PackBits/TIFF-LZW+EarlyChange/Deflate/CCITT G3-1D+G4, photometric 0/1/2/3, bits 1/8, predictor 2 | ✅ (tiled/16-bit/planar-2/YCbCr rejected by name) | commons-imaging / ffmpeg vectors |
 | **AVIF / HEIC** | — | permanently out of scope (see REFERENCES.md) | |
 
 ## Encoders
 
-None yet. Order: PNG (lodepng ref, deflate side vendors from KiteArchive when it
-lands there) → JPEG baseline (stb_image_write/jpge) → GIF (commons-imaging writer).
+| Format | Status |
+|---|---|
+| PNG | ✅ 8-bit RGB/RGBA auto-pick, per-row MSAD filter heuristic, vendored KiteArchive deflate — round-trips pixel-exact, ImageIO reads output |
+| JPEG | ✅ baseline (stb_image_write port, Double math for cross-target determinism), quality 1–100, 4:2:0 ≤90 / 4:4:4 above — PSNR-tested, ImageIO + real stb read output |
+| GIF | ❌ next (commons-imaging writer ref; needs quantizer + real LZW encode) |
+
+## Scaling
+
+`KiteBitmap.scaled(maxW, maxH)` — box-filter downscale, aspect-preserving, never
+upscales; the Coil decoder honors `options.size` with it (`isSampled=true`).
+Decode-time DCT-domain scaling still future work.
 
 ## Infrastructure
 

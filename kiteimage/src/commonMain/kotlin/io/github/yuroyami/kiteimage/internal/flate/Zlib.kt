@@ -8,10 +8,28 @@ package io.github.yuroyami.kiteimage.internal.flate
  */
 
 /**
- * zlib (RFC 1950) framing over [Inflate] — a 2-byte CMF/FLG header and a big-endian
- * Adler-32 trailer. This is the wrapper PNG `IDAT` uses.
+ * zlib (RFC 1950) framing over [Inflate]/[Deflate] — a 2-byte CMF/FLG header and
+ * a big-endian Adler-32 trailer. This is the wrapper PNG `IDAT` uses. The
+ * compress side arrived with the PNG encoder (vendored from KiteArchive like the
+ * rest of this package).
  */
 internal object Zlib {
+
+    /** Compress [data] into a zlib stream. */
+    fun compress(data: ByteArray): ByteArray {
+        val out = ByteArrayBuilder(data.size / 2 + 16)
+        // CMF = 0x78 (CM=8, CINFO=7 → 32 KiB window), FLG = 0x9C so that
+        // (CMF*256 + FLG) % 31 == 0 with FLEVEL=2, FDICT=0.
+        out.append(0x78.toByte())
+        out.append(0x9C.toByte())
+        out.append(Deflate.encode(data))
+        val adler = Adler32.of(data)
+        out.append(((adler ushr 24) and 0xFF).toByte())   // big-endian
+        out.append(((adler ushr 16) and 0xFF).toByte())
+        out.append(((adler ushr 8) and 0xFF).toByte())
+        out.append((adler and 0xFF).toByte())
+        return out.toByteArray()
+    }
 
     /**
      * Decompress a zlib stream. The Adler-32 trailer is not re-validated here.

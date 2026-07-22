@@ -125,9 +125,11 @@ class PngDecoderTest {
     }
 
     @Test
-    fun interlacedRejectedClearly() {
-        val e = assertFailsWith<UnsupportedImageException> { KiteImage.decode(hex(INTERLACED_1X1)) }
-        assertTrue("Adam7" in e.message!!)
+    fun interlacedOnePixelDecodes() {
+        // A 1x1 Adam7 file is just pass 1 with a single pixel.
+        val bm = KiteImage.decode(hex(INTERLACED_1X1))
+        assertEquals(1, bm.width)
+        assertEquals(gray(0), bm[0, 0])
     }
 
     @Test

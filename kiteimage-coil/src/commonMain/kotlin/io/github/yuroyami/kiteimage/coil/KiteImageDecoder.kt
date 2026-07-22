@@ -6,8 +6,10 @@ import coil3.decode.Decoder
 import coil3.decode.ImageSource
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
+import coil3.size.Dimension
 import io.github.yuroyami.kiteimage.ImageFormat
 import io.github.yuroyami.kiteimage.KiteImage
+import io.github.yuroyami.kiteimage.scaled
 import okio.use
 
 /**
@@ -25,25 +27,34 @@ import okio.use
  *
  * The factory claims only inputs KiteImage fully decodes (GIF, baseline JPEG,
  * and the PNG/BMP feature subsets) and declines everything else —
- * interlaced/CgBI PNGs, RLE/bitfields BMPs, lossless/arithmetic JPEGs — so Coil's platform decoders
+ * CgBI PNGs, RLE/bitfields BMPs, lossless/arithmetic JPEGs — so Coil's platform decoders
  * keep handling those and nothing regresses versus a stock setup. Animated
  * results come back as [KiteAnimationImage]; static ones as an ordinary bitmap
  * image that memory-caches normally.
  */
 public class KiteImageDecoder(
     private val source: ImageSource,
-    @Suppress("unused") private val options: Options,
+    private val options: Options,
 ) : Decoder {
 
     override suspend fun decode(): DecodeResult {
         val bytes = source.source().use { it.readByteArray() }
         val animation = KiteImage.decodeAnimation(bytes)
-        val image = if (animation.isAnimated) {
-            KiteAnimationImage(animation)
-        } else {
-            animation.frames.first().bitmap.toCoilImage(shareable = true)
+        if (animation.isAnimated) {
+            // Animations keep full resolution: scaling every composited frame
+            // trades decode CPU for little — playback draws scaled anyway.
+            return DecodeResult(image = KiteAnimationImage(animation), isSampled = false)
         }
-        return DecodeResult(image = image, isSampled = false)
+        var bitmap = animation.frames.first().bitmap
+        // Honor the request's target size (box-filter downscale, never up).
+        val tw = (options.size.width as? Dimension.Pixels)?.px ?: 0
+        val th = (options.size.height as? Dimension.Pixels)?.px ?: 0
+        var sampled = false
+        if (tw > 0 && th > 0 && (bitmap.width > tw || bitmap.height > th)) {
+            bitmap = bitmap.scaled(tw, th)
+            sampled = true
+        }
+        return DecodeResult(image = bitmap.toCoilImage(shareable = true), isSampled = sampled)
     }
 
     public class Factory : Decoder.Factory {
@@ -63,6 +74,9 @@ public class KiteImageDecoder(
                 // JPEG needs a marker walk (SOF position varies behind APPn/EXIF
                 // blobs): claim SOF0/SOF1/SOF2, decline the exotics.
                 ImageFormat.JPEG -> jpegIsClaimable(result.source.source().peek())
+                // Platform decoders mostly can't read these anyway (no TIFF in
+                // BitmapFactory, no JP2 in Skia) — claiming is strictly better.
+                ImageFormat.TIFF, ImageFormat.JP2 -> true
                 else -> false
             }
             return if (claimed) KiteImageDecoder(result.source, options) else null
@@ -106,11 +120,8 @@ public class KiteImageDecoder(
         private fun pngIsDecodable(h: ByteArray): Boolean {
             if (h.size < 29) return false
             // First chunk type at offset 12; Apple's CgBI variant goes to the platform.
-            if (h[12] == 'C'.code.toByte() && h[13] == 'g'.code.toByte() &&
-                h[14] == 'B'.code.toByte() && h[15] == 'I'.code.toByte()
-            ) return false
-            // IHDR interlace flag (offset 28): Adam7 isn't decoded yet.
-            return h[28].toInt() == 0
+            return !(h[12] == 'C'.code.toByte() && h[13] == 'g'.code.toByte() &&
+                h[14] == 'B'.code.toByte() && h[15] == 'I'.code.toByte())
         }
 
         /** Decline what BmpDecoder would reject (compression, exotic depths, OS/2 header). */

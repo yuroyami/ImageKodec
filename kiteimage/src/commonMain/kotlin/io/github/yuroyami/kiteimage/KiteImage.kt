@@ -3,7 +3,10 @@ package io.github.yuroyami.kiteimage
 import io.github.yuroyami.kiteimage.codec.BmpDecoder
 import io.github.yuroyami.kiteimage.codec.GifDecoder
 import io.github.yuroyami.kiteimage.codec.JpegDecoder
+import io.github.yuroyami.kiteimage.codec.JpegEncoder
 import io.github.yuroyami.kiteimage.codec.PngDecoder
+import io.github.yuroyami.kiteimage.codec.PngEncoder
+import io.github.yuroyami.kiteimage.codec.TiffDecoder
 
 /**
  * The KiteImage facade. Everything is pure computation on byte arrays — no I/O,
@@ -38,9 +41,7 @@ public object KiteImage {
         ImageFormat.WEBP -> throw UnsupportedImageException(
             "WebP decoding is not in this version yet",
         )
-        ImageFormat.TIFF -> throw UnsupportedImageException(
-            "TIFF decoding is not in this version yet",
-        )
+        ImageFormat.TIFF -> TiffDecoder.decode(data)
         null -> throw ImageDecodeException(
             "unrecognised image format (${data.size} bytes${
                 if (data.size >= 4) {
@@ -51,6 +52,20 @@ public object KiteImage {
             })",
         )
     }
+
+    /**
+     * Encode [bitmap] as a PNG: 8-bit RGB, or RGBA when any pixel carries alpha.
+     * Lossless — decoding the result returns the exact same pixels.
+     */
+    public fun encodePng(bitmap: KiteBitmap): ByteArray = PngEncoder.encode(bitmap)
+
+    /**
+     * Encode [bitmap] as a baseline JPEG at [quality] 1..100 (default 90).
+     * Alpha is discarded (JPEG has none); quality ≤ 90 uses 4:2:0 chroma
+     * subsampling, above that 4:4:4 — stb_image_write's behavior.
+     */
+    public fun encodeJpeg(bitmap: KiteBitmap, quality: Int = 90): ByteArray =
+        JpegEncoder.encode(bitmap, quality)
 
     /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored). */
     private fun jp2ToBitmap(data: ByteArray): KiteBitmap {

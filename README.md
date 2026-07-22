@@ -6,7 +6,7 @@
 [![Ported from](https://img.shields.io/badge/ports-stb__image%20·%20commons--imaging-orange)](reference/REFERENCES.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-lightgrey)](#license--credits)
 [![Status](https://img.shields.io/badge/status-PNG%20%2F%20BMP%20%2F%20GIF%20%2F%20JPEG%20decode-brightgreen)](PORTING_STATUS.md)
-[![Tests](https://img.shields.io/badge/tests-143%20passing-brightgreen)](PORTING_STATUS.md)
+[![Tests](https://img.shields.io/badge/tests-191%20passing-brightgreen)](PORTING_STATUS.md)
 
 **A pure-Kotlin image codec toolkit for Kotlin Multiplatform: from-scratch ports of the canonical references (stb_image, commons-imaging). The same `.kt` decodes on Android, iOS, desktop JVM, the browser and WASM — no BitmapFactory, no CoreGraphics, no native binary.**
 
@@ -24,8 +24,15 @@ anim.frames.forEach { frame -> frame.bitmap; frame.delayMillis }
 anim.loopCount                  // NETSCAPE semantics: 0 = forever
 anim.isAnimated                 // false for static formats (single frame)
 
+// encode
+KiteImage.encodePng(bitmap)             // lossless, RGB/RGBA auto
+KiteImage.encodeJpeg(bitmap, quality = 85)
+
+// resize (box filter, never upscales)
+bitmap.scaled(maxWidth = 256, maxHeight = 256)
+
 // or just identify
-KiteImage.detect(bytes)         // -> ImageFormat.PNG / JPEG / GIF / BMP / WEBP / TIFF
+KiteImage.detect(bytes)         // -> ImageFormat.PNG / JPEG / GIF / BMP / WEBP / TIFF / JP2
 ```
 
 ## Why KiteImage
@@ -57,14 +64,14 @@ Today, at v0.0.1:
 
 | Format | Decode | Encode |
 |---|---|---|
-| PNG | ✅ all color types, all depths, all filters (Adam7 interlace: not yet) | roadmap |
+| PNG | ✅ everything: all color types, depths, filters, Adam7 interlace | ✅ RGB/RGBA, filter heuristic |
 | BMP | ✅ 8/24/32-bit BI_RGB, both row orders | roadmap |
 | GIF | ✅ 87a/89a incl. animation: full LZW, interlace, disposal compositing, delays, loop count | roadmap |
-| JPEG | ✅ baseline + extended sequential + **progressive**: restarts, 4:2:0/4:2:2/4:4:4/4:1:1, gray/YCbCr/RGB/CMYK/YCCK, bit-identical to stb_image | roadmap |
+| JPEG | ✅ baseline + extended sequential + **progressive**: restarts, 4:2:0/4:2:2/4:4:4/4:1:1, gray/YCbCr/RGB/CMYK/YCCK, bit-identical to stb_image | ✅ baseline, quality 1–100, 4:2:0/4:4:4 |
 | JPEG 2000 | ✅ JP2/J2K part 1 (moved from KitePDF, OpenJPEG-oracle-tested) | — |
 | JBIG2 / CCITT G3+G4 | ✅ parameterized codec APIs (scan-world; no container magic) | — |
 | WebP | recognised, not decoded | — |
-| TIFF | recognised, not decoded | — |
+| TIFF | ✅ baseline strips: raw/PackBits/LZW/Deflate/CCITT G3+G4, gray/RGB(A)/palette/1-bit, predictor | — |
 | AVIF / HEIC | out of scope (see [REFERENCES.md](reference/REFERENCES.md)) | — |
 
 The full matrix with per-feature detail lives in [PORTING_STATUS.md](PORTING_STATUS.md).

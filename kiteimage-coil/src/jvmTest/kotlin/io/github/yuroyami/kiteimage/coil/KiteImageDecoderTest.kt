@@ -71,9 +71,9 @@ class KiteImageDecoderTest {
     }
 
     @Test
-    fun interlacedPngDeclinedAndHandledByCoilsOwnDecoder() {
-        // Our factory must return null → Coil falls through to SkiaImageDecoder,
-        // which handles Adam7 fine. The request must still SUCCEED.
+    fun interlacedPngNowClaimedAndDecoded() {
+        // Adam7 landed — the factory claims interlaced PNGs and KiteImage
+        // decodes them; the request succeeds either way.
         val success = assertIs<SuccessResult>(execute(hex(INTERLACED_PNG_1X1)))
         assertTrue(success.image !is KiteAnimationImage)
         assertEquals(1, success.image.width)
@@ -89,6 +89,23 @@ class KiteImageDecoderTest {
         val success = assertIs<SuccessResult>(execute(out.toByteArray()))
         assertTrue(success.image !is KiteAnimationImage)
         assertEquals(4, success.image.width)
+    }
+
+    @Test
+    fun targetSizeDownscalesStaticResults() {
+        // 64x64 PNG requested at 16x16 → decoder box-filters and flags isSampled.
+        val img = BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB)
+        for (y in 0 until 64) for (x in 0 until 64) img.setRGB(x, y, (0xFF shl 24) or (x * 4 shl 16) or (y * 4))
+        val out = ByteArrayOutputStream()
+        check(ImageIO.write(img, "png", out))
+        val result = runBlocking {
+            loader().execute(
+                ImageRequest.Builder(context).data(out.toByteArray()).size(16, 16).build(),
+            )
+        }
+        val success = assertIs<SuccessResult>(result)
+        assertEquals(16, success.image.width)
+        assertEquals(16, success.image.height)
     }
 
     @Test
