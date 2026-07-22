@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Adam7 vectors from `gen_png_vectors.py` — pass rows constructed pixel-by-pixel
+ * Adam7 vectors from `gen_png_vectors.py`: pass rows constructed pixel-by-pixel
  * in pass order, so expectations are knowable by formula. Geometry coverage:
  * every pass non-empty (9x9), mostly-empty passes (5x3), sub-byte packed pass
  * rows (2-bit palette, 1-bit gray).

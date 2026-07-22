@@ -28,7 +28,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 /**
- * Display any image KiteImage can decode — and it decides on its own whether to
+ * Display any image KiteImage can decode: and it decides on its own whether to
  * animate. Feed it a GIF and it plays (correct delays, disposal compositing,
  * NETSCAPE loop count, holding the last frame after a finite loop ends); feed it
  * a PNG/BMP and it just draws. One composable, no format branching at call sites.
@@ -116,7 +116,7 @@ private sealed interface DecodeState {
     data object Loading : DecodeState
     data object Failed : DecodeState
     class Ready(val animation: KiteAnimation) : DecodeState {
-        /** Frames convert to ImageBitmap lazily, once each — GIFs with many frames
+        /** Frames convert to ImageBitmap lazily, once each: GIFs with many frames
          *  don't pay a double allocation up front. */
         val frameCache: Array<ImageBitmap?> = arrayOfNulls(animation.frames.size)
     }

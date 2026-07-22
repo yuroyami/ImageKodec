@@ -72,7 +72,7 @@ class KiteImageDecoderTest {
 
     @Test
     fun interlacedPngNowClaimedAndDecoded() {
-        // Adam7 landed — the factory claims interlaced PNGs and KiteImage
+        // Adam7 landed: the factory claims interlaced PNGs and KiteImage
         // decodes them; the request succeeds either way.
         val success = assertIs<SuccessResult>(execute(hex(INTERLACED_PNG_1X1)))
         assertTrue(success.image !is KiteAnimationImage)

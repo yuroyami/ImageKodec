@@ -10,7 +10,7 @@ import org.jetbrains.skia.ImageInfo
 
 /**
  * Skiko path (JVM, iOS, macOS, JS, WASM). UNPREMUL, not OPAQUE/PREMUL: the core
- * hands over straight (non-premultiplied) alpha, and Skia premultiplies on draw —
+ * hands over straight (non-premultiplied) alpha, and Skia premultiplies on draw;
  * same choice KitePDF's compose viewer landed on after transparent PDF logos
  * rendered on grey boxes.
  */

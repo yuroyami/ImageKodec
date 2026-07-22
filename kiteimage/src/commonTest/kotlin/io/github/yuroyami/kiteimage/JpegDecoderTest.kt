@@ -8,7 +8,7 @@ import kotlin.test.assertFailsWith
  * JPEG vectors: encoded by ffmpeg (an unrelated encoder), ground truth decoded
  * by the real stb_image compiled with clang (`stb_dump.c`, STBI_NO_SIMD). The
  * port is a faithful line-for-line translation of stb's scalar kernels, so the
- * assertion is BIT-EXACT equality — any drift from the reference is a bug.
+ * assertion is BIT-EXACT equality: any drift from the reference is a bug.
  */
 class JpegDecoderTest {
 
@@ -61,7 +61,7 @@ class JpegDecoderTest {
         w = 32, h = 24, name = "j_444",
     )
 
-    // 4:2:0 32x24 — hv_2 triangle upsampling
+    // 4:2:0 32x24; hv_2 triangle upsampling
     @Test
     fun yuv420Subsampling() = check(
         jpegHex = "ffd8fffe00104c61766336322e31312e31303000ffdb0043000806060706070808080808080909090a0a0a090909090a0a0a0a0a0a0c0c0c0a0a0a0a0a0a0a0c0c0c0c0d0e0d0d0d0c0d0e0e0f0f0f1212111115151519191fffc4006100010101010100" +
@@ -95,7 +95,7 @@ class JpegDecoderTest {
         w = 32, h = 24, name = "j_420",
     )
 
-    // 4:2:2 32x24 — h_2 upsampling
+    // 4:2:2 32x24; h_2 upsampling
     @Test
     fun yuv422Subsampling() = check(
         jpegHex = "ffd8fffe00104c61766336322e31312e31303000ffdb0043000806060706070808080808080909090a0a0a090909090a0a0a0a0a0a0c0c0c0a0a0a0a0a0a0a0c0c0c0c0d0e0d0d0d0c0d0e0e0f0f0f1212111115151519191fffc4005f00010101010100" +
@@ -129,7 +129,7 @@ class JpegDecoderTest {
         w = 32, h = 24, name = "j_422",
     )
 
-    // 4:2:0 17x11 — partial edge MCUs
+    // 4:2:0 17x11; partial edge MCUs
     @Test
     fun yuv420OddDimensions() = check(
         jpegHex = "ffd8fffe00104c61766336322e31312e31303000ffdb0043000806060706070808080808080909090a0a0a090909090a0a0a0a0a0a0c0c0c0a0a0a0a0a0a0a0c0c0c0c0d0e0d0d0d0c0d0e0e0f0f0f1212111115151519191fffc4006a00010101000000" +
@@ -144,7 +144,7 @@ class JpegDecoderTest {
         w = 17, h = 11, name = "j_420odd",
     )
 
-    // sharp 4px color blocks — heavy AC coefficients
+    // sharp 4px color blocks: heavy AC coefficients
     @Test
     fun hardEdges444() = check(
         jpegHex = "ffd8fffe00104c61766336322e31312e31303000ffdb0043000806060706070808080808080909090a0a0a090909090a0a0a0a0a0a0c0c0c0a0a0a0a0a0a0a0c0c0c0c0d0e0d0d0d0c0d0e0e0f0f0f1212111115151519191fffc4007d00000301000000" +

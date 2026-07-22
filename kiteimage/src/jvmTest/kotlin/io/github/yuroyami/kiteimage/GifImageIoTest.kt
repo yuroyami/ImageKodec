@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 
 /**
  * GIF cross-check against a real encoder. ImageIO's GIF writer produces genuine
- * LZW — dictionary growth, code-width bumps, mid-stream clears on full tables —
+ * LZW: dictionary growth, code-width bumps, mid-stream clears on full tables -
  * exactly the paths the literal-only commonTest vectors deliberately avoid.
  */
 class GifImageIoTest {
@@ -46,7 +46,7 @@ class GifImageIoTest {
 
     @Test
     fun solidColorGifMaxCompression() {
-        // Long runs of one index — LZW's best case, exercises deep prefix chains.
+        // Long runs of one index: LZW's best case, exercises deep prefix chains.
         val img = BufferedImage(97, 41, BufferedImage.TYPE_BYTE_INDEXED)
         val g = img.createGraphics()
         g.color = java.awt.Color(0x33, 0x66, 0x99)

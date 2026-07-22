@@ -36,7 +36,7 @@ class ToImageBitmapTest {
             val alpha = expected ushr 24
             when {
                 // Fully transparent: alpha survives; RGB does NOT (Compose's backing
-                // store is premultiplied N32 — color under alpha 0 is gone, and
+                // store is premultiplied N32: color under alpha 0 is gone, and
                 // nothing visible depends on it).
                 alpha == 0 -> assertEquals(0, packed ushr 24, "($x,$y) alpha")
                 // Opaque: bit-exact.

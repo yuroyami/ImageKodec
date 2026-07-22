@@ -7,7 +7,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * BMP vectors are built programmatically — the format is uncompressed, so the
+ * BMP vectors are built programmatically: the format is uncompressed, so the
  * builder below IS the spec restated, and every expectation is knowable by eye.
  */
 class BmpDecoderTest {

@@ -2,12 +2,12 @@ package io.github.yuroyami.kiteimage.internal.flate
 
 /*
  * Vendored from KiteArchive (io.github.yuroyami.kitearchive.checksum), minus the
- * Checksum interface — KiteImage only needs the incremental CRC for PNG chunk
+ * Checksum interface: KiteImage only needs the incremental CRC for PNG chunk
  * verification. Swap for the `kitearchive` artifact once it is on Maven Central.
  */
 
 /**
- * CRC-32 (IEEE 802.3 / zlib / gzip / PNG) — reflected polynomial `0xEDB88320`,
+ * CRC-32 (IEEE 802.3 / zlib / gzip / PNG): reflected polynomial `0xEDB88320`,
  * init `0xFFFFFFFF`, final XOR `0xFFFFFFFF`. Matches `zlib`'s `crc32()`.
  *
  * Check value: `CRC32("123456789") == 0xCBF43926`.

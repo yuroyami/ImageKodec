@@ -16,7 +16,7 @@ import okio.use
  * A [coil3.decode.Decoder] backed by KiteImage's pure-Kotlin codecs.
  *
  * Register the [Factory] on your ImageLoader and Coil keeps doing everything it
- * is good at — network fetch, disk + memory cache, request lifecycle — while
+ * is good at (network fetch, disk + memory cache, request lifecycle) while
  * decoding runs through KiteImage with identical behavior on every target:
  *
  * ```kotlin
@@ -26,8 +26,7 @@ import okio.use
  * ```
  *
  * The factory claims only inputs KiteImage fully decodes (GIF, baseline JPEG,
- * and the PNG/BMP feature subsets) and declines everything else —
- * CgBI PNGs, RLE/bitfields BMPs, lossless/arithmetic JPEGs — so Coil's platform decoders
+ * and the PNG/BMP feature subsets) and declines everything else (CgBI PNGs, RLE/bitfields BMPs, lossless/arithmetic JPEGs) so Coil's platform decoders
  * keep handling those and nothing regresses versus a stock setup. Animated
  * results come back as [KiteAnimationImage]; static ones as an ordinary bitmap
  * image that memory-caches normally.
@@ -42,7 +41,7 @@ public class KiteImageDecoder(
         val animation = KiteImage.decodeAnimation(bytes)
         if (animation.isAnimated) {
             // Animations keep full resolution: scaling every composited frame
-            // trades decode CPU for little — playback draws scaled anyway.
+            // trades decode CPU for little: playback draws scaled anyway.
             return DecodeResult(image = KiteAnimationImage(animation), isSampled = false)
         }
         var bitmap = animation.frames.first().bitmap
@@ -75,7 +74,7 @@ public class KiteImageDecoder(
                 // blobs): claim SOF0/SOF1/SOF2, decline the exotics.
                 ImageFormat.JPEG -> jpegIsClaimable(result.source.source().peek())
                 // Platform decoders mostly can't read these anyway (no TIFF in
-                // BitmapFactory, no JP2 in Skia) — claiming is strictly better.
+                // BitmapFactory, no JP2 in Skia): claiming is strictly better.
                 ImageFormat.TIFF, ImageFormat.JP2 -> true
                 else -> false
             }
@@ -139,7 +138,7 @@ public class KiteImageDecoder(
         private companion object {
             // Enough for the PNG IHDR interlace byte (29) and the BMP compression field (34).
             const val PEEK_BYTES = 34
-            // JPEG marker-walk bound — EXIF/XMP blobs sit before SOF, but never this much.
+            // JPEG marker-walk bound: EXIF/XMP blobs sit before SOF, but never this much.
             const val MAX_MARKER_SCAN = 1L shl 20
         }
     }

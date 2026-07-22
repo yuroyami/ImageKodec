@@ -6,18 +6,18 @@
 [![Ported from](https://img.shields.io/badge/ports-stb__image%20·%20commons--imaging-orange)](reference/REFERENCES.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-lightgrey)](#license--credits)
 [![Status](https://img.shields.io/badge/status-PNG%20%2F%20BMP%20%2F%20GIF%20%2F%20JPEG%20decode-brightgreen)](PORTING_STATUS.md)
-[![Tests](https://img.shields.io/badge/tests-191%20passing-brightgreen)](PORTING_STATUS.md)
+[![Tests](https://img.shields.io/badge/tests-192%20passing-brightgreen)](PORTING_STATUS.md)
 
-**A pure-Kotlin image codec toolkit for Kotlin Multiplatform: from-scratch ports of the canonical references (stb_image, commons-imaging). The same `.kt` decodes on Android, iOS, desktop JVM, the browser and WASM — no BitmapFactory, no CoreGraphics, no native binary.**
+**A pure-Kotlin image codec toolkit for Kotlin Multiplatform: from-scratch ports of the canonical references (stb_image, commons-imaging). The same `.kt` decodes on Android, iOS, desktop JVM, the browser and WASM. No BitmapFactory, no CoreGraphics, no native binary.**
 
 ```kotlin
-// decode — sniffs the format from magic bytes, returns packed ARGB
+// decode: sniffs the format from magic bytes, returns packed ARGB
 val bitmap: KiteBitmap = KiteImage.decode(bytes)
 bitmap.width; bitmap.height
 bitmap[x, y]                    // 0xAARRGGBB
 
-// animations — every frame arrives fully composited (disposal methods,
-// transparency and frame offsets already applied); playback is just
+// animations: every frame arrives fully composited (disposal methods,
+// transparency and frame offsets already applied), so playback is just
 // "draw frame N, wait delay N"
 val anim: KiteAnimation = KiteImage.decodeAnimation(bytes)
 anim.frames.forEach { frame -> frame.bitmap; frame.delayMillis }
@@ -39,24 +39,24 @@ KiteImage.detect(bytes)         // -> ImageFormat.PNG / JPEG / GIF / BMP / WEBP 
 
 Compose Multiplatform can *display* images everywhere, but *decoding* them everywhere
 still leans on each platform: `BitmapFactory` on Android, CoreGraphics on iOS, Skia
-codecs on desktop, the browser on web. The moment you need pixels in common code — a
-PDF embedding its images, a thumbnail hash, a server-side resize, a wasm tool — you're
+codecs on desktop, the browser on web. The moment you need pixels in common code (a
+PDF embedding its images, a thumbnail hash, a server-side resize, a wasm tool) you're
 stitching per-platform decoders again.
 
 KiteImage is one decoder for all of them. Pure computation on `ByteArray`, kotlin-stdlib
 only, identical output on every target.
 
-- **One pixel layout** — every format normalises to non-premultiplied ARGB_8888 in a
+- **One pixel layout.** Every format normalises to non-premultiplied ARGB_8888 in a
   plain `IntArray`. Grayscale, palette, BGR, 16-bit: gone before you see them.
-- **Wide sniffing, honest decoding** — `detect` recognises more formats than `decode`
+- **Wide sniffing, honest decoding.** `detect` recognises more formats than `decode`
   handles, so "that's a WebP, and this build can't decode WebP yet" beats "unknown
   format". Unsupported features throw `UnsupportedImageException` naming the feature.
-- **Hostile-input guards** — dimension and decompression-bomb limits, CRC verification
-  on consumed PNG chunks, truncation surfaces as `ImageDecodeException` (never an
-  index crash). Malformed-input behavior is part of the test suite.
-- **Kite lineage** — the PNG inflate path is the same zlib/`puff` port that already
-  ships in [KiteArchive](https://github.com/yuroyami/KiteArchive); references are
-  ported clean-room from permissively-licensed canonical sources.
+- **Hostile-input guards.** Dimension and decompression-bomb limits, CRC verification
+  on consumed PNG chunks, and truncation surfaces as `ImageDecodeException`, never an
+  index crash. Malformed-input behavior is part of the test suite.
+- **Kite lineage.** The PNG flate paths are the same zlib ports that already ship in
+  [KiteArchive](https://github.com/yuroyami/KiteArchive); references are ported
+  clean-room from permissively-licensed canonical sources.
 
 ## Format support
 
@@ -67,34 +67,35 @@ Today, at v0.0.1:
 | PNG | ✅ everything: all color types, depths, filters, Adam7 interlace | ✅ RGB/RGBA, filter heuristic |
 | BMP | ✅ 8/24/32-bit BI_RGB, both row orders | roadmap |
 | GIF | ✅ 87a/89a incl. animation: full LZW, interlace, disposal compositing, delays, loop count | roadmap |
-| JPEG | ✅ baseline + extended sequential + **progressive**: restarts, 4:2:0/4:2:2/4:4:4/4:1:1, gray/YCbCr/RGB/CMYK/YCCK, bit-identical to stb_image | ✅ baseline, quality 1–100, 4:2:0/4:4:4 |
+| JPEG | ✅ baseline + extended sequential + **progressive**: restarts, 4:2:0/4:2:2/4:4:4/4:1:1, gray/YCbCr/RGB/CMYK/YCCK, bit-identical to stb_image | ✅ baseline, quality 1-100, 4:2:0/4:4:4 |
 | JPEG 2000 | ✅ JP2/J2K part 1 (moved from KitePDF, OpenJPEG-oracle-tested) | — |
-| JBIG2 / CCITT G3+G4 | ✅ parameterized codec APIs (scan-world; no container magic) | — |
-| WebP | recognised, not decoded | — |
+| JBIG2 / CCITT G3+G4 | ✅ parameterized codec APIs (scan-world formats without container magic) | — |
 | TIFF | ✅ baseline strips: raw/PackBits/LZW/Deflate/CCITT G3+G4, gray/RGB(A)/palette/1-bit, predictor | — |
+| WebP | recognised, not decoded | — |
 | AVIF / HEIC | out of scope (see [REFERENCES.md](reference/REFERENCES.md)) | — |
 
 The full matrix with per-feature detail lives in [PORTING_STATUS.md](PORTING_STATUS.md).
 
 ## Compose
 
-`kiteimage-compose` ships one composable. It decides on its own whether to animate —
-feed it anything:
+`kiteimage-compose` ships one composable. It decides on its own whether to animate.
+Feed it anything:
 
 ```kotlin
 KiteImage(
-    data = bytes,                  // GIF → plays; PNG/BMP → draws. No branching.
+    data = bytes,                  // GIF plays; PNG/BMP draws. No branching.
     contentDescription = "avatar",
     modifier = Modifier.size(96.dp),
     // animate = false,            // escape hatch: pin the first frame (thumbnails)
-    // onError = { log(it) },      // malformed input → draws nothing + callback
+    // onError = { log(it) },      // malformed input draws nothing + callback
 )
 ```
 
 Decoding runs off the UI thread. Animated inputs honor per-frame delays (with the
-browser ≤10 ms → 100 ms rule), disposal compositing, and the NETSCAPE loop count —
-finite loops end holding the last frame. `KiteBitmap.toImageBitmap()` is public for
-custom pipelines, and an overload takes an already-decoded `KiteBitmap`.
+browser rule that clamps delays of 10 ms and under to 100 ms), disposal compositing,
+and the NETSCAPE loop count. Finite loops end holding the last frame.
+`KiteBitmap.toImageBitmap()` is public for custom pipelines, and an overload takes an
+already-decoded `KiteBitmap`.
 
 ## Coil interop
 
@@ -107,7 +108,7 @@ ImageLoader.Builder(context)
     .components { add(KiteImageDecoder.Factory()) }
     .build()
 
-// 2. remote GIF, fetched + cached by Coil, animated by KiteImage — on every target
+// 2. remote GIF, fetched + cached by Coil, animated by KiteImage, on every target
 KiteAsyncImage(
     model = "https://example.com/reaction.gif",
     contentDescription = null,
@@ -116,16 +117,21 @@ KiteAsyncImage(
 
 Coil itself can't animate outside Android (its non-Android decode is a Skia
 delegate, and coil-gif is an Android-only module). `KiteImageDecoder` claims only
-what KiteImage fully decodes — GIF, JPEG (baseline + progressive) and the
-supported PNG/BMP subsets — and declines the rest (SVG, interlaced PNG, …) so
+what KiteImage fully decodes: GIF, JPEG (baseline + progressive), TIFF, JP2 and the
+supported PNG/BMP subsets. It declines the rest (SVG, CgBI PNG, exotic BMPs) so
 Coil's platform decoders keep them and nothing regresses. Animated results skip
-Coil's memory cache (`shareable = false`,
-same tradeoff as coil-gif) and re-decode from disk cache; plain `AsyncImage` still
-shows their first frame, `KiteAsyncImage` plays them.
+Coil's memory cache (`shareable = false`, the same tradeoff coil-gif makes) and
+re-decode from disk cache. Plain `AsyncImage` still shows their first frame;
+`KiteAsyncImage` plays them.
+
+## Sample
+
+`./gradlew :sample:run` opens a desktop gallery: an animated GIF playing through the
+composable, JPEG/JP2/TIFF/BMP tiles, and both encoders dogfooded at runtime.
 
 ## Install
 
-Not yet published — building from source works today:
+Not yet published. Building from source works today:
 
 ```sh
 ./gradlew :kiteimage:publishToMavenLocal
@@ -139,8 +145,8 @@ commonMain.dependencies {
 
 ## License & credits
 
-Apache License 2.0. Ported clean-room from permissively-licensed references —
+Apache License 2.0. Ported clean-room from permissively-licensed references,
 primarily [stb_image](https://github.com/nothings/stb) (public domain / MIT) and
-[Apache Commons Imaging](https://github.com/apache/commons-imaging) (Apache-2.0);
-the inflate path derives from Mark Adler's public-domain `puff` via KiteArchive.
-Details in [reference/REFERENCES.md](reference/REFERENCES.md) and [NOTICE](NOTICE).
+[Apache Commons Imaging](https://github.com/apache/commons-imaging) (Apache-2.0).
+The flate paths derive from zlib references via KiteArchive. Details in
+[reference/REFERENCES.md](reference/REFERENCES.md) and [NOTICE](NOTICE).

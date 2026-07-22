@@ -1,7 +1,7 @@
 package io.github.yuroyami.kiteimage.internal.flate
 
 /**
- * A minimal growable byte buffer — the pure-Kotlin equivalent of a `ByteArrayOutputStream`,
+ * A minimal growable byte buffer: the pure-Kotlin equivalent of a `ByteArrayOutputStream`,
  * with no `java.io` dependency so it lives in `commonMain`. Amortised O(1) append by
  * doubling. Used by the DEFLATE encoder and the gzip/zlib framers.
  */

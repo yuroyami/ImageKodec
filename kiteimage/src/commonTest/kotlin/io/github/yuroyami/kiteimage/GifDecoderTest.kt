@@ -8,7 +8,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Vectors from `gen_gif_vectors.py` — a minimal independent GIF writer whose LZW
+ * Vectors from `gen_gif_vectors.py`: a minimal independent GIF writer whose LZW
  * stream is literal-only with periodic CLEAR codes (the "uncompressed GIF"
  * technique), so these pin container semantics: color tables, interlacing,
  * transparency, disposal compositing, delays, loop count. Dictionary-growth LZW

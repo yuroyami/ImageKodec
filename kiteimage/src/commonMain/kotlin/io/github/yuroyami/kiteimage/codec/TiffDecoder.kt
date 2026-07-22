@@ -6,15 +6,15 @@ import io.github.yuroyami.kiteimage.UnsupportedImageException
 import io.github.yuroyami.kiteimage.internal.flate.Zlib
 
 /**
- * Baseline TIFF decoder (commons-imaging as the semantic reference). Scope —
+ * Baseline TIFF decoder (commons-imaging as the semantic reference). Scope:
  * the strip-based baseline that covers the files people actually have:
  *
  *  - both byte orders (II/MM), first IFD only (multi-page: first page)
  *  - compressions: none (1), CCITT G3-1D (2, byte-aligned rows), G3 via
- *    T4Options bit0=0 (3), G4 (4) — the absorbed [CcittFax] codec — TIFF-LZW
+ *    T4Options bit0=0 (3), G4 (4), the absorbed [CcittFax] codec, TIFF-LZW
  *    with EarlyChange (5), Deflate (8 / 32946), PackBits (32773)
  *  - photometric 0/1 (bilevel + gray, either polarity), 2 (RGB, optional
- *    alpha via ExtraSamples — treated as straight), 3 (palette, 16-bit
+ *    alpha via ExtraSamples: treated as straight), 3 (palette, 16-bit
  *    ColorMap entries)
  *  - bits per sample 1 and 8, horizontal-differencing predictor (2),
  *    chunky planar configuration only

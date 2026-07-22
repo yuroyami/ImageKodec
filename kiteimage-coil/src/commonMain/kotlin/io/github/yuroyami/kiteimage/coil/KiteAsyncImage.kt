@@ -32,13 +32,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
 /**
- * `AsyncImage`, but animations actually play — on every target.
+ * `AsyncImage`, but animations actually play: on every target.
  *
  * Coil does what Coil is for: [model] goes through its full pipeline (network
  * fetchers, disk cache, memory cache, request lifecycle) via [imageLoader].
  * Rendering is ours: when the result is a [KiteAnimationImage] (produced by a
- * registered [KiteImageDecoder]), this composable runs KiteImage's frame loop —
- * per-frame delays, loop count, last-frame hold — instead of Coil's static
+ * registered [KiteImageDecoder]), this composable runs KiteImage's frame loop
+ * (per-frame delays, loop count, last-frame hold) instead of Coil's static
  * painter, which has no animation driver outside Android. Any other result
  * renders exactly as `AsyncImage` would, via `Image.asPainter`.
  *

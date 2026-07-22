@@ -23,7 +23,7 @@ class JpegImageIoTest {
     private fun photoish(w: Int, h: Int): BufferedImage {
         val img = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
         for (y in 0 until h) for (x in 0 until w) {
-            // smooth waves — compresses like a photo, no random noise
+            // smooth waves: compresses like a photo, no random noise
             val r = (128 + 127 * kotlin.math.sin(x / 7.0)).toInt().coerceIn(0, 255)
             val g = (128 + 127 * kotlin.math.sin(y / 5.0 + 1.0)).toInt().coerceIn(0, 255)
             val b = (128 + 127 * kotlin.math.sin((x + y) / 9.0 + 2.0)).toInt().coerceIn(0, 255)
@@ -50,7 +50,7 @@ class JpegImageIoTest {
 
     /**
      * Tolerances cover legitimate inter-decoder variance: stb's IDCT vs
-     * libjpeg's, and centered (JFIF) vs co-sited chroma upsampling phase — a
+     * libjpeg's, and centered (JFIF) vs co-sited chroma upsampling phase: a
      * few counts at hard edges, worst on tiny single-MCU images. Real decoder
      * bugs show up as means in the tens (see the gray color-management note
      * below), not single digits.
@@ -126,7 +126,7 @@ class JpegImageIoTest {
     @Test
     fun realWorldRestartMarkerFile() {
         // macOS ships a large baseline JPEG with DRI/RSTn restart markers. Skip
-        // silently on machines that don't have it — commonTest still covers the
+        // silently on machines that don't have it: commonTest still covers the
         // codec; this adds a real-camera-pipeline file with restarts.
         val f = File("/System/Library/CoreServices/DefaultBackground.jpg")
         if (!f.exists()) return

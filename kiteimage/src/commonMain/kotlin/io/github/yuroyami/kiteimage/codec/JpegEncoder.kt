@@ -4,7 +4,7 @@ import io.github.yuroyami.kiteimage.KiteBitmap
 import io.github.yuroyami.kiteimage.internal.flate.ByteArrayBuilder
 
 /**
- * Baseline JPEG encoder — a faithful port of `stb_image_write.h`'s
+ * Baseline JPEG encoder: a faithful port of `stb_image_write.h`'s
  * `stbi_write_jpg_core` (fixed standard Huffman tables, AAN float fDCT, the
  * IJG-scaled quality→quant mapping, 4:2:0 subsampling at quality ≤ 90 and
  * 4:4:4 above, edge replication for partial MCUs).
@@ -13,7 +13,7 @@ import io.github.yuroyami.kiteimage.internal.flate.ByteArrayBuilder
  * doesn't round Float math to 32 bits between operations, so a Float port
  * would produce different files per target; Double is deterministic
  * everywhere. Output therefore may differ from C stbiw by a coefficient here
- * and there — validity and quality are pinned by tests instead (decode
+ * and there: validity and quality are pinned by tests instead (decode
  * round-trip PSNR, ImageIO and the real stb_image both read our files).
  */
 internal object JpegEncoder {
@@ -61,14 +61,14 @@ internal object JpegEncoder {
         0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA,
     )
 
-    // Fixed code tables (code, size) — stbiw's YDC_HT/UVDC_HT/YAC_HT/UVAC_HT,
+    // Fixed code tables (code, size): stbiw's YDC_HT/UVDC_HT/YAC_HT/UVAC_HT,
     // generated from the standard tables above at first use.
     private val YDC_HT = buildHuffTable(STD_DC_LUM_NRCODES, STD_DC_LUM_VALUES)
     private val UVDC_HT = buildHuffTable(STD_DC_CHR_NRCODES, STD_DC_CHR_VALUES)
     private val YAC_HT = buildHuffTable(STD_AC_LUM_NRCODES, STD_AC_LUM_VALUES)
     private val UVAC_HT = buildHuffTable(STD_AC_CHR_NRCODES, STD_AC_CHR_VALUES)
 
-    /** codes[value] = (code shl 5) or size — packed like stbiw's [256][2] tables. */
+    /** codes[value] = (code shl 5) or size: packed like stbiw's [256][2] tables. */
     private fun buildHuffTable(nrcodes: IntArray, values: IntArray): IntArray {
         val out = IntArray(256)
         var code = 0
@@ -244,7 +244,7 @@ internal object JpegEncoder {
         return out.toByteArray()
     }
 
-    // stbiw__jpg_DCT — AAN forward DCT on one 8-element span.
+    // stbiw__jpg_DCT: AAN forward DCT on one 8-element span.
     private fun dct1d(d: DoubleArray, o0: Int, o1: Int, o2: Int, o3: Int, o4: Int, o5: Int, o6: Int, o7: Int) {
         val d0 = d[o0]; val d1 = d[o1]; val d2 = d[o2]; val d3 = d[o3]
         val d4 = d[o4]; val d5 = d[o5]; val d6 = d[o6]; val d7 = d[o7]

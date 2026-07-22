@@ -23,7 +23,7 @@ import io.github.yuroyami.kiteimage.internal.ByteReader
  *    loop count
  *
  * Compositing starts from a fully transparent canvas and "restore to background"
- * clears to transparent — what every modern renderer does; the spec's literal
+ * clears to transparent: what every modern renderer does; the spec's literal
  * background-color-index fill hasn't been honoured by anyone in decades.
  * Frames are presented as full composited canvases, so playback is just
  * "draw frame N, wait delay N".
@@ -306,7 +306,7 @@ internal object GifDecoder {
                         throw ImageDecodeException("GIF: LZW code $code beyond dictionary ($avail)")
                     }
                     if (code == avail) {
-                        // KwKwK: chain is oldCode's chain + oldCode's first byte —
+                        // KwKwK: chain is oldCode's chain + oldCode's first byte;
                         // and that's exactly what the new dictionary entry becomes,
                         // so wire it up first and emit the new code's chain.
                         prefix[avail] = oldCode

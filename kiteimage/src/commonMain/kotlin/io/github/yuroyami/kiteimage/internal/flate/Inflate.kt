@@ -1,12 +1,12 @@
 package io.github.yuroyami.kiteimage.internal.flate
 
 /**
- * Raw DEFLATE (RFC 1951) decompressor — a faithful pure-Kotlin port of Mark
+ * Raw DEFLATE (RFC 1951) decompressor: a faithful pure-Kotlin port of Mark
  * Adler's `puff()` (the canonical, deliberately-simple reference inflate, bundled
  * with zlib at `contrib/puff/puff.c`). Vendored from KiteArchive, which carried it
  * over from the KiteTorrent port, which itself took it from libtorrent's
  * `src/puff.cpp`. Kept `internal`: PNG IDAT needs an inflater and the KiteImage
- * core takes zero dependencies — swap for the `kitearchive` artifact once it is
+ * core takes zero dependencies: swap for the `kitearchive` artifact once it is
  * on Maven Central.
  *
  * Differences from the C, all behaviour-preserving:
@@ -70,7 +70,7 @@ internal object Inflate {
      * decompressed bytes.
      *
      * @throws InflateException with the faithful [InflateError] on malformed or
-     *   truncated input — the same failure taxonomy puff returns numerically.
+     *   truncated input: the same failure taxonomy puff returns numerically.
      */
     fun inflate(input: ByteArray): ByteArray {
         val s = State(input)

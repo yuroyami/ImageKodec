@@ -26,7 +26,7 @@ class JpegProgressiveTest {
         }
     }
 
-    // RGB 32x24 q=0.8 — full scan script w/ refinement
+    // RGB 32x24 q=0.8: full scan script w/ refinement
     @Test
     fun progressiveRgb32x24() = check(
         jpegHex = "ffd8ffe000104a46494600010200000100010000ffdb00430006040506050406060506070706080a100a0a09090a140e0f0c1017141818171416161a1d251f1a1b231c1616202c20232627292a29191f2d302d283025282928ffdb0043010707070a080a" +
@@ -63,7 +63,7 @@ class JpegProgressiveTest {
         w = 32, h = 24, name = "p_rgb32",
     )
 
-    // 17x11 — partial edge MCUs through progressive path
+    // 17x11: partial edge MCUs through progressive path
     @Test
     fun progressiveOddDimensions() = check(
         jpegHex = "ffd8ffe000104a46494600010200000100010000ffdb0043000a07070807060a0808080b0a0a0b0e18100e0d0d0e1d15161118231f2524221f2221262b372f26293429212230413134393b3e3e3e252e4449433c48373d3e3bffdb0043010a0b0b0e0d0e" +

@@ -5,7 +5,7 @@ import io.github.yuroyami.kiteimage.KiteBitmap
 import io.github.yuroyami.kiteimage.UnsupportedImageException
 
 /**
- * Baseline JPEG decoder — a faithful pure-Kotlin port of `stb_image.h`'s JPEG
+ * Baseline JPEG decoder: a faithful pure-Kotlin port of `stb_image.h`'s JPEG
  * path (the scalar kernels; stb's SIMD variants are behavior-identical by
  * design). Function-level comments name the stb original so the two can be
  * diffed side by side. Scope:
@@ -13,8 +13,8 @@ import io.github.yuroyami.kiteimage.UnsupportedImageException
  *  - baseline sequential (SOF0) and extended sequential (SOF1), 8-bit
  *  - Huffman decode with stb's 9-bit fast table + fast-AC combined table
  *  - restart intervals (DRI/RSTn), multi-scan non-interleaved baseline files
- *  - chroma subsampling with integer factors 1..4 — 4:4:4, 4:2:0, 4:2:2, 4:1:1
- *    and friends — using stb's JFIF-centered triangle-filter upsampling for the
+ *  - chroma subsampling with integer factors 1..4: 4:4:4, 4:2:0, 4:2:2, 4:1:1
+ *    and friends: using stb's JFIF-centered triangle-filter upsampling for the
  *    2x cases and nearest-neighbor for the generic ones
  *  - grayscale (1 comp), YCbCr (3), component-id "RGB" (3, no transform),
  *    CMYK and YCCK via the Adobe APP14 transform flag (4)
@@ -178,7 +178,7 @@ internal object JpegDecoder {
         var succLow = 0
         var eobRun = 0
 
-        // header reads — truncation is a decode error
+        // header reads: truncation is a decode error
         fun u8(): Int {
             if (pos >= input.size) err("truncated file")
             return input[pos++].toInt() and 0xFF
@@ -191,7 +191,7 @@ internal object JpegDecoder {
             pos += n
         }
 
-        // entropy reads — stb's stbi__get8 returns 0 at EOF instead of failing
+        // entropy reads: stb's stbi__get8 returns 0 at EOF instead of failing
         fun u8e(): Int = if (pos < input.size) input[pos++].toInt() and 0xFF else 0
 
         val eof: Boolean get() = pos >= input.size
@@ -433,7 +433,7 @@ internal object JpegDecoder {
                             if (r != 0) j.eobRun += getBits(j, r)
                             r = 64   // force end of block
                         }
-                        // r == 15, s == 0: run of 15 zeros then write s (0) — nothing special
+                        // r == 15, s == 0: run of 15 zeros then write s (0); nothing special
                     } else {
                         if (s != 1) err("bad huffman code")
                         s = if (getBit(j)) bit.toInt() else -bit.toInt()
@@ -823,7 +823,7 @@ internal object JpegDecoder {
         }
     }
 
-    // stbi__parse_entropy_coded_data, progressive paths — coefficients only,
+    // stbi__parse_entropy_coded_data, progressive paths: coefficients only,
     // no IDCT here; that happens once at EOI in [finishProgressive].
     private fun parseProgressiveScan(j: State) {
         if (j.scanN == 1) {
@@ -902,7 +902,7 @@ internal object JpegDecoder {
             while (x == 0xFF) {
                 if (j.eof) return MARKER_NONE
                 x = j.u8e()
-                if (x == 0x00) break            // stuffed zero — not a marker
+                if (x == 0x00) break            // stuffed zero, not a marker
                 if (x == 0xFF) continue         // fill byte
                 return x                        // real marker
             }

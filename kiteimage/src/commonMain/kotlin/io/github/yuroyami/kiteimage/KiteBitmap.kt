@@ -3,7 +3,7 @@ package io.github.yuroyami.kiteimage
 /**
  * A decoded raster image: [width] × [height] pixels, packed as non-premultiplied
  * ARGB_8888 in a row-major [argb] array (`argb[y * width + x]`, alpha in the top
- * byte). One layout for every source format — decoders normalise grayscale,
+ * byte). One layout for every source format: decoders normalise grayscale,
  * palette, BGR and 16-bit inputs into this on the way out, so consumers and the
  * Compose interop never branch on the source format.
  *

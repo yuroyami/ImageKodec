@@ -2,14 +2,14 @@ package io.github.yuroyami.kiteimage
 
 /**
  * Downscale to fit inside [maxWidth]×[maxHeight], preserving aspect ratio, using
- * box (area-average) filtering — each destination pixel averages every source
+ * box (area-average) filtering: each destination pixel averages every source
  * pixel that maps into its bin, so thumbnails don't shimmer the way
  * nearest-neighbor ones do. Channels average independently in straight
  * (non-premultiplied) alpha.
  *
  * Never upscales: if the bitmap already fits, the same instance returns.
  *
- * This is a post-decode scale — the decoder still materialises the full-size
+ * This is a post-decode scale: the decoder still materialises the full-size
  * image transiently. What it saves is *retained* memory (the thumbnail you keep
  * vs the 12MP original). Decode-time DCT-domain scaling is future work.
  */
@@ -17,7 +17,7 @@ public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
     require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
     if (width <= maxWidth && height <= maxHeight) return this
 
-    // Fit inside, keep aspect, floor — but never to zero.
+    // Fit inside, keep aspect, floor: but never to zero.
     val scale = minOf(maxWidth.toDouble() / width, maxHeight.toDouble() / height)
     val dw = maxOf(1, (width * scale).toInt())
     val dh = maxOf(1, (height * scale).toInt())

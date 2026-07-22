@@ -9,8 +9,8 @@ import io.github.yuroyami.kiteimage.codec.PngEncoder
 import io.github.yuroyami.kiteimage.codec.TiffDecoder
 
 /**
- * The KiteImage facade. Everything is pure computation on byte arrays — no I/O,
- * no threads, no platform types — so it behaves identically on every KMP target.
+ * The KiteImage facade. Everything is pure computation on byte arrays: no I/O,
+ * no threads, no platform types: so it behaves identically on every KMP target.
  *
  * ```kotlin
  * val bitmap = KiteImage.decode(bytes)          // sniffs the format, dispatches
@@ -30,7 +30,7 @@ public object KiteImage {
      *
      * @throws ImageDecodeException on malformed/truncated input or unknown format
      * @throws UnsupportedImageException on formats recognised but not yet decodable
-     *   (see [ImageFormat] — sniffing is deliberately wider than decoding)
+     *   (see [ImageFormat]: sniffing is deliberately wider than decoding)
      */
     public fun decode(data: ByteArray): KiteBitmap = when (detect(data)) {
         ImageFormat.PNG -> PngDecoder.decode(data)
@@ -55,14 +55,14 @@ public object KiteImage {
 
     /**
      * Encode [bitmap] as a PNG: 8-bit RGB, or RGBA when any pixel carries alpha.
-     * Lossless — decoding the result returns the exact same pixels.
+     * Lossless: decoding the result returns the exact same pixels.
      */
     public fun encodePng(bitmap: KiteBitmap): ByteArray = PngEncoder.encode(bitmap)
 
     /**
      * Encode [bitmap] as a baseline JPEG at [quality] 1..100 (default 90).
      * Alpha is discarded (JPEG has none); quality ≤ 90 uses 4:2:0 chroma
-     * subsampling, above that 4:4:4 — stb_image_write's behavior.
+     * subsampling, above that 4:4:4; stb_image_write's behavior.
      */
     public fun encodeJpeg(bitmap: KiteBitmap, quality: Int = 90): ByteArray =
         JpegEncoder.encode(bitmap, quality)

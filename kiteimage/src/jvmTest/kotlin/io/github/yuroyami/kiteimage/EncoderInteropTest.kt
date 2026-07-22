@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Our encoded files must open in other people's decoders — ImageIO always, and
+ * Our encoded files must open in other people's decoders: ImageIO always, and
  * the real stb_image via the compiled harness when it's around.
  */
 class EncoderInteropTest {
@@ -46,7 +46,7 @@ class EncoderInteropTest {
                 if (d > maxDiff) maxDiff = d
             }
         }
-        assertTrue(maxDiff < 40, "q92 encode drifted $maxDiff — structurally broken output?")
+        assertTrue(maxDiff < 40, "q92 encode drifted $maxDiff; structurally broken output?")
     }
 
     @Test

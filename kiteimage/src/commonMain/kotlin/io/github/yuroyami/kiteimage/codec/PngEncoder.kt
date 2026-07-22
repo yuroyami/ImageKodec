@@ -8,7 +8,7 @@ import kotlin.math.abs
 /**
  * PNG encoder (lodepng as the structural reference, libpng's filter heuristic).
  *
- * Output shape: 8-bit truecolor — color type 6 (RGBA) when any pixel carries
+ * Output shape: 8-bit truecolor; color type 6 (RGBA) when any pixel carries
  * alpha, color type 2 (RGB) otherwise. Palette/gray optimization is deliberately
  * out of scope for v1: every decoder reads truecolor, and correctness beats
  * bytes here. Per row, all five filters are tried and the one with the minimal

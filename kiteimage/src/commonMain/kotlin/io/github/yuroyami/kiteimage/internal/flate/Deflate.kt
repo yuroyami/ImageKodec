@@ -3,7 +3,7 @@ package io.github.yuroyami.kiteimage.internal.flate
 
 
 /**
- * Pure-Kotlin RFC 1951 DEFLATE *deflater* — the inverse of [Inflate]. Consolidated
+ * Pure-Kotlin RFC 1951 DEFLATE *deflater*: the inverse of [Inflate]. Consolidated
  * from the KitePDF FlateDecode encoder and upgraded with a **dynamic-Huffman**
  * (BTYPE=10) path.
  *
@@ -80,7 +80,7 @@ private class Deflater(private val data: ByteArray) {
         return out.toByteArray()
     }
 
-    /* ─── LZ77 (greedy, hash-chained) — gathers tokens + frequencies ──────── */
+    /* ─── LZ77 (greedy, hash-chained): gathers tokens + frequencies ──────── */
 
     private fun lz77() {
         val n = data.size
@@ -374,7 +374,7 @@ private class Deflater(private val data: ByteArray) {
             for (i in 0 until m) { weight[i] = freq[symbols[i]].toLong(); depth[i] = 0 }
             var nodeCount = m
 
-            // Min-heap of node ids keyed by (weight, depth) — depth tie-break mirrors
+            // Min-heap of node ids keyed by (weight, depth): depth tie-break mirrors
             // zlib and keeps the tree shallow, minimising overflow.
             val heap = IntArray(maxNodes)
             var heapSize = 0

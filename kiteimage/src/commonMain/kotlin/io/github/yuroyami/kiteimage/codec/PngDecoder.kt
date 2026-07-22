@@ -12,16 +12,16 @@ import io.github.yuroyami.kiteimage.internal.flate.Zlib
  * PNG decoder (W3C PNG spec / RFC 2083), ported against `stb_image.h`'s
  * `stbi__parse_png_file` with the spec as ground truth. Scope:
  *
- *  - all five color types — gray (0), RGB (2), palette (3), gray+alpha (4), RGBA (6)
+ *  - all five color types: gray (0), RGB (2), palette (3), gray+alpha (4), RGBA (6)
  *  - all legal bit depths; 16-bit samples reduce to their high byte (stb's 8-bit
  *    behaviour), sub-byte gray scales by sample replication (1/2/4-bit → ×255/×85/×17)
  *  - all five row filters (None/Sub/Up/Average/Paeth)
  *  - `tRNS` transparency for types 0/2 (color-key) and 3 (per-entry alpha)
  *  - CRC verification on the chunks we consume (IHDR/PLTE/tRNS/IDAT); ancillary
- *    chunks we skip are not CRC-checked — real-world writers get those wrong,
+ *    chunks we skip are not CRC-checked: real-world writers get those wrong,
  *    and stb doesn't check any CRC at all
  *
- * Interlaced (Adam7) files are recognised and rejected with a clear message —
+ * Interlaced (Adam7) files are recognised and rejected with a clear message;
  * next on the roadmap, tracked in PORTING_STATUS.md. Apple's proprietary CgBI
  * variant is detected up front for the same reason.
  */
@@ -136,7 +136,7 @@ internal object PngDecoder {
                 }
                 else -> {
                     // Ancillary chunk we don't consume (tEXt, gAMA, pHYs, …): skip data
-                    // + CRC without verifying — see class doc.
+                    // + CRC without verifying: see class doc.
                     r.skip(chunk.length)
                     r.skip(4)
                 }
@@ -320,7 +320,7 @@ internal object PngDecoder {
     /**
      * Expand a filtered-then-unfiltered region ([width]×[height] samples starting
      * at [base]) into [argb], with [dst] mapping region coordinates to final
-     * pixel indices — identity for normal files, the pass scatter for Adam7.
+     * pixel indices: identity for normal files, the pass scatter for Adam7.
      */
     private fun expand(
         d: ByteArray, base: Int, width: Int, height: Int, rowBytes: Int,

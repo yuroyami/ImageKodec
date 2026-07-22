@@ -3,7 +3,7 @@ package io.github.yuroyami.kiteimage
 /**
  * Image container formats KiteImage can *identify* from magic bytes. Sniffing
  * intentionally recognises more formats than [KiteImage.decode] currently
- * handles — "that's a WebP we can't decode yet" is a far better error than
+ * handles: "that's a WebP we can't decode yet" is a far better error than
  * "unknown format".
  */
 public enum class ImageFormat {
@@ -52,7 +52,7 @@ public enum class ImageFormat {
                     at(4) == 'j'.code && at(5) == 'P'.code && at(6) == ' '.code && at(7) == ' '.code -> JP2
                 at(0) == 0xFF && at(1) == 0x4F -> JP2
 
-                // "BM" — last: two ASCII letters is the weakest magic of the set.
+                // "BM" last; two ASCII letters is the weakest magic of the set.
                 at(0) == 'B'.code && at(1) == 'M'.code -> BMP
 
                 else -> null

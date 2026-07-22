@@ -10,13 +10,13 @@ import io.github.yuroyami.kiteimage.internal.ByteReader
  * the commons-imaging BMP parser; scope is the uncompressed BI_RGB core that
  * covers essentially every BMP found in the wild:
  *
- *  - BITMAPINFOHEADER (40), V4 (108) and V5 (124) headers — the V4/V5 extras
+ *  - BITMAPINFOHEADER (40), V4 (108) and V5 (124) headers: the V4/V5 extras
  *    (color space, gamma) don't affect BI_RGB pixel decoding and are skipped
  *  - 8-bit palette, 24-bit BGR, 32-bit BGRA
  *  - bottom-up (positive height, the norm) and top-down (negative) row order
  *  - rows padded to 4-byte boundaries
  *  - the stb pragmatism: a 32-bit image whose alpha plane is entirely zero is
- *    treated as opaque — countless real files write 0 there and mean "no alpha"
+ *    treated as opaque; countless real files write 0 there and mean "no alpha"
  *
  * BI_RLE4/RLE8/BITFIELDS compression, 1/2/4/16-bit depths and the ancient
  * BITMAPCOREHEADER are rejected with a message naming the exact unsupported

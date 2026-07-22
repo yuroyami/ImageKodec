@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
  * Round-trip against a real, unrelated encoder: ImageIO writes the file, KiteImage
  * decodes it, and every pixel must equal the ARGB values the image was built from.
  * PNG is lossless, so any mismatch is a decoder bug (ImageIO's PNG writer also
- * picks row filters adaptively — this exercises filter paths on organic data, not
+ * picks row filters adaptively: this exercises filter paths on organic data, not
  * just the hand-filtered vectors).
  *
  * Grayscale BufferedImage types are deliberately absent: TYPE_BYTE_GRAY routes
@@ -71,7 +71,7 @@ class ImageIoRoundTripTest {
 
     @Test
     fun pngIndexedPalette() {
-        // TYPE_BYTE_INDEXED uses a fixed 256-color sRGB palette — colorspace-neutral.
+        // TYPE_BYTE_INDEXED uses a fixed 256-color sRGB palette: colorspace-neutral.
         val img = BufferedImage(16, 16, BufferedImage.TYPE_BYTE_INDEXED)
         val rng = Random(42)
         for (y in 0 until 16) for (x in 0 until 16) {
@@ -92,7 +92,7 @@ class ImageIoRoundTripTest {
     @Test
     fun pngGradientsExerciseAdaptiveFilters() {
         // Smooth data makes ImageIO's filter chooser pick Sub/Up/Average/Paeth
-        // rather than None — the exact paths the hand vectors pin individually.
+        // rather than None: the exact paths the hand vectors pin individually.
         val img = BufferedImage(48, 48, BufferedImage.TYPE_INT_RGB)
         for (y in 0 until 48) for (x in 0 until 48) {
             img.setRGB(x, y, (0xFF shl 24) or (x * 5 shl 16) or (y * 5 shl 8) or ((x + y) * 2))

@@ -11,7 +11,7 @@ import io.github.yuroyami.kiteimage.KiteBitmap
  * plain `AsyncImage` working everywhere; [KiteAsyncImage] detects this type in a
  * successful result and takes over playback with its own frame loop.
  *
- * [shareable] is false — the same contract as coil-gif's Android decoder — so
+ * [shareable] is false, the same contract as coil-gif's Android decoder, so
  * Coil skips the memory cache for animations and re-decodes from the disk cache
  * on revisit instead of holding every frame of every GIF in RAM.
  */

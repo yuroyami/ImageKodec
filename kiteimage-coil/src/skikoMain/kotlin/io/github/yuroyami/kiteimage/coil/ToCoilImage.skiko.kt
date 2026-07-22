@@ -8,7 +8,7 @@ import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 
-/** Skiko path (JVM, iOS, macOS, JS, WASM) — UNPREMUL raster, same contract as
+/** Skiko path (JVM, iOS, macOS, JS, WASM): UNPREMUL raster, same contract as
  *  kiteimage-compose's toImageBitmap. */
 internal actual fun KiteBitmap.toCoilImage(shareable: Boolean): Image {
     val rgba = ByteArray(argb.size * 4)

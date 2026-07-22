@@ -38,7 +38,7 @@ private fun tiles(): List<Tile> {
     }
 
     fun bmp(w: Int, h: Int): ByteArray {
-        // 24-bit BMP built by hand — BMP has no encoder yet, the format is trivial.
+        // 24-bit BMP built by hand: BMP has no encoder yet, the format is trivial.
         val rowPad = (4 - (w * 3) % 4) % 4
         val size = 54 + (w * 3 + rowPad) * h
         val out = ByteArray(size)
@@ -58,10 +58,10 @@ private fun tiles(): List<Tile> {
     }
 
     return listOf(
-        Tile("GIF — animated,\ndecoded + played by KiteImage", SAMPLE_GIF),
+        Tile("GIF: animated, decoded + played\nby KiteImage", SAMPLE_GIF),
         Tile("JPEG 4:2:0 (ffmpeg-encoded)", SAMPLE_JPEG),
-        Tile("JPEG — OUR encoder q85", KiteImage.encodeJpeg(card(96, 96, alpha = false), quality = 85)),
-        Tile("PNG — OUR encoder, alpha", KiteImage.encodePng(card(96, 96, alpha = true))),
+        Tile("JPEG: OUR encoder, q85", KiteImage.encodeJpeg(card(96, 96, alpha = false), quality = 85)),
+        Tile("PNG: OUR encoder, alpha", KiteImage.encodePng(card(96, 96, alpha = true))),
         Tile("JPEG 2000 (absorbed JPX codec)", SAMPLE_JP2),
         Tile("TIFF deflate (ffmpeg-encoded)", SAMPLE_TIFF),
         Tile("BMP 24-bit", bmp(96, 96)),
@@ -69,7 +69,7 @@ private fun tiles(): List<Tile> {
 }
 
 fun main() = application {
-    Window(onCloseRequest = ::exitApplication, title = "KiteImage sample — every pixel pure Kotlin") {
+    Window(onCloseRequest = ::exitApplication, title = "KiteImage sample: every pixel pure Kotlin") {
         Surface(color = MaterialTheme.colorScheme.background) {
             val all = tiles()
             LazyVerticalGrid(

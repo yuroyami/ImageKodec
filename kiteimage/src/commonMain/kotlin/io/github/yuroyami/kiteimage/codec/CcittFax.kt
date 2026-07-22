@@ -1,7 +1,7 @@
 package io.github.yuroyami.kiteimage.codec
 
 /*
- * CCITT Group 3 / Group 4 (ITU-T T.4 / T.6) facsimile decoding — moved from
+ * CCITT Group 3 / Group 4 (ITU-T T.4 / T.6) facsimile decoding: moved from
  * KitePDF's `/CCITTFaxDecode` filter (the algorithm half; the PdfDictionary
  * parameter-parsing glue stayed behind). Also the compression used by TIFF
  * compressions 2/3/4, which is why it lives in KiteImage now. JBIG2's MMR
@@ -108,7 +108,7 @@ internal class HuffmanTable private constructor(
 
     /**
      * Decode the next code; returns the value, or -1 on no-match. Advances the
-     * reader by the matched code length (and not at all on no-match — every
+     * reader by the matched code length (and not at all on no-match: every
      * caller either rewinds via peekAndTry or aborts the row on -1).
      */
     fun decode(reader: BitReader): Int {
@@ -429,7 +429,7 @@ internal object CcittFaxTables {
 /* ─── 1D run decoder ──────────────────────────────────────────────────────── */
 
 /**
- * Decode one run (white or black). Walks the makeup chain — a run > 63 is
+ * Decode one run (white or black). Walks the makeup chain: a run > 63 is
  * encoded as one or more makeup codes (each a multiple of 64) followed by
  * a terminator (0..63). Sum of all of those is the run length.
  *
@@ -462,7 +462,7 @@ internal fun decodeRun(reader: BitReader, isWhite: Boolean): Int {
 /** Try to decode in [table] without consuming bits when no match is possible. */
 private fun peekAndTry(reader: BitReader, table: HuffmanTable): Int? {
     // Snapshot the bit cursor as a primitive local instead of allocating a
-    // SaveState object — this runs many times per scanline on CCITT images.
+    // SaveState object: this runs many times per scanline on CCITT images.
     val savedBits = reader.bitsConsumed
     val v = table.decode(reader)
     if (v < 0) {
@@ -527,7 +527,7 @@ private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): Int
     var safetyHops = 0
 
     while (a0 < cols) {
-        if (safetyHops++ > cols * 4) return null  // pathological — bail
+        if (safetyHops++ > cols * 4) return null  // pathological; bail
 
         val b1 = findB1(refLine, a0, a0Color)
         val b2 = findNextChange(refLine, b1)
@@ -571,7 +571,7 @@ private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): Int
             }
             CcittFaxTables.MODE_EXTENSION -> {
                 // Extension codes signal end-of-page-block or escape sequences.
-                // Treat as end of row — emit what we have.
+                // Treat as end of row: emit what we have.
                 fillRange(coding, maxOf(a0, 0), cols, a0Color)
                 return coding
             }
@@ -636,7 +636,7 @@ internal fun decodeGroup3OneD(reader: BitReader, opts: CcittOptions): ByteArray 
         var color = 0  // 0 = white
         while (pos < cols) {
             val run = decodeRun(reader, color == 0)
-            if (run == Int.MIN_VALUE) break  // EOL — end of line
+            if (run == Int.MIN_VALUE) break  // EOL (end of line)
             if (run < 0) {
                 if (pos == 0 && rowIndex >= rows.size) return packAll(rows, bytesPerRow)
                 break

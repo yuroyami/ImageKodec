@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
  * The automated eyeball: render the KiteImage() composable inside an
  * ImageComposeScene and advance the virtual frame clock. An animated GIF's
  * pixels MUST change between frames (playback runs), and a static PNG's must
- * not. This is the proof the composable's frame loop actually drives the UI —
+ * not. This is the proof the composable's frame loop actually drives the UI;
  * everything below it (decode, compositing) is covered by the codec suites.
  */
 class GifPlaybackSceneTest {
