@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false
+
+jobs:
+  # The JVM, JS, wasm and Linux/Windows native targets. This is the job that
+  # runs the full test suite: the codecs are pure computation, so a pass here
+  # covers the decoders everywhere. The oracle suites (stb, OpenJPEG, libwebp,
+  # libtiff) skip themselves when the tools are missing, so they are installed
+  # rather than left to no-op silently.
+  linux:
+    name: JVM / JS / wasm / native (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install codec oracles
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y webp libtiff-tools imagemagick
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Core tests (JVM)
+        run: ./gradlew :kiteimage:jvmTest --stacktrace
+
+      - name: Core tests (JS + wasm)
+        run: ./gradlew :kiteimage:jsNodeTest :kiteimage:wasmJsNodeTest :kiteimage:wasmWasiNodeTest --stacktrace
+
+      - name: Core tests (native)
+        run: ./gradlew :kiteimage:linuxX64Test --stacktrace
+
+      - name: Compose and Coil tests
+        run: ./gradlew :kiteimage-compose:jvmTest :kiteimage-coil:jvmTest --stacktrace
+
+      - name: Public API check
+        run: ./gradlew checkLegacyAbi --stacktrace
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-linux
+          path: '**/build/reports/tests/**'
+
+  # Apple targets can only be built on a Mac, and they are the reason this
+  # library exists in the first place, so they get their own job rather than
+  # riding along as a compile-only check.
+  apple:
+    name: Apple targets (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Native tests
+        run: ./gradlew :kiteimage:macosArm64Test :kiteimage:iosSimulatorArm64Test --stacktrace
+
+      - name: Compose and Coil compile for every target
+        run: ./gradlew :kiteimage-compose:assemble :kiteimage-coil:assemble --stacktrace
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-apple
+          path: '**/build/reports/tests/**'
+
+  # The Android variants build through AGP, which neither job above exercises.
+  android:
+    name: Android library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble Android variants
+        run: ./gradlew :kiteimage:assemble :kiteimage-compose:assemble :kiteimage-coil:assemble --stacktrace
+
+  docs:
+    name: API documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the Dokka site
+        run: ./gradlew dokkaGenerate --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-docs
+          path: build/dokka/html

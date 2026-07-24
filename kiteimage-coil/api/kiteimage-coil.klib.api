@@ -1,0 +1,51 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64, js, macosArm64, wasmJs]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <io.github.yuroyami:kiteimage-coil>
+final class io.github.yuroyami.kiteimage.coil/KiteAnimationImage : coil3/Image { // io.github.yuroyami.kiteimage.coil/KiteAnimationImage|null[0]
+    constructor <init>(io.github.yuroyami.kiteimage/KiteAnimation, kotlin/Boolean = ...) // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.<init>|<init>(io.github.yuroyami.kiteimage.KiteAnimation;kotlin.Boolean){}[0]
+
+    final val animation // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.animation|{}animation[0]
+        final fun <get-animation>(): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.animation.<get-animation>|<get-animation>(){}[0]
+    final val height // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.height.<get-height>|<get-height>(){}[0]
+    final val shareable // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.shareable|{}shareable[0]
+        final fun <get-shareable>(): kotlin/Boolean // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.shareable.<get-shareable>|<get-shareable>(){}[0]
+    final val size // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.size|{}size[0]
+        final fun <get-size>(): kotlin/Long // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.size.<get-size>|<get-size>(){}[0]
+    final val width // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.width.<get-width>|<get-width>(){}[0]
+
+    final fun draw(org.jetbrains.skia/Canvas) // io.github.yuroyami.kiteimage.coil/KiteAnimationImage.draw|draw(org.jetbrains.skia.Canvas){}[0]
+}
+
+final class io.github.yuroyami.kiteimage.coil/KiteImageDecoder : coil3.decode/Decoder { // io.github.yuroyami.kiteimage.coil/KiteImageDecoder|null[0]
+    constructor <init>(coil3.decode/ImageSource, coil3.request/Options, kotlin/Long = ...) // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.<init>|<init>(coil3.decode.ImageSource;coil3.request.Options;kotlin.Long){}[0]
+
+    final suspend fun decode(): coil3.decode/DecodeResult // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.decode|decode(){}[0]
+
+    final class Factory : coil3.decode/Decoder.Factory { // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.Factory|null[0]
+        constructor <init>(kotlin/Long = ...) // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.Factory.<init>|<init>(kotlin.Long){}[0]
+
+        final fun create(coil3.fetch/SourceFetchResult, coil3.request/Options, coil3/ImageLoader): coil3.decode/Decoder? // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.Factory.create|create(coil3.fetch.SourceFetchResult;coil3.request.Options;coil3.ImageLoader){}[0]
+
+        final object Companion { // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.Factory.Companion|null[0]
+            final const val DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.Factory.Companion.DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES|{}DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES[0]
+                final fun <get-DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES>(): kotlin/Long // io.github.yuroyami.kiteimage.coil/KiteImageDecoder.Factory.Companion.DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES.<get-DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES>|<get-DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES>(){}[0]
+        }
+    }
+}
+
+final val io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteAnimationImage$stableprop // io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteAnimationImage$stableprop|#static{}io_github_yuroyami_kiteimage_coil_KiteAnimationImage$stableprop[0]
+final val io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder$stableprop // io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder$stableprop|#static{}io_github_yuroyami_kiteimage_coil_KiteImageDecoder$stableprop[0]
+final val io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder_Factory$stableprop // io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder_Factory$stableprop|#static{}io_github_yuroyami_kiteimage_coil_KiteImageDecoder_Factory$stableprop[0]
+
+final fun io.github.yuroyami.kiteimage.coil/KiteAsyncImage(kotlin/Any?, kotlin/String?, androidx.compose.ui/Modifier?, coil3/ImageLoader?, androidx.compose.ui/Alignment?, androidx.compose.ui.layout/ContentScale?, kotlin/Float, androidx.compose.ui.graphics/ColorFilter?, androidx.compose.ui.graphics/FilterQuality, kotlin/Boolean, androidx.compose.ui.graphics.painter/Painter?, androidx.compose.ui.graphics.painter/Painter?, kotlin/Function1<coil3.request/SuccessResult, kotlin/Unit>?, kotlin/Function1<coil3.request/ErrorResult, kotlin/Unit>?, androidx.compose.runtime/Composer?, kotlin/Int, kotlin/Int, kotlin/Int) // io.github.yuroyami.kiteimage.coil/KiteAsyncImage|KiteAsyncImage(kotlin.Any?;kotlin.String?;androidx.compose.ui.Modifier?;coil3.ImageLoader?;androidx.compose.ui.Alignment?;androidx.compose.ui.layout.ContentScale?;kotlin.Float;androidx.compose.ui.graphics.ColorFilter?;androidx.compose.ui.graphics.FilterQuality;kotlin.Boolean;androidx.compose.ui.graphics.painter.Painter?;androidx.compose.ui.graphics.painter.Painter?;kotlin.Function1<coil3.request.SuccessResult,kotlin.Unit>?;kotlin.Function1<coil3.request.ErrorResult,kotlin.Unit>?;androidx.compose.runtime.Composer?;kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+final fun io.github.yuroyami.kiteimage.coil/KiteAsyncImage(kotlin/Any?, kotlin/String?, androidx.compose.ui/Modifier?, coil3/ImageLoader?, androidx.compose.ui/Alignment?, androidx.compose.ui.layout/ContentScale?, kotlin/Float, androidx.compose.ui.graphics/ColorFilter?, androidx.compose.ui.graphics/FilterQuality?, kotlin/Boolean, androidx.compose.ui.graphics.painter/Painter?, androidx.compose.ui.graphics.painter/Painter?, kotlin/Function1<coil3.request/SuccessResult, kotlin/Unit>?, kotlin/Function1<coil3.request/ErrorResult, kotlin/Unit>?, androidx.compose.runtime/Composer?, kotlin/Int, kotlin/Int, kotlin/Int) // io.github.yuroyami.kiteimage.coil/KiteAsyncImage|KiteAsyncImage(kotlin.Any?;kotlin.String?;androidx.compose.ui.Modifier?;coil3.ImageLoader?;androidx.compose.ui.Alignment?;androidx.compose.ui.layout.ContentScale?;kotlin.Float;androidx.compose.ui.graphics.ColorFilter?;androidx.compose.ui.graphics.FilterQuality?;kotlin.Boolean;androidx.compose.ui.graphics.painter.Painter?;androidx.compose.ui.graphics.painter.Painter?;kotlin.Function1<coil3.request.SuccessResult,kotlin.Unit>?;kotlin.Function1<coil3.request.ErrorResult,kotlin.Unit>?;androidx.compose.runtime.Composer?;kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+final fun io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteAnimationImage$stableprop_getter(): kotlin/Int // io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteAnimationImage$stableprop_getter|io_github_yuroyami_kiteimage_coil_KiteAnimationImage$stableprop_getter(){}[0]
+final fun io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder$stableprop_getter(): kotlin/Int // io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder$stableprop_getter|io_github_yuroyami_kiteimage_coil_KiteImageDecoder$stableprop_getter(){}[0]
+final fun io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder_Factory$stableprop_getter(): kotlin/Int // io.github.yuroyami.kiteimage.coil/io_github_yuroyami_kiteimage_coil_KiteImageDecoder_Factory$stableprop_getter|io_github_yuroyami_kiteimage_coil_KiteImageDecoder_Factory$stableprop_getter(){}[0]

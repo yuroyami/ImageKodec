@@ -40,6 +40,15 @@ kotlin {
     explicitApi()
     jvmToolchain(21)
 
+    // Public API tracking. `updateLegacyAbi` refreshes api/*.api, `checkLegacyAbi`
+    // fails the build when the committed dump and the code disagree: with
+    // explicitApi() on, that turns an accidental signature change into a review
+    // conversation instead of a broken release.
+    @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
+    abiValidation {
+        // Declaring the block is what switches tracking on.
+    }
+
     applyDefaultHierarchyTemplate()
 
     android {

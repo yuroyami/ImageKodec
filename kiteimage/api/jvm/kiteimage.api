@@ -1,0 +1,182 @@
+public class io/github/yuroyami/kiteimage/ImageDecodeException : java/lang/Exception {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class io/github/yuroyami/kiteimage/ImageFormat : java/lang/Enum {
+	public static final field BMP Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static final field Companion Lio/github/yuroyami/kiteimage/ImageFormat$Companion;
+	public static final field GIF Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static final field JP2 Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static final field JPEG Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static final field PNG Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static final field TIFF Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static final field WEBP Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/kiteimage/ImageFormat;
+	public static fun values ()[Lio/github/yuroyami/kiteimage/ImageFormat;
+}
+
+public final class io/github/yuroyami/kiteimage/ImageFormat$Companion {
+	public final fun sniff ([B)Lio/github/yuroyami/kiteimage/ImageFormat;
+}
+
+public final class io/github/yuroyami/kiteimage/ImageInfo {
+	public fun <init> (Lio/github/yuroyami/kiteimage/ImageFormat;IIIZIILio/github/yuroyami/kiteimage/Orientation;ZLjava/lang/String;)V
+	public synthetic fun <init> (Lio/github/yuroyami/kiteimage/ImageFormat;IIIZIILio/github/yuroyami/kiteimage/Orientation;ZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBitDepth ()I
+	public final fun getDisplayHeight ()I
+	public final fun getDisplayWidth ()I
+	public final fun getFormat ()Lio/github/yuroyami/kiteimage/ImageFormat;
+	public final fun getFrameCount ()I
+	public final fun getHasAlpha ()Z
+	public final fun getHeight ()I
+	public final fun getLoopCount ()I
+	public final fun getOrientation ()Lio/github/yuroyami/kiteimage/Orientation;
+	public final fun getUnsupportedReason ()Ljava/lang/String;
+	public final fun getWidth ()I
+	public final fun isAnimated ()Z
+	public final fun isDecodable ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/kiteimage/KiteAnimation {
+	public fun <init> (IILjava/util/List;I)V
+	public final fun getDurationMillis ()I
+	public final fun getFrames ()Ljava/util/List;
+	public final fun getHeight ()I
+	public final fun getLoopCount ()I
+	public final fun getWidth ()I
+	public final fun isAnimated ()Z
+}
+
+public final class io/github/yuroyami/kiteimage/KiteBitmap {
+	public fun <init> (II[I)V
+	public final fun get (II)I
+	public final fun getArgb ()[I
+	public final fun getHeight ()I
+	public final fun getWidth ()I
+	public final fun hasTransparency ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/kiteimage/KiteFrame {
+	public fun <init> (Lio/github/yuroyami/kiteimage/KiteBitmap;II)V
+	public final fun getBitmap ()Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public final fun getDelayMillis ()I
+	public final fun getDelayRawCentiseconds ()I
+}
+
+public final class io/github/yuroyami/kiteimage/KiteImage {
+	public static final field INSTANCE Lio/github/yuroyami/kiteimage/KiteImage;
+	public final fun decode ([BZ)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static synthetic fun decode$default (Lio/github/yuroyami/kiteimage/KiteImage;[BZILjava/lang/Object;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public final fun decodeAnimation ([BZLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/kiteimage/KiteImage;[BZLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public final fun detect ([B)Lio/github/yuroyami/kiteimage/ImageFormat;
+	public final fun encodeBmp (Lio/github/yuroyami/kiteimage/KiteBitmap;)[B
+	public final fun encodeGif (Lio/github/yuroyami/kiteimage/KiteAnimation;Z)[B
+	public final fun encodeGif (Lio/github/yuroyami/kiteimage/KiteBitmap;Z)[B
+	public static synthetic fun encodeGif$default (Lio/github/yuroyami/kiteimage/KiteImage;Lio/github/yuroyami/kiteimage/KiteAnimation;ZILjava/lang/Object;)[B
+	public static synthetic fun encodeGif$default (Lio/github/yuroyami/kiteimage/KiteImage;Lio/github/yuroyami/kiteimage/KiteBitmap;ZILjava/lang/Object;)[B
+	public final fun encodeJpeg (Lio/github/yuroyami/kiteimage/KiteBitmap;I)[B
+	public static synthetic fun encodeJpeg$default (Lio/github/yuroyami/kiteimage/KiteImage;Lio/github/yuroyami/kiteimage/KiteBitmap;IILjava/lang/Object;)[B
+	public final fun encodePng (Lio/github/yuroyami/kiteimage/KiteBitmap;)[B
+	public final fun probe ([B)Lio/github/yuroyami/kiteimage/ImageInfo;
+	public final fun probeOrNull ([B)Lio/github/yuroyami/kiteimage/ImageInfo;
+}
+
+public final class io/github/yuroyami/kiteimage/Orientation : java/lang/Enum {
+	public static final field Companion Lio/github/yuroyami/kiteimage/Orientation$Companion;
+	public static final field FlipHorizontal Lio/github/yuroyami/kiteimage/Orientation;
+	public static final field FlipVertical Lio/github/yuroyami/kiteimage/Orientation;
+	public static final field Normal Lio/github/yuroyami/kiteimage/Orientation;
+	public static final field Rotate180 Lio/github/yuroyami/kiteimage/Orientation;
+	public static final field Rotate270 Lio/github/yuroyami/kiteimage/Orientation;
+	public static final field Rotate90 Lio/github/yuroyami/kiteimage/Orientation;
+	public static final field Transpose Lio/github/yuroyami/kiteimage/Orientation;
+	public static final field Transverse Lio/github/yuroyami/kiteimage/Orientation;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getExifValue ()I
+	public final fun getSwapsAxes ()Z
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/kiteimage/Orientation;
+	public static fun values ()[Lio/github/yuroyami/kiteimage/Orientation;
+}
+
+public final class io/github/yuroyami/kiteimage/Orientation$Companion {
+	public final fun fromExif (I)Lio/github/yuroyami/kiteimage/Orientation;
+}
+
+public final class io/github/yuroyami/kiteimage/ScalingKt {
+	public static final fun scaled (Lio/github/yuroyami/kiteimage/KiteAnimation;II)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public static final fun scaled (Lio/github/yuroyami/kiteimage/KiteBitmap;II)Lio/github/yuroyami/kiteimage/KiteBitmap;
+}
+
+public final class io/github/yuroyami/kiteimage/TransformsKt {
+	public static final fun cropped (Lio/github/yuroyami/kiteimage/KiteAnimation;IIII)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public static final fun cropped (Lio/github/yuroyami/kiteimage/KiteBitmap;IIII)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun flippedHorizontal (Lio/github/yuroyami/kiteimage/KiteBitmap;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun flippedVertical (Lio/github/yuroyami/kiteimage/KiteBitmap;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun oriented (Lio/github/yuroyami/kiteimage/KiteAnimation;Lio/github/yuroyami/kiteimage/Orientation;)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public static final fun oriented (Lio/github/yuroyami/kiteimage/KiteBitmap;Lio/github/yuroyami/kiteimage/Orientation;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun rotated180 (Lio/github/yuroyami/kiteimage/KiteAnimation;)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public static final fun rotated180 (Lio/github/yuroyami/kiteimage/KiteBitmap;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun rotated270 (Lio/github/yuroyami/kiteimage/KiteAnimation;)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public static final fun rotated270 (Lio/github/yuroyami/kiteimage/KiteBitmap;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun rotated90 (Lio/github/yuroyami/kiteimage/KiteAnimation;)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public static final fun rotated90 (Lio/github/yuroyami/kiteimage/KiteBitmap;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun transposed (Lio/github/yuroyami/kiteimage/KiteBitmap;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+	public static final fun transversed (Lio/github/yuroyami/kiteimage/KiteBitmap;)Lio/github/yuroyami/kiteimage/KiteBitmap;
+}
+
+public final class io/github/yuroyami/kiteimage/UnsupportedImageException : io/github/yuroyami/kiteimage/ImageDecodeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class io/github/yuroyami/kiteimage/codec/CcittFax {
+	public static final field INSTANCE Lio/github/yuroyami/kiteimage/codec/CcittFax;
+	public final fun decode ([BILio/github/yuroyami/kiteimage/codec/CcittOptions;)[B
+}
+
+public final class io/github/yuroyami/kiteimage/codec/CcittOptions {
+	public fun <init> (IIZZZZ)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun copy (IIZZZZ)Lio/github/yuroyami/kiteimage/codec/CcittOptions;
+	public static synthetic fun copy$default (Lio/github/yuroyami/kiteimage/codec/CcittOptions;IIZZZZILjava/lang/Object;)Lio/github/yuroyami/kiteimage/codec/CcittOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBlackIs1 ()Z
+	public final fun getColumns ()I
+	public final fun getEncodedByteAlign ()Z
+	public final fun getEndOfBlock ()Z
+	public final fun getEndOfLine ()Z
+	public final fun getRows ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/kiteimage/codec/Jbig2Decoder {
+	public static final field INSTANCE Lio/github/yuroyami/kiteimage/codec/Jbig2Decoder;
+	public final fun decode ([B[BII)[B
+}
+
+public final class io/github/yuroyami/kiteimage/codec/JpxDecoder {
+	public static final field INSTANCE Lio/github/yuroyami/kiteimage/codec/JpxDecoder;
+	public final fun decode ([B)Lio/github/yuroyami/kiteimage/codec/JpxDecoder$Result;
+	public final fun isJpx ([B)Z
+}
+
+public final class io/github/yuroyami/kiteimage/codec/JpxDecoder$Result {
+	public fun <init> (IILjava/lang/String;[B[B)V
+	public final fun getAlpha ()[B
+	public final fun getColorSpace ()Ljava/lang/String;
+	public final fun getHeight ()I
+	public final fun getPixelBytes ()[B
+	public final fun getWidth ()I
+}
+

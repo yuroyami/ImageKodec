@@ -1,0 +1,36 @@
+public final class io/github/yuroyami/kiteimage/coil/KiteAnimationImage : coil3/Image {
+	public static final field $stable I
+	public fun <init> (Lio/github/yuroyami/kiteimage/KiteAnimation;Z)V
+	public synthetic fun <init> (Lio/github/yuroyami/kiteimage/KiteAnimation;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun draw (Lorg/jetbrains/skia/Canvas;)V
+	public final fun getAnimation ()Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public fun getHeight ()I
+	public fun getShareable ()Z
+	public fun getSize ()J
+	public fun getWidth ()I
+}
+
+public final class io/github/yuroyami/kiteimage/coil/KiteAsyncImageKt {
+	public static final fun KiteAsyncImage-q-raAnI (Ljava/lang/Object;Ljava/lang/String;Landroidx/compose/ui/Modifier;Lcoil3/ImageLoader;Landroidx/compose/ui/Alignment;Landroidx/compose/ui/layout/ContentScale;FLandroidx/compose/ui/graphics/ColorFilter;IZLandroidx/compose/ui/graphics/painter/Painter;Landroidx/compose/ui/graphics/painter/Painter;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;III)V
+}
+
+public final class io/github/yuroyami/kiteimage/coil/KiteImageDecoder : coil3/decode/Decoder {
+	public static final field $stable I
+	public fun <init> (Lcoil3/decode/ImageSource;Lcoil3/request/Options;J)V
+	public synthetic fun <init> (Lcoil3/decode/ImageSource;Lcoil3/request/Options;JILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun decode (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/yuroyami/kiteimage/coil/KiteImageDecoder$Factory : coil3/decode/Decoder$Factory {
+	public static final field $stable I
+	public static final field Companion Lio/github/yuroyami/kiteimage/coil/KiteImageDecoder$Factory$Companion;
+	public static final field DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES J
+	public fun <init> ()V
+	public fun <init> (J)V
+	public synthetic fun <init> (JILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun create (Lcoil3/fetch/SourceFetchResult;Lcoil3/request/Options;Lcoil3/ImageLoader;)Lcoil3/decode/Decoder;
+}
+
+public final class io/github/yuroyami/kiteimage/coil/KiteImageDecoder$Factory$Companion {
+}
+

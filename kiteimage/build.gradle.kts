@@ -19,8 +19,28 @@ plugins {
  * separate :kiteimage-compose module so this core stays portable to every target
  * and Compose never reaches consumers who don't want it.
  */
+/*
+ * The decompression-bomb guards deliberately sit at ~1 GiB of decoded pixels
+ * (268M px), and the fuzz suite drives malformed headers right up to them. The
+ * test JVM therefore needs enough heap that the *guard* is what rejects the
+ * input, rather than the allocator failing first and masking which one fired.
+ */
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "3g"
+}
+
 kotlin {
+    explicitApi()
     jvmToolchain(21)
+
+    // Public API tracking. `updateLegacyAbi` refreshes api/*.api, `checkLegacyAbi`
+    // fails the build when the committed dump and the code disagree: with
+    // explicitApi() on, that turns an accidental signature change into a review
+    // conversation instead of a broken release.
+    @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
+    abiValidation {
+        // Declaring the block is what switches tracking on.
+    }
 
     android {
         namespace = "io.github.yuroyami.kiteimage"
@@ -56,17 +76,27 @@ kotlin {
         nodejs()
     }
 
+    // Mocha's 2-second default is fine for unit tests and hopeless for the fuzz
+    // suite, which drives thousands of malformed files through every decoder.
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
     js(IR) {
         browser()
-        nodejs()
+        nodejs {
+            testTask {
+                useMocha { timeout = "600s" }
+            }
+        }
         binaries.library()
     }
 
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
         browser()
-        nodejs()
+        nodejs {
+            testTask {
+                useMocha { timeout = "600s" }
+            }
+        }
     }
 
     jvm()

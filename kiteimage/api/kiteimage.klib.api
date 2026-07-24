@@ -1,0 +1,222 @@
+// Klib ABI Dump
+// Targets: [androidNativeArm32, androidNativeArm64, androidNativeX64, androidNativeX86, iosArm64, iosSimulatorArm64, iosX64, js, linuxArm64, linuxX64, macosArm64, mingwX64, tvosArm64, tvosSimulatorArm64, wasmJs, wasmWasi, watchosArm32, watchosArm64, watchosDeviceArm64, watchosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <io.github.yuroyami:kiteimage>
+final enum class io.github.yuroyami.kiteimage/ImageFormat : kotlin/Enum<io.github.yuroyami.kiteimage/ImageFormat> { // io.github.yuroyami.kiteimage/ImageFormat|null[0]
+    enum entry BMP // io.github.yuroyami.kiteimage/ImageFormat.BMP|null[0]
+    enum entry GIF // io.github.yuroyami.kiteimage/ImageFormat.GIF|null[0]
+    enum entry JP2 // io.github.yuroyami.kiteimage/ImageFormat.JP2|null[0]
+    enum entry JPEG // io.github.yuroyami.kiteimage/ImageFormat.JPEG|null[0]
+    enum entry PNG // io.github.yuroyami.kiteimage/ImageFormat.PNG|null[0]
+    enum entry TIFF // io.github.yuroyami.kiteimage/ImageFormat.TIFF|null[0]
+    enum entry WEBP // io.github.yuroyami.kiteimage/ImageFormat.WEBP|null[0]
+
+    final val entries // io.github.yuroyami.kiteimage/ImageFormat.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.kiteimage/ImageFormat> // io.github.yuroyami.kiteimage/ImageFormat.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.kiteimage/ImageFormat // io.github.yuroyami.kiteimage/ImageFormat.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.kiteimage/ImageFormat> // io.github.yuroyami.kiteimage/ImageFormat.values|values#static(){}[0]
+
+    final object Companion { // io.github.yuroyami.kiteimage/ImageFormat.Companion|null[0]
+        final fun sniff(kotlin/ByteArray): io.github.yuroyami.kiteimage/ImageFormat? // io.github.yuroyami.kiteimage/ImageFormat.Companion.sniff|sniff(kotlin.ByteArray){}[0]
+    }
+}
+
+final enum class io.github.yuroyami.kiteimage/Orientation : kotlin/Enum<io.github.yuroyami.kiteimage/Orientation> { // io.github.yuroyami.kiteimage/Orientation|null[0]
+    enum entry FlipHorizontal // io.github.yuroyami.kiteimage/Orientation.FlipHorizontal|null[0]
+    enum entry FlipVertical // io.github.yuroyami.kiteimage/Orientation.FlipVertical|null[0]
+    enum entry Normal // io.github.yuroyami.kiteimage/Orientation.Normal|null[0]
+    enum entry Rotate180 // io.github.yuroyami.kiteimage/Orientation.Rotate180|null[0]
+    enum entry Rotate270 // io.github.yuroyami.kiteimage/Orientation.Rotate270|null[0]
+    enum entry Rotate90 // io.github.yuroyami.kiteimage/Orientation.Rotate90|null[0]
+    enum entry Transpose // io.github.yuroyami.kiteimage/Orientation.Transpose|null[0]
+    enum entry Transverse // io.github.yuroyami.kiteimage/Orientation.Transverse|null[0]
+
+    final val entries // io.github.yuroyami.kiteimage/Orientation.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.kiteimage/Orientation> // io.github.yuroyami.kiteimage/Orientation.entries.<get-entries>|<get-entries>#static(){}[0]
+    final val exifValue // io.github.yuroyami.kiteimage/Orientation.exifValue|{}exifValue[0]
+        final fun <get-exifValue>(): kotlin/Int // io.github.yuroyami.kiteimage/Orientation.exifValue.<get-exifValue>|<get-exifValue>(){}[0]
+    final val swapsAxes // io.github.yuroyami.kiteimage/Orientation.swapsAxes|{}swapsAxes[0]
+        final fun <get-swapsAxes>(): kotlin/Boolean // io.github.yuroyami.kiteimage/Orientation.swapsAxes.<get-swapsAxes>|<get-swapsAxes>(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.kiteimage/Orientation // io.github.yuroyami.kiteimage/Orientation.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.kiteimage/Orientation> // io.github.yuroyami.kiteimage/Orientation.values|values#static(){}[0]
+
+    final object Companion { // io.github.yuroyami.kiteimage/Orientation.Companion|null[0]
+        final fun fromExif(kotlin/Int): io.github.yuroyami.kiteimage/Orientation // io.github.yuroyami.kiteimage/Orientation.Companion.fromExif|fromExif(kotlin.Int){}[0]
+    }
+}
+
+final class io.github.yuroyami.kiteimage.codec/CcittOptions { // io.github.yuroyami.kiteimage.codec/CcittOptions|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Boolean, kotlin/Boolean, kotlin/Boolean) // io.github.yuroyami.kiteimage.codec/CcittOptions.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean){}[0]
+
+    final val blackIs1 // io.github.yuroyami.kiteimage.codec/CcittOptions.blackIs1|{}blackIs1[0]
+        final fun <get-blackIs1>(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.blackIs1.<get-blackIs1>|<get-blackIs1>(){}[0]
+    final val columns // io.github.yuroyami.kiteimage.codec/CcittOptions.columns|{}columns[0]
+        final fun <get-columns>(): kotlin/Int // io.github.yuroyami.kiteimage.codec/CcittOptions.columns.<get-columns>|<get-columns>(){}[0]
+    final val encodedByteAlign // io.github.yuroyami.kiteimage.codec/CcittOptions.encodedByteAlign|{}encodedByteAlign[0]
+        final fun <get-encodedByteAlign>(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.encodedByteAlign.<get-encodedByteAlign>|<get-encodedByteAlign>(){}[0]
+    final val endOfBlock // io.github.yuroyami.kiteimage.codec/CcittOptions.endOfBlock|{}endOfBlock[0]
+        final fun <get-endOfBlock>(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.endOfBlock.<get-endOfBlock>|<get-endOfBlock>(){}[0]
+    final val endOfLine // io.github.yuroyami.kiteimage.codec/CcittOptions.endOfLine|{}endOfLine[0]
+        final fun <get-endOfLine>(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.endOfLine.<get-endOfLine>|<get-endOfLine>(){}[0]
+    final val rows // io.github.yuroyami.kiteimage.codec/CcittOptions.rows|{}rows[0]
+        final fun <get-rows>(): kotlin/Int // io.github.yuroyami.kiteimage.codec/CcittOptions.rows.<get-rows>|<get-rows>(){}[0]
+
+    final fun component1(): kotlin/Int // io.github.yuroyami.kiteimage.codec/CcittOptions.component1|component1(){}[0]
+    final fun component2(): kotlin/Int // io.github.yuroyami.kiteimage.codec/CcittOptions.component2|component2(){}[0]
+    final fun component3(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.component3|component3(){}[0]
+    final fun component4(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.component4|component4(){}[0]
+    final fun component5(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.component5|component5(){}[0]
+    final fun component6(): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.component6|component6(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ...): io.github.yuroyami.kiteimage.codec/CcittOptions // io.github.yuroyami.kiteimage.codec/CcittOptions.copy|copy(kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/CcittOptions.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.yuroyami.kiteimage.codec/CcittOptions.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.yuroyami.kiteimage.codec/CcittOptions.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.kiteimage/ImageInfo { // io.github.yuroyami.kiteimage/ImageInfo|null[0]
+    constructor <init>(io.github.yuroyami.kiteimage/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Int, io.github.yuroyami.kiteimage/Orientation, kotlin/Boolean, kotlin/String? = ...) // io.github.yuroyami.kiteimage/ImageInfo.<init>|<init>(io.github.yuroyami.kiteimage.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Int;io.github.yuroyami.kiteimage.Orientation;kotlin.Boolean;kotlin.String?){}[0]
+
+    final val bitDepth // io.github.yuroyami.kiteimage/ImageInfo.bitDepth|{}bitDepth[0]
+        final fun <get-bitDepth>(): kotlin/Int // io.github.yuroyami.kiteimage/ImageInfo.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
+    final val displayHeight // io.github.yuroyami.kiteimage/ImageInfo.displayHeight|{}displayHeight[0]
+        final fun <get-displayHeight>(): kotlin/Int // io.github.yuroyami.kiteimage/ImageInfo.displayHeight.<get-displayHeight>|<get-displayHeight>(){}[0]
+    final val displayWidth // io.github.yuroyami.kiteimage/ImageInfo.displayWidth|{}displayWidth[0]
+        final fun <get-displayWidth>(): kotlin/Int // io.github.yuroyami.kiteimage/ImageInfo.displayWidth.<get-displayWidth>|<get-displayWidth>(){}[0]
+    final val format // io.github.yuroyami.kiteimage/ImageInfo.format|{}format[0]
+        final fun <get-format>(): io.github.yuroyami.kiteimage/ImageFormat // io.github.yuroyami.kiteimage/ImageInfo.format.<get-format>|<get-format>(){}[0]
+    final val frameCount // io.github.yuroyami.kiteimage/ImageInfo.frameCount|{}frameCount[0]
+        final fun <get-frameCount>(): kotlin/Int // io.github.yuroyami.kiteimage/ImageInfo.frameCount.<get-frameCount>|<get-frameCount>(){}[0]
+    final val hasAlpha // io.github.yuroyami.kiteimage/ImageInfo.hasAlpha|{}hasAlpha[0]
+        final fun <get-hasAlpha>(): kotlin/Boolean // io.github.yuroyami.kiteimage/ImageInfo.hasAlpha.<get-hasAlpha>|<get-hasAlpha>(){}[0]
+    final val height // io.github.yuroyami.kiteimage/ImageInfo.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.kiteimage/ImageInfo.height.<get-height>|<get-height>(){}[0]
+    final val isAnimated // io.github.yuroyami.kiteimage/ImageInfo.isAnimated|{}isAnimated[0]
+        final fun <get-isAnimated>(): kotlin/Boolean // io.github.yuroyami.kiteimage/ImageInfo.isAnimated.<get-isAnimated>|<get-isAnimated>(){}[0]
+    final val isDecodable // io.github.yuroyami.kiteimage/ImageInfo.isDecodable|{}isDecodable[0]
+        final fun <get-isDecodable>(): kotlin/Boolean // io.github.yuroyami.kiteimage/ImageInfo.isDecodable.<get-isDecodable>|<get-isDecodable>(){}[0]
+    final val loopCount // io.github.yuroyami.kiteimage/ImageInfo.loopCount|{}loopCount[0]
+        final fun <get-loopCount>(): kotlin/Int // io.github.yuroyami.kiteimage/ImageInfo.loopCount.<get-loopCount>|<get-loopCount>(){}[0]
+    final val orientation // io.github.yuroyami.kiteimage/ImageInfo.orientation|{}orientation[0]
+        final fun <get-orientation>(): io.github.yuroyami.kiteimage/Orientation // io.github.yuroyami.kiteimage/ImageInfo.orientation.<get-orientation>|<get-orientation>(){}[0]
+    final val unsupportedReason // io.github.yuroyami.kiteimage/ImageInfo.unsupportedReason|{}unsupportedReason[0]
+        final fun <get-unsupportedReason>(): kotlin/String? // io.github.yuroyami.kiteimage/ImageInfo.unsupportedReason.<get-unsupportedReason>|<get-unsupportedReason>(){}[0]
+    final val width // io.github.yuroyami.kiteimage/ImageInfo.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.kiteimage/ImageInfo.width.<get-width>|<get-width>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.kiteimage/ImageInfo.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.kiteimage/KiteAnimation { // io.github.yuroyami.kiteimage/KiteAnimation|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin.collections/List<io.github.yuroyami.kiteimage/KiteFrame>, kotlin/Int) // io.github.yuroyami.kiteimage/KiteAnimation.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.collections.List<io.github.yuroyami.kiteimage.KiteFrame>;kotlin.Int){}[0]
+
+    final val durationMillis // io.github.yuroyami.kiteimage/KiteAnimation.durationMillis|{}durationMillis[0]
+        final fun <get-durationMillis>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteAnimation.durationMillis.<get-durationMillis>|<get-durationMillis>(){}[0]
+    final val frames // io.github.yuroyami.kiteimage/KiteAnimation.frames|{}frames[0]
+        final fun <get-frames>(): kotlin.collections/List<io.github.yuroyami.kiteimage/KiteFrame> // io.github.yuroyami.kiteimage/KiteAnimation.frames.<get-frames>|<get-frames>(){}[0]
+    final val height // io.github.yuroyami.kiteimage/KiteAnimation.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteAnimation.height.<get-height>|<get-height>(){}[0]
+    final val isAnimated // io.github.yuroyami.kiteimage/KiteAnimation.isAnimated|{}isAnimated[0]
+        final fun <get-isAnimated>(): kotlin/Boolean // io.github.yuroyami.kiteimage/KiteAnimation.isAnimated.<get-isAnimated>|<get-isAnimated>(){}[0]
+    final val loopCount // io.github.yuroyami.kiteimage/KiteAnimation.loopCount|{}loopCount[0]
+        final fun <get-loopCount>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteAnimation.loopCount.<get-loopCount>|<get-loopCount>(){}[0]
+    final val width // io.github.yuroyami.kiteimage/KiteAnimation.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteAnimation.width.<get-width>|<get-width>(){}[0]
+}
+
+final class io.github.yuroyami.kiteimage/KiteBitmap { // io.github.yuroyami.kiteimage/KiteBitmap|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/IntArray) // io.github.yuroyami.kiteimage/KiteBitmap.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.IntArray){}[0]
+
+    final val argb // io.github.yuroyami.kiteimage/KiteBitmap.argb|{}argb[0]
+        final fun <get-argb>(): kotlin/IntArray // io.github.yuroyami.kiteimage/KiteBitmap.argb.<get-argb>|<get-argb>(){}[0]
+    final val height // io.github.yuroyami.kiteimage/KiteBitmap.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteBitmap.height.<get-height>|<get-height>(){}[0]
+    final val width // io.github.yuroyami.kiteimage/KiteBitmap.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteBitmap.width.<get-width>|<get-width>(){}[0]
+
+    final fun get(kotlin/Int, kotlin/Int): kotlin/Int // io.github.yuroyami.kiteimage/KiteBitmap.get|get(kotlin.Int;kotlin.Int){}[0]
+    final fun hasTransparency(): kotlin/Boolean // io.github.yuroyami.kiteimage/KiteBitmap.hasTransparency|hasTransparency(){}[0]
+    final fun toString(): kotlin/String // io.github.yuroyami.kiteimage/KiteBitmap.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.kiteimage/KiteFrame { // io.github.yuroyami.kiteimage/KiteFrame|null[0]
+    constructor <init>(io.github.yuroyami.kiteimage/KiteBitmap, kotlin/Int, kotlin/Int) // io.github.yuroyami.kiteimage/KiteFrame.<init>|<init>(io.github.yuroyami.kiteimage.KiteBitmap;kotlin.Int;kotlin.Int){}[0]
+
+    final val bitmap // io.github.yuroyami.kiteimage/KiteFrame.bitmap|{}bitmap[0]
+        final fun <get-bitmap>(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/KiteFrame.bitmap.<get-bitmap>|<get-bitmap>(){}[0]
+    final val delayMillis // io.github.yuroyami.kiteimage/KiteFrame.delayMillis|{}delayMillis[0]
+        final fun <get-delayMillis>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteFrame.delayMillis.<get-delayMillis>|<get-delayMillis>(){}[0]
+    final val delayRawCentiseconds // io.github.yuroyami.kiteimage/KiteFrame.delayRawCentiseconds|{}delayRawCentiseconds[0]
+        final fun <get-delayRawCentiseconds>(): kotlin/Int // io.github.yuroyami.kiteimage/KiteFrame.delayRawCentiseconds.<get-delayRawCentiseconds>|<get-delayRawCentiseconds>(){}[0]
+}
+
+final class io.github.yuroyami.kiteimage/UnsupportedImageException : io.github.yuroyami.kiteimage/ImageDecodeException { // io.github.yuroyami.kiteimage/UnsupportedImageException|null[0]
+    constructor <init>(kotlin/String, kotlin/Throwable? = ...) // io.github.yuroyami.kiteimage/UnsupportedImageException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
+}
+
+open class io.github.yuroyami.kiteimage/ImageDecodeException : kotlin/Exception { // io.github.yuroyami.kiteimage/ImageDecodeException|null[0]
+    constructor <init>(kotlin/String, kotlin/Throwable? = ...) // io.github.yuroyami.kiteimage/ImageDecodeException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
+}
+
+final object io.github.yuroyami.kiteimage.codec/CcittFax { // io.github.yuroyami.kiteimage.codec/CcittFax|null[0]
+    final fun decode(kotlin/ByteArray, kotlin/Int, io.github.yuroyami.kiteimage.codec/CcittOptions): kotlin/ByteArray // io.github.yuroyami.kiteimage.codec/CcittFax.decode|decode(kotlin.ByteArray;kotlin.Int;io.github.yuroyami.kiteimage.codec.CcittOptions){}[0]
+}
+
+final object io.github.yuroyami.kiteimage.codec/Jbig2Decoder { // io.github.yuroyami.kiteimage.codec/Jbig2Decoder|null[0]
+    final fun decode(kotlin/ByteArray, kotlin/ByteArray?, kotlin/Int, kotlin/Int): kotlin/ByteArray? // io.github.yuroyami.kiteimage.codec/Jbig2Decoder.decode|decode(kotlin.ByteArray;kotlin.ByteArray?;kotlin.Int;kotlin.Int){}[0]
+}
+
+final object io.github.yuroyami.kiteimage.codec/JpxDecoder { // io.github.yuroyami.kiteimage.codec/JpxDecoder|null[0]
+    final fun decode(kotlin/ByteArray): io.github.yuroyami.kiteimage.codec/JpxDecoder.Result? // io.github.yuroyami.kiteimage.codec/JpxDecoder.decode|decode(kotlin.ByteArray){}[0]
+    final fun isJpx(kotlin/ByteArray): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/JpxDecoder.isJpx|isJpx(kotlin.ByteArray){}[0]
+
+    final class Result { // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result|null[0]
+        constructor <init>(kotlin/Int, kotlin/Int, kotlin/String, kotlin/ByteArray, kotlin/ByteArray?) // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.String;kotlin.ByteArray;kotlin.ByteArray?){}[0]
+
+        final val alpha // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.alpha|{}alpha[0]
+            final fun <get-alpha>(): kotlin/ByteArray? // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.alpha.<get-alpha>|<get-alpha>(){}[0]
+        final val colorSpace // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.colorSpace|{}colorSpace[0]
+            final fun <get-colorSpace>(): kotlin/String // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.colorSpace.<get-colorSpace>|<get-colorSpace>(){}[0]
+        final val height // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.height|{}height[0]
+            final fun <get-height>(): kotlin/Int // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.height.<get-height>|<get-height>(){}[0]
+        final val pixelBytes // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.pixelBytes|{}pixelBytes[0]
+            final fun <get-pixelBytes>(): kotlin/ByteArray // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.pixelBytes.<get-pixelBytes>|<get-pixelBytes>(){}[0]
+        final val width // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.width|{}width[0]
+            final fun <get-width>(): kotlin/Int // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result.width.<get-width>|<get-width>(){}[0]
+    }
+}
+
+final object io.github.yuroyami.kiteimage/KiteImage { // io.github.yuroyami.kiteimage/KiteImage|null[0]
+    final fun decode(kotlin/ByteArray, kotlin/Boolean = ...): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/KiteImage.decode|decode(kotlin.ByteArray;kotlin.Boolean){}[0]
+    final fun decodeAnimation(kotlin/ByteArray, kotlin/Boolean = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/KiteImage.decodeAnimation|decodeAnimation(kotlin.ByteArray;kotlin.Boolean;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun detect(kotlin/ByteArray): io.github.yuroyami.kiteimage/ImageFormat? // io.github.yuroyami.kiteimage/KiteImage.detect|detect(kotlin.ByteArray){}[0]
+    final fun encodeBmp(io.github.yuroyami.kiteimage/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.kiteimage/KiteImage.encodeBmp|encodeBmp(io.github.yuroyami.kiteimage.KiteBitmap){}[0]
+    final fun encodeGif(io.github.yuroyami.kiteimage/KiteAnimation, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.kiteimage/KiteImage.encodeGif|encodeGif(io.github.yuroyami.kiteimage.KiteAnimation;kotlin.Boolean){}[0]
+    final fun encodeGif(io.github.yuroyami.kiteimage/KiteBitmap, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.kiteimage/KiteImage.encodeGif|encodeGif(io.github.yuroyami.kiteimage.KiteBitmap;kotlin.Boolean){}[0]
+    final fun encodeJpeg(io.github.yuroyami.kiteimage/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.kiteimage/KiteImage.encodeJpeg|encodeJpeg(io.github.yuroyami.kiteimage.KiteBitmap;kotlin.Int){}[0]
+    final fun encodePng(io.github.yuroyami.kiteimage/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.kiteimage/KiteImage.encodePng|encodePng(io.github.yuroyami.kiteimage.KiteBitmap){}[0]
+    final fun probe(kotlin/ByteArray): io.github.yuroyami.kiteimage/ImageInfo // io.github.yuroyami.kiteimage/KiteImage.probe|probe(kotlin.ByteArray){}[0]
+    final fun probeOrNull(kotlin/ByteArray): io.github.yuroyami.kiteimage/ImageInfo? // io.github.yuroyami.kiteimage/KiteImage.probeOrNull|probeOrNull(kotlin.ByteArray){}[0]
+}
+
+final fun (io.github.yuroyami.kiteimage/KiteAnimation).io.github.yuroyami.kiteimage/cropped(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/cropped|cropped@io.github.yuroyami.kiteimage.KiteAnimation(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteAnimation).io.github.yuroyami.kiteimage/oriented(io.github.yuroyami.kiteimage/Orientation): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/oriented|oriented@io.github.yuroyami.kiteimage.KiteAnimation(io.github.yuroyami.kiteimage.Orientation){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteAnimation).io.github.yuroyami.kiteimage/rotated180(): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/rotated180|rotated180@io.github.yuroyami.kiteimage.KiteAnimation(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteAnimation).io.github.yuroyami.kiteimage/rotated270(): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/rotated270|rotated270@io.github.yuroyami.kiteimage.KiteAnimation(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteAnimation).io.github.yuroyami.kiteimage/rotated90(): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/rotated90|rotated90@io.github.yuroyami.kiteimage.KiteAnimation(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteAnimation).io.github.yuroyami.kiteimage/scaled(kotlin/Int, kotlin/Int): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/scaled|scaled@io.github.yuroyami.kiteimage.KiteAnimation(kotlin.Int;kotlin.Int){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/cropped(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/cropped|cropped@io.github.yuroyami.kiteimage.KiteBitmap(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/flippedHorizontal(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/flippedHorizontal|flippedHorizontal@io.github.yuroyami.kiteimage.KiteBitmap(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/flippedVertical(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/flippedVertical|flippedVertical@io.github.yuroyami.kiteimage.KiteBitmap(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/oriented(io.github.yuroyami.kiteimage/Orientation): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/oriented|oriented@io.github.yuroyami.kiteimage.KiteBitmap(io.github.yuroyami.kiteimage.Orientation){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/rotated180(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/rotated180|rotated180@io.github.yuroyami.kiteimage.KiteBitmap(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/rotated270(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/rotated270|rotated270@io.github.yuroyami.kiteimage.KiteBitmap(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/rotated90(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/rotated90|rotated90@io.github.yuroyami.kiteimage.KiteBitmap(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/scaled(kotlin/Int, kotlin/Int): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/scaled|scaled@io.github.yuroyami.kiteimage.KiteBitmap(kotlin.Int;kotlin.Int){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/transposed(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/transposed|transposed@io.github.yuroyami.kiteimage.KiteBitmap(){}[0]
+final fun (io.github.yuroyami.kiteimage/KiteBitmap).io.github.yuroyami.kiteimage/transversed(): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/transversed|transversed@io.github.yuroyami.kiteimage.KiteBitmap(){}[0]
