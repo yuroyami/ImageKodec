@@ -4,6 +4,7 @@ import io.github.yuroyami.kiteimage.ImageDecodeException
 import io.github.yuroyami.kiteimage.KiteAnimation
 import io.github.yuroyami.kiteimage.KiteBitmap
 import io.github.yuroyami.kiteimage.KiteFrame
+import io.github.yuroyami.kiteimage.internal.Budget
 import io.github.yuroyami.kiteimage.internal.ByteReader
 
 /**
@@ -34,7 +35,17 @@ internal object GifDecoder {
     private const val MAX_TOTAL_PIXELS = 1L shl 28   // canvas px × frames; bomb guard
     private const val MAX_CODES = 4096               // LZW dictionary limit (12-bit codes)
 
-    fun decode(data: ByteArray, firstFrameOnly: Boolean): KiteAnimation {
+    /**
+     * [cancellationCheck], when given, runs after each frame is composited and
+     * may throw (e.g. `CoroutineContext.ensureActive`) to abandon a decode whose
+     * result no longer matters: a fast-scrolled-away Coil request stops burning
+     * CPU after at most one more frame instead of finishing the whole file.
+     */
+    fun decode(
+        data: ByteArray,
+        firstFrameOnly: Boolean,
+        cancellationCheck: (() -> Unit)? = null,
+    ): KiteAnimation {
         val r = ByteReader(data)
 
         // --- header + logical screen descriptor --------------------------------
@@ -49,6 +60,9 @@ internal object GifDecoder {
         if (width == 0 || height == 0) throw ImageDecodeException("GIF: zero dimension ${width}x$height")
         if (width.toLong() * height > MAX_TOTAL_PIXELS) {
             throw ImageDecodeException("GIF: ${width}x$height exceeds safety limits")
+        }
+        if (!Budget.fits(width, height, data.size)) {
+            throw ImageDecodeException("GIF: ${width}x$height cannot come from ${data.size} bytes")
         }
 
         val globalTable: IntArray? = if (packed and 0x80 != 0) {
@@ -119,6 +133,7 @@ internal object GifDecoder {
                         ),
                     )
                     if (firstFrameOnly) return KiteAnimation(width, height, frames, loopCount)
+                    cancellationCheck?.invoke()
                     if ((frames.size + 1).toLong() * width * height > MAX_TOTAL_PIXELS) {
                         throw ImageDecodeException("GIF: frame count exceeds the $MAX_TOTAL_PIXELS-pixel safety limit")
                     }
@@ -248,7 +263,11 @@ internal object GifDecoder {
         var outAt = 0
         val stack = ByteArray(MAX_CODES)
 
+        // All hot-loop state lives in plain locals (no captured-var closures:
+        // those box each `var` into a Ref object, a per-bit-read indirection
+        // that Kotlin/Native in particular does not optimise away).
         var codeSize = minCodeSize + 1
+        var codeMask = (1 shl codeSize) - 1
         var avail = clear + 2
         var oldCode = -1
 
@@ -256,38 +275,22 @@ internal object GifDecoder {
         var bitCnt = 0
         var inAt = 0
 
-        fun readCode(): Int {
+        while (outAt < expected) {
             while (bitCnt < codeSize) {
-                if (inAt == input.size) return -1
+                if (inAt == input.size) {
+                    throw ImageDecodeException("GIF: LZW data ended after $outAt of $expected pixels")
+                }
                 bitBuf = bitBuf or ((input[inAt++].toInt() and 0xFF) shl bitCnt)
                 bitCnt += 8
             }
-            val code = bitBuf and ((1 shl codeSize) - 1)
+            val code = bitBuf and codeMask
             bitBuf = bitBuf ushr codeSize
             bitCnt -= codeSize
-            return code
-        }
 
-        fun emitChain(code: Int) {
-            var c = code
-            var sp = 0
-            while (c >= clear) {
-                stack[sp++] = suffix[c]
-                c = prefix[c]
-                if (sp >= MAX_CODES) throw ImageDecodeException("GIF: corrupt LZW prefix chain")
-            }
-            stack[sp++] = suffix[c]
-            while (sp > 0 && outAt < expected) out[outAt++] = stack[--sp]
-        }
-
-        while (outAt < expected) {
-            val code = readCode()
             when {
-                code == -1 -> throw ImageDecodeException(
-                    "GIF: LZW data ended after $outAt of $expected pixels",
-                )
                 code == clear -> {
                     codeSize = minCodeSize + 1
+                    codeMask = (1 shl codeSize) - 1
                     avail = clear + 2
                     oldCode = -1
                 }
@@ -313,9 +316,9 @@ internal object GifDecoder {
                         suffix[avail] = first[oldCode]
                         first[avail] = first[oldCode]
                         avail++
-                        emitChain(code)
+                        outAt = emitChain(code, clear, prefix, suffix, stack, out, outAt, expected)
                     } else {
-                        emitChain(code)
+                        outAt = emitChain(code, clear, prefix, suffix, stack, out, outAt, expected)
                         if (avail < MAX_CODES) {
                             prefix[avail] = oldCode
                             suffix[avail] = first[code]
@@ -323,12 +326,39 @@ internal object GifDecoder {
                             avail++
                         }
                     }
-                    if (avail == (1 shl codeSize) && codeSize < 12) codeSize++
+                    if (avail == (1 shl codeSize) && codeSize < 12) {
+                        codeSize++
+                        codeMask = (1 shl codeSize) - 1
+                    }
                     oldCode = code
                 }
             }
         }
         return out
+    }
+
+    /** Emit [code]'s chain into [out] at [outAt]; returns the new write position. */
+    private fun emitChain(
+        code: Int,
+        clear: Int,
+        prefix: IntArray,
+        suffix: ByteArray,
+        stack: ByteArray,
+        out: ByteArray,
+        outAt: Int,
+        expected: Int,
+    ): Int {
+        var c = code
+        var sp = 0
+        while (c >= clear) {
+            stack[sp++] = suffix[c]
+            c = prefix[c]
+            if (sp >= MAX_CODES) throw ImageDecodeException("GIF: corrupt LZW prefix chain")
+        }
+        stack[sp++] = suffix[c]
+        var at = outAt
+        while (sp > 0 && at < expected) out[at++] = stack[--sp]
+        return at
     }
 
     /** Undo the 4-pass interlace: storage order → natural row order. */

@@ -50,4 +50,43 @@ class ScalingTest {
         assertEquals(5, bm.width)
         assertEquals(1, bm.height)   // floor would give 0; clamped to 1
     }
+
+    @Test
+    fun transparentPixelsDontBleedColorIntoBins() {
+        // Two fully transparent BLACK pixels + two opaque WHITE ones. Unweighted
+        // averaging would darken the result to gray; alpha-weighted averaging
+        // must keep the visible color pure white (the halo fix).
+        val px = intArrayOf(
+            argb(0, 0, 0, 0), argb(0xFF, 255, 255, 255),
+            argb(0, 0, 0, 0), argb(0xFF, 255, 255, 255),
+        )
+        val bm = KiteBitmap(2, 2, px).scaled(1, 1)
+        assertEquals(argb(128, 255, 255, 255), bm[0, 0])
+    }
+
+    @Test
+    fun fullyTransparentBinStaysFullyTransparent() {
+        val px = IntArray(4) { argb(0, 200, 100, 50) }
+        val bm = KiteBitmap(2, 2, px).scaled(1, 1)
+        assertEquals(0, bm[0, 0])
+    }
+
+    @Test
+    fun animationScalingPreservesTimingAndLoops() {
+        val frames = listOf(
+            KiteFrame(KiteBitmap(4, 4, IntArray(16) { 0xFFFF0000.toInt() }), delayMillis = 100, delayRawCentiseconds = 10),
+            KiteFrame(KiteBitmap(4, 4, IntArray(16) { 0xFF0000FF.toInt() }), delayMillis = 250, delayRawCentiseconds = 25),
+        )
+        val anim = KiteAnimation(4, 4, frames, loopCount = 3).scaled(2, 2)
+        assertEquals(2, anim.width)
+        assertEquals(2, anim.height)
+        assertEquals(2, anim.frames.size)
+        assertEquals(3, anim.loopCount)
+        assertEquals(100, anim.frames[0].delayMillis)
+        assertEquals(25, anim.frames[1].delayRawCentiseconds)
+        assertEquals(0xFFFF0000.toInt(), anim.frames[0].bitmap[0, 0])
+        assertEquals(0xFF0000FF.toInt(), anim.frames[1].bitmap[1, 1])
+        // Already fits: same instance, no copy.
+        assertSame(anim, anim.scaled(10, 10))
+    }
 }

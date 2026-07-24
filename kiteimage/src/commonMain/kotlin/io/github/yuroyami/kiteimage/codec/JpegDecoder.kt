@@ -3,6 +3,7 @@ package io.github.yuroyami.kiteimage.codec
 import io.github.yuroyami.kiteimage.ImageDecodeException
 import io.github.yuroyami.kiteimage.KiteBitmap
 import io.github.yuroyami.kiteimage.UnsupportedImageException
+import io.github.yuroyami.kiteimage.internal.Budget
 
 /**
  * Baseline JPEG decoder: a faithful pure-Kotlin port of `stb_image.h`'s JPEG
@@ -682,6 +683,9 @@ internal object JpegDecoder {
         if (j.imgX > MAX_DIMENSION || j.imgY > MAX_DIMENSION || j.imgX.toLong() * j.imgY > MAX_PIXELS) {
             err("${j.imgX}x${j.imgY} exceeds safety limits")
         }
+        if (!Budget.fits(j.imgX, j.imgY, j.input.size)) {
+            err("${j.imgX}x${j.imgY} cannot come from ${j.input.size} bytes")
+        }
         val c = j.u8()
         if (c != 3 && c != 1 && c != 4) err("bad component count $c")
         j.imgN = c
@@ -1008,15 +1012,22 @@ internal object JpegDecoder {
 
     private fun float2fixed(x: Double): Int = ((x * 4096.0 + 0.5).toInt()) shl 8
 
+    // Hoisted out of the per-pixel loop: the C originals are compile-time
+    // constants, and not every Kotlin backend folds the calls away.
+    private val FIX_1_40200 = float2fixed(1.40200)
+    private val FIX_0_71414 = float2fixed(0.71414)
+    private val FIX_0_34414 = float2fixed(0.34414)
+    private val FIX_1_77200 = float2fixed(1.77200)
+
     // stbi__YCbCr_to_RGB_row (reduced-precision fixed point, bit-exact w/ stb)
     private fun ycbcrToRgbRow(out: IntArray, outOfs: Int, y: ByteArray, yOfs: Int, cb: ByteArray, cbOfs: Int, cr: ByteArray, crOfs: Int, count: Int) {
         for (i in 0 until count) {
             val yFixed = ((y[yOfs + i].toInt() and 0xFF) shl 20) + (1 shl 19)
             val cr0 = (cr[crOfs + i].toInt() and 0xFF) - 128
             val cb0 = (cb[cbOfs + i].toInt() and 0xFF) - 128
-            var r = yFixed + cr0 * float2fixed(1.40200)
-            var g = yFixed + (cr0 * -float2fixed(0.71414)) + ((cb0 * -float2fixed(0.34414)) and 0xFFFF0000.toInt())
-            var b = yFixed + cb0 * float2fixed(1.77200)
+            var r = yFixed + cr0 * FIX_1_40200
+            var g = yFixed + (cr0 * -FIX_0_71414) + ((cb0 * -FIX_0_34414) and 0xFFFF0000.toInt())
+            var b = yFixed + cb0 * FIX_1_77200
             r = r shr 20; g = g shr 20; b = b shr 20
             r = clamp(r); g = clamp(g); b = clamp(b)
             out[outOfs + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b

@@ -48,10 +48,63 @@ class KiteImageDecoderTest {
         assertEquals(3, image.animation.loopCount)
         assertEquals(2, image.width)
         assertEquals(2, image.height)
-        assertTrue(!image.shareable, "animations must skip the memory cache")
+        // KiteAnimationImage is stateless (playback state lives in the
+        // composable), so small animations are memory-cacheable: a scroll-back
+        // is a cache hit, not a full re-decode.
+        assertTrue(image.shareable, "small animations must be memory-cacheable")
         // Frame pixels survived the whole pipeline.
         assertEquals(0xFFFF0000.toInt(), image.animation.frames[0].bitmap[0, 0])
         assertEquals(0xFF0000FF.toInt(), image.animation.frames[1].bitmap[0, 0])
+    }
+
+    @Test
+    fun cacheableAnimationHitsMemoryCacheOnRevisit() {
+        // One loader, one cache key ("juju"): the whole animation is a single
+        // cache entry: there are no per-frame keys anywhere: and the second
+        // request must come back from the memory cache, not a re-decode.
+        val loader = loader()
+        fun request() = ImageRequest.Builder(context)
+            .data(hex(ANIM_KEEP_2F))
+            .memoryCacheKey("juju")
+            .build()
+
+        val first = assertIs<SuccessResult>(runBlocking { loader.execute(request()) })
+        assertIs<KiteAnimationImage>(first.image)
+
+        val second = assertIs<SuccessResult>(runBlocking { loader.execute(request()) })
+        val image = assertIs<KiteAnimationImage>(second.image)
+        assertEquals(coil3.decode.DataSource.MEMORY_CACHE, second.dataSource)
+        assertEquals(2, image.animation.frames.size)
+    }
+
+    @Test
+    fun animationsOverCacheLimitStayUnshareable() {
+        val loader = ImageLoader.Builder(context)
+            .components { add(KiteImageDecoder.Factory(maxCacheableAnimationBytes = 0)) }
+            .build()
+        val result = runBlocking {
+            loader.execute(ImageRequest.Builder(context).data(hex(ANIM_KEEP_2F)).build())
+        }
+        val success = assertIs<SuccessResult>(result)
+        val image = assertIs<KiteAnimationImage>(success.image)
+        assertTrue(!image.shareable, "over-limit animations must skip the memory cache")
+    }
+
+    @Test
+    fun targetSizeDownscalesAnimationFrames() {
+        // 2x2 2-frame GIF requested at 1x1: every frame box-filters down, and
+        // the animation survives as an animation.
+        val result = runBlocking {
+            loader().execute(
+                ImageRequest.Builder(context).data(hex(ANIM_KEEP_2F)).size(1, 1).build(),
+            )
+        }
+        val success = assertIs<SuccessResult>(result)
+        val image = assertIs<KiteAnimationImage>(success.image)
+        assertEquals(1, image.width)
+        assertEquals(1, image.height)
+        assertEquals(2, image.animation.frames.size)
+        assertEquals(1, image.animation.frames[0].bitmap.width)
     }
 
     @Test
@@ -127,10 +180,10 @@ class KiteImageDecoderTest {
             return out.toByteArray()
         }
 
-        fun claim(bytes: ByteArray): Boolean {
-            val buf = okio.Buffer().write(bytes)
-            return KiteImageDecoder.Factory().run { jpegIsClaimable(buf.peek()) }
-        }
+        // The factory now asks the probe rather than walking markers itself, so
+        // "would we claim this?" is exactly "does the probe say it's decodable?".
+        fun claim(bytes: ByteArray): Boolean =
+            io.github.yuroyami.kiteimage.KiteImage.probeOrNull(bytes)?.isDecodable == true
 
         assertTrue(claim(encode(progressive = false)), "baseline must be claimed")
         assertTrue(claim(encode(progressive = true)), "progressive must be claimed too")

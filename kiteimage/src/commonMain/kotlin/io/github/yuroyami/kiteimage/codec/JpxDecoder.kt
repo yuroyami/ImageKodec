@@ -22,19 +22,19 @@ import kotlin.math.min
 public object JpxDecoder {
 
     public class Result(
-        val width: Int,
-        val height: Int,
-        val colorSpace: String,
+        public val width: Int,
+        public val height: Int,
+        public val colorSpace: String,
         /** Interleaved 8-bpc samples: 1 (gray) or 3 (RGB) per pixel. */
-        val pixelBytes: ByteArray,
+        public val pixelBytes: ByteArray,
         /** 8-bit opacity plane ([width]x[height]) from a cdef channel, or null. */
-        val alpha: ByteArray?,
+        public val alpha: ByteArray?,
     )
 
-    fun decode(data: ByteArray): Result? = runCatching { decodeOrThrow(data) }.getOrNull()
+    public fun decode(data: ByteArray): Result? = runCatching { decodeOrThrow(data) }.getOrNull()
 
     /** True when [data] looks like a JP2 container or a raw J2K codestream. */
-    fun isJpx(data: ByteArray): Boolean {
+    public fun isJpx(data: ByteArray): Boolean {
         if (data.size < 4) return false
         if (data[0].toInt() == 0xFF && (data[1].toInt() and 0xFF) == 0x4F) return true // SOC
         return data.size >= 12 && u32(data, 0) == 12L && u32(data, 4) == 0x6A502020L

@@ -21,7 +21,7 @@ package io.github.yuroyami.kiteimage.codec
 public object Jbig2Decoder {
 
     /** Decode [data] (the `/JBIG2Decode` stream) with optional [globals] into a 1bpp bitmap. */
-    fun decode(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? =
+    public fun decode(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? =
         runCatching { Ctx().decodeEmbedded(data, globals, width, height) }.getOrNull()
 
     // The MQ arithmetic decoder (T.88 Annex E) lives in the shared [MqDecoder],

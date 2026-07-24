@@ -12,8 +12,11 @@ public open class ImageDecodeException(
 
 /**
  * The input is a well-formed image in a format (or format feature) KiteImage
- * doesn't decode yet: e.g. WebP, or an interlaced PNG. Subtype of
+ * doesn't decode yet: e.g. WebP, or a lossless/arithmetic JPEG. Subtype of
  * [ImageDecodeException] so callers who don't care about the distinction catch
  * one type.
  */
-public class UnsupportedImageException(message: String) : ImageDecodeException(message)
+public class UnsupportedImageException(
+    message: String,
+    cause: Throwable? = null,
+) : ImageDecodeException(message, cause)

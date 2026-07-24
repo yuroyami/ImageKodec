@@ -113,11 +113,17 @@ class BmpDecoderTest {
     }
 
     @Test
-    fun bmpRleRejectedWithClearMessage() {
-        val e = assertFailsWith<UnsupportedImageException> {
-            KiteImage.decode(bmp(2, 2, 8, palette = listOf(0), pixels = listOf(0, 0, 0, 0), compression = 1))
+    fun embeddedJpegAndPngPayloadsAreRejectedByName() {
+        // BI_JPEG / BI_PNG smuggle a whole other image into the pixel array. That
+        // is a container trick, not a BMP encoding, so it is declined by name.
+        val jpeg = assertFailsWith<UnsupportedImageException> {
+            KiteImage.decode(bmp(2, 2, 24, pixels = List(4) { 0 }, compression = 4))
         }
-        assertTrue("BI_RLE8" in e.message!!)
+        assertTrue("JPEG" in jpeg.message!!, jpeg.message!!)
+        val png = assertFailsWith<UnsupportedImageException> {
+            KiteImage.decode(bmp(2, 2, 24, pixels = List(4) { 0 }, compression = 5))
+        }
+        assertTrue("PNG" in png.message!!, png.message!!)
     }
 
     @Test

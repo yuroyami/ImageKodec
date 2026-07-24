@@ -1,14 +1,14 @@
 [versions] #######################################################################################
 # Toolchain — kept in lock-step with KiteArchive / KiteTorrent / KitePDF so the Kite
 # lineage builds with one shared stack.
-kotlin = "2.4.0"
+kotlin = "2.4.10"
 agp = "9.2.1"
 vanniktechPublish = "0.36.0"
-dokka = "2.0.0"
+dokka = "2.2.0"
 
 # :kiteimage-compose / :kiteimage-coil only. The :kiteimage core stays kotlin-stdlib-only.
-composeMultiplatform = "1.11.1"
-skiko = "0.148.1"
+composeMultiplatform = "1.12.0-beta02"
+skiko = "0.148.2"
 coil = "3.5.0"
 
 [libraries] ######################################################################################

@@ -34,9 +34,11 @@ internal object Zlib {
     /**
      * Decompress a zlib stream. The Adler-32 trailer is not re-validated here.
      *
-     * [maximumSize] is the decompression-bomb guard. PNG callers pass the exact
-     * expected filtered-scanline size computed from IHDR, so anything larger is
-     * malformed by definition.
+     * [maximumSize] is the decompression-bomb guard, enforced *during* inflate:
+     * the stream aborts the moment the output would exceed it, before that
+     * memory is allocated. PNG/TIFF callers pass the exact expected size
+     * computed from the headers, so anything larger is malformed by definition;
+     * that exact size also preallocates the output buffer (no growth copies).
      */
     fun decompress(input: ByteArray, maximumSize: Long): ByteArray {
         require(maximumSize > 0) { "maximumSize must be > 0" }
@@ -50,10 +52,11 @@ internal object Zlib {
         if ((flg and 0x20) != 0) throw InflateException(InflateError.INVALID_ZLIB_HEADER) // FDICT
         if (((cmf shl 8) or flg) % 31 != 0) throw InflateException(InflateError.INVALID_ZLIB_HEADER)
 
-        val out = Inflate.inflate(input.copyOfRange(2, input.size))
-        if (out.size.toLong() > maximumSize) {
-            throw InflateException(InflateError.INFLATED_DATA_TOO_LARGE)
-        }
-        return out
+        return Inflate.inflate(
+            input,
+            offset = 2,
+            sizeHint = if (maximumSize <= Int.MAX_VALUE) maximumSize.toInt() else 0,
+            maxOutput = maximumSize,
+        )
     }
 }

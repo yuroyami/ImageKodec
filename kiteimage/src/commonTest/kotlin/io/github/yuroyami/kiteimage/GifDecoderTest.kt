@@ -152,6 +152,27 @@ class GifDecoderTest {
         assertFalse(anim.isAnimated)
     }
 
+    @Test
+    fun cancellationCheckRunsBetweenFramesAndAborts() {
+        class Abort : RuntimeException()
+
+        // Invoked after each composited frame; count how far decode got.
+        var calls = 0
+        assertFailsWith<Abort> {
+            KiteImage.decodeAnimation(hex(ANIM_KEEP_2F)) {
+                calls++
+                throw Abort()
+            }
+        }
+        assertEquals(1, calls, "decode must stop at the first check, not finish the file")
+
+        // A check that never throws changes nothing about the result.
+        calls = 0
+        val anim = KiteImage.decodeAnimation(hex(ANIM_KEEP_2F)) { calls++ }
+        assertEquals(2, anim.frames.size)
+        assertEquals(2, calls)
+    }
+
     /** Tiny 1x1 24-bit BMP built inline. */
     private fun hexBmp(): ByteArray {
         val out = ArrayList<Byte>()

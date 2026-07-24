@@ -1,19 +1,22 @@
 package io.github.yuroyami.kiteimage.internal.flate
 
 /**
- * Raw DEFLATE (RFC 1951) decompressor: a faithful pure-Kotlin port of Mark
- * Adler's `puff()` (the canonical, deliberately-simple reference inflate, bundled
- * with zlib at `contrib/puff/puff.c`). Vendored from KiteArchive, which carried it
- * over from the KiteTorrent port, which itself took it from libtorrent's
- * `src/puff.cpp`. Kept `internal`: PNG IDAT needs an inflater and the KiteImage
- * core takes zero dependencies: swap for the `kitearchive` artifact once it is
- * on Maven Central.
+ * Raw DEFLATE (RFC 1951) decompressor: a pure-Kotlin port of Mark Adler's
+ * `puff()` (the canonical reference inflate, bundled with zlib at
+ * `contrib/puff/puff.c`), accelerated with a table-driven Huffman fast path.
+ * Vendored from KiteArchive, which carried it over from the KiteTorrent port,
+ * which itself took it from libtorrent's `src/puff.cpp`. Kept `internal`: PNG
+ * IDAT needs an inflater and the KiteImage core takes zero dependencies: swap
+ * for the `kitearchive` artifact once it is on Maven Central.
  *
  * Differences from the C, all behaviour-preserving:
  *
  *  - puff writes into a caller-supplied fixed-size buffer and returns `1`
  *    ("output space exhausted") when it's too small; we grow the output array on
- *    demand instead, so error code `1` never occurs here.
+ *    demand instead, so error code `1` never occurs here. Callers that know the
+ *    final size pass [inflate]'s `sizeHint` to preallocate it, and `maxOutput`
+ *    to abort *mid-stream* the moment the output would exceed it: the
+ *    decompression-bomb guard fires before the memory is committed, not after.
  *
  *  - puff signals "ran past the end of input" via `setjmp`/`longjmp`; we model
  *    that non-local exit with a private [OutOfInput] throwable caught at the top
@@ -22,9 +25,17 @@ package io.github.yuroyami.kiteimage.internal.flate
  *  - puff's "scan only" mode (`dest == NULL`) is omitted; we always materialise
  *    the output.
  *
+ *  - puff decodes every Huffman symbol bit-by-bit. We additionally build a
+ *    [FAST_BITS]-wide lookup table per Huffman code (the standard zlib/stb
+ *    acceleration): one masked read resolves any code of ≤ [FAST_BITS] bits,
+ *    which is nearly every symbol in real streams; longer codes and the last
+ *    few bytes of input fall back to puff's exact bit-by-bit walk.
+ *
  * Bits are consumed LSB-first within each input byte; Huffman codes are read
  * MSB-first and accumulated in reversed order so canonical codes compare as plain
- * integers (see [decode]).
+ * integers (see [decodeSlow]). The fast table is therefore indexed by
+ * *bit-reversed* canonical codes: the low bit of the index is the first bit off
+ * the wire, which is the code's MSB.
  *
  * This object is stateless and thread-safe; all mutable inflate state lives in the
  * private [State] created per call.
@@ -37,6 +48,12 @@ internal object Inflate {
     private const val MAXDCODES = 30      // maximum number of distance codes
     private const val MAXCODES = MAXLCODES + MAXDCODES
     private const val FIXLCODES = 288     // number of fixed literal/length codes
+
+    // Fast-table width: 9 bits covers the fixed literal table and virtually all
+    // dynamic-block symbols; same choice as zlib's ENOUGH/stb's ZFAST_BITS.
+    private const val FAST_BITS = 9
+    private const val FAST_SIZE = 1 shl FAST_BITS
+    private const val FAST_MASK = FAST_SIZE - 1
 
     // Size base for length codes 257..285 (puff `lens[]`).
     private val LENS = shortArrayOf(
@@ -66,14 +83,25 @@ internal object Inflate {
     )
 
     /**
-     * Inflate a raw DEFLATE stream (no gzip/zlib wrapper) and return the
-     * decompressed bytes.
+     * Inflate a raw DEFLATE stream (no gzip/zlib wrapper) starting at [offset]
+     * in [input] and return the decompressed bytes.
+     *
+     * [sizeHint] preallocates the output buffer when the caller knows the final
+     * size (PNG/TIFF compute it exactly); 0 means "unknown, grow by doubling".
+     * [maxOutput] aborts with [InflateError.INFLATED_DATA_TOO_LARGE] as soon as
+     * the output *would* grow past it, before allocating: the bomb guard runs
+     * during decompression, not after.
      *
      * @throws InflateException with the faithful [InflateError] on malformed or
      *   truncated input: the same failure taxonomy puff returns numerically.
      */
-    fun inflate(input: ByteArray): ByteArray {
-        val s = State(input)
+    fun inflate(
+        input: ByteArray,
+        offset: Int = 0,
+        sizeHint: Int = 0,
+        maxOutput: Long = Long.MAX_VALUE,
+    ): ByteArray {
+        val s = State(input, offset, sizeHint, maxOutput)
         try {
             var last: Int
             do {
@@ -99,21 +127,31 @@ internal object Inflate {
     /**
      * Per-call inflate state. Holds the input cursor + bit buffer and the growable
      * output. Mirrors puff's `struct state`, except [out] grows instead of being a
-     * fixed buffer, so there is no `outlen` overflow path.
+     * fixed buffer, and growth past [maxOutput] throws instead of erroring later.
      */
-    private class State(private val inBuf: ByteArray) {
-        private var incnt = 0           // bytes read so far
+    private class State(
+        private val inBuf: ByteArray,
+        startOffset: Int,
+        sizeHint: Int,
+        private val maxOutput: Long,
+    ) {
+        private var incnt = startOffset // input cursor
         var bitbuf = 0                  // bit buffer
         var bitcnt = 0                  // number of valid low bits in bitbuf
 
-        private var out = ByteArray(256)
+        private var out = ByteArray(
+            when {
+                sizeHint > 0 -> minOf(sizeHint.toLong(), maxOutput).toInt().coerceAtLeast(16)
+                else -> 256
+            },
+        )
         var outcnt = 0
             private set
 
-        val inLen: Int get() = inBuf.size
         val inAvailable: Int get() = inBuf.size - incnt
 
-        fun output(): ByteArray = out.copyOf(outcnt)
+        /** No copy when the size hint was exact: the common PNG/TIFF path. */
+        fun output(): ByteArray = if (outcnt == out.size) out else out.copyOf(outcnt)
 
         fun nextByte(): Int {
             if (incnt == inBuf.size) throw OutOfInput()
@@ -121,8 +159,6 @@ internal object Inflate {
         }
 
         fun rawByte(): Int = inBuf[incnt++].toInt() and 0xff
-
-        fun skip(n: Int) { incnt += n }
 
         fun bits(need: Int): Int {
             var value = bitbuf
@@ -138,9 +174,12 @@ internal object Inflate {
         fun ensure(extra: Int) {
             val needed = outcnt + extra
             if (needed > out.size) {
+                if (needed.toLong() > maxOutput) {
+                    throw InflateException(InflateError.INFLATED_DATA_TOO_LARGE)
+                }
                 var cap = if (out.size == 0) 256 else out.size
                 while (cap < needed) cap = cap shl 1
-                out = out.copyOf(cap)
+                out = out.copyOf(minOf(cap.toLong(), maxOutput).toInt().coerceAtLeast(needed))
             }
         }
 
@@ -169,9 +208,52 @@ internal object Inflate {
         }
     }
 
+    /**
+     * Canonical Huffman code as puff builds it (count-of-each-length + symbols
+     * in canonical order), plus the [FAST_BITS] lookup table: `fast[next 9 wire
+     * bits] = (symbol shl 4) or codeLength`, 0 = code longer than [FAST_BITS]
+     * (fall back to the bit-by-bit walk).
+     */
     private class Huffman(maxSymbols: Int) {
         val count = ShortArray(MAXBITS + 1)
         val symbol = ShortArray(maxSymbols)
+        val fast = ShortArray(FAST_SIZE)
+
+        /** Fill [fast] from the canonical code assignment (RFC 1951 §3.2.2). */
+        fun buildFastTable() {
+            // First canonical code of each length.
+            val nextCode = IntArray(MAXBITS + 1)
+            var c = 0
+            for (len in 1..MAXBITS) {
+                c = (c + count[len - 1]) shl 1
+                nextCode[len] = c
+            }
+            var symIdx = 0
+            for (len in 1..MAXBITS) {
+                repeat(count[len].toInt()) {
+                    if (len <= FAST_BITS) {
+                        val sym = symbol[symIdx].toInt()
+                        // Wire order = code MSB first, index bit 0 = first wire
+                        // bit, so index by the bit-reversed code; every index
+                        // sharing those low `len` bits decodes to this symbol.
+                        var rev = 0
+                        var v = nextCode[len]
+                        repeat(len) {
+                            rev = (rev shl 1) or (v and 1)
+                            v = v ushr 1
+                        }
+                        val entry = ((sym shl 4) or len).toShort()
+                        var i = rev
+                        while (i < FAST_SIZE) {
+                            fast[i] = entry
+                            i += 1 shl len
+                        }
+                    }
+                    nextCode[len]++
+                    symIdx++
+                }
+            }
+        }
     }
 
     private fun stored(s: State): Int {
@@ -192,7 +274,32 @@ internal object Inflate {
         return 0
     }
 
+    /**
+     * Decode one symbol: fast path first (one masked table read resolves codes
+     * of ≤ [FAST_BITS] bits), puff's bit-by-bit walk for long codes or when the
+     * input is too near its end to fill the peek window.
+     */
     private fun decode(s: State, h: Huffman): Int {
+        // Top up the peek window to FAST_BITS. If the input ends first, take the
+        // exact slow path: it consumes bit-by-bit and throws OutOfInput only if
+        // the stream truly ends mid-code.
+        while (s.bitcnt < FAST_BITS) {
+            if (s.inAvailable == 0) return decodeSlow(s, h)
+            s.bitbuf = s.bitbuf or (s.rawByte() shl s.bitcnt)
+            s.bitcnt += 8
+        }
+        val entry = h.fast[s.bitbuf and FAST_MASK].toInt()
+        if (entry != 0) {
+            val len = entry and 15
+            s.bitbuf = s.bitbuf ushr len
+            s.bitcnt -= len
+            return entry ushr 4
+        }
+        return decodeSlow(s, h)
+    }
+
+    /** puff's exact bit-by-bit canonical walk (unchanged semantics). */
+    private fun decodeSlow(s: State, h: Huffman): Int {
         var bitbuf = s.bitbuf
         var left = s.bitcnt
         var code = 0
@@ -227,6 +334,9 @@ internal object Inflate {
     }
 
     private fun construct(h: Huffman, length: ShortArray, n: Int): Int {
+        // Zero the fast table here, not in buildFastTable: the all-lengths-zero
+        // early return below must not leave a reused Huffman's stale table live.
+        h.fast.fill(0)
         for (len in 0..MAXBITS) h.count[len] = 0
         for (symbol in 0 until n) h.count[length[symbol].toInt()]++
         if (h.count[0].toInt() == n) return 0
@@ -251,6 +361,8 @@ internal object Inflate {
                 offs[l]++
             }
         }
+
+        h.buildFastTable()
         return left
     }
 

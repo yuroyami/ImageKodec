@@ -1,9 +1,13 @@
 package io.github.yuroyami.kiteimage.codec
 
 import io.github.yuroyami.kiteimage.ImageDecodeException
+import io.github.yuroyami.kiteimage.KiteAnimation
 import io.github.yuroyami.kiteimage.KiteBitmap
+import io.github.yuroyami.kiteimage.KiteFrame
 import io.github.yuroyami.kiteimage.UnsupportedImageException
+import io.github.yuroyami.kiteimage.internal.Budget
 import io.github.yuroyami.kiteimage.internal.ByteReader
+import io.github.yuroyami.kiteimage.internal.sourceOver
 import io.github.yuroyami.kiteimage.internal.flate.Crc32
 import io.github.yuroyami.kiteimage.internal.flate.InflateException
 import io.github.yuroyami.kiteimage.internal.flate.Zlib
@@ -17,20 +21,132 @@ import io.github.yuroyami.kiteimage.internal.flate.Zlib
  *    behaviour), sub-byte gray scales by sample replication (1/2/4-bit → ×255/×85/×17)
  *  - all five row filters (None/Sub/Up/Average/Paeth)
  *  - `tRNS` transparency for types 0/2 (color-key) and 3 (per-entry alpha)
- *  - CRC verification on the chunks we consume (IHDR/PLTE/tRNS/IDAT); ancillary
- *    chunks we skip are not CRC-checked: real-world writers get those wrong,
- *    and stb doesn't check any CRC at all
+ *  - CRC verification on the chunks we consume (IHDR/PLTE/tRNS/IDAT/acTL/fcTL/fdAT);
+ *    ancillary chunks we skip are not CRC-checked: real-world writers get those
+ *    wrong, and stb doesn't check any CRC at all
+ *  - APNG: `acTL`/`fcTL`/`fdAT`, both dispose and blend operations, frame rects,
+ *    and the rule that decides whether the default image is also frame zero
  *
- * Interlaced (Adam7) files are recognised and rejected with a clear message;
- * next on the roadmap, tracked in PORTING_STATUS.md. Apple's proprietary CgBI
- * variant is detected up front for the same reason.
+ * Adam7 interlacing is fully supported: each of the seven passes unfilters
+ * independently and scatters into the final image. Apple's proprietary CgBI
+ * variant is detected up front and rejected with a clear message.
+ *
+ * [decode] always returns the **default image** (the `IDAT` one), which is what
+ * every non-APNG-aware viewer shows and what the spec asks for. [decodeAnimation]
+ * is where the frame sequence comes from.
  */
 internal object PngDecoder {
 
     private const val MAX_DIMENSION = 1 shl 24       // 16M px per side
     private const val MAX_PIXELS = 1L shl 28         // 268M px ≈ 1 GiB of ARGB; bomb guard
+    private const val MAX_TOTAL_PIXELS = 1L shl 28   // canvas px × frames; animation bomb guard
+
+    // APNG dispose_op / blend_op wire values (APNG spec).
+    private const val DISPOSE_NONE = 0
+    private const val DISPOSE_BACKGROUND = 1
+    private const val DISPOSE_PREVIOUS = 2
+    private const val BLEND_SOURCE = 0
+    private const val BLEND_OVER = 1
+
+    // --- public entry points ----------------------------------------------------
 
     fun decode(data: ByteArray): KiteBitmap {
+        val png = parse(data, wantAnimation = false)
+        return KiteBitmap(png.width, png.height, renderSubImage(png, png.width, png.height, png.idat))
+    }
+
+    /**
+     * Decode an APNG's frame sequence, fully composited. A PNG without `acTL`
+     * decodes as a single frame holding the default image, so this is total over
+     * every PNG [decode] accepts.
+     *
+     * [cancellationCheck] runs after each composited frame and may throw to
+     * abandon a decode whose result no longer matters.
+     */
+    fun decodeAnimation(data: ByteArray, cancellationCheck: (() -> Unit)? = null): KiteAnimation {
+        val png = parse(data, wantAnimation = true)
+
+        if (png.frames.isEmpty()) {
+            val still = KiteBitmap(png.width, png.height, renderSubImage(png, png.width, png.height, png.idat))
+            return KiteAnimation(
+                width = png.width,
+                height = png.height,
+                frames = listOf(KiteFrame(still, delayMillis = 0, delayRawCentiseconds = 0)),
+                loopCount = 1,
+            )
+        }
+
+        if (png.width.toLong() * png.height * png.frames.size > MAX_TOTAL_PIXELS) {
+            throw ImageDecodeException(
+                "APNG: ${png.frames.size} frames of ${png.width}x${png.height} exceeds safety limits",
+            )
+        }
+
+        val canvas = IntArray(png.width * png.height)   // starts fully transparent
+        val out = ArrayList<KiteFrame>(png.frames.size)
+        var saved: IntArray? = null
+
+        for (frame in png.frames) {
+            if (frame.disposeOp == DISPOSE_PREVIOUS) saved = canvas.copyOf()
+
+            val pixels = renderSubImage(png, frame.width, frame.height, frame.data)
+            blit(canvas, png.width, pixels, frame)
+
+            out.add(
+                KiteFrame(
+                    bitmap = KiteBitmap(png.width, png.height, canvas.copyOf()),
+                    delayMillis = frame.delayMillis,
+                    delayRawCentiseconds = frame.delayCentiseconds,
+                ),
+            )
+
+            when (frame.disposeOp) {
+                DISPOSE_BACKGROUND -> clearRect(canvas, png.width, frame)
+                DISPOSE_PREVIOUS -> saved?.copyInto(canvas)
+                else -> Unit
+            }
+            cancellationCheck?.invoke()
+        }
+
+        return KiteAnimation(png.width, png.height, out, png.loopCount)
+    }
+
+    // --- parsed structure -------------------------------------------------------
+
+    private class Frame(
+        val width: Int,
+        val height: Int,
+        val xOffset: Int,
+        val yOffset: Int,
+        val delayMillis: Int,
+        val delayCentiseconds: Int,
+        val disposeOp: Int,
+        val blendOp: Int,
+        /** zlib parts for this frame: `IDAT` for the default image, `fdAT` payloads otherwise. */
+        val data: List<ByteArray>,
+    )
+
+    private class Png(
+        val width: Int,
+        val height: Int,
+        val bitDepth: Int,
+        val colorType: Int,
+        val channels: Int,
+        val interlace: Int,
+        val palette: IntArray?,
+        val paletteAlpha: IntArray?,
+        val trnsGray: Int,
+        val trnsR: Int,
+        val trnsG: Int,
+        val trnsB: Int,
+        val idat: List<ByteArray>,
+        val frames: List<Frame>,
+        val loopCount: Int,
+    )
+
+    // --- container parse --------------------------------------------------------
+
+    private fun parse(data: ByteArray, wantAnimation: Boolean): Png {
         val r = ByteReader(data)
 
         // 8-byte signature: \x89 P N G \r \n \x1a \n (sniffed upstream, re-checked here
@@ -66,6 +182,11 @@ internal object PngDecoder {
         if (widthL > MAX_DIMENSION || heightL > MAX_DIMENSION || widthL * heightL > MAX_PIXELS) {
             throw ImageDecodeException("PNG: ${widthL}x$heightL exceeds safety limits")
         }
+        if (!Budget.fits(widthL.toInt(), heightL.toInt(), data.size)) {
+            throw ImageDecodeException(
+                "PNG: ${widthL}x$heightL cannot come from ${data.size} bytes",
+            )
+        }
         val width = widthL.toInt()
         val height = heightL.toInt()
         if (interlace != 0 && interlace != 1) {
@@ -92,6 +213,21 @@ internal object PngDecoder {
         var trnsR = -1; var trnsG = -1; var trnsB = -1   // color-key, type 2
         val idat = ArrayList<ByteArray>()
         var sawEnd = false
+
+        // APNG state. `pending` is the fcTL whose data chunks haven't arrived yet.
+        var loopCount = 1
+        var declaredFrames = -1
+        val frames = ArrayList<Frame>()
+        var pending: PendingFrame? = null
+        var pendingData = ArrayList<ByteArray>()
+        var defaultImageIsFrame = false
+
+        fun flushPending() {
+            val p = pending ?: return
+            frames.add(p.toFrame(pendingData))
+            pending = null
+            pendingData = ArrayList()
+        }
 
         while (!sawEnd) {
             chunk = readChunkHeader(r)
@@ -125,10 +261,71 @@ internal object PngDecoder {
                         else -> throw ImageDecodeException("PNG: tRNS not allowed for color type $colorType")
                     }
                 }
+                "acTL" -> {
+                    if (chunk.length != 8) throw ImageDecodeException("PNG: acTL length ${chunk.length}")
+                    val raw = r.bytes(8)
+                    verifyCrc(r, "acTL", raw)
+                    val a = ByteReader(raw)
+                    val n = a.u32be()
+                    // num_plays uses the same 0-means-forever convention as GIF.
+                    loopCount = a.u32be().toInt()
+                    if (n <= 0 || n > MAX_TOTAL_PIXELS) throw ImageDecodeException("PNG: acTL frame count $n")
+                    declaredFrames = n.toInt()
+                }
+                "fcTL" -> {
+                    if (chunk.length != 26) throw ImageDecodeException("PNG: fcTL length ${chunk.length}")
+                    val raw = r.bytes(26)
+                    verifyCrc(r, "fcTL", raw)
+                    if (!wantAnimation) continue
+
+                    flushPending()
+                    val f = ByteReader(raw)
+                    f.skip(4)                                  // sequence number: ordering is the chunk order
+                    val fw = f.u32be().toInt()
+                    val fh = f.u32be().toInt()
+                    val fx = f.u32be().toInt()
+                    val fy = f.u32be().toInt()
+                    val delayNum = f.u16be()
+                    val delayDen = f.u16be()
+                    val dispose = f.u8()
+                    val blend = f.u8()
+
+                    if (fw <= 0 || fh <= 0) throw ImageDecodeException("PNG: fcTL empty frame ${fw}x$fh")
+                    if (fx < 0 || fy < 0 || fx + fw > width || fy + fh > height) {
+                        throw ImageDecodeException(
+                            "PNG: fcTL rect ${fw}x$fh at ($fx, $fy) leaves the ${width}x$height canvas",
+                        )
+                    }
+                    if (dispose > DISPOSE_PREVIOUS) throw ImageDecodeException("PNG: fcTL dispose_op $dispose")
+                    if (blend > BLEND_OVER) throw ImageDecodeException("PNG: fcTL blend_op $blend")
+
+                    // delay_den 0 means 100 (the field's documented default).
+                    val den = if (delayDen == 0) 100 else delayDen
+                    val millis = (delayNum.toLong() * 1000 / den).toInt()
+
+                    pending = PendingFrame(fw, fh, fx, fy, millis, dispose, blend)
+
+                    // An fcTL *before* IDAT means the default image is also frame 0.
+                    if (idat.isEmpty()) defaultImageIsFrame = true
+                }
+                "fdAT" -> {
+                    if (chunk.length < 4) throw ImageDecodeException("PNG: fdAT length ${chunk.length}")
+                    val raw = r.bytes(chunk.length)
+                    verifyCrc(r, "fdAT", raw)
+                    if (!wantAnimation) continue
+                    if (pending == null) throw ImageDecodeException("PNG: fdAT without a preceding fcTL")
+                    // First 4 bytes are the sequence number, the rest is IDAT-shaped data.
+                    pendingData.add(raw.copyOfRange(4, raw.size))
+                }
                 "IDAT" -> {
                     val raw = r.bytes(chunk.length)
                     verifyCrc(r, "IDAT", raw)
                     idat.add(raw)
+                    // The default image belongs to the frame opened by the last fcTL,
+                    // if that fcTL came first.
+                    if (wantAnimation && defaultImageIsFrame && pending != null && pendingData.isEmpty()) {
+                        pendingData.add(DEFAULT_IMAGE_MARKER)
+                    }
                 }
                 "IEND" -> {
                     r.skip(4)   // CRC of empty data; constant, nothing to protect
@@ -142,17 +339,93 @@ internal object PngDecoder {
                 }
             }
         }
+        flushPending()
 
         if (colorType == 3 && palette == null) throw ImageDecodeException("PNG: palette image without PLTE")
         if (idat.isEmpty()) throw ImageDecodeException("PNG: no IDAT data")
 
-        // --- inflate ------------------------------------------------------------
-        val compressed = concat(idat)
+        // Resolve the default-image placeholder now that IDAT is complete, and drop
+        // any frame that never received data (a truncated final fcTL).
+        val resolved = frames.mapNotNull { f ->
+            val parts = f.data.flatMap { part -> if (part === DEFAULT_IMAGE_MARKER) idat else listOf(part) }
+            if (parts.isEmpty()) null else Frame(
+                f.width, f.height, f.xOffset, f.yOffset,
+                f.delayMillis, f.delayCentiseconds, f.disposeOp, f.blendOp, parts,
+            )
+        }
+        if (declaredFrames > 0 && resolved.isNotEmpty() && resolved.size != declaredFrames) {
+            throw ImageDecodeException(
+                "APNG: acTL declares $declaredFrames frames, found ${resolved.size}",
+            )
+        }
+
+        return Png(
+            width, height, bitDepth, colorType, channels, interlace,
+            palette, paletteAlpha, trnsGray, trnsR, trnsG, trnsB,
+            idat, resolved, loopCount,
+        )
+    }
+
+    /** Stand-in for "this frame's pixels are the IDAT default image". */
+    private val DEFAULT_IMAGE_MARKER = ByteArray(0)
+
+    private class PendingFrame(
+        val width: Int,
+        val height: Int,
+        val xOffset: Int,
+        val yOffset: Int,
+        val millis: Int,
+        val disposeOp: Int,
+        val blendOp: Int,
+    ) {
+        fun toFrame(data: List<ByteArray>): Frame {
+            // Same browser rule GIF gets: "as fast as possible" renders at 100 ms.
+            val normalised = if (millis <= 10) 100 else millis
+            return Frame(
+                width, height, xOffset, yOffset,
+                normalised, (millis + 5) / 10, disposeOp, blendOp, data,
+            )
+        }
+    }
+
+    // --- compositing ------------------------------------------------------------
+
+    /** Draw [src] (a [Frame]-sized sub-image) into [canvas] honouring the blend op. */
+    private fun blit(canvas: IntArray, canvasWidth: Int, src: IntArray, frame: Frame) {
+        for (y in 0 until frame.height) {
+            var s = y * frame.width
+            var d = (frame.yOffset + y) * canvasWidth + frame.xOffset
+            for (x in 0 until frame.width) {
+                val sp = src[s++]
+                canvas[d] = if (frame.blendOp == BLEND_SOURCE) sp else sourceOver(sp, canvas[d])
+                d++
+            }
+        }
+    }
+
+    /** Dispose "background": the frame's own rect goes fully transparent. */
+    private fun clearRect(canvas: IntArray, canvasWidth: Int, frame: Frame) {
+        for (y in 0 until frame.height) {
+            val row = (frame.yOffset + y) * canvasWidth + frame.xOffset
+            canvas.fill(0, row, row + frame.width)
+        }
+    }
+
+    // --- sub-image pipeline -----------------------------------------------------
+
+    /**
+     * Inflate, unfilter and expand one sub-image: the whole default image, or a
+     * single APNG frame. Every frame shares the file's bit depth, colour type,
+     * palette and interlace method; only the dimensions and the data differ.
+     */
+    private fun renderSubImage(png: Png, width: Int, height: Int, parts: List<ByteArray>): IntArray {
+        val compressed = concat(parts)
+
         // Exact size is knowable from IHDR: each row is one filter byte + ceil(bits/8).
         // Interlaced files are the sum over the seven Adam7 passes, each an
         // independent sub-image with its own filter bytes.
-        fun rowBytesFor(w: Int) = ((w.toLong() * channels * bitDepth + 7) / 8).toInt()
-        val expected: Long = if (interlace == 0) {
+        fun rowBytesFor(w: Int) = ((w.toLong() * png.channels * png.bitDepth + 7) / 8).toInt()
+        val expected: Long = if (png.interlace == 0) {
             height.toLong() * (1 + rowBytesFor(width))
         } else {
             var total = 0L
@@ -174,16 +447,13 @@ internal object PngDecoder {
 
         // The filter's "previous pixel" step: whole bytes for depths >= 8, one byte
         // for packed sub-byte rows (spec: filters operate on bytes, not samples).
-        val fUnit = maxOf(1, (channels * bitDepth) / 8)
+        val fUnit = maxOf(1, (png.channels * png.bitDepth) / 8)
         val argb = IntArray(width * height)
 
-        if (interlace == 0) {
+        if (png.interlace == 0) {
             val rowBytes = rowBytesFor(width)
             unfilter(inflated, 0, height, rowBytes, fUnit)
-            expand(
-                inflated, 0, width, height, rowBytes, bitDepth, colorType,
-                palette, paletteAlpha, trnsGray, trnsR, trnsG, trnsB, argb,
-            ) { x, y -> y * width + x }
+            expand(png, inflated, 0, width, height, rowBytes, argb) { x, y -> y * width + x }
         } else {
             // Adam7: each pass unfilters + expands independently, scattering its
             // pixels to (xStart + x*xStep, yStart + y*yStep) in the final image.
@@ -196,14 +466,11 @@ internal object PngDecoder {
                 unfilter(inflated, ofs, hp, rb, fUnit)
                 val x0 = PASS_X_START[p]; val xs = PASS_X_STEP[p]
                 val y0 = PASS_Y_START[p]; val ys = PASS_Y_STEP[p]
-                expand(
-                    inflated, ofs, wp, hp, rb, bitDepth, colorType,
-                    palette, paletteAlpha, trnsGray, trnsR, trnsG, trnsB, argb,
-                ) { x, y -> (y0 + y * ys) * width + (x0 + x * xs) }
+                expand(png, inflated, ofs, wp, hp, rb, argb) { x, y -> (y0 + y * ys) * width + (x0 + x * xs) }
                 ofs += hp * (1 + rb)
             }
         }
-        return KiteBitmap(width, height, argb)
+        return argb
     }
 
     // Adam7 pass geometry (PNG spec §8.2).
@@ -257,6 +524,7 @@ internal object PngDecoder {
     }
 
     private fun concat(parts: List<ByteArray>): ByteArray {
+        if (parts.size == 1) return parts[0]
         var total = 0
         for (p in parts) total += p.size
         val out = ByteArray(total)
@@ -323,14 +591,13 @@ internal object PngDecoder {
      * pixel indices: identity for normal files, the pass scatter for Adam7.
      */
     private fun expand(
+        png: Png,
         d: ByteArray, base: Int, width: Int, height: Int, rowBytes: Int,
-        bitDepth: Int, colorType: Int,
-        palette: IntArray?, paletteAlpha: IntArray?,
-        trnsGray: Int, trnsR: Int, trnsG: Int, trnsB: Int,
         argb: IntArray,
         dst: (x: Int, y: Int) -> Int,
     ) {
         val stride = 1 + rowBytes
+        val bitDepth = png.bitDepth
 
         // Reads sample number `s` of a row as an Int at native depth. For 16-bit the
         // full value is returned (color-key compares need it); byte reduction to the
@@ -357,28 +624,28 @@ internal object PngDecoder {
 
         for (y in 0 until height) {
             val rowStart = base + y * stride + 1
-            when (colorType) {
+            when (png.colorType) {
                 0 -> for (x in 0 until width) {
                     val raw = sample(rowStart, x)
                     val g = scale(raw)
-                    val a = if (raw == trnsGray) 0 else 0xFF
+                    val a = if (raw == png.trnsGray) 0 else 0xFF
                     argb[dst(x, y)] = (a shl 24) or (g shl 16) or (g shl 8) or g
                 }
                 2 -> for (x in 0 until width) {
                     val rr = sample(rowStart, x * 3)
                     val gg = sample(rowStart, x * 3 + 1)
                     val bb = sample(rowStart, x * 3 + 2)
-                    val a = if (rr == trnsR && gg == trnsG && bb == trnsB) 0 else 0xFF
+                    val a = if (rr == png.trnsR && gg == png.trnsG && bb == png.trnsB) 0 else 0xFF
                     argb[dst(x, y)] = (a shl 24) or (scale(rr) shl 16) or (scale(gg) shl 8) or scale(bb)
                 }
                 3 -> {
-                    val pal = palette!!
+                    val pal = png.palette!!
                     for (x in 0 until width) {
                         val idx = sample(rowStart, x)
                         if (idx >= pal.size) {
                             throw ImageDecodeException("PNG: palette index $idx out of ${pal.size} entries")
                         }
-                        val alpha = paletteAlpha?.get(idx) ?: 255
+                        val alpha = png.paletteAlpha?.get(idx) ?: 255
                         argb[dst(x, y)] = (pal[idx] and 0x00FFFFFF) or (alpha shl 24)
                     }
                 }
