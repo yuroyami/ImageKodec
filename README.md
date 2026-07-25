@@ -10,19 +10,26 @@ every target.
 [![Targets](https://img.shields.io/badge/targets-22%20core%2C%207%20UI-blue)](#targets)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
+**[Documentation](https://yuroyami.github.io/KiteImage/)** · an overview with
+examples, plus the generated API reference.
+
 ## What you get
 
-Compose Multiplatform draws an image on every target, but getting the pixels
-still goes through the platform: `BitmapFactory` on Android, CoreGraphics on
-iOS, Skia on desktop, the browser on web. The moment common code needs actual
-pixels — a thumbnail hash, a server-side resize, a PDF's embedded images — that
-is per-platform code again.
+Compose Multiplatform draws an image on every target. Getting the pixels still
+goes through the platform: `BitmapFactory` on Android, CoreGraphics on iOS, Skia
+on desktop, and the browser on web. Common code that needs real pixels must
+therefore call per-platform code. A thumbnail hash, a server-side resize and a
+PDF's embedded images all need this.
 
-KiteImage decodes in common Kotlin instead. Every format normalises to
-non-premultiplied ARGB_8888 in a plain `IntArray`, so palettes, grayscale, BGR
-ordering and chroma subsampling are resolved before the caller sees anything.
-The core artifact depends on kotlin-stdlib and nothing else; the Compose and
-Coil bindings are separate, optional modules.
+KiteImage decodes in common Kotlin instead. Every format normalizes to
+non-premultiplied ARGB_8888 in a plain `IntArray`. Non-premultiplied means the
+red, green and blue channels hold the original color, not the color already
+multiplied by the alpha value. KiteImage resolves palettes, grayscale, BGR
+ordering and chroma subsampling before it returns the pixels. Chroma subsampling
+means the file stores color at a lower resolution than brightness.
+
+The core artifact depends on kotlin-stdlib and nothing else. The Compose and Coil
+bindings are separate, optional modules.
 
 ```kotlin
 import io.github.yuroyami.kiteimage.KiteImage
@@ -32,7 +39,7 @@ import io.github.yuroyami.kiteimage.KiteBitmap
 val info = KiteImage.probe(bytes)
 println("${info.width}x${info.height}, ${info.frameCount} frame(s)")
 
-// Format is sniffed from the magic bytes.
+// KiteImage reads the magic bytes to find the format.
 val bitmap: KiteBitmap = KiteImage.decode(bytes)
 val pixel = bitmap[10, 20]                       // 0xAARRGGBB
 
@@ -54,15 +61,15 @@ commonMain.dependencies {
 }
 ```
 
-Read [Targets](#targets) before adding the optional two. `kiteimage-coil`
+Read [Targets](#targets) before you add the optional two. `kiteimage-coil`
 declares `kiteimage-compose` as `implementation`, so it does not arrive
-transitively. If you want the Coil module, declare the Compose module yourself.
+transitively. Declare the Compose module yourself if you want the Coil module.
 
 ## What it does
 
 ### Read a header without decoding
 
-`probe` parses the header alone. Nothing image-sized is allocated, so this stays
+`probe` parses the header alone. It allocates nothing image-sized, so it stays
 cheap on a 50-megapixel file.
 
 ```kotlin
@@ -74,22 +81,27 @@ info.isDecodable                 // and info.unsupportedReason when it is false
 ```
 
 `isDecodable` is a statement about features. It is false when the file uses
-something this build does not implement — lossy WebP, a CgBI PNG, an
-arithmetic-coded JPEG, JPEG-in-TIFF — and `unsupportedReason` names it. That is
-what the Coil decoder uses to decide which files to claim. It stays true for a
-file that declares only supported features and is then truncated or corrupt, so
-a decode can still fail after a clean probe.
+something this build does not implement, and `unsupportedReason` names it.
+Examples are lossy WebP, a CgBI PNG, an arithmetic-coded JPEG and JPEG-in-TIFF.
+The Coil decoder uses this flag to decide which files to claim.
+
+`isDecodable` stays true for a file that declares only supported features and is
+then truncated or corrupt. A decode can therefore still fail after a clean probe.
 
 ### Decode a still
 
 ```kotlin
 val bitmap = KiteImage.decode(bytes)
-val upright = KiteImage.decode(bytes, applyOrientation = true)   // honour EXIF
+val upright = KiteImage.decode(bytes, applyOrientation = true)   // honor EXIF
 ```
+
+Two terms used in this table. IFD means Image File Directory, the record that
+describes one page of a TIFF file. Chroma subsampling means the file stores color
+at a lower resolution than brightness.
 
 | Format | What decodes |
 | --- | --- |
-| PNG | colour types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and colour-key, Adam7 interlace |
+| PNG | color types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and color-key, Adam7 interlace |
 | APNG | dispose none/background/previous, blend source/over, frame rects, loop count |
 | JPEG | baseline SOF0, extended sequential SOF1, progressive SOF2, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
@@ -98,25 +110,27 @@ val upright = KiteImage.decode(bytes, applyOrientation = true)   // honour EXIF
 | TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3-1D/G4, photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, first IFD only |
 | JPEG 2000 | JP2 container and raw J2K codestream, part 1 baseline |
 
-Two rows in that table are narrower than their format name suggests, so they get
-said twice. **Only lossless VP8L WebP decodes.** Lossy VP8 throws
-`UnsupportedImageException`, in stills and inside animation frames alike, and
-most `.webp` files on the web are lossy. **Only a TIFF's first IFD is read**, so
-a multi-page TIFF quietly gives you page 1.
+Two rows above are narrower than the format name suggests:
 
-`ImageFormat.sniff` (and `KiteImage.detect`) recognise PNG, JPEG, GIF, BMP, WEBP,
-TIFF and JP2. Sniffing is deliberately wider than decoding, which is what makes
-`probe` worth calling.
+- **Only lossless VP8L WebP decodes.** Lossy VP8 throws
+  `UnsupportedImageException`, in stills and inside animation frames alike. Most
+  `.webp` files published on the internet are lossy.
+- **The TIFF decoder reads only the first IFD.** A multi-page TIFF decodes to
+  page 1 and reports no error.
+
+`ImageFormat.sniff` (and `KiteImage.detect`) recognize PNG, JPEG, GIF, BMP, WEBP,
+TIFF and JP2. Sniffing is deliberately wider than decoding, which is why `probe`
+is worth calling.
 
 `Jbig2Decoder` and `CcittFax` are public as well. Neither format carries magic
-bytes or dimensions of its own, so both take their parameters explicitly and
-return packed 1-bit rows instead of going through `decode`.
+bytes or dimensions of its own. Both therefore take their parameters explicitly,
+and both return packed 1-bit rows instead of using `decode`.
 
 ### Play an animation
 
-GIF, APNG and animated WebP come back through one type. Frames are full
-composited canvases with disposal, blending and frame offsets already applied,
-so playback is "draw frame N, wait delay N".
+One type covers GIF, APNG and animated WebP. Frames are full composited canvases,
+with disposal, blending and frame offsets already applied. Playback is therefore
+"draw frame N, wait delay N".
 
 ```kotlin
 val anim = KiteImage.decodeAnimation(bytes)
@@ -125,23 +139,24 @@ anim.loopCount        // 0 means forever, in each format's own semantics
 anim.durationMillis
 ```
 
-GIF and WebP delays of 10 ms and under are reported as 100 ms, matching what
-browsers do. APNG is passed through as stated, so an fcTL with `delay_num = 0`
-gives a zero-millisecond frame. `KiteFrame.delayRawCentiseconds` is the exact
-figure a GIF stated; for APNG and WebP it is derived, since neither stores
-centiseconds.
+GIF and WebP delays of 10 ms and under are reported as 100 ms, which matches
+browser behavior. KiteImage reports an APNG delay exactly as the file states it,
+so an fcTL with `delay_num = 0` gives a zero-millisecond frame.
+`KiteFrame.delayRawCentiseconds`
+is the exact figure a GIF stated. For APNG and WebP it is derived, because
+neither format stores centiseconds.
 
 ### Write an image out
 
 ```kotlin
 KiteImage.encodePng(bitmap)                    // 8-bit RGB, or RGBA when alpha is present
 KiteImage.encodeJpeg(bitmap, quality = 85)     // baseline; 4:2:0 at quality <= 90, 4:4:4 above
-KiteImage.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colours
+KiteImage.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colors
 KiteImage.encodeGif(anim)                      // animated, delays and loop count preserved
 KiteImage.encodeBmp(bitmap)                    // 24-bit BI_RGB, or 32-bit V4 BITFIELDS with alpha
 ```
 
-There is no WebP encoder and no TIFF encoder.
+There is no WebP, TIFF or JPEG 2000 encoder.
 
 ### Rotate, crop and scale
 
@@ -154,16 +169,16 @@ bitmap.scaled(maxWidth = 256, maxHeight = 256)
 bitmap.oriented(info.orientation)
 ```
 
-`scaled` is an alpha-weighted box filter that preserves aspect ratio and never
-upscales; an image already inside the box is returned unchanged. `oriented`,
-`cropped`, `scaled` and the three rotations also exist for a whole
-`KiteAnimation`. `cropped` throws `IllegalArgumentException` on a rect that
-leaves the image rather than clamping it.
+`scaled` is an alpha-weighted box filter. It preserves aspect ratio and never
+upscales. When the image already fits the box, it returns the image unchanged.
+`oriented`, `cropped`, `scaled` and the three rotations also exist for a whole
+`KiteAnimation`. `cropped` throws `IllegalArgumentException` when the rectangle
+extends outside the image. It does not clamp the rectangle.
 
 ### Show an image in Compose
 
-`kiteimage-compose` ships `KiteImage`, which decides for itself whether to
-animate.
+`kiteimage-compose` provides a `KiteImage` composable. It reads the input and
+animates it when the input is animated.
 
 ```kotlin
 import io.github.yuroyami.kiteimage.compose.KiteImage
@@ -172,27 +187,29 @@ KiteImage(
     data = bytes,
     contentDescription = "avatar",
     modifier = Modifier.size(96.dp),
-    animate = true,                    // false pins the first frame
+    animate = true,                    // false shows only the first frame
     onError = { log(it) },             // malformed input draws nothing
 )
 ```
 
-Decoding runs on `Dispatchers.Default` and re-runs when `data` changes; until it
-finishes, the composable holds its layout slot and draws nothing. EXIF
-orientation is applied here even though `KiteImage.decode` leaves it off by
-default. Two more composables are public for pipelines that decode themselves:
-an overload of `KiteImage` taking a `KiteBitmap`, and `KiteAnimatedImage` taking
-a `KiteAnimation`. `KiteBitmap.toImageBitmap()` is public as well.
+Decoding runs on `Dispatchers.Default` and re-runs when `data` changes. The
+composable holds its layout slot and draws nothing until decoding finishes. It
+applies EXIF orientation, even though `KiteImage.decode` does not apply it by
+default.
 
-Note that two public things are called `KiteImage`: the `object` in
-`io.github.yuroyami.kiteimage` and this `@Composable fun` in
-`io.github.yuroyami.kiteimage.compose`. Importing both in one file needs an
-`as` alias.
+Two more composables are public, for pipelines that decode themselves: an
+overload of `KiteImage` that takes a `KiteBitmap`, and `KiteAnimatedImage` that
+takes a `KiteAnimation`. `KiteBitmap.toImageBitmap()` is public as well.
+
+Two public declarations share the name `KiteImage`. One is the `object` in
+`io.github.yuroyami.kiteimage`. The other is this `@Composable fun` in
+`io.github.yuroyami.kiteimage.compose`. Importing both in one file needs an `as`
+alias.
 
 ### Use it with Coil
 
-`kiteimage-coil` keeps network fetching, disk and memory caching, and the request
-lifecycle with Coil, and takes over decoding.
+`kiteimage-coil` decodes the image instead of Coil's platform decoder. Coil keeps
+network fetching, disk and memory caching, and the request lifecycle.
 
 ```kotlin
 ImageLoader.Builder(context)
@@ -203,21 +220,24 @@ KiteAsyncImage(model = "https://example.com/reaction.gif", contentDescription = 
 ```
 
 `KiteImageDecoder.Factory` claims a file by calling `probe` on a 64 KiB peek and
-checking `isDecodable`, so it takes what these codecs handle and leaves the rest
-to Coil's platform decoders. TIFF and JP2 are claimed even when that probe fails
-outright, because a TIFF's IFD often sits past the peek and neither format has a
-platform decoder to fall back to.
+checking `isDecodable`. It therefore takes what these codecs handle and leaves
+the rest to Coil's platform decoders. The factory claims TIFF and JP2 even when
+the probe fails. A TIFF's IFD is often further into the file than 64 KiB, and no
+platform decoder handles either format.
 
-`KiteAnimationImage` holds no playback state of its own; the frame position lives
-in the composable. Animations whose decoded frames fit under
-`KiteImageDecoder.Factory(maxCacheableAnimationBytes = ...)` (64 MiB by default)
-therefore go through Coil's memory cache, and larger ones re-decode from the disk
-cache instead of evicting everything else. `KiteAsyncImage` feeds its layout
-constraints to the request as a target size, so still images and every animation
-frame are box-filtered down to what is actually drawn.
+`KiteAnimationImage` holds no playback state of its own, because the frame
+position lives in the composable. The default animation cache limit is 64 MiB,
+and `KiteImageDecoder.Factory(maxCacheableAnimationBytes = ...)` changes it.
+Coil's memory cache holds an animation when its decoded frames fit under that
+limit. Larger ones re-decode from the disk cache instead of evicting everything
+else.
 
-This module declares coil3 as `api`, so coil3 types land on your compile
-classpath whether you reference them or not.
+`KiteAsyncImage` passes its layout constraints to the request as a target size.
+KiteImage then box-filters still images and every animation frame to the size you
+actually draw.
+
+This module declares coil3 as `api`, so coil3 types appear on your compile
+classpath even when you do not use them.
 
 ## Targets
 
@@ -233,93 +253,104 @@ classpath whether you reference them or not.
 `macosX64` is not built, following Kotlin's deprecation of Intel-Apple native
 targets.
 
-`kiteimage-compose` and `kiteimage-coil` build for seven: Android, `jvm`,
+`kiteimage-compose` and `kiteimage-coil` build for seven targets: Android, `jvm`,
 `iosArm64`, `iosSimulatorArm64`, `macosArm64`, `js` (browser only) and `wasmJs`
-(browser only). **A project that targets `iosX64`, Linux, Windows, tvOS, watchOS,
-androidNative, wasmWasi, or Node on `js`/`wasmJs` will resolve the core and then
-fail to resolve those two modules**, which is the most common way a first build
-breaks here. Keep them out of a source set that includes those targets.
+(browser only).
+
+**A project that targets `iosX64`, Linux, Windows, tvOS, watchOS, androidNative
+or wasmWasi will resolve the core and then fail to resolve those two modules.**
+This is the most common way a first build breaks here. Keep the two optional
+modules out of any source set that includes those targets.
+
+On `js` and `wasmJs`, those two modules configure the browser environment only. A
+web project that runs under Node should not use them.
 
 ## Limits
 
-- **Lossy WebP does not decode**, which covers most `.webp` files in the wild.
-  `probe` reports them as undecodable and `decode` throws
-  `UnsupportedImageException`, so they can be routed to a platform decoder
+- **Lossy WebP does not decode**, which covers most `.webp` files published on
+  the internet. `probe` reports them as undecodable and `decode` throws
+  `UnsupportedImageException`. You can therefore route them to a platform decoder
   without a failed attempt first.
-- **16-bit samples are truncated to the high byte.** PNG and TIFF read 16-bit
-  files, but the output buffer is 8 bits per channel, so the low byte is
-  discarded rather than dithered or scaled. `probe` still reports the stored
-  depth.
-- **TIFF reads the first IFD only.** A multi-page TIFF decodes to page 1 with no
-  error and `frameCount` of 1.
-- **Only PNG, JPEG, GIF and BMP can be written.** There is no encoder for WebP,
+- **KiteImage keeps only the high byte of a 16-bit sample.** PNG and TIFF read
+  16-bit files, but the output buffer is 8 bits per channel. KiteImage discards
+  the low byte rather than dithering or scaling it. `probe` still reports the
+  stored depth.
+- **The TIFF decoder reads only the first IFD.** A multi-page TIFF decodes to
+  page 1 with no error and a `frameCount` of 1.
+- **KiteImage writes PNG, JPEG, GIF and BMP only.** There is no encoder for WebP,
   TIFF or JPEG 2000.
 - **The PNG encoder writes 8-bit RGB or RGBA only**, with no interlace, no
-  palette and no 16-bit output. It picks a filter per row, which is a
-  compression choice, not a format capability.
-- **Whole-array only.** Every entry point takes a complete `ByteArray`; there is
+  palette and no 16-bit output. It picks a filter per row, which is a compression
+  choice, not a format capability.
+- **Whole-array only.** Every entry point takes a complete `ByteArray`. There is
   no streaming or partial-decode API, and scaling happens after a full-size
   decode rather than in the DCT domain.
 - **Feature refusals are typed, with one exception.** Everything a decoder
-  recognises but cannot handle throws `UnsupportedImageException` naming the
+  recognizes but cannot handle throws `UnsupportedImageException` naming the
   feature. The JPEG 2000 decoder reports one failure signal for everything, so
-  its refusals surface as plain `ImageDecodeException`; `probe` still names the
-  main-header ones (RGN, POC, PPM/PPT, non-baseline code-block styles).
+  its refusals surface as plain `ImageDecodeException`. `probe` still names the
+  main-header ones: RGN, POC, PPM/PPT and non-baseline code-block styles.
 - **`probe` covers features, not corruption.** JPEG 2000 is the loosest of the
-  seven. Its check stops at the first tile-part and does not range-check the COD
-  and QCD parameters, so a per-tile coding-style override or an out-of-range
-  decomposition count is only found at decode.
-- **Decompression-bomb guards can reject legitimate files.** PNG, JPEG, GIF, BMP,
-  TIFF and WebP cap output at 2^28 pixels and at 4096 decoded pixels per input
-  byte, so a very large, very well compressed image can hit the second limit.
-  JPEG 2000 uses its own flat 2^26-pixel ceiling and no input-relative budget.
-- EXIF orientation is read for JPEG and TIFF and reported by `probe`, but
+  seven formats. Its check stops at the first tile-part and does not range-check
+  the COD and QCD parameters. A per-tile coding-style override, or an
+  out-of-range decomposition count, is therefore only found at decode.
+- **Decompression-bomb guards can reject legitimate files.** A decompression bomb
+  is a small file that expands into a very large image. PNG, JPEG, GIF, BMP, TIFF
+  and WebP cap output at 2^28 pixels and at 4096 decoded pixels per input byte. A
+  very large, very well compressed image can hit that second limit. JPEG 2000
+  uses its own flat 2^26-pixel ceiling and no input-relative budget.
+- `probe` reads EXIF orientation from JPEG and TIFF files and reports it.
   `decode` only applies it when you pass `applyOrientation = true`. The Compose
   binding applies it for you.
 - GIF "restore to background" clears to transparent instead of the declared
-  background colour index, matching what browsers do rather than the 1989 text.
+  background color index. That matches browser behavior rather than the 1989
+  specification text.
 
 ## Testing
 
 265 tests: 195 in `commonTest`, which run on JVM, JS (Node), Wasm (Node) and
 Kotlin/Native, plus 70 JVM-only integration tests across the three modules.
 
-Correctness is pinned against other implementations rather than against
-hand-written expectations. JPEG decode is bit-identical to stb_image, checked
-with vectors a clang-compiled stb_image produced, so that comparison runs on
-every target with no external tool. `javax.imageio` reads back everything the
-encoders write, which also needs no external tool. Three further suites compare
-against a binary when it is installed and skip when it is not: libwebp's
-`cwebp`/`dwebp` (pixel-exact for VP8L), OpenJPEG (exact for reversible 5/3,
-within 4/255 for irreversible 9/7) and libtiff plus ImageMagick (exact except
-16-bit, which allows 1). A skipped test reports as a pass, so read the skip
-count rather than only the green tick.
+Correctness is checked against other implementations, not against hand-written
+expectations:
+
+| Codec | Checked against | Tolerance |
+| --- | --- | --- |
+| JPEG decode | stb_image, through committed vectors that a clang-compiled stb_image produced | bit-identical |
+| PNG, GIF, BMP, JPEG encode | `javax.imageio` reads the output back | exact |
+| WebP lossless | libwebp `cwebp` and `dwebp` | pixel-exact |
+| JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 4/255 for irreversible 9/7 |
+| TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1 |
+
+The first two rows need no external tool, so they always run. The last three rows
+run only when the binary is installed, and skip when it is not. A skipped test
+reports as a pass, so read the skip count and not only the pass result.
 
 `FuzzTest` drives seeded bit flips, truncations and cross-format splices through
-every decoder and asserts nothing but `ImageDecodeException` escapes.
+every decoder. It asserts that nothing but `ImageDecodeException` escapes.
 
-There are no TODOs, stubs or unimplemented branches in the source. Every gap is
-a refusal at a named point.
+Every unsupported feature fails at a named point, not silently.
 
-`./gradlew :sample:run` opens a desktop gallery with animated GIF, APNG and
-animated WebP playing, JPEG/JP2/TIFF stills, and all four encoders run at
+`./gradlew :sample:run` opens a desktop gallery. It plays animated GIF, APNG and
+animated WebP, shows JPEG, JP2 and TIFF stills, and runs all four encoders at
 startup. Every tile is captioned from `probe`.
 
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the build and the reference oracle
 behind each codec. The rule that matters is that a decoder never trusts its
-input. Security reporting is in [SECURITY.md](SECURITY.md); the feature matrix in
-[PORTING_STATUS.md](PORTING_STATUS.md); the change history in
+input. Security reporting is in [SECURITY.md](SECURITY.md), the feature matrix in
+[PORTING_STATUS.md](PORTING_STATUS.md), and the change history in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-Apache-2.0. Ported clean-room from permissively licensed references, primarily
-[stb_image](https://github.com/nothings/stb) (public domain / MIT) and
-[Apache Commons Imaging](https://github.com/apache/commons-imaging) (Apache-2.0);
-the flate paths derive from zlib references by way of KiteArchive. Per-codec
-provenance is in [reference/REFERENCES.md](reference/REFERENCES.md) and
+Apache-2.0. KiteImage is a clean-room implementation built from permissively
+licensed references, mainly [stb_image](https://github.com/nothings/stb) (public
+domain or MIT) and
+[Apache Commons Imaging](https://github.com/apache/commons-imaging) (Apache-2.0).
+The flate paths derive from zlib references by way of KiteArchive. Per-codec
+attribution is in [reference/REFERENCES.md](reference/REFERENCES.md) and
 [NOTICE](NOTICE).
 
 Part of the Kite family: [KiteCore](https://github.com/yuroyami/KiteCore),

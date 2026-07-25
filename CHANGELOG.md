@@ -27,10 +27,10 @@ reviewable in the diff.
   whether the default image is also frame zero. `decode` still returns the
   default image, which is what a non-APNG viewer shows.
 - **WebP decoding (lossless).** The full RIFF container including `VP8X`, and the
-  VP8L codec: prefix-code groups, meta-prefix images, colour cache, LZ77 back
+  VP8L codec: prefix-code groups, meta-prefix images, color cache, LZ77 back
   references, and all four transforms. Animated WebP (`ANIM` / `ANMF`)
   composites through the same source-over operator APNG uses.
-- **GIF encoding.** Median-cut quantisation, optional Floyd-Steinberg dithering,
+- **GIF encoding.** Median-cut quantization, optional Floyd-Steinberg dithering,
   a real LZW compressor, single-image and animated output with per-frame delays
   and the NETSCAPE loop block.
 - **BMP encoding.** 24-bit `BI_RGB` when opaque, 32-bit `BI_BITFIELDS` under a V4

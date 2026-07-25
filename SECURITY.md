@@ -28,7 +28,7 @@ decoder entry point is a bug worth reporting:
 ## What does not
 
 - **A refusal.** Rejecting a file KiteImage cannot decode is the documented
-  behaviour, not a denial of service.
+  behavior, not a denial of service.
 - **Wrong pixels.** A decode that produces the wrong picture is a correctness
   bug; file it as a normal issue with the input attached.
 - **Resource use inside the documented budget.** A legitimate 100-megapixel
