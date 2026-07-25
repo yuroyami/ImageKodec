@@ -50,7 +50,10 @@ public class KiteImageDecoder(
     override suspend fun decode(): DecodeResult {
         val bytes = source.source().use { it.readByteArray() }
         val ctx = currentCoroutineContext()
-        val animation = KiteImage.decodeAnimation(bytes) { ctx.ensureActive() }
+        // EXIF orientation is applied, matching what Coil's own platform decoders
+        // do: a decoder that quietly showed every portrait photo on its side would
+        // be a regression against a stock ImageLoader, not a neutral swap.
+        val animation = KiteImage.decodeAnimation(bytes, applyOrientation = true) { ctx.ensureActive() }
 
         // Honor the request's target size (box-filter downscale, never up).
         val tw = (options.size.width as? Dimension.Pixels)?.px ?: 0

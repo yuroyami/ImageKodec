@@ -25,10 +25,10 @@ import kotlin.test.assertTrue
  */
 class WebpOracleTest {
 
-    private val cwebp = File("/opt/homebrew/bin/cwebp")
-    private val dwebp = File("/opt/homebrew/bin/dwebp")
+    private val cwebp get() = Tools.require("cwebp")
+    private val dwebp get() = Tools.require("dwebp")
 
-    private fun tools(): Boolean = cwebp.canExecute() && dwebp.canExecute()
+    private fun tools(): Boolean = Tools.hasAll("cwebp", "dwebp")
 
     private fun run(vararg args: String): Int {
         val proc = ProcessBuilder(args.toList()).redirectErrorStream(true).start()

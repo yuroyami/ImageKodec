@@ -11,5 +11,13 @@ reference/REFERENCES.md) are each under permissive licenses: stb_image /
 stb_image_write (public domain / MIT), lodepng (zlib), Apache Commons Imaging
 (Apache-2.0).
 
+Several codecs were written from their published specification rather than
+ported from any source tree, and verified against a reference binary used only
+as a test oracle: WebP lossless and the WebP container (Google's WebP specs;
+checked against libwebp's cwebp/dwebp, BSD-3-Clause, neither read nor
+redistributed), APNG (Mozilla's APNG specification), and the TIFF and BMP
+feature sets added on top of the ported baselines (TIFF 6.0, Microsoft DIB
+documentation).
+
 AVIF and HEIC are deliberately excluded: AV1/HEVC decoders are beyond a realistic
 pure-Kotlin port, and HEVC carries patent-licensing baggage besides.

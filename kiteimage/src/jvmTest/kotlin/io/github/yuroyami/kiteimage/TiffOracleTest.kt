@@ -22,10 +22,10 @@ import kotlin.test.assertTrue
  */
 class TiffOracleTest {
 
-    private val magick = File("/opt/homebrew/bin/magick")
-    private val tiffcp = File("/opt/homebrew/bin/tiffcp")
+    private val magick get() = Tools.require("magick")
+    private val tiffcp get() = Tools.require("tiffcp")
 
-    private fun tools(): Boolean = magick.canExecute() && tiffcp.canExecute()
+    private fun tools(): Boolean = Tools.hasAll("magick", "tiffcp")
 
     private fun run(vararg args: String): Int {
         val proc = ProcessBuilder(args.toList()).redirectErrorStream(true).start()

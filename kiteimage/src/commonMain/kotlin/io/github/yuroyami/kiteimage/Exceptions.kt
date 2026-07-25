@@ -11,10 +11,14 @@ public open class ImageDecodeException(
 ) : Exception(message, cause)
 
 /**
- * The input is a well-formed image in a format (or format feature) KiteImage
- * doesn't decode yet: e.g. WebP, or a lossless/arithmetic JPEG. Subtype of
- * [ImageDecodeException] so callers who don't care about the distinction catch
- * one type.
+ * The input is a well-formed image in a format, or a format feature, KiteImage
+ * doesn't decode: lossy WebP, an arithmetic-coded JPEG, a CgBI PNG. The message
+ * always names the specific feature, and `KiteImage.probe` reports the same
+ * thing up front through [ImageInfo.unsupportedReason], so a caller can route
+ * the file elsewhere instead of catching this.
+ *
+ * Subtype of [ImageDecodeException] so callers who don't care about the
+ * distinction catch one type.
  */
 public class UnsupportedImageException(
     message: String,

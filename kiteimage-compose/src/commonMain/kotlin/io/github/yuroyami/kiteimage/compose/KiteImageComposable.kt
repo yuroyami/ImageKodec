@@ -55,7 +55,14 @@ public fun KiteImage(
     val state by produceState<DecodeState>(DecodeState.Loading, data) {
         value = DecodeState.Loading
         value = try {
-            DecodeState.Ready(withContext(Dispatchers.Default) { KiteImage.decodeAnimation(data) })
+            // Orientation is applied here, unlike the raw `KiteImage.decode`
+            // default: this composable draws for a human, and a phone photo whose
+            // EXIF tag says "rotate me" is simply sideways without it.
+            DecodeState.Ready(
+                withContext(Dispatchers.Default) {
+                    KiteImage.decodeAnimation(data, applyOrientation = true)
+                },
+            )
         } catch (e: ImageDecodeException) {
             currentOnError?.invoke(e)
             DecodeState.Failed

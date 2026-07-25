@@ -19,10 +19,10 @@ import kotlin.test.assertTrue
  */
 class JpxOracleTest {
 
-    private val compress = File("/opt/homebrew/bin/opj_compress")
-    private val decompress = File("/opt/homebrew/bin/opj_decompress")
+    private val compress get() = Tools.require("opj_compress")
+    private val decompress get() = Tools.require("opj_decompress")
 
-    private fun tools(): Boolean = compress.canExecute() && decompress.canExecute()
+    private fun tools(): Boolean = Tools.hasAll("opj_compress", "opj_decompress")
 
     /** Deterministic 97x61 RGB test card: gradients + blocks + a few edges. */
     private fun ppm(w: Int = 97, h: Int = 61, gray: Boolean = false): File {

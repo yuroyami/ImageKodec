@@ -45,8 +45,9 @@ reviewable in the diff.
   decoder: bit flips, byte corruption, truncation at every offset, header-field
   tampering and cross-format splices. It asserts that malformed input can only
   ever produce an `ImageDecodeException`.
-- **CI**, covering JVM, JS, wasm, native and Android, with the codec oracles
-  (stb_image, OpenJPEG, libwebp, libtiff) installed rather than skipped.
+- **CI**, covering JVM, JS, wasm, native and Android, with the tool-backed codec
+  oracles (OpenJPEG, libwebp, libtiff) installed rather than skipped. The
+  stb_image oracle needs no tool: its vectors are committed.
 - **Public API tracking** via committed `api/*.api` dumps and `checkLegacyAbi`.
 
 ### Changed
@@ -61,7 +62,23 @@ reviewable in the diff.
 
 ### Fixed
 
+- **The Compose and Coil bindings ignored EXIF orientation**, so a phone photo
+  drew on its side. Both now decode with orientation applied, which is what
+  Coil's own platform decoders do; swapping in `KiteImageDecoder` is no longer a
+  regression against a stock `ImageLoader`.
 - WebP animation frames whose rectangle left the canvas wrote out of bounds.
 - TIFF fields with a corrupt value count could size an array before anything
   checked the values existed.
 - TIFF fields with a zero value count were indexed as if they held one.
+- The oracle test suites resolved their reference binaries from a hardcoded
+  `/opt/homebrew/bin`, so they silently skipped everywhere except one kind of
+  developer machine, CI included. They now search `PATH`, and CI installs the
+  OpenJPEG tools it was previously missing.
+- Attribution: the WebP, APNG, TIFF and BMP work was written from published
+  specifications and verified against reference *binaries*, with no reference
+  source consulted. `NOTICE` and `reference/REFERENCES.md` now record that, and
+  the VP8L header comment no longer claims a port it isn't.
+- The published POM descriptions still advertised the pre-JPEG format list.
+- The sample gallery hand-rolled a BMP because "BMP has no encoder yet", and
+  showed none of the newer formats. It now covers APNG, lossless and animated
+  WebP, both new encoders, and captions every tile from `probe`.

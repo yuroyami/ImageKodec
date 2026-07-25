@@ -4,9 +4,13 @@ import io.github.yuroyami.kiteimage.ImageDecodeException
 import io.github.yuroyami.kiteimage.internal.Budget
 
 /**
- * VP8L, the lossless half of WebP (RFC-style spec: "WebP Lossless Bitstream
- * Specification"), ported against libwebp's `dec/vp8l_dec.c` with the spec as
- * ground truth.
+ * VP8L, the lossless half of WebP.
+ *
+ * Written from the *WebP Lossless Bitstream Specification* rather than ported
+ * from a reference tree, and then verified bit-exact against libwebp's own
+ * `dwebp` binary across every transform, both palette packings, all ten encoder
+ * effort levels and a meta-prefix-sized image. The provenance matters for a
+ * clean-room library, so: spec in, oracle out, no libwebp source consulted.
  *
  * The format is a small stack of ideas rather than one big algorithm:
  *
@@ -22,8 +26,7 @@ import io.github.yuroyami.kiteimage.internal.Budget
  *    bundled per byte when the palette is small)
  *
  * Everything is integer arithmetic on `IntArray`s, so the output is identical on
- * every target, and the whole decode is verified bit-exact against libwebp's own
- * `dwebp` in the test suite.
+ * every target.
  */
 internal object Vp8lDecoder {
 

@@ -4,20 +4,22 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * A pure-Kotlin JPEG 2000 decoder (ITU-T T.800) for `/JPXDecode` images: JP2
- * container boxes or a raw codestream, part 1 baseline. Produces an 8-bpc
- * Gray/RGB raster (plus an optional alpha plane from a `cdef` opacity
- * channel) that [ImageXObject] packs into a RAW image.
+ * A pure-Kotlin JPEG 2000 decoder (ITU-T T.800), taking either JP2 container
+ * boxes or a raw codestream, part 1 baseline. Produces an 8-bpc Gray or RGB
+ * raster plus an optional alpha plane from a `cdef` opacity channel.
  *
- * Scope: SIZ/COD/QCD (+ COC/QCC overrides), multiple tiles and tile-parts,
+ * Handled: SIZ/COD/QCD with COC/QCC overrides, multiple tiles and tile-parts,
  * LRCP/RLCP/RPCL/PCRL/CPRL progressions, general precincts, tag trees,
- * multi-layer tier-2 packet headers (with SOP/EPH), EBCOT tier-1 (baseline
- * code-block style), reversible 5/3 and irreversible 9/7 inverse DWT,
- * RCT/ICT multiple-component transforms, DC level shift, component
- * subsampling (nearest upsample) and bit depths up to 16. NOT handled
- * (returns null, the image falls back to the placeholder): RGN regions of
- * interest, POC progression changes, PPM/PPT packed headers, non-baseline
- * code-block styles (bypass/reset/termall/vsc/segsym).
+ * multi-layer tier-2 packet headers (with SOP/EPH), EBCOT tier-1 at the baseline
+ * code-block style, reversible 5/3 and irreversible 9/7 inverse DWT, RCT and ICT
+ * multiple-component transforms, DC level shift, component subsampling by
+ * nearest upsample, and bit depths up to 16.
+ *
+ * Not handled, each of which makes [decode] return null: RGN regions of
+ * interest, POC progression changes, PPM/PPT packed headers, and non-baseline
+ * code-block styles (bypass, reset, termall, vsc, segsym). `KiteImage.probe`
+ * names the ones that sit in the main header, so a caller can find out without
+ * attempting a decode.
  */
 public object JpxDecoder {
 

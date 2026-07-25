@@ -1,14 +1,15 @@
 package io.github.yuroyami.kiteimage
 
-import java.io.File
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Our encoded files must open in other people's decoders: ImageIO always, and
- * the real stb_image via the compiled harness when it's around.
+ * Our encoded files must open in another implementation's decoder. ImageIO is
+ * the one that is always present, so it is the one the suite is built on: no
+ * external binary, no gate, and therefore no test that reports a pass because it
+ * quietly skipped.
  */
 class EncoderInteropTest {
 
@@ -47,17 +48,5 @@ class EncoderInteropTest {
             }
         }
         assertTrue(maxDiff < 40, "q92 encode drifted $maxDiff; structurally broken output?")
-    }
-
-    @Test
-    fun realStbDecodesOurJpegWhenHarnessPresent() {
-        val harness = File("/tmp/stb_dump")
-        if (!harness.canExecute()) return   // rig is session-local; skip elsewhere
-        val jpeg = KiteImage.encodeJpeg(card(24, 16, alpha = false), quality = 80)
-        val f = File.createTempFile("kiteimage-enc", ".jpg").apply { deleteOnExit(); writeBytes(jpeg) }
-        val proc = ProcessBuilder(harness.absolutePath, f.absolutePath).redirectErrorStream(true).start()
-        val out = proc.inputStream.bufferedReader().readText()
-        assertEquals(0, proc.waitFor(), "stb failed on our JPEG: $out")
-        assertTrue(out.startsWith("24 16"), "stb saw wrong dims: ${out.take(40)}")
     }
 }

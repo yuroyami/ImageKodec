@@ -16,9 +16,10 @@ env:
 jobs:
   # The JVM, JS, wasm and Linux/Windows native targets. This is the job that
   # runs the full test suite: the codecs are pure computation, so a pass here
-  # covers the decoders everywhere. The oracle suites (stb, OpenJPEG, libwebp,
-  # libtiff) skip themselves when the tools are missing, so they are installed
-  # rather than left to no-op silently.
+  # covers the decoders everywhere. The stb_image oracle needs no tool (its
+  # vectors are committed); the OpenJPEG, libwebp and libtiff suites skip
+  # themselves when their binary is missing, so those are installed rather than
+  # left to no-op silently.
   linux:
     name: JVM / JS / wasm / native (Linux)
     runs-on: ubuntu-latest
@@ -30,10 +31,16 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # The oracle suites skip themselves when their tool is missing, and a
+      # skipped test reads exactly like a passing one, so these are installed
+      # rather than left to chance. The tests find them on PATH.
       - name: Install codec oracles
         run: |
           sudo apt-get update
-          sudo apt-get install -y webp libtiff-tools imagemagick
+          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools
+          for t in cwebp dwebp tiffcp magick opj_compress opj_decompress; do
+            command -v "$t" >/dev/null || echo "::warning::oracle tool $t not on PATH; its suite will skip"
+          done
 
       - uses: gradle/actions/setup-gradle@v4
 

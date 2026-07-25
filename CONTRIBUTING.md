@@ -9,7 +9,9 @@
 That is the fast loop. Before opening a pull request, run what CI runs:
 
 ```sh
-./gradlew :kiteimage:jvmTest :kiteimage:jsNodeTest :kiteimage:wasmJsNodeTest :kiteimage-compose:jvmTest :kiteimage-coil:jvmTest checkLegacyAbi
+./gradlew :kiteimage:jvmTest :kiteimage:jsNodeTest :kiteimage:wasmJsNodeTest \
+          :kiteimage:wasmWasiNodeTest :kiteimage:linuxX64Test \
+          :kiteimage-compose:jvmTest :kiteimage-coil:jvmTest checkLegacyAbi
 ```
 
 On a Mac, add the Apple targets:
@@ -34,14 +36,15 @@ ported from:
 
 | Codec | Oracle |
 |---|---|
-| PNG, BMP, GIF, JPEG encode | ImageIO, and real `stb_image` when the harness is built |
-| JPEG decode | `stb_image`, bit-identical |
+| PNG, BMP, GIF, JPEG encode | ImageIO reads our output back |
+| JPEG decode | `stb_image`, bit-identical, via committed vectors that a clang-compiled `stb_image` produced |
 | JPEG 2000 | OpenJPEG (`opj_compress` / `opj_decompress`) |
 | WebP lossless | libwebp (`cwebp` / `dwebp`), bit-identical |
-| TIFF | libtiff (`tiffcp`) read back through ImageIO |
+| TIFF | libtiff (`tiffcp`) and ImageMagick (`magick`) |
 
-The oracle suites skip themselves when the tools are missing, so install them
-locally if you are touching those codecs:
+The last three suites `assumeTrue`-skip when their binary is missing, and a
+skipped test reports as a pass. If you are touching those codecs, install the
+tools and check the skip count, not just the green tick:
 
 ```sh
 brew install webp libtiff imagemagick openjpeg     # macOS

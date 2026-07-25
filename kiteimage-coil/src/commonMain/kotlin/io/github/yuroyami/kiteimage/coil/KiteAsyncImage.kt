@@ -33,12 +33,13 @@ import io.github.yuroyami.kiteimage.compose.KiteAnimatedImage
  *
  * Coil does what Coil is for: [model] goes through its full pipeline (network
  * fetchers, disk cache, memory cache, request lifecycle) via [imageLoader].
- * Rendering is ours: when the result is a [KiteAnimationImage] (produced by a
+ * Rendering is ours. When the result is a [KiteAnimationImage] (produced by a
  * registered [KiteImageDecoder]), this composable plays it with
- * [KiteAnimatedImage]'s elapsed-time frame loop (per-frame delays, loop count,
- * last-frame hold, no drift), which Coil's static painter can't do outside
- * Android. Any other result renders exactly as `AsyncImage` would, via
- * `Image.asPainter`.
+ * `KiteAnimatedImage`'s elapsed-time frame loop: per-frame delays, loop count,
+ * last-frame hold and no drift. That composable lives in `kiteimage-compose`,
+ * which this module depends on as `implementation`, so declare it yourself if
+ * you want to call it directly. Any other result renders exactly as `AsyncImage`
+ * would, via `Image.asPainter`.
  *
  * The request carries this composable's **layout constraints** as its target
  * size (unless [model] is an [ImageRequest] that already defines one), so

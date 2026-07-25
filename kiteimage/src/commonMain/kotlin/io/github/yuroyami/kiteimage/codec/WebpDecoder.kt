@@ -121,7 +121,6 @@ internal object WebpDecoder {
         val payloadAt: Int,
         val payloadLength: Int,
         val lossless: Boolean,
-        val hasAlphaChunk: Boolean,
     )
 
     private class File(
@@ -145,9 +144,6 @@ internal object WebpDecoder {
         var loopCount = 1
         var sawVp8x = false
         val frames = ArrayList<Frame>()
-
-        // State for the non-animated case, where the chunks sit at the top level.
-        var pendingAlpha = false
 
         var p = 12
         while (p + 8 <= end) {
@@ -188,11 +184,10 @@ internal object WebpDecoder {
                             blend = (flags and 0x02) == 0,
                             disposeToBackground = (flags and 0x01) != 0,
                             payloadAt = sub.at, payloadLength = sub.length,
-                            lossless = sub.lossless, hasAlphaChunk = sub.alpha,
+                            lossless = sub.lossless,
                         ),
                     )
                 }
-                "ALPH" -> pendingAlpha = true
                 "VP8 ", "VP8L" -> {
                     if (frames.isEmpty() || !animated) {
                         val lossless = tag == "VP8L"
@@ -206,7 +201,7 @@ internal object WebpDecoder {
                                 x = 0, y = 0, width = canvasWidth, height = canvasHeight,
                                 durationMillis = 0, blend = false, disposeToBackground = false,
                                 payloadAt = body, payloadLength = len,
-                                lossless = lossless, hasAlphaChunk = pendingAlpha,
+                                lossless = lossless,
                             ),
                         )
                     }
@@ -231,12 +226,11 @@ internal object WebpDecoder {
         return File(canvasWidth, canvasHeight, animated && frames.size >= 1, loopCount, frames)
     }
 
-    private class SubImage(val at: Int, val length: Int, val lossless: Boolean, val alpha: Boolean)
+    private class SubImage(val at: Int, val length: Int, val lossless: Boolean)
 
-    /** Walk an ANMF's own chunk list for its optional ALPH and its image chunk. */
+    /** Walk an ANMF's own chunk list for its image chunk (VP8 or VP8L). */
     private fun readSubImage(data: ByteArray, start: Int, end: Int): SubImage {
         var p = start
-        var alpha = false
         while (p + 8 <= end) {
             val tag = tag(data, p)
             val size = u32(data, p + 4)
@@ -244,9 +238,8 @@ internal object WebpDecoder {
             if (size < 0 || body + size > end.toLong()) err("frame chunk $tag runs past the frame")
             val len = size.toInt()
             when (tag) {
-                "ALPH" -> alpha = true
-                "VP8 " -> return SubImage(body, len, lossless = false, alpha = alpha)
-                "VP8L" -> return SubImage(body, len, lossless = true, alpha = alpha)
+                "VP8 " -> return SubImage(body, len, lossless = false)
+                "VP8L" -> return SubImage(body, len, lossless = true)
             }
             p = body + len + (len and 1)
         }

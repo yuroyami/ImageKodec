@@ -1,17 +1,30 @@
 # KiteImage: porting status
 
-Updated 2026-07-24. Tests: **260** on the JVM (core 247, compose 3, coil 10), of
-which the 189 common ones also run green on JS/Node, wasm/Node and Kotlin/Native
-(macOS arm64). KitePDF depends on kiteimage, so its 697 tests exercise these
-codecs daily.
+Updated 2026-07-25. Tests: **265** on the JVM (core 252, compose 3, coil 10), of
+which the 195 common ones also run green on JS/Node, wasm/Node and Kotlin/Native
+(macOS arm64, linux x64). KitePDF depends on kiteimage, so its 697 tests exercise
+these codecs daily.
 
 Correctness is established against reference implementations, not assertions:
-JPEG decode is **bit-identical to stb_image**, WebP lossless is **bit-identical
-to libwebp's `dwebp`**, JPEG 2000 is checked against OpenJPEG, and the TIFF
-layouts are checked against files libtiff itself wrote. Core targets: Android,
-iosArm64, iosSimulatorArm64, iosX64, macosArm64, tvOS, watchOS, androidNative,
-linuxX64/Arm64, mingwX64, JVM, JS (browser+node), wasmJs, wasmWasi. Compose and
-Coil targets: the CMP 1.11 set (no Intel-Apple variants).
+JPEG decode is **bit-identical to stb_image** (checked with committed vectors
+that clang-compiled stb_image produced, so it runs on every target with no
+external tool). Three further suites compare against a binary when it is
+installed and skip when it is not: libwebp's `dwebp` for lossless WebP
+(pixel-exact), OpenJPEG for JPEG 2000, and libtiff plus ImageMagick for TIFF.
+
+`kiteimage` builds for 22 targets: Android (minSdk 21), `jvm`,
+`iosArm64`, `iosSimulatorArm64`, `iosX64`, `macosArm64`, `tvosArm64`,
+`tvosSimulatorArm64`, `watchosArm32`, `watchosArm64`, `watchosDeviceArm64`,
+`watchosSimulatorArm64`, `androidNativeArm32`, `androidNativeArm64`,
+`androidNativeX64`, `androidNativeX86`, `linuxX64`, `linuxArm64`, `mingwX64`,
+`js` (browser and Node), `wasmJs` (browser and Node), `wasmWasi` (Node). No
+`macosX64`, following Kotlin's deprecation of Intel-Apple native targets.
+
+`kiteimage-compose` and `kiteimage-coil` build for **seven**: Android,
+`jvm`, `iosArm64`, `iosSimulatorArm64`, `macosArm64`, `js` (browser only),
+`wasmJs` (browser only). That is the set Compose Multiplatform publishes. A
+project targeting Linux, Windows, tvOS, watchOS, androidNative or wasmWasi
+resolves the core and then fails to resolve those two.
 
 ## Decoders
 
@@ -44,15 +57,17 @@ Coil targets: the CMP 1.11 set (no Intel-Apple variants).
 | | lossless/arithmetic/hierarchical | rejected by name (like stb) | |
 | **WebP** | RIFF container, `VP8X` extended form, canvas rules | ✅ | libwebp |
 | | **VP8L (lossless)**: prefix groups, meta-prefix image, colour cache, LZ77 + plane-code distances, all four transforms | ✅ bit-identical to `dwebp` | libwebp `vp8l_dec.c` |
-| | **animation** (`ANIM`/`ANMF`): frame rects, blend and dispose flags, loop count, durations | ✅ | |
-| | VP8 (lossy) | ❌ declined by name: see "Excluded" | |
+| | **animation** (`ANIM`/`ANMF`): frame rects, blend and dispose flags, loop count, durations | ✅ lossless frames only | |
+| | VP8 (lossy), in stills and in animation frames alike | ❌ declined by name: see "Excluded" | |
 | **JPEG 2000** | JP2 container + raw J2K codestream, part 1 (EBCOT, 5/3+9/7 DWT, all progressions, tiles) | ✅ | KitePDF (oracle vs OpenJPEG) |
+| | RGN, POC, PPM/PPT, non-baseline code-block styles | ❌ named by `probe` from the main header; the decode reports one generic `ImageDecodeException` | |
 | **JBIG2** | generic-region arithmetic + MMR paths, embedded streams w/ globals | ✅ parameterized API (no container to sniff) | KitePDF |
 | **CCITT G3/G4** | T.4 1D + T.6 2D fax; TIFF compressions 3/4 | ✅ parameterized `CcittFax` API | KitePDF |
-| **TIFF** | II/MM, **strips and tiles**, first IFD | ✅ | commons-imaging / libtiff vectors |
+| **TIFF** | II/MM, **strips and tiles** | ✅ | commons-imaging / libtiff vectors |
+| | multi-page (IFD chain) | ❌ first IFD only: a multi-page file silently decodes to page 1 | |
 | | raw/PackBits/TIFF-LZW+EarlyChange/Deflate/CCITT G3-1D+G4 | ✅ | |
 | | photometric 0/1 (+alpha), 2 (RGB/RGBA), 3 (palette), **6 (YCbCr, incl. chroma subsampling, chunky units and separate planes)** | ✅ | |
-| | bits 1/2/4/8/**16**, predictor 2 for 8- and 16-bit | ✅ | |
+| | bits 1/2/4/8/**16**, predictor 2 for 8- and 16-bit | ✅ (16-bit → high byte) | |
 | | **planar configuration 1 and 2** | ✅ | |
 | | JPEG-in-TIFF (compression 6/7), floating-point samples | ❌ rejected by name | |
 | **AVIF / HEIC** | | permanently out of scope (see REFERENCES.md) | |
@@ -62,18 +77,19 @@ Coil targets: the CMP 1.11 set (no Intel-Apple variants).
 | Format | Status |
 |---|---|
 | PNG | ✅ 8-bit RGB/RGBA auto-pick, per-row MSAD filter heuristic, vendored KiteArchive deflate: round-trips pixel-exact, ImageIO reads output |
-| JPEG | ✅ baseline (stb_image_write port, Double math for cross-target determinism), quality 1–100, 4:2:0 ≤90 / 4:4:4 above; PSNR-tested, ImageIO + real stb read output |
+| JPEG | ✅ baseline (stb_image_write port, Double math for cross-target determinism), quality 1–100, 4:2:0 ≤90 / 4:4:4 above; PSNR-tested, ImageIO reads output |
 | GIF | ✅ median-cut quantiser, optional Floyd-Steinberg dithering, real LZW; stills and animations with delays + NETSCAPE loop; exact round trip under 256 colours, ImageIO reads every frame |
 | BMP | ✅ 24-bit BI_RGB when opaque, 32-bit BI_BITFIELDS under a V4 header when alpha is present; ImageIO reads output pixel-exact |
-| WebP | ❌ not planned for v1 (decode is the useful half) |
+| WebP, TIFF, JPEG 2000 | ❌ no encoder; decode only |
 
 ## Inspection and geometry
 
 | Piece | Status |
 |---|---|
 | `KiteImage.probe` → `ImageInfo`: dimensions, bit depth, declared alpha, frame count, loop count, EXIF orientation, decodability + reason. Header-only for every format | ✅ |
+| `ImageInfo.isDecodable` mirrors each decoder's feature refusals: PNG CgBI; JPEG SOF kind, precision, DNL and component count; BMP compression and depth; WebP lossy in stills **and inside animation frames**; TIFF bits/compression/predictor/photometric/G3-2D; JP2 components, precision, subsampling, size ceiling and main-header markers | ✅ features only. A corrupt file that declares supported features still probes decodable and then throws. JP2 is the loosest: the walk stops at the first tile-part and does not range-check COD/QCD |
 | `Orientation` + `KiteBitmap.oriented`, and `decode(applyOrientation = true)` | ✅ |
-| `rotated90/180/270`, `flippedHorizontal/Vertical`, `transposed`, `transversed`, `cropped`, on bitmaps and whole animations | ✅ |
+| `rotated90/180/270`, `flippedHorizontal/Vertical`, `transposed`, `transversed`, `cropped`, `oriented` on bitmaps | ✅ animations get `rotated90/180/270`, `cropped`, `scaled` and `oriented` only |
 | `KiteBitmap.scaled(maxW, maxH)`: box-filter downscale, aspect-preserving, alpha-weighted, never upscales | ✅ |
 | Decode-time (DCT-domain) scaling | future work: still a post-decode scale today |
 
@@ -84,9 +100,9 @@ Coil targets: the CMP 1.11 set (no Intel-Apple variants).
 | `KiteBitmap` ARGB_8888 pixel buffer | ✅ |
 | `ImageFormat.sniff` (PNG/JPEG/GIF/BMP/WEBP/TIFF/JP2) | ✅ |
 | vendored flate (`internal.flate`: puff inflate, zlib framing, CRC-32) | ✅: swap to `kitearchive` artifact when it's on Central |
-| bomb guards: dimension and pixel ceilings, exact-size inflate caps, **and an input-relative budget** so a corrupt header in a small file cannot size a large buffer | ✅ |
+| bomb guards: dimension and pixel ceilings, exact-size inflate caps, **and an input-relative budget** so a corrupt header in a small file cannot size a large buffer | ✅ PNG/JPEG/GIF/BMP/TIFF/WebP; JPEG 2000 has only its own flat 2^26-pixel ceiling |
 | `FuzzTest`: seeded mutation harness over every decoder (bit flips, byte corruption, truncation at every offset, header tampering, cross-format splices) asserting only `ImageDecodeException` escapes | ✅ |
-| oracle suites: stb_image (JPEG), OpenJPEG (JP2), libwebp (WebP), libtiff + ImageIO (TIFF), ImageIO (PNG/GIF/BMP/JPEG encode) | ✅ skip cleanly when tools are absent |
+| oracle suites: stb_image (JPEG decode, committed vectors, always runs), OpenJPEG (JP2), libwebp (WebP), libtiff + ImageMagick (TIFF), ImageIO (PNG/GIF/BMP/JPEG encode, always runs) | ✅ the three tool-backed suites `assumeTrue`-skip when the binary is missing, which reads as a pass — check the CI log for skip counts, not just for green |
 | GitHub Actions CI: JVM + JS + wasm + native on Linux, Apple targets on macOS, Android assemble, Dokka | ✅ |
 | public API dumps (`api/*.api`) + `checkLegacyAbi` | ✅ |
 | `:kiteimage-compose`: `KiteImage()` composable, auto-detects animated vs static, off-UI-thread decode, delays/loop-count playback, `animate` escape hatch, `onError`; `KiteAnimatedImage()` for pre-decoded animations | ✅ |

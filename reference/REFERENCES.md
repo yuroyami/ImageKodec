@@ -22,6 +22,20 @@ retain the original notice in the ported `.kt` header (the Kite-lineage conventi
 | GIF **encode** (pure-Java writer, mechanical port) | `commons-imaging` | `src/main/java/org/apache/commons/imaging/formats/gif/*` | Apache-2.0 |
 | Image resampling (phase 2, `kiteimage-ops`) | `stb` | `stb_image_resize2.h` | public domain / MIT |
 
+### Not ported from a tree: written from the specification
+
+Some codecs here were implemented from their published specification and then
+checked against a reference **binary**, with no reference source consulted. That
+is a stronger clean-room position than a port, and it is recorded here so the
+provenance is not guesswork later.
+
+| KiteImage target | Written from | Verified against | Notes |
+|---|---|---|---|
+| **WebP lossless (VP8L)** + the RIFF/`VP8X` container and `ANIM`/`ANMF` animation | [WebP Lossless Bitstream Specification](https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification) and the [WebP container spec](https://developers.google.com/speed/webp/docs/riff_container) | libwebp's `cwebp` / `dwebp` binaries as a decode oracle (`WebpOracleTest`), bit-exact | libwebp is BSD-3-Clause; **no libwebp source was read**, and none is vendored |
+| **APNG** animation over the PNG decoder | [APNG specification](https://wiki.mozilla.org/APNG_Specification) | hand-built vectors whose composites are computed from the spec's own blend formula | |
+| TIFF tiles, 16-bit samples, planar config 2, YCbCr | TIFF 6.0 specification | libtiff's `tiffcp` for fixture generation, ImageIO as an independent reader (`TiffOracleTest`) | |
+| BMP RLE4/RLE8, BITFIELDS, OS/2 headers | Microsoft `wingdi.h` DIB documentation | ImageIO (`GifBmpInteropTest`) | |
+
 ## Not cloned, used indirectly
 
 | What | Where it lives | Why |

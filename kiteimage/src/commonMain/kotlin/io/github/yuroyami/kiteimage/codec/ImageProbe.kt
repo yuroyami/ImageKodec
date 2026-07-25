@@ -20,11 +20,20 @@ import io.github.yuroyami.kiteimage.internal.ByteReader
  *  - BMP/TIFF/JP2/WebP: fixed header fields (and, for animated WebP, the ANMF
  *    chunk count)
  *
- * [ImageInfo.isDecodable] mirrors the real decoders' rejection rules, so a
- * Coil-style "should I claim this file?" question is one call rather than a
- * hand-rolled header sniff per format.
+ * [ImageInfo.isDecodable] mirrors the decoders' feature refusals, so a Coil-style
+ * "should I claim this file?" question is one call rather than a hand-rolled
+ * header sniff per format. It answers about features, not about integrity: a
+ * truncated or corrupt file that declares only supported features still probes as
+ * decodable and then fails, and for JPEG 2000 the check covers the main header
+ * but not per-tile overrides.
  */
 internal object ImageProbe {
+
+    /**
+     * JpxDecoder's own output ceiling. It is the one codec that does not go
+     * through the shared input-relative budget, and its limit is lower.
+     */
+    private const val MAX_JP2_PIXELS = 64L shl 20
 
     fun probe(data: ByteArray): ImageInfo = when (ImageFormat.sniff(data)) {
         ImageFormat.PNG -> png(data)
@@ -132,12 +141,19 @@ internal object ImageProbe {
             val width = f.u16be()
             val components = f.u8()
 
-            val supported = marker == 0xC0 || marker == 0xC1 || marker == 0xC2
-            val reason = when (marker) {
+            // Everything JpegDecoder.processFrameHeader refuses, in its order.
+            val why = when (marker) {
                 0xC3, 0xC7, 0xCB, 0xCF -> "lossless JPEG"
                 0xC5, 0xC6 -> "hierarchical/differential JPEG"
                 0xC9, 0xCA, 0xCD, 0xCE -> "arithmetic-coded JPEG"
-                else -> null
+                0xC0, 0xC1, 0xC2 -> when {
+                    precision != 8 -> "$precision-bit JPEG (8-bit samples only)"
+                    height == 0 -> "JPEG with its height deferred to a DNL marker"
+                    components != 1 && components != 3 && components != 4 ->
+                        "$components-component JPEG"
+                    else -> null
+                }
+                else -> "JPEG SOF marker 0x${marker.toString(16)}"
             }
 
             return ImageInfo(
@@ -150,9 +166,8 @@ internal object ImageProbe {
                 frameCount = 1,
                 loopCount = 1,
                 orientation = Exif.orientationFromJpeg(data) ?: Orientation.Normal,
-                isDecodable = supported && components in 1..4,
-                unsupportedReason = reason
-                    ?: if (components !in 1..4) "$components-component JPEG" else null,
+                isDecodable = why == null,
+                unsupportedReason = why,
             )
         }
     }
@@ -224,6 +239,9 @@ internal object ImageProbe {
             frameCount = maxOf(1, frames),
             loopCount = loops,
             orientation = Orientation.Normal,
+            // [GifDecoder] implements every GIF87a/89a feature and throws no
+            // UnsupportedImageException, so there is nothing for a header read to
+            // rule out. A malformed or bomb-sized file still fails at decode.
             isDecodable = true,
         )
     }
@@ -317,6 +335,13 @@ internal object ImageProbe {
         var spp = 1
         var extraSamples = 0
         var orientation = Orientation.Normal
+        // TIFF defaults, used when the tag is absent. Photometric has none, so -1
+        // stands for "the file does not say". That is a malformed-file question
+        // rather than a feature-support one, and it is left to the decoder.
+        var compression = 1
+        var photometric = -1
+        var predictor = 1
+        var t4Options = 0
 
         for (i in 0 until count) {
             val at = ifd + 2 + i * 12
@@ -324,24 +349,47 @@ internal object ImageProbe {
             val tag = u16(at)
             val type = u16(at + 2)
             val n = u32(at + 4)
-            // SHORT and LONG scalars sit inline; arrays point elsewhere. We only
-            // read scalars plus the first element of BitsPerSample.
+            // BYTE, SHORT and LONG scalars sit inline; arrays point elsewhere. We
+            // only read scalars plus the first element of BitsPerSample.
             fun scalar(): Int = when (type) {
+                1 -> data[at + 8].toInt() and 0xFF
                 3 -> u16(at + 8)
                 4 -> u32(at + 8)
                 else -> 0
             }
+            // A count of exactly one is the only shape where the value is both
+            // certainly inline and certainly the one TiffDecoder reads, so the
+            // feature checks below never guess.
+            fun single(): Int? = if (n == 1 && (type == 1 || type == 3 || type == 4)) scalar() else null
+            // The first element of a BYTE/SHORT/LONG field, inline when the whole
+            // array fits the 4-byte slot and behind the pointer otherwise. Same
+            // rule TiffDecoder.values() applies, so the two agree on arrays.
+            fun first(): Int? {
+                val unit = when (type) { 1 -> 1; 3 -> 2; 4 -> 4; else -> return null }
+                if (n < 1) return null
+                val base = if (unit.toLong() * n <= 4) at + 8 else u32(at + 8)
+                return when (unit) {
+                    1 -> if (base >= 0 && base < data.size) data[base].toInt() and 0xFF else null
+                    2 -> u16(base)
+                    else -> u32(base)
+                }
+            }
             when (tag) {
                 256 -> width = scalar()
                 257 -> height = scalar()
-                258 -> bits = if (n <= (if (type == 3) 2 else 1)) scalar() else u16(u32(at + 8))
+                258 -> bits = first() ?: bits
+                259 -> compression = single() ?: compression
+                262 -> photometric = single() ?: photometric
                 274 -> orientation = Orientation.fromExif(scalar())
                 277 -> spp = scalar()
+                292 -> t4Options = single() ?: t4Options
+                317 -> predictor = single() ?: predictor
                 338 -> extraSamples = if (n >= 1) 1 else 0
             }
         }
 
         val alpha = extraSamples > 0 || spp == 2 || spp == 4
+        val reason = tiffUnsupported(bits, compression, photometric, predictor, t4Options)
         return ImageInfo(
             format = ImageFormat.TIFF,
             width = width,
@@ -351,8 +399,35 @@ internal object ImageProbe {
             frameCount = 1,
             loopCount = 1,
             orientation = orientation,
-            isDecodable = true,
+            isDecodable = reason == null,
+            unsupportedReason = reason,
         )
+    }
+
+    /**
+     * The features [TiffDecoder] refuses, tested in the order the decoder reaches
+     * them so probe and decode name the same one. Everything else a TIFF can be
+     * wrong about is malformed structure, which only a decode can find.
+     */
+    private fun tiffUnsupported(
+        bits: Int,
+        compression: Int,
+        photometric: Int,
+        predictor: Int,
+        t4Options: Int,
+    ): String? = when {
+        bits !in intArrayOf(1, 2, 4, 8, 16) ->
+            "TIFF with $bits bits per sample (1, 2, 4, 8 and 16 are decodable)"
+        photometric == 6 && bits != 8 -> "TIFF YCbCr with $bits-bit samples (8-bit only)"
+        compression !in intArrayOf(1, 2, 3, 4, 5, 8, 32773, 32946) ->
+            "TIFF compression $compression" + if (compression == 6 || compression == 7) " (JPEG-in-TIFF)" else ""
+        compression == 3 && (t4Options and 1) != 0 -> "TIFF CCITT G3 two-dimensional coding (T4Options bit 0)"
+        predictor !in intArrayOf(1, 2) -> "TIFF predictor $predictor"
+        // Horizontal differencing is only implemented for whole-byte samples.
+        predictor == 2 && bits != 8 && bits != 16 -> "TIFF predictor 2 with $bits-bit samples"
+        photometric >= 0 && photometric !in intArrayOf(0, 1, 2, 3, 6) ->
+            "TIFF photometric interpretation $photometric"
+        else -> null
     }
 
     // --- JPEG 2000 --------------------------------------------------------------
@@ -391,6 +466,7 @@ internal object ImageProbe {
             throw ImageDecodeException("JP2: bad image size ${w}x$h")
         }
 
+        val reason = jp2Unsupported(data, siz, comps, w.toInt(), h.toInt())
         return ImageInfo(
             format = ImageFormat.JP2,
             width = w.toInt(),
@@ -400,8 +476,71 @@ internal object ImageProbe {
             frameCount = 1,
             loopCount = 1,
             orientation = Orientation.Normal,
-            isDecodable = true,
+            isDecodable = reason == null,
+            unsupportedReason = reason,
         )
+    }
+
+    /**
+     * Walk the JPEG 2000 main header for the features [JpxDecoder] declines, so
+     * `probe` can name one instead of the decode failing later.
+     *
+     * [siz] is the offset of the SIZ segment's length field. The walk covers
+     * marker segments only and stops at the first tile-part (SOT), so a per-tile
+     * coding-style override or a PPT segment inside a tile-part header is not
+     * seen here and still surfaces as a decode failure. Nor are the COD and QCD
+     * parameter ranges checked beyond the code-block style.
+     */
+    private fun jp2Unsupported(data: ByteArray, siz: Int, comps: Int, w: Int, h: Int): String? {
+        if (comps !in 1..16) return "JPEG 2000 with $comps components (1 to 16 are decodable)"
+        if (w.toLong() * h > MAX_JP2_PIXELS) {
+            return "JPEG 2000 larger than ${MAX_JP2_PIXELS shr 20} megapixels"
+        }
+        // Per-component Ssiz/XRsiz/YRsiz triples follow Csiz.
+        for (c in 0 until comps) {
+            val at = siz + 38 + c * 3
+            if (at + 3 > data.size) break
+            val bits = (data[at].toInt() and 0x7F) + 1
+            if (bits > 16) return "JPEG 2000 with $bits-bit samples (16-bit maximum)"
+            val dx = data[at + 1].toInt() and 0xFF
+            val dy = data[at + 2].toInt() and 0xFF
+            if (dx == 0 || dy == 0) return "JPEG 2000 with a zero component subsampling factor"
+        }
+
+        fun u16(p: Int): Int? =
+            if (p < 0 || p + 2 > data.size) null
+            else ((data[p].toInt() and 0xFF) shl 8) or (data[p + 1].toInt() and 0xFF)
+
+        fun u8(p: Int): Int? = if (p < 0 || p >= data.size) null else data[p].toInt() and 0xFF
+
+        fun codeBlockStyle(at: Int): String? {
+            val style = u8(at) ?: return null
+            return if (style == 0) null else "JPEG 2000 code-block style 0x${style.toString(16)}"
+        }
+
+        var p = siz + (u16(siz) ?: return null)                    // past the SIZ segment
+        while (true) {
+            val marker = u16(p) ?: return null
+            if (marker < 0xFF00) return null                       // lost sync; leave it to the decode
+            when (marker) {
+                0xFF90, 0xFF93, 0xFFD9 -> return null              // SOT / SOD / EOC: main header over
+                0xFF5E -> return "JPEG 2000 region of interest (RGN)"
+                0xFF5F -> return "JPEG 2000 progression order change (POC)"
+                0xFF60, 0xFF61 -> return "JPEG 2000 packed packet headers (PPM/PPT)"
+                // COD: marker(2) Lcod(2) Scod SGcod(4) then SPcod decomposition,
+                // code-block width, height, style.
+                0xFF52 -> codeBlockStyle(p + 12)?.let { return it }
+                // COC: the same style byte, past a Ccoc that widens with Csiz.
+                0xFF53 -> codeBlockStyle(p + 8 + if (comps < 257) 1 else 2)?.let { return it }
+            }
+            if (marker in 0xFF30..0xFF3F) {                        // standalone, no segment
+                p += 2
+                continue
+            }
+            val len = u16(p + 2) ?: return null
+            if (len < 2) return null
+            p += 2 + len
+        }
     }
 
     /** Walk JP2 boxes for the "jp2c" contiguous codestream; returns its payload offset. */
@@ -468,7 +607,14 @@ internal object ImageProbe {
                     loops = u16le(body + 4)
                     frames = 0
                 }
-                "ANMF" -> frames++
+                "ANMF" -> {
+                    frames++
+                    // The frame's own image chunk sits past the 16-byte ANMF
+                    // header. Without descending, a lossy animation would probe
+                    // decodable and then fail inside the frame loop.
+                    val end = minOf(body + size.toInt(), data.size)
+                    if (webpFrameIsLossy(data, body + 16, end)) lossy = true
+                }
                 "ALPH" -> alpha = true
                 "VP8 " -> {
                     // Uncompressed data chunk of a key frame: 3-byte frame tag,
@@ -510,5 +656,25 @@ internal object ImageProbe {
             isDecodable = !lossy,
             unsupportedReason = if (lossy) "WebP lossy (VP8)" else null,
         )
+    }
+
+    /**
+     * True when the animation frame between [start] and [end] carries a lossy
+     * `VP8 ` image chunk, mirroring WebpDecoder's sub-chunk walk. A frame whose
+     * chunks cannot be read is reported as not lossy and left to the decode.
+     */
+    private fun webpFrameIsLossy(data: ByteArray, start: Int, end: Int): Boolean {
+        var p = start
+        while (p >= 0 && p + 8 <= end && p + 8 <= data.size) {
+            when (data.copyOfRange(p, p + 4).decodeToString()) {
+                "VP8 " -> return true
+                "VP8L" -> return false
+            }
+            var size = 0L
+            for (i in 3 downTo 0) size = (size shl 8) or (data[p + 4 + i].toLong() and 0xFF)
+            if (size > Int.MAX_VALUE) return false
+            p += 8 + size.toInt() + (size.toInt() and 1)
+        }
+        return false
     }
 }

@@ -72,7 +72,8 @@ class WebpDecoderTest {
         assertEquals(24, info.width)
         assertEquals(16, info.height)
         assertFalse(info.isDecodable)
-        assertTrue(info.unsupportedReason!!.contains("lossy"), info.unsupportedReason!!)
+        val reason = info.unsupportedReason
+        assertTrue(reason != null && "lossy" in reason, "expected a reason naming the codec, got $reason")
 
         val alpha = KiteImage.probe(hex(LOSSY_ALPHA))
         assertEquals(16, alpha.width)
@@ -80,10 +81,52 @@ class WebpDecoderTest {
         assertTrue(alpha.hasAlpha)
     }
 
+    /**
+     * An animated WebP whose one frame is lossy VP8. libwebp writes these
+     * routinely, and the image chunk lives inside the ANMF body, so a probe that
+     * only reads top-level chunks calls the file decodable and is then wrong.
+     */
+    private fun lossyAnimation(): ByteArray {
+        fun u16le(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
+        fun u24le(v: Int) = u16le(v) + byteArrayOf(((v shr 16) and 0xFF).toByte())
+        fun u32le(v: Int) = u16le(v) + u16le(v shr 16)
+        fun chunk(tag: String, body: ByteArray) =
+            tag.encodeToByteArray() + u32le(body.size) +
+                (if (body.size % 2 == 1) body + byteArrayOf(0) else body)
+
+        // A VP8 key-frame header: 3-byte frame tag, the 9D 01 2A start code, then
+        // two 14-bit dimensions. Nothing reads past it before the refusal.
+        val vp8 = chunk(
+            "VP8 ",
+            byteArrayOf(0x30, 0x00, 0x00, 0x9D.toByte(), 0x01, 0x2A) + u16le(8) + u16le(8),
+        )
+        val anmf = chunk(
+            "ANMF",
+            u24le(0) + u24le(0) + u24le(7) + u24le(7) + u24le(100) + byteArrayOf(0) + vp8,
+        )
+        val vp8x = chunk("VP8X", byteArrayOf(0x02, 0, 0, 0) + u24le(7) + u24le(7))
+        val anim = chunk("ANIM", u32le(0) + u16le(0))
+        val body = "WEBP".encodeToByteArray() + vp8x + anim + anmf
+        return "RIFF".encodeToByteArray() + u32le(body.size) + body
+    }
+
+    @Test
+    fun lossyAnimationFramesAreReportedUndecodableUpFront() {
+        val bytes = lossyAnimation()
+        val info = KiteImage.probe(bytes)
+        assertEquals(8, info.width)
+        assertEquals(1, info.frameCount)
+        assertFalse(info.isDecodable, "a lossy animation frame is still lossy VP8")
+        assertTrue("lossy" in info.unsupportedReason.orEmpty(), info.unsupportedReason.orEmpty())
+
+        assertFailsWith<UnsupportedImageException> { KiteImage.decodeAnimation(bytes) }
+        assertFailsWith<UnsupportedImageException> { KiteImage.decode(bytes) }
+    }
+
     @Test
     fun lossyDecodeFailsByNameNotByCrash() {
         val e = assertFailsWith<UnsupportedImageException> { KiteImage.decode(hex(LOSSY)) }
-        assertTrue(e.message!!.contains("VP8"), e.message!!)
+        assertTrue("VP8" in e.message.orEmpty(), e.message.orEmpty())
         assertFailsWith<UnsupportedImageException> { KiteImage.decode(hex(LOSSY_ALPHA)) }
     }
 

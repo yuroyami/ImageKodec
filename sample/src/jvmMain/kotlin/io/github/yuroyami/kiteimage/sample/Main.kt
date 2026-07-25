@@ -19,7 +19,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import io.github.yuroyami.kiteimage.KiteAnimation
 import io.github.yuroyami.kiteimage.KiteBitmap
+import io.github.yuroyami.kiteimage.KiteFrame
 import io.github.yuroyami.kiteimage.KiteImage
 import io.github.yuroyami.kiteimage.compose.KiteImage
 
@@ -37,35 +39,53 @@ private fun tiles(): List<Tile> {
         return KiteBitmap(w, h, px)
     }
 
-    fun bmp(w: Int, h: Int): ByteArray {
-        // 24-bit BMP built by hand: BMP has no encoder yet, the format is trivial.
-        val rowPad = (4 - (w * 3) % 4) % 4
-        val size = 54 + (w * 3 + rowPad) * h
-        val out = ByteArray(size)
-        var o = 0
-        fun u8(v: Int) { out[o++] = v.toByte() }
-        fun u16(v: Int) { u8(v); u8(v shr 8) }
-        fun u32(v: Int) { u16(v); u16(v shr 16) }
-        u8('B'.code); u8('M'.code); u32(size); u32(0); u32(54)
-        u32(40); u32(w); u32(h); u16(1); u16(24); u32(0); u32(0); u32(0); u32(0); u32(0); u32(0)
-        for (y in h - 1 downTo 0) {
-            for (x in 0 until w) {
-                u8((x * 255 / (w - 1))); u8(128); u8((y * 255 / (h - 1)))
+    /** A four-frame spin, so the GIF encoder gets exercised on an animation. */
+    fun spinner(): KiteAnimation {
+        val size = 96
+        val frames = List(4) { i ->
+            val px = IntArray(size * size)
+            for (y in 0 until size) for (x in 0 until size) {
+                val quadrant = (x / (size / 2)) + 2 * (y / (size / 2))
+                val lit = quadrant == i
+                px[y * size + x] = if (lit) 0xFFF07A32.toInt() else 0xFF23374F.toInt()
             }
-            repeat(rowPad) { u8(0) }
+            KiteFrame(KiteBitmap(size, size, px), delayMillis = 180, delayRawCentiseconds = 18)
         }
-        return out
+        return KiteAnimation(size, size, frames, loopCount = 0)
     }
 
     return listOf(
         Tile("GIF: animated, decoded + played\nby KiteImage", SAMPLE_GIF),
+        Tile("GIF: OUR encoder, animated\n(quantised + dithered)", KiteImage.encodeGif(spinner())),
+        Tile("APNG: acTL/fcTL/fdAT,\nfour frames", SAMPLE_APNG),
+        Tile("WebP lossless (VP8L)", SAMPLE_WEBP),
+        Tile("WebP: animated (ANIM/ANMF)", SAMPLE_WEBP_ANIMATED),
         Tile("JPEG 4:2:0 (ffmpeg-encoded)", SAMPLE_JPEG),
         Tile("JPEG: OUR encoder, q85", KiteImage.encodeJpeg(card(96, 96, alpha = false), quality = 85)),
         Tile("PNG: OUR encoder, alpha", KiteImage.encodePng(card(96, 96, alpha = true))),
+        Tile("BMP: OUR encoder, 32-bit\nwith alpha", KiteImage.encodeBmp(card(96, 96, alpha = true))),
         Tile("JPEG 2000 (absorbed JPX codec)", SAMPLE_JP2),
         Tile("TIFF deflate (ffmpeg-encoded)", SAMPLE_TIFF),
-        Tile("BMP 24-bit", bmp(96, 96)),
     )
+}
+
+/**
+ * The one-line summary under each tile comes from `KiteImage.probe`: the header
+ * read, not the decode. It doubles as a live check that probing and decoding
+ * agree about what every one of these files is.
+ */
+private fun caption(bytes: ByteArray): String {
+    val info = KiteImage.probeOrNull(bytes) ?: return "unrecognised"
+    return buildString {
+        append(info.format)
+        append("  ${info.displayWidth}x${info.displayHeight}")
+        if (info.bitDepth != 8) append("  ${info.bitDepth}-bit")
+        if (info.hasAlpha) append("  alpha")
+        if (info.isAnimated) {
+            append("  ${info.frameCount} frames")
+            append(if (info.loopCount == 0) ", looping" else ", x${info.loopCount}")
+        }
+    }
 }
 
 fun main() = application {
@@ -101,6 +121,12 @@ private fun TileView(tile: Tile) {
             tile.title,
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 6.dp),
+        )
+        Text(
+            caption(tile.bytes),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }

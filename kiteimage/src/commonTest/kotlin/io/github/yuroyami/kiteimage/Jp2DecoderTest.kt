@@ -2,7 +2,11 @@ package io.github.yuroyami.kiteimage
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 import kotlin.math.abs
 
 /**
@@ -71,5 +75,74 @@ class Jp2DecoderTest {
         val mean = sum.toDouble() / (32 * 24 * 3)
         assertTrue(worst <= 8, "max diff $worst > 8 (mean $mean)")
         assertTrue(mean <= 2.0, "mean diff $mean > 2.0")
+    }
+
+    // --- probe agrees with decode ---------------------------------------------------
+
+    /** The bare codestream inside [JP2]; both the probe and the decoder take it alone. */
+    private fun codestream(): ByteArray {
+        val all = hex(JP2)
+        return all.copyOfRange(indexOfMarker(all, 0xFF4F), all.size)
+    }
+
+    private fun indexOfMarker(data: ByteArray, marker: Int): Int {
+        val hi = ((marker shr 8) and 0xFF).toByte()
+        val lo = (marker and 0xFF).toByte()
+        for (i in 0 until data.size - 1) {
+            if (data[i] == hi && data[i + 1] == lo) return i
+        }
+        fail("marker ${marker.toString(16)} is not in this vector")
+    }
+
+    /** [codestream], with a [marker] segment spliced in ahead of the first tile-part. */
+    private fun withMainHeaderMarker(marker: Int): ByteArray {
+        val cs = codestream()
+        val sot = indexOfMarker(cs, 0xFF90)
+        val segment = byteArrayOf(
+            ((marker shr 8) and 0xFF).toByte(), (marker and 0xFF).toByte(),
+            0x00, 0x04, 0x00, 0x00,                  // length 4, two bytes of payload
+        )
+        return cs.copyOfRange(0, sot) + segment + cs.copyOfRange(sot, cs.size)
+    }
+
+    @Test
+    fun supportedCodestreamProbesDecodable() {
+        val cs = codestream()
+        val info = KiteImage.probe(cs)
+        assertTrue(info.isDecodable, "reason: ${info.unsupportedReason}")
+        assertEquals(32, info.width)
+        assertEquals(32, KiteImage.decode(cs).width)
+    }
+
+    /**
+     * The main-header features the JPX decoder gives up on have to be visible to
+     * a header read, or `probe` promises pixels `decode` will not produce.
+     */
+    @Test
+    fun probeNamesTheMainHeaderFeaturesTheDecoderDeclines() {
+        val cases = listOf(
+            0xFF5E to "region of interest",
+            0xFF5F to "progression order change",
+            0xFF60 to "packed packet headers",
+        )
+        for ((marker, label) in cases) {
+            val spliced = withMainHeaderMarker(marker)
+            val info = KiteImage.probe(spliced)
+            assertFalse(info.isDecodable, "$label should probe undecodable")
+            assertNotNull(info.unsupportedReason, "$label reason")
+            assertFailsWith<ImageDecodeException>(label) { KiteImage.decode(spliced) }
+        }
+    }
+
+    @Test
+    fun probeRejectsANonBaselineCodeBlockStyle() {
+        val cs = codestream()
+        // COD: marker(2) Lcod(2) Scod SGcod(4), then the SPcod code-block style byte.
+        val patched = cs.copyOf()
+        patched[indexOfMarker(cs, 0xFF52) + 12] = 0x01   // selective arithmetic bypass
+        val info = KiteImage.probe(patched)
+        assertFalse(info.isDecodable)
+        assertTrue(info.unsupportedReason!!.contains("code-block"), info.unsupportedReason!!)
+        assertFailsWith<ImageDecodeException> { KiteImage.decode(patched) }
     }
 }

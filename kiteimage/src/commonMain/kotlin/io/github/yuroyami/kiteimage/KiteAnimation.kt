@@ -17,13 +17,14 @@ public class KiteFrame(
 )
 
 /**
- * A decoded animation (today: GIF; animated WebP will reuse this shape). Static
- * images decode as a single frame, so [KiteImage.decodeAnimation] is total over
- * every supported format.
+ * A decoded animation: GIF, APNG and animated WebP all arrive in this shape.
+ * Static images decode as a single frame, so [KiteImage.decodeAnimation] is total
+ * over every supported format.
  *
- * [loopCount] carries the NETSCAPE2.0 semantics as stored: `0` = loop forever,
- * `n > 0` = play the sequence `n` times. Files with no loop extension get `1`
- * (play once): that's what the extension's absence meant in practice.
+ * [loopCount] means the same thing in all three formats: `0` = loop forever,
+ * `n > 0` = play the sequence `n` times. A file that carries no loop count at
+ * all gets `1` (play once), which is what its absence has always meant in
+ * practice.
  */
 public class KiteAnimation(
     public val width: Int,

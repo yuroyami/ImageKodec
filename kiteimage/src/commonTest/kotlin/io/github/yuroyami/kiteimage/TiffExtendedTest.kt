@@ -3,6 +3,10 @@ package io.github.yuroyami.kiteimage
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -297,5 +301,60 @@ class TiffExtendedTest {
         assertEquals(argb(64, 200, 200, 200), bm[0, 0])
         assertEquals(argb(255, 100, 100, 100), bm[1, 0])
         assertTrue(KiteImage.probe(bytes).hasAlpha)
+    }
+
+    // --- probe agrees with decode ---------------------------------------------------
+
+    /**
+     * A 2x1 uncompressed 8-bit greyscale file, with [overrides] replacing fields
+     * by tag. The base is fully supported, so each override isolates exactly one
+     * feature.
+     */
+    private fun greyTiff(vararg overrides: Field): ByteArray {
+        val px = bytes(0x40, 0xC0)
+        val fields = mutableListOf(
+            long(256, 2), long(257, 1),
+            short(258, 8), short(259, 1), short(262, 1), short(277, 1),
+            short(284, 1), long(278, 1),
+            long(273, 0), long(279, px.size),
+        )
+        for (o in overrides) {
+            fields.removeAll { it.tag == o.tag }
+            fields.add(o)
+        }
+        return tiff(fields, px)
+    }
+
+    @Test
+    fun supportedTiffProbesDecodable() {
+        val bytes = greyTiff()
+        val info = KiteImage.probe(bytes)
+        assertTrue(info.isDecodable, "reason: ${info.unsupportedReason}")
+        assertNull(info.unsupportedReason)
+        assertEquals(2, KiteImage.decode(bytes).width)
+    }
+
+    /**
+     * Every TIFF feature the decoder throws [UnsupportedImageException] for has to
+     * be visible from the IFD alone, or `probe` is promising pixels that `decode`
+     * will not deliver.
+     */
+    @Test
+    fun probeRefusesTheTiffFeaturesTheDecoderRefuses() {
+        val cases = listOf(
+            "JPEG-in-TIFF" to greyTiff(short(259, 7)),
+            "32-bit samples" to greyTiff(short(258, 32)),
+            "floating-point predictor" to greyTiff(short(317, 3)),
+            "predictor 2 at 4 bits" to greyTiff(short(317, 2), short(258, 4)),
+            "CMYK photometric" to greyTiff(short(262, 5)),
+            "CCITT G3 two-dimensional" to greyTiff(short(259, 3), long(292, 1)),
+            "16-bit YCbCr" to greyTiff(short(262, 6), short(258, 16), short(277, 3)),
+        )
+        for ((name, bytes) in cases) {
+            val info = KiteImage.probe(bytes)
+            assertFalse(info.isDecodable, "$name should probe undecodable")
+            assertNotNull(info.unsupportedReason, "$name reason")
+            assertFailsWith<UnsupportedImageException>(name) { KiteImage.decode(bytes) }
+        }
     }
 }

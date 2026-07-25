@@ -282,7 +282,11 @@ internal object TiffDecoder {
                                 write16(plane, ro + i * 2, (cur + prev) and 0xFFFF, le)
                             }
                         }
-                        else -> err("predictor 2 with $bits-bit samples")
+                        // Horizontal differencing is defined for whole-byte
+                        // samples; sub-byte depths have no implementation here.
+                        else -> throw UnsupportedImageException(
+                            "TIFF: predictor 2 with $bits-bit samples is not supported",
+                        )
                     }
                 }
             }

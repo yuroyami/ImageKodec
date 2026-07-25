@@ -13,8 +13,8 @@ import io.github.yuroyami.kiteimage.internal.flate.ByteArrayBuilder
  * doesn't round Float math to 32 bits between operations, so a Float port
  * would produce different files per target; Double is deterministic
  * everywhere. Output therefore may differ from C stbiw by a coefficient here
- * and there: validity and quality are pinned by tests instead (decode
- * round-trip PSNR, ImageIO and the real stb_image both read our files).
+ * and there, so validity and quality are pinned by tests instead: a decode
+ * round-trip PSNR check, and ImageIO reading the files back.
  */
 internal object JpegEncoder {
 

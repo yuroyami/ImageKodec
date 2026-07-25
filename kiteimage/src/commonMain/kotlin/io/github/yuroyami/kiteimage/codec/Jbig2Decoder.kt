@@ -3,9 +3,10 @@ package io.github.yuroyami.kiteimage.codec
 
 /**
  * A pure-Kotlin JBIG2 decoder (ITU-T T.88) covering the flavours PDFs use for
- * scanned / OCR'd bilevel images. Produces a 1-bit-per-pixel bitmap that
- * [ImageXObject] packs into a [Kind.RAW][ImageXObject.Kind.RAW] image so JBIG2
- * renders on every backend with no platform loader.
+ * scanned and OCR'd bilevel images. Produces a 1-bit-per-pixel bitmap. JBIG2
+ * carries no magic bytes and no dimensions of its own, so it is not part of the
+ * `KiteImage.decode` sniff path; call this directly with the size the container
+ * declared.
  *
  * Scope: the MQ arithmetic decoder (Annex E), arithmetic integer decoding
  * (Annex A), generic region decoding (6.2, templates 0-3 + TPGDON), MMR-coded
