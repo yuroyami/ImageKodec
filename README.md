@@ -4,6 +4,7 @@ Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
 BMP, TIFF, JPEG 2000 and lossless WebP from a `ByteArray`, with the same code on
 every target.
 
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/kiteimage)](https://central.sonatype.com/artifact/io.github.yuroyami/kiteimage)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuroyami/KiteImage/ci.yml?branch=main&label=CI)](https://github.com/yuroyami/KiteImage/actions/workflows/ci.yml)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Targets](https://img.shields.io/badge/targets-22%20core%2C%207%20UI-blue)](#targets)
@@ -44,18 +45,12 @@ val png: ByteArray = KiteImage.encodePng(bitmap)
 
 ## Install
 
-Not published yet. Build it locally first:
-
-```sh
-./gradlew publishToMavenLocal
-```
-
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:kiteimage:0.0.1-SNAPSHOT")
+    implementation("io.github.yuroyami:kiteimage:0.1.0")
     // Optional, and both build for far fewer targets than the core.
-    implementation("io.github.yuroyami:kiteimage-compose:0.0.1-SNAPSHOT")
-    implementation("io.github.yuroyami:kiteimage-coil:0.0.1-SNAPSHOT")
+    implementation("io.github.yuroyami:kiteimage-compose:0.1.0")
+    implementation("io.github.yuroyami:kiteimage-coil:0.1.0")
 }
 ```
 

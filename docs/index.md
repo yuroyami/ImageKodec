@@ -27,15 +27,9 @@ artifact depends on `kotlin-stdlib` and nothing else.
 
 ## Install
 
-Not published yet. Build and install it locally:
-
-```bash
-./gradlew publishToMavenLocal
-```
-
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:kiteimage:0.0.1-SNAPSHOT")
+    implementation("io.github.yuroyami:kiteimage:0.1.0")
 }
 ```
 
