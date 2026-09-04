@@ -108,9 +108,9 @@ The README's Limits section has the full list.
 <span>Every public type, generated from source.</span>
 </a>
 
-<a class="kite-card" href="https://github.com/yuroyami/KiteImage/blob/main/PORTING_STATUS.md">
-<strong>Format status</strong>
-<span>The support level for every format and feature, and what is deliberately out of scope.</span>
+<a class="kite-card" href="https://github.com/yuroyami/KiteImage/issues">
+<strong>Open issues</strong>
+<span>Known gaps and what is planned, grouped by format and by area.</span>
 </a>
 
 </div>

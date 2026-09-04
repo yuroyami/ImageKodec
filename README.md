@@ -339,9 +339,9 @@ startup. Every tile is captioned from `probe`.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the build and the reference oracle
 behind each codec. The rule that matters is that a decoder never trusts its
-input. Security reporting is in [SECURITY.md](SECURITY.md), the feature matrix in
-[PORTING_STATUS.md](PORTING_STATUS.md), and the change history in
-[CHANGELOG.md](CHANGELOG.md).
+input. Security reporting is in [SECURITY.md](SECURITY.md), the change history in
+[CHANGELOG.md](CHANGELOG.md), and open work in
+[GitHub Issues](https://github.com/yuroyami/KiteImage/issues).
 
 ## License
 

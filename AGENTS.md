@@ -2,7 +2,7 @@
 
 How to build, the test gate and the style rules: [CONTRIBUTING.md](CONTRIBUTING.md).
 Open work: [GitHub Issues](https://github.com/yuroyami/KiteImage/issues).
-Format support and known limits: [PORTING_STATUS.md](PORTING_STATUS.md).
+Format support and known limits: the Limits section of [README.md](README.md).
 
 ## Gotchas
 

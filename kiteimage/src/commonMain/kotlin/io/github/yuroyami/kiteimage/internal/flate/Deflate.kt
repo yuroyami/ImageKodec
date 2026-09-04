@@ -14,7 +14,7 @@ package io.github.yuroyami.kiteimage.internal.flate
  * min-heap Huffman tree, then the overflow-redistribution that caps lengths at 15
  * bits (7 for the code-length code) while preserving the Kraft equality.
  *
- * Stored (BTYPE=00) blocks and multi-block chunking are deferred (PORTING_STATUS.md);
+ * Stored (BTYPE=00) blocks and multi-block chunking are deferred (issue #20);
  * a single dynamic/fixed block encodes inputs of any size, and choosing the smaller of
  * the two is a strict improvement over the old fixed-only encoder.
  *
