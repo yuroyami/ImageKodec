@@ -27,7 +27,7 @@ internal object Deflate {
     fun encode(data: ByteArray): ByteArray = Deflater(data).encode()
 }
 
-private class Deflater(private val data: ByteArray) {
+internal class Deflater(private val data: ByteArray) {
 
     private val out = ByteArrayBuilder(maxOf(64, data.size / 3))
     private var bitBuf = 0
@@ -415,13 +415,17 @@ private class Deflater(private val data: ByteArray) {
                 heap[heapSize++] = node; siftUp(heapSize - 1)
             }
 
-            // Raw (unbounded) length per leaf = depth in the tree.
+            // Clamp every node to maxLen, internal ones too, and count each clamped node.
+            // Counting leaves only leaves the code over-subscribed, as zlib's gen_bitlen shows.
+            // A parent always has a higher id than its children, so walk the ids downward.
             val blCount = IntArray(maxLen + 2)
+            val nodeLen = IntArray(nodeCount)
             var overflow = 0
-            for (i in 0 until m) {
-                var d = 0; var p = parent[i]
-                while (p != -1) { d++; p = parent[p] }
-                if (d > maxLen) { blCount[maxLen]++; overflow++ } else blCount[d]++
+            for (node in nodeCount - 2 downTo 0) {
+                var bits = nodeLen[parent[node]] + 1
+                if (bits > maxLen) { bits = maxLen; overflow++ }
+                nodeLen[node] = bits
+                if (node < m) blCount[bits]++
             }
 
             // zlib gen_bitlen overflow redistribution (keeps sum == m and Kraft == 1).

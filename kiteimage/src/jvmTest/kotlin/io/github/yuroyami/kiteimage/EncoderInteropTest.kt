@@ -35,6 +35,31 @@ class EncoderInteropTest {
     }
 
     @Test
+    fun imageIoReadsOurPngOfADetailedImage() {
+        // The small cards above never build a Huffman tree deeper than the 15-bit
+        // limit. A gradient with light noise does, and that is where the encoder
+        // once wrote a stream that zlib rejected.
+        val w = 1024
+        val h = 768
+        var state = 1
+        fun noise(): Int {
+            state = state xor (state shl 13)
+            state = state xor (state ushr 17)
+            state = state xor (state shl 5)
+            return state and 7
+        }
+        val src = KiteBitmap(w, h, IntArray(w * h) { i ->
+            val x = i % w
+            val y = i / w
+            argb(0xFF, (x * 255 / w + noise()) and 0xFF, (y * 255 / h + noise()) and 0xFF, (x xor y) and 0xFF)
+        })
+        val img = ImageIO.read(KiteImage.encodePng(src).inputStream())!!
+        assertEquals(w, img.width)
+        assertEquals(h, img.height)
+        for (i in src.argb.indices) assertEquals(src.argb[i], img.getRGB(i % w, i / w), "pixel $i")
+    }
+
+    @Test
     fun imageIoReadsOurJpeg() {
         val src = card(40, 30, alpha = false)
         val img = ImageIO.read(KiteImage.encodeJpeg(src, quality = 92).inputStream())!!
