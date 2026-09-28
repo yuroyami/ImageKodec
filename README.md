@@ -87,6 +87,8 @@ The Coil decoder uses this flag to decide which files to claim.
 
 `isDecodable` stays true for a file that declares only supported features and is
 then truncated or corrupt. A decode can therefore still fail after a clean probe.
+One case is different: WebP data that ends before its first image chunk probes as
+not decodable. Until that chunk, nothing says whether the image is lossy.
 
 ### Decode a still
 

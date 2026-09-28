@@ -271,4 +271,62 @@ class WebpDecoderTest {
         // Sniffing no longer recognises it, so this is an unknown format.
         assertFailsWith<ImageDecodeException> { KiteImage.decode(bytes) }
     }
+
+    // --- a probe over the start of a file -----------------------------------------------------
+    // The Coil binding probes the first 64 KiB and claims the file when it is decodable, so the
+    // answer for a prefix has to be right or say that it cannot tell.
+
+    private fun le16(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
+    private fun le24(v: Int) = le16(v) + byteArrayOf(((v shr 16) and 0xFF).toByte())
+    private fun le32(v: Int) = le16(v) + le16(v shr 16)
+    private fun chunk(tag: String, body: ByteArray) = tag.encodeToByteArray() + le32(body.size) + body
+
+    private fun riff(vararg chunks: ByteArray): ByteArray {
+        val body = "WEBP".encodeToByteArray() + chunks.reduce { a, b -> a + b }
+        return "RIFF".encodeToByteArray() + le32(body.size) + body
+    }
+
+    /** A 16 by 16 VP8 key frame header, then [padding] bytes that no probe reads. */
+    private fun lossyChunk(padding: Int) = chunk("VP8 ", byteArrayOf(0x30, 0, 0, 0x9D.toByte(), 0x01, 0x2A) + le16(16) + le16(16) + ByteArray(padding))
+
+    /** A 16 by 16 VP8L header (signature, then 14-bit width and height minus one), then [padding] bytes. */
+    private fun losslessChunk(padding: Int) = chunk("VP8L", byteArrayOf(0x2F, 0x0F, 0xC0.toByte(), 0x03, 0x00) + ByteArray(padding))
+
+    private val vp8x = chunk("VP8X", byteArrayOf(0x20, 0, 0, 0) + le24(15) + le24(15))
+
+    @Test
+    fun aLossyChunkCutOffMidwayIsStillLossy() {
+        // VP8X, then a VP8 chunk that the data stops in the middle of. Its first bytes are there.
+        val cut = riff(vp8x, lossyChunk(padding = 5000)).copyOf(12 + 18 + 8 + 100)
+        val info = KiteImage.probe(cut)
+        assertFalse(info.isDecodable)
+        assertTrue("lossy" in info.unsupportedReason.orEmpty(), info.unsupportedReason.orEmpty())
+    }
+
+    @Test
+    fun aSimpleFileCutOffInsideItsImageChunkIsStillProbed() {
+        // No VP8X: the probe read nothing from a chunk that ran past the data, and threw.
+        val lossy = KiteImage.probe(riff(lossyChunk(padding = 5000)).copyOf(12 + 8 + 100))
+        assertEquals(16, lossy.width)
+        assertFalse(lossy.isDecodable)
+        assertTrue("lossy" in lossy.unsupportedReason.orEmpty(), lossy.unsupportedReason.orEmpty())
+
+        val lossless = KiteImage.probe(riff(losslessChunk(padding = 5000)).copyOf(12 + 8 + 100))
+        assertEquals(16, lossless.width)
+        assertEquals(16, lossless.height)
+        assertTrue(lossless.isDecodable, lossless.unsupportedReason.orEmpty())
+    }
+
+    @Test
+    fun aPrefixThatEndsBeforeTheImageChunkIsNotDecodable() {
+        // A 70,000-byte profile pushes the image chunk past the first 64 KiB. Nothing in the prefix says
+        // whether the image is lossy, so the probe must not say it can decode it.
+        val file = riff(vp8x, chunk("ICCP", ByteArray(70_000)), lossyChunk(padding = 2000))
+        val info = KiteImage.probe(file.copyOf(65_536))
+        assertEquals(16, info.width)
+        assertFalse(info.isDecodable)
+        assertTrue("image chunk" in info.unsupportedReason.orEmpty(), info.unsupportedReason.orEmpty())
+        // The whole file is read correctly.
+        assertTrue("lossy" in KiteImage.probe(file).unsupportedReason.orEmpty())
+    }
 }

@@ -80,7 +80,8 @@ public enum class Orientation(public val exifValue: Int) {
  * @property orientation the EXIF orientation, [Orientation.Normal] when absent
  * @property isDecodable whether this build's [KiteImage.decode] can actually
  *   produce pixels for this file. False means the format or a specific feature
- *   isn't implemented; [unsupportedReason] names it.
+ *   isn't implemented; [unsupportedReason] names it. It is also false for WebP data
+ *   that ends before its first image chunk, because nothing yet says what the image holds.
  * @property unsupportedReason human-readable reason when [isDecodable] is false
  */
 public class ImageInfo(

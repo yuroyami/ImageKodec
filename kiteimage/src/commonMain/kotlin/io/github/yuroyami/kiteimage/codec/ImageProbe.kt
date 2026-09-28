@@ -581,6 +581,7 @@ internal object ImageProbe {
         var loops = 1
         var animated = false
         var sawAny = false
+        var sawImage = false
         var lossy = false
 
         fun u16le(at: Int) = (data[at].toInt() and 0xFF) or ((data[at + 1].toInt() and 0xFF) shl 8)
@@ -591,7 +592,11 @@ internal object ImageProbe {
             val fourcc = data.copyOfRange(p, p + 4).decodeToString()
             val size = u32le(p + 4)
             val body = p + 8
-            if (size < 0 || body + size > data.size + 1L) break
+            // A chunk the data cuts off cannot be skipped, but an image chunk only needs its first
+            // bytes, and they are usually there. Stopping before them missed a lossy file whose image
+            // chunk starts inside a 64 KiB peek and ends outside it.
+            val cutOff = body + size > data.size + 1L
+            if (cutOff && fourcc != "VP8 " && fourcc != "VP8L" && fourcc != "ANMF") break
 
             when (fourcc) {
                 "VP8X" -> {
@@ -614,7 +619,9 @@ internal object ImageProbe {
                     // header. Without descending, a lossy animation would probe
                     // decodable and then fail inside the frame loop.
                     val end = minOf(body + size.toInt(), data.size)
-                    if (webpFrameIsLossy(data, body + 16, end)) lossy = true
+                    val frameIsLossy = webpFrameIsLossy(data, body + 16, end)
+                    if (frameIsLossy != null) sawImage = true
+                    if (frameIsLossy == true) lossy = true
                 }
                 "ALPH" -> alpha = true
                 "VP8 " -> {
@@ -622,6 +629,7 @@ internal object ImageProbe {
                     // 3-byte start code 9D 01 2A, then 14-bit width and height.
                     if (body + 10 > data.size) break
                     lossy = true
+                    sawImage = true
                     if (!sawAny) {
                         width = u16le(body + 6) and 0x3FFF
                         height = u16le(body + 8) and 0x3FFF
@@ -631,6 +639,7 @@ internal object ImageProbe {
                 "VP8L" -> {
                     if (body + 5 > data.size) break
                     val bits = u32le(body + 1)
+                    sawImage = true
                     if (!sawAny) {
                         width = ((bits and 0x3FFF).toInt()) + 1
                         height = (((bits shr 14) and 0x3FFF).toInt()) + 1
@@ -639,11 +648,18 @@ internal object ImageProbe {
                     if (((bits shr 28) and 1L) != 0L) alpha = true
                 }
             }
+            if (cutOff) break
             // Chunks are padded to an even size.
             p = body + size.toInt() + (size.toInt() and 1)
         }
 
         if (!sawAny) throw ImageDecodeException("WebP: no VP8/VP8L/VP8X chunk")
+        // Without an image chunk the data cannot say whether the image is lossy, so it is not decodable.
+        val reason = when {
+            lossy -> "WebP lossy (VP8)"
+            !sawImage -> "WebP data ends before its first image chunk"
+            else -> null
+        }
 
         return ImageInfo(
             format = ImageFormat.WEBP,
@@ -654,17 +670,17 @@ internal object ImageProbe {
             frameCount = if (animated) maxOf(1, frames) else 1,
             loopCount = if (animated) loops else 1,
             orientation = Orientation.Normal,
-            isDecodable = !lossy,
-            unsupportedReason = if (lossy) "WebP lossy (VP8)" else null,
+            isDecodable = reason == null,
+            unsupportedReason = reason,
         )
     }
 
     /**
-     * True when the animation frame between [start] and [end] carries a lossy
-     * `VP8 ` image chunk, mirroring WebpDecoder's sub-chunk walk. A frame whose
-     * chunks cannot be read is reported as not lossy and left to the decode.
+     * Whether the animation frame between [start] and [end] carries a lossy `VP8 ` image chunk (true)
+     * or a lossless `VP8L` one (false), mirroring WebpDecoder's sub-chunk walk. Null when the walk
+     * reaches neither, because the frame is malformed or the data ends first.
      */
-    private fun webpFrameIsLossy(data: ByteArray, start: Int, end: Int): Boolean {
+    private fun webpFrameIsLossy(data: ByteArray, start: Int, end: Int): Boolean? {
         var p = start
         while (p >= 0 && p + 8 <= end && p + 8 <= data.size) {
             when (data.copyOfRange(p, p + 4).decodeToString()) {
@@ -673,9 +689,9 @@ internal object ImageProbe {
             }
             var size = 0L
             for (i in 3 downTo 0) size = (size shl 8) or (data[p + 4 + i].toLong() and 0xFF)
-            if (size > Int.MAX_VALUE) return false
+            if (size > Int.MAX_VALUE) return null
             p += 8 + size.toInt() + (size.toInt() and 1)
         }
-        return false
+        return null
     }
 }
