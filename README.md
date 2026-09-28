@@ -304,8 +304,8 @@ web project that runs under Node should not use them.
   palette and no 16-bit output. It picks a filter per row, which is a compression
   choice, not a format capability.
 - **Whole-array only.** Every entry point takes a complete `ByteArray`. There is
-  no streaming or partial-decode API, and scaling happens after a full-size
-  decode rather than in the DCT domain.
+  no streaming or partial-decode API. `decodeReduced` shrinks a JPEG or a
+  JPEG 2000 image inside the decoder, and `scaled` works after a full-size decode.
 - **Feature refusals are typed, with one exception.** Everything a decoder
   recognizes but cannot handle throws `UnsupportedImageException` naming the
   feature. The JPEG 2000 decoder reports one failure signal for everything, so
@@ -318,8 +318,12 @@ web project that runs under Node should not use them.
 - **Decompression-bomb guards can reject legitimate files.** A decompression bomb
   is a small file that expands into a very large image. PNG, JPEG, GIF, BMP, TIFF
   and WebP cap output at 2^28 pixels and at 4096 decoded pixels per input byte. A
-  very large, very well compressed image can hit that second limit. JPEG 2000
-  uses its own flat 2^26-pixel ceiling and no input-relative budget.
+  very large, very well compressed image can hit that second limit. An animation
+  keeps one full canvas per frame, so its frames together must fit the same
+  limits. JPEG 2000 has a lower ceiling of 2^26 pixels. It applies the same
+  input-relative limit when it decodes, but `probe` checks only the ceiling.
+  `CcittFax` and `Jbig2Decoder` apply only the 2^28-pixel ceiling. A blank
+  scanned page needs far fewer bytes than the input-relative limit allows for.
 - `probe` reads EXIF orientation from JPEG and TIFF files and reports it.
   `decode` only applies it when you pass `applyOrientation = true`. The Compose
   binding applies it for you.
@@ -329,8 +333,9 @@ web project that runs under Node should not use them.
 
 ## Testing
 
-265 tests: 195 in `commonTest`, which run on JVM, JS (Node), Wasm (Node) and
-Kotlin/Native, plus 70 JVM-only integration tests across the three modules.
+Most tests live in `commonTest`. They run on JVM, JS (Node), Wasm (Node) and
+Kotlin/Native. The JVM-only tests include the comparisons against other
+implementations, and the Compose and Coil integration tests.
 
 Correctness is checked against other implementations, not against hand-written
 expectations:
@@ -348,7 +353,9 @@ run only when the binary is installed, and skip when it is not. A skipped test
 reports as a pass, so read the skip count and not only the pass result.
 
 `FuzzTest` drives seeded bit flips, truncations and cross-format splices through
-every decoder. It asserts that nothing but `ImageDecodeException` escapes.
+every decoder that `KiteImage.decode` dispatches to. It asserts that nothing but
+`ImageDecodeException` escapes. `CcittFax` and `Jbig2Decoder` have tests of their
+own and are not part of that corpus.
 
 Every unsupported feature fails at a named point, not silently.
 

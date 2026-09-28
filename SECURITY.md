@@ -40,7 +40,9 @@ decoder entry point is a bug worth reporting:
 - **Dimension and pixel-count ceilings** on every decoder.
 - **An input-relative budget**: declared dimensions are also checked against what
   the input size could plausibly produce, so a corrupt header in a small file
-  cannot reserve a large buffer.
+  cannot reserve a large buffer. An animation must fit this budget for all its
+  frames together. `CcittFax` and `Jbig2Decoder` take only the pixel ceiling,
+  because a blank scanned page needs very few bytes.
 - **Exact-size inflate caps** on PNG and TIFF: the expected decompressed size is
   computed from the headers and enforced during inflation, not after.
 - **Bounds-checked readers** throughout, so truncation surfaces as a decode error
