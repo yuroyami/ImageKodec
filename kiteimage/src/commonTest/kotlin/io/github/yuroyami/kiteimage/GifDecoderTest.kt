@@ -173,6 +173,36 @@ class GifDecoderTest {
         assertEquals(2, calls)
     }
 
+    /** A 1x1 screen with a two-entry table and one frame that declares [frameWidth] by [frameHeight]. */
+    private fun gifWithFrame(frameWidth: Int, frameHeight: Int, lzw: String = "0200"): ByteArray {
+        fun le16(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v ushr 8) and 0xFF).toByte())
+        return "GIF89a".encodeToByteArray() +
+            le16(1) + le16(1) + byteArrayOf(0x80.toByte(), 0, 0) +          // screen, table flag, 2 entries
+            hex("000000ffffff") +                                           // black, white
+            byteArrayOf(0x2C) + le16(0) + le16(0) + le16(frameWidth) + le16(frameHeight) + byteArrayOf(0) +
+            hex(lzw) +                                                      // min code size 2, no data
+            byteArrayOf(0x3B)
+    }
+
+    @Test
+    fun aFrameRectangleTheInputCannotHoldIsRejectedBeforeItIsAllocated() {
+        // 65535 * 65535 wraps to a negative Int, and 32768 * 32768 is a gigabyte. Neither may
+        // reach the LZW buffer, so the message has to come from the frame check.
+        for (side in intArrayOf(65535, 32768)) {
+            val e = assertFailsWith<ImageDecodeException>("frame $side x $side") { KiteImage.decode(gifWithFrame(side, side)) }
+            assertTrue(e.message!!.contains("frame"), "message should name the frame: ${e.message}")
+        }
+    }
+
+    @Test
+    fun aFrameLargerThanTheScreenIsStillClipped() {
+        // Real files do this, so the size check must not treat it as an error. The frame
+        // is 2x2, the screen 1x1, and the LZW data is four pixels of index 1: white.
+        val bitmap = KiteImage.decode(gifWithFrame(2, 2, lzw = "02" + "03" + "8c2d99" + "00"))
+        assertEquals(1, bitmap.width)
+        assertEquals(argb(0xFF, 0xFF, 0xFF, 0xFF), bitmap[0, 0])
+    }
+
     /** Tiny 1x1 24-bit BMP built inline. */
     private fun hexBmp(): ByteArray {
         val out = ArrayList<Byte>()

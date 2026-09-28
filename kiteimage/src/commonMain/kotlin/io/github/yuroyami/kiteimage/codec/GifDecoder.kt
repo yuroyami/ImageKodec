@@ -88,6 +88,11 @@ internal object GifDecoder {
                     val fh = r.u16le()
                     val fPacked = r.u8()
                     if (fw == 0 || fh == 0) throw ImageDecodeException("GIF: empty frame rect")
+                // A frame may stick out of the screen, so its size is a field of its own to
+                // check. The Long comparison inside `fits` keeps `fw * fh` from wrapping below.
+                if (!Budget.fits(fw, fh, data.size)) {
+                    throw ImageDecodeException("GIF: frame ${fw}x$fh cannot come from ${data.size} bytes")
+                }
 
                     val localTable: IntArray? = if (fPacked and 0x80 != 0) {
                         readColorTable(r, sizeBits = (fPacked and 0x07) + 1)
