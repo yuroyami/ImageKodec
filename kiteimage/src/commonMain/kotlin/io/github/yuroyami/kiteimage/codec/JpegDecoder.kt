@@ -38,6 +38,12 @@ internal object JpegDecoder {
     private const val FAST_BITS = 9
     private const val MARKER_NONE = 0xFF
 
+    /**
+     * Most scans one frame may hold. A sequential file has at most one per component and a real
+     * progressive file ten to twenty. Each scan walks the whole image, so the count has to be bounded.
+     */
+    private const val MAX_SCANS = 512
+
     private const val MAX_DIMENSION = 1 shl 24
     private const val MAX_PIXELS = 1L shl 28
 
@@ -171,6 +177,7 @@ internal object JpegDecoder {
         var codeBits = 0
         var marker = MARKER_NONE
         var nomore = false
+        var padBits = 0            // zero bits growBuffer added past the end of the data, which the file does not hold
 
         var jfif = false
         var app14ColorTransform = -1
@@ -226,10 +233,17 @@ internal object JpegDecoder {
                     return
                 }
             }
+            if (j.nomore) j.padBits += 8
             j.codeBuffer = j.codeBuffer or (b shl (24 - j.codeBits))
             j.codeBits += 8
         } while (j.codeBits <= 24)
     }
+
+    /**
+     * True once the marker that ends the scan's data has been read and every bit left is padding.
+     * The file holds no more data for this scan, so decoding on would only turn zero bits into noise.
+     */
+    private fun starved(j: State): Boolean = j.nomore && j.codeBits <= j.padBits
 
     // stbi__jpeg_huff_decode
     private fun huffDecode(j: State, h: Huffman): Int {
@@ -653,6 +667,7 @@ internal object JpegDecoder {
         j.codeBits = 0
         j.codeBuffer = 0
         j.nomore = false
+        j.padBits = 0
         for (c in j.comp) c.dcPred = 0
         j.marker = MARKER_NONE
         j.todo = if (j.restartInterval != 0) j.restartInterval else Int.MAX_VALUE
@@ -809,7 +824,8 @@ internal object JpegDecoder {
             comp.scale = if (hs == vs && hs and (hs - 1) == 0) maxOf(0, j.scale - hs.countTrailingZeroBits()) else j.scale
             comp.ws = comp.w2 shr comp.scale
             comp.ys = (comp.y + (1 shl comp.scale) - 1) shr comp.scale
-            comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scale))
+            // A block the file never reaches stays mid-gray, as in libjpeg, not black.
+            comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scale)).also { it.fill(0x80.toByte()) }
             if (j.progressive) {
                 // w2/h2 are multiples of 8; one 64-short block per 8x8 tile
                 comp.coeffW = comp.w2 / 8
@@ -872,8 +888,13 @@ internal object JpegDecoder {
             val h = (comp.y + 7) shr 3
             for (jj in 0 until h) {
                 for (i in 0 until w) {
-                    decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
-                    idctInto(j, comp, i, jj, data, tmp)
+                    // Without a restart interval nothing can follow the end of the data.
+                    val live = !starved(j)
+                    if (!live && j.restartInterval == 0) return
+                    if (live) {
+                        decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
+                        idctInto(j, comp, i, jj, data, tmp)
+                    }
                     if (--j.todo <= 0) {
                         if (j.codeBits < 24) growBuffer(j)
                         if (!isRestart(j.marker)) return
@@ -885,13 +906,17 @@ internal object JpegDecoder {
             // interleaved MCUs
             for (jj in 0 until j.mcuY) {
                 for (i in 0 until j.mcuX) {
-                    for (k in 0 until j.scanN) {
-                        val n = j.order[k]
-                        val comp = j.comp[n]
-                        for (y in 0 until comp.v) {
-                            for (x in 0 until comp.h) {
-                                decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
-                                idctInto(j, comp, i * comp.h + x, jj * comp.v + y, data, tmp)
+                    val live = !starved(j)
+                    if (!live && j.restartInterval == 0) return
+                    if (live) {
+                        for (k in 0 until j.scanN) {
+                            val n = j.order[k]
+                            val comp = j.comp[n]
+                            for (y in 0 until comp.v) {
+                                for (x in 0 until comp.h) {
+                                    decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
+                                    idctInto(j, comp, i * comp.h + x, jj * comp.v + y, data, tmp)
+                                }
                             }
                         }
                     }
@@ -916,11 +941,16 @@ internal object JpegDecoder {
             val h = (comp.y + 7) shr 3
             for (jj in 0 until h) {
                 for (i in 0 until w) {
-                    val ofs = 64 * (i + jj * comp.coeffW)
-                    if (j.specStart == 0) {
-                        decodeBlockProgDc(j, coeff, ofs, j.huffDc[comp.hd], n)
-                    } else {
-                        decodeBlockProgAc(j, coeff, ofs, j.huffAc[comp.ha], j.fastAc[comp.ha])
+                    // A block inside an EOB run reads no Huffman code, so it can be live with no data left.
+                    val live = !starved(j) || j.eobRun > 0
+                    if (!live && j.restartInterval == 0) return
+                    if (live) {
+                        val ofs = 64 * (i + jj * comp.coeffW)
+                        if (j.specStart == 0) {
+                            decodeBlockProgDc(j, coeff, ofs, j.huffDc[comp.hd], n)
+                        } else {
+                            decodeBlockProgAc(j, coeff, ofs, j.huffAc[comp.ha], j.fastAc[comp.ha])
+                        }
                     }
                     if (--j.todo <= 0) {
                         if (j.codeBits < 24) growBuffer(j)
@@ -933,15 +963,19 @@ internal object JpegDecoder {
             // interleaved progressive scans carry DC only
             for (jj in 0 until j.mcuY) {
                 for (i in 0 until j.mcuX) {
-                    for (k in 0 until j.scanN) {
-                        val n = j.order[k]
-                        val comp = j.comp[n]
-                        val coeff = comp.coeff!!
-                        for (y in 0 until comp.v) {
-                            for (x in 0 until comp.h) {
-                                val x2 = i * comp.h + x        // block coords, not pixels
-                                val y2 = jj * comp.v + y
-                                decodeBlockProgDc(j, coeff, 64 * (x2 + y2 * comp.coeffW), j.huffDc[comp.hd], n)
+                    val live = !starved(j)
+                    if (!live && j.restartInterval == 0) return
+                    if (live) {
+                        for (k in 0 until j.scanN) {
+                            val n = j.order[k]
+                            val comp = j.comp[n]
+                            val coeff = comp.coeff!!
+                            for (y in 0 until comp.v) {
+                                for (x in 0 until comp.h) {
+                                    val x2 = i * comp.h + x        // block coords, not pixels
+                                    val y2 = jj * comp.v + y
+                                    decodeBlockProgDc(j, coeff, 64 * (x2 + y2 * comp.coeffW), j.huffDc[comp.hd], n)
+                                }
                             }
                         }
                     }
@@ -1157,9 +1191,11 @@ internal object JpegDecoder {
         // stbi__decode_jpeg_image: scans until EOI
         m = getMarker(j)
         var sawScan = false
+        var scans = 0
         while (m != 0xD9) {   // EOI
             when {
                 m == 0xDA -> {   // SOS
+                    if (++scans > MAX_SCANS) err("more than $MAX_SCANS scans")
                     processScanHeader(j)
                     parseEntropyCodedData(j)
                     sawScan = true
