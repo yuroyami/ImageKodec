@@ -291,7 +291,8 @@ internal object PngDecoder {
                     val blend = f.u8()
 
                     if (fw <= 0 || fh <= 0) throw ImageDecodeException("PNG: fcTL empty frame ${fw}x$fh")
-                    if (fx < 0 || fy < 0 || fx + fw > width || fy + fh > height) {
+                    // Add in Long: an offset near Int.MAX_VALUE makes the Int sum wrap negative.
+                    if (fx < 0 || fy < 0 || fx.toLong() + fw > width || fy.toLong() + fh > height) {
                         throw ImageDecodeException(
                             "PNG: fcTL rect ${fw}x$fh at ($fx, $fy) leaves the ${width}x$height canvas",
                         )

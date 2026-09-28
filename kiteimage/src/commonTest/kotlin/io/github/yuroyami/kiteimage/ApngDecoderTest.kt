@@ -308,6 +308,22 @@ class ApngDecoderTest {
     }
 
     @Test
+    fun frameOffsetThatOverflowsAnIntIsRejected() {
+        // x + width wraps to a negative Int, which once slipped past the bounds check
+        // and reached the canvas write.
+        for ((x, y) in listOf(0x7FFFFFFF to 0, 0 to 0x7FFFFFFF)) {
+            val bytes = apng(
+                width = 1, height = 1,
+                defaultImage = solid(1, 1, red),
+                frames = listOf(solid(1, 1, green, x = x, y = y)),
+                defaultIsFirstFrame = true,
+            )
+            val e = assertFailsWith<ImageDecodeException> { KiteImage.decodeAnimation(bytes) }
+            assertTrue(e.message!!.contains("canvas"), "message should name the problem: ${e.message}")
+        }
+    }
+
+    @Test
     fun frameCountMismatchIsRejected() {
         val bytes = apng(
             width = 1, height = 1,
