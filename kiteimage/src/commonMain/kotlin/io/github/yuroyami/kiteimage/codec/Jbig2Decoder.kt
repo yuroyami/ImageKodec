@@ -1,5 +1,8 @@
 package io.github.yuroyami.kiteimage.codec
 
+import io.github.yuroyami.kiteimage.ImageDecodeException
+import io.github.yuroyami.kiteimage.internal.Budget
+
 
 /**
  * A pure-Kotlin JBIG2 decoder (ITU-T T.88) covering the flavours PDFs use for
@@ -21,9 +24,18 @@ package io.github.yuroyami.kiteimage.codec
  */
 public object Jbig2Decoder {
 
-    /** Decode [data] (the `/JBIG2Decode` stream) with optional [globals] into a 1bpp bitmap. */
-    public fun decode(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? =
-        runCatching { Ctx().decodeEmbedded(data, globals, width, height) }.getOrNull()
+    /**
+     * Decode [data] (the `/JBIG2Decode` stream) with optional [globals] into a 1bpp bitmap of [width]
+     * by [height] pixels. Rows are packed MSB first and padded to a whole byte, and a set bit is white.
+     *
+     * Returns null when the stream is damaged or uses a feature this decoder lacks, and when [width] or
+     * [height] is not positive or the page would pass 2^28 pixels. The input size says little about the
+     * page, because a blank scanned page takes a few dozen bytes, so only the pixel ceiling applies.
+     */
+    public fun decode(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? {
+        if (width < 1 || height < 1 || width.toLong() * height > Budget.MAX_PIXELS) return null
+        return runCatching { Ctx().decodeEmbedded(data, globals, width, height) }.getOrNull()
+    }
 
     // The MQ arithmetic decoder (T.88 Annex E) lives in the shared [MqDecoder],
     // which JPEG 2000 tier-1 coding reuses (the two specs define one coder).
@@ -200,6 +212,10 @@ public object Jbig2Decoder {
     // ---- bitmap -------------------------------------------------------------
 
     private class Bitmap(val w: Int, val h: Int) {
+        // Every size in a segment is a header field. One byte a pixel, so 2^28 pixels is 256 MiB.
+        init {
+            require(w >= 0 && h >= 0 && w.toLong() * h <= Budget.MAX_PIXELS) { "JBIG2: a ${w}x$h bitmap passes the pixel ceiling" }
+        }
         val bits = ByteArray(w * h) // 0/1 per pixel
         fun get(x: Int, y: Int): Int = if (x < 0 || x >= w || y < 0 || y >= h) 0 else bits[y * w + x].toInt()
         fun set(x: Int, y: Int, v: Int) { if (x in 0 until w && y in 0 until h) bits[y * w + x] = v.toByte() }
@@ -952,13 +968,17 @@ public object Jbig2Decoder {
                     count = (r.u32() and 0x1FFFFFFF).toInt()
                     r.skip((count + 8) / 8)
                 } else { count = rtByte ushr 5; r.skip(1) }
+                // Each referred-to segment takes a byte or more, so a count past the data is a lie.
+                if (count > data.size) throw ImageDecodeException("JBIG2: $count referred-to segments cannot fit in ${data.size} bytes")
                 val refSize = if (number <= 256) 1 else if (number <= 65536) 2 else 4
                 val refs = LongArray(count) { when (refSize) { 1 -> r.u8().toLong(); 2 -> r.u16().toLong(); else -> r.u32() } }
                 val pageAssoc = if (pageAssocSize == 4) r.u32() else r.u8().toLong()
                 val dataLen = r.u32()
                 if (dataLen == 0xFFFFFFFFL) break // unknown-length generic region: unsupported
                 val start = r.pos
-                val end = minOf(data.size, start + dataLen.toInt())
+                // Long: a length of 0xFFFFFFF5 is -11 as an Int, which put the cursor back on this header
+                // and made the walk parse it forever. In Long, end is never before start.
+                val end = minOf(data.size.toLong(), start + dataLen).toInt()
                 out.add(Segment(number, type, refs, pageAssoc, data, start, end))
                 r.pos = end
                 if (end >= data.size) break
@@ -970,10 +990,16 @@ public object Jbig2Decoder {
     private fun ceilLog2(n: Int): Int { var v = 1; var b = 0; while (v < n) { v = v shl 1; b++ }; return b }
 
     private class R(val d: ByteArray, var pos: Int) {
-        fun u8(): Int = d[pos++].toInt() and 0xFF
+        // An index past the end is a trap on webassembly, not an exception, so each read checks first.
+        private fun need(n: Int) {
+            if (pos < 0 || n > d.size - pos) throw ImageDecodeException("JBIG2: the data ends at offset $pos")
+        }
+
+        fun u8(): Int { need(1); return d[pos++].toInt() and 0xFF }
         fun s8(): Int { val v = u8(); return if (v >= 0x80) v - 256 else v }
-        fun u16(): Int { val v = ((d[pos].toInt() and 0xFF) shl 8) or (d[pos + 1].toInt() and 0xFF); pos += 2; return v }
+        fun u16(): Int { need(2); val v = ((d[pos].toInt() and 0xFF) shl 8) or (d[pos + 1].toInt() and 0xFF); pos += 2; return v }
         fun u32(): Long {
+            need(4)
             val v = ((d[pos].toLong() and 0xFF) shl 24) or ((d[pos + 1].toLong() and 0xFF) shl 16) or
                 ((d[pos + 2].toLong() and 0xFF) shl 8) or (d[pos + 3].toLong() and 0xFF)
             pos += 4; return v

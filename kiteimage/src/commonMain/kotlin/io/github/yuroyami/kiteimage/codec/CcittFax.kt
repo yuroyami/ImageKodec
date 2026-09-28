@@ -1,5 +1,8 @@
 package io.github.yuroyami.kiteimage.codec
 
+import io.github.yuroyami.kiteimage.ImageDecodeException
+import io.github.yuroyami.kiteimage.internal.Budget
+
 /*
  * CCITT Group 3 / Group 4 (ITU-T T.4 / T.6) facsimile decoding: moved from
  * KitePDF's `/CCITTFaxDecode` filter (the algorithm half; the PdfDictionary
@@ -21,6 +24,9 @@ public object CcittFax {
      * Decode with the mode selection PDF's `/K` uses: negative = pure 2D
      * (Group 4, T.6), zero = pure 1D (Group 3, T.4). Positive (mixed 1D/2D)
      * falls back to 1D, matching the KitePDF behavior this came from.
+     *
+     * @throws ImageDecodeException if [CcittOptions.columns] is outside 1 to 2^24, if
+     *   [CcittOptions.rows] is negative, or if the decoded image would pass 2^28 pixels
      */
     public fun decode(input: ByteArray, k: Int, options: CcittOptions): ByteArray {
         val reader = BitReader(input)
@@ -28,6 +34,10 @@ public object CcittFax {
     }
 }
 
+/**
+ * The parameters fax data does not carry. [columns] is the row width in pixels. [rows] is the
+ * row count, or 0 when it is not known and the decode runs until the data ends.
+ */
 public data class CcittOptions(
     val columns: Int,
     val rows: Int,
@@ -479,7 +489,32 @@ private fun peekAndTry(reader: BitReader, table: HuffmanTable): Int? {
  * Decode Group 4 (T.6) 2D-only encoding. Output is `rows × bytesPerRow`
  * bytes; rows are MSB-packed and zero-padded at the line end.
  */
+/** Widest row accepted: the same dimension ceiling the container decoders use. */
+private const val MAX_COLUMNS = 1 shl 24
+
+/**
+ * The caller's geometry is a header field like any other, and in a PDF it comes from the file. Fax
+ * data can state a row in one bit, so the input size says little about how large the page may be, and
+ * the pixel ceiling is what bounds the memory. `Budget.fits` would refuse a blank scanned page.
+ */
+private fun checkGeometry(opts: CcittOptions) {
+    val cols = opts.columns
+    if (cols < 1 || cols > MAX_COLUMNS) throw ImageDecodeException("CCITT: $cols columns is outside 1 to $MAX_COLUMNS")
+    if (opts.rows < 0) throw ImageDecodeException("CCITT: ${opts.rows} rows")
+    if (opts.rows.toLong() * cols > Budget.MAX_PIXELS) {
+        throw ImageDecodeException("CCITT: ${opts.rows} rows of $cols columns pass ${Budget.MAX_PIXELS} pixels")
+    }
+}
+
+/** Throws when one more row, after [rows] decoded ones, would take the page past the pixel ceiling. */
+private fun checkRoomForRow(rows: Int, cols: Int) {
+    if ((rows + 1).toLong() * cols > Budget.MAX_PIXELS) {
+        throw ImageDecodeException("CCITT: more than ${Budget.MAX_PIXELS} pixels of $cols columns")
+    }
+}
+
 internal fun decodeGroup4(reader: BitReader, opts: CcittOptions): ByteArray {
+    checkGeometry(opts)
     val cols = opts.columns
     val bytesPerRow = (cols + 7) / 8
     // Reference line: implicit all-white (a virtual change at column = cols).
@@ -495,6 +530,7 @@ internal fun decodeGroup4(reader: BitReader, opts: CcittOptions): ByteArray {
             reader.skipBits(24)
             break
         }
+        checkRoomForRow(row, cols)
         val codingLine = decodeOneG4Row(reader, refLine, cols) ?: break
         output += packRow(codingLine, cols, bytesPerRow, opts.blackIs1)
         refLine = codingLine
@@ -617,6 +653,7 @@ private fun fillRange(line: IntArray, from: Int, to: Int, color: Int) {
 /* ─── Group 3 1D decoder ──────────────────────────────────────────────────── */
 
 internal fun decodeGroup3OneD(reader: BitReader, opts: CcittOptions): ByteArray {
+    checkGeometry(opts)
     val cols = opts.columns
     val bytesPerRow = (cols + 7) / 8
     val rows = ArrayList<ByteArray>()
@@ -631,6 +668,7 @@ internal fun decodeGroup3OneD(reader: BitReader, opts: CcittOptions): ByteArray 
             // Skip to next EOL marker (11 zero bits then a 1).
             consumeOptionalEol(reader)
         }
+        checkRoomForRow(rowIndex, cols)
         val coding = IntArray(cols)
         var pos = 0
         var color = 0  // 0 = white
