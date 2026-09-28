@@ -303,6 +303,20 @@ class TiffExtendedTest {
         assertTrue(KiteImage.probe(bytes).hasAlpha)
     }
 
+    // --- damaged and unusual files ----------------------------------------------------
+
+    @Test
+    fun aCorruptDeflateStripIsADecodeError() {
+        // The strip bytes 0x40 0xC0 are not a zlib header. PNG converts that failure
+        // into an ImageDecodeException, and TIFF has to do the same.
+        for (compression in intArrayOf(8, 32946)) {
+            val e = assertFailsWith<ImageDecodeException>("compression $compression") {
+                KiteImage.decode(greyTiff(short(259, compression)))
+            }
+            assertTrue(e.message!!.contains("inflate"), "message should name the problem: ${e.message}")
+        }
+    }
+
     // --- probe agrees with decode ---------------------------------------------------
 
     /**

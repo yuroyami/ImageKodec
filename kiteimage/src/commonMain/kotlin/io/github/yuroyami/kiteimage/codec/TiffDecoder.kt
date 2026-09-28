@@ -4,6 +4,7 @@ import io.github.yuroyami.kiteimage.ImageDecodeException
 import io.github.yuroyami.kiteimage.KiteBitmap
 import io.github.yuroyami.kiteimage.UnsupportedImageException
 import io.github.yuroyami.kiteimage.internal.Budget
+import io.github.yuroyami.kiteimage.internal.flate.InflateException
 import io.github.yuroyami.kiteimage.internal.flate.Zlib
 
 /**
@@ -202,7 +203,11 @@ internal object TiffDecoder {
             return when (compression) {
                 1 -> comp.copyOf(expect)
                 5 -> tiffLzw(comp, expect)
-                8, 32946 -> Zlib.decompress(comp, expect.toLong()).copyOf(expect)
+                8, 32946 -> try {
+                    Zlib.decompress(comp, expect.toLong()).copyOf(expect)
+                } catch (e: InflateException) {
+                    throw ImageDecodeException("TIFF: strip inflate failed: ${e.message}", e)
+                }
                 32773 -> packBits(comp, expect)
                 2 -> ccittStrip(comp, k = 0, columns, rows, byteAligned = true)
                 3 -> {
