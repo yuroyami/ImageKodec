@@ -195,6 +195,22 @@ class GifDecoderTest {
     }
 
     @Test
+    fun framesAreCountedAgainstTheInputSize() {
+        // Every frame keeps a full canvas, so 20 one-pixel frames on a 1024 by 1024 screen
+        // hold 80 MiB of pixels and cost about 16 bytes of input each.
+        fun le16(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v ushr 8) and 0xFF).toByte())
+        var bytes = "GIF89a".encodeToByteArray() + le16(1024) + le16(1024) +
+            byteArrayOf(0x80.toByte(), 0, 0) + hex("000000ffffff")
+        repeat(20) {
+            bytes += byteArrayOf(0x2C) + le16(0) + le16(0) + le16(1) + le16(1) + byteArrayOf(0) +
+                byteArrayOf(2, 2, 0x44, 0x01, 0)                          // min code size 2: one pixel, index 0
+        }
+        bytes += byteArrayOf(0x3B)
+        val e = assertFailsWith<ImageDecodeException> { KiteImage.decodeAnimation(bytes) }
+        assertTrue(e.message!!.contains("cannot come from"), "message should name the problem: ${e.message}")
+    }
+
+    @Test
     fun aFrameLargerThanTheScreenIsStillClipped() {
         // Real files do this, so the size check must not treat it as an error. The frame
         // is 2x2, the screen 1x1, and the LZW data is four pixels of index 1: white.

@@ -308,6 +308,20 @@ class ApngDecoderTest {
     }
 
     @Test
+    fun framesAreCountedAgainstTheInputSize() {
+        // Every frame keeps a full canvas, so 20 one-pixel frames on a 1024 by 1024 canvas
+        // hold 80 MiB of pixels and cost about 60 bytes of input each.
+        val bytes = apng(
+            width = 1024, height = 1024,
+            defaultImage = solid(1, 1, red),
+            frames = List(20) { solid(1, 1, green) },
+            defaultIsFirstFrame = false,
+        )
+        val e = assertFailsWith<ImageDecodeException> { KiteImage.decodeAnimation(bytes) }
+        assertTrue(e.message!!.contains("cannot come from"), "message should name the problem: ${e.message}")
+    }
+
+    @Test
     fun frameOffsetThatOverflowsAnIntIsRejected() {
         // x + width wraps to a negative Int, which once slipped past the bounds check
         // and reached the canvas write.

@@ -33,4 +33,14 @@ internal object Budget {
     /** True when [width] × [height] fits the budget for an input of [inputBytes]. */
     fun fits(width: Int, height: Int, inputBytes: Int): Boolean =
         width > 0 && height > 0 && width.toLong() * height <= pixelCap(inputBytes)
+
+    /**
+     * True when [frames] full canvases of [width] × [height] fit the budget for an
+     * input of [inputBytes]. An animation keeps one composited canvas per frame, so
+     * the canvas alone passing [fits] says nothing about the frames: a tiny frame
+     * costs a few bytes of input and a whole canvas of memory.
+     */
+    fun framesFit(width: Int, height: Int, frames: Int, inputBytes: Int): Boolean =
+        width > 0 && height > 0 && frames > 0 &&
+            width.toLong() * height * frames <= pixelCap(inputBytes)
 }

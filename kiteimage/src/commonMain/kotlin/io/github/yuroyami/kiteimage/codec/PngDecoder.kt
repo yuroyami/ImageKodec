@@ -39,7 +39,7 @@ internal object PngDecoder {
 
     private const val MAX_DIMENSION = 1 shl 24       // 16M px per side
     private const val MAX_PIXELS = 1L shl 28         // 268M px ≈ 1 GiB of ARGB; bomb guard
-    private const val MAX_TOTAL_PIXELS = 1L shl 28   // canvas px × frames; animation bomb guard
+    private const val MAX_TOTAL_PIXELS = 1L shl 28   // most frames an acTL may claim
 
     // APNG dispose_op / blend_op wire values (APNG spec).
     private const val DISPOSE_NONE = 0
@@ -76,9 +76,9 @@ internal object PngDecoder {
             )
         }
 
-        if (png.width.toLong() * png.height * png.frames.size > MAX_TOTAL_PIXELS) {
+        if (!Budget.framesFit(png.width, png.height, png.frames.size, data.size)) {
             throw ImageDecodeException(
-                "APNG: ${png.frames.size} frames of ${png.width}x${png.height} exceeds safety limits",
+                "APNG: ${png.frames.size} frames of ${png.width}x${png.height} cannot come from ${data.size} bytes",
             )
         }
 

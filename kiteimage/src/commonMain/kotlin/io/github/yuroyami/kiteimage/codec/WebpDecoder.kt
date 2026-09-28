@@ -29,7 +29,6 @@ internal object WebpDecoder {
 
     private const val MAX_DIMENSION = 1 shl 24
     private const val MAX_PIXELS = 1L shl 28
-    private const val MAX_TOTAL_PIXELS = 1L shl 28
 
     private const val LOSSY_MESSAGE =
         "WebP lossy (VP8) is not supported; this build decodes lossless (VP8L) WebP only"
@@ -56,8 +55,8 @@ internal object WebpDecoder {
 
         val w = file.canvasWidth
         val h = file.canvasHeight
-        if (w.toLong() * h * file.frames.size > MAX_TOTAL_PIXELS) {
-            err("${file.frames.size} frames of ${w}x$h exceeds safety limits")
+        if (!Budget.framesFit(w, h, file.frames.size, data.size)) {
+            err("${file.frames.size} frames of ${w}x$h cannot come from ${data.size} bytes")
         }
 
         val canvas = IntArray(w * h)                     // starts fully transparent

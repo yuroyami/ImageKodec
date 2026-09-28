@@ -32,7 +32,7 @@ import io.github.yuroyami.kiteimage.internal.ByteReader
 internal object GifDecoder {
 
     private const val MAX_DIMENSION = 1 shl 16       // GIF fields are u16 anyway
-    private const val MAX_TOTAL_PIXELS = 1L shl 28   // canvas px × frames; bomb guard
+    private const val MAX_TOTAL_PIXELS = 1L shl 28   // largest canvas; frames are counted against the input size
     private const val MAX_CODES = 4096               // LZW dictionary limit (12-bit codes)
 
     /**
@@ -130,6 +130,12 @@ internal object GifDecoder {
                         }
                     }
 
+                    // Every frame keeps a full canvas, so count them before the copy is made.
+                    if (!Budget.framesFit(width, height, frames.size + 1, data.size)) {
+                        throw ImageDecodeException(
+                            "GIF: ${frames.size + 1} frames of ${width}x$height cannot come from ${data.size} bytes",
+                        )
+                    }
                     frames.add(
                         KiteFrame(
                             bitmap = KiteBitmap(width, height, canvas.copyOf()),
@@ -139,9 +145,6 @@ internal object GifDecoder {
                     )
                     if (firstFrameOnly) return KiteAnimation(width, height, frames, loopCount)
                     cancellationCheck?.invoke()
-                    if ((frames.size + 1).toLong() * width * height > MAX_TOTAL_PIXELS) {
-                        throw ImageDecodeException("GIF: frame count exceeds the $MAX_TOTAL_PIXELS-pixel safety limit")
-                    }
 
                     // Dispose AFTER presenting, preparing the canvas for the next frame.
                     when (disposal) {
