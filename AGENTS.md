@@ -12,6 +12,9 @@ being true.
 - The OpenJPEG, libtiff and libwebp suites skip themselves when their binary is
   missing, and a skipped test reports as a pass, so read the skip count and not
   only the green run (#14).
-- JPEG 2000 does not use the shared `Budget` guard and keeps its own pixel
-  ceiling in two places, so the probe and the decode can disagree about which
-  files are too big (#2).
+- The JPEG 2000 probe does not check the shared `Budget` guard that the decoder
+  checks, and both keep their own pixel ceiling, so the probe can call a file
+  decodable that the decoder refuses (#2).
+- A format with no file in the `FuzzTest` corpus is not fuzzed at all. JPEG 2000
+  had none, so a packet header cut off by the end of the data looped forever and
+  no test noticed.

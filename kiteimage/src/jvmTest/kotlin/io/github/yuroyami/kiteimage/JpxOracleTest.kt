@@ -157,6 +157,14 @@ class JpxOracleTest {
     }
 
     @Test
+    fun an_image_whose_origin_is_not_zero_decodes() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        // At (5, 3) the first precinct of a high-pass band starts at an odd sample.
+        val (kite, ref) = both(encode(ppm(), "-d", "5,3"))
+        compare("offset", kite, ref, tolerance = 0)
+    }
+
+    @Test
     fun the_corpus_fixture_jp2_decodes_exactly() {
         assumeTrue("OpenJPEG tools not found, skipping.", tools())
         // Pull the embedded codestream straight out of the corpus PDF.

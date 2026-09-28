@@ -1,5 +1,6 @@
 package io.github.yuroyami.kiteimage.codec
 
+import io.github.yuroyami.kiteimage.internal.Budget
 import kotlin.math.max
 import kotlin.math.min
 
@@ -107,9 +108,14 @@ public object JpxDecoder {
     // ---- codestream headers --------------------------------------------------
 
     private class R(val d: ByteArray, var pos: Int) {
-        fun u8(): Int = d[pos++].toInt() and 0xFF
-        fun u16(): Int { val v = ((d[pos].toInt() and 0xFF) shl 8) or (d[pos + 1].toInt() and 0xFF); pos += 2; return v }
-        fun u32i(): Int { val v = u32(d, pos); pos += 4; return v.toInt() }
+        // A read past the end must throw here: on WebAssembly an index out of bounds is a trap
+        // that no catch sees, so a cut header would stop the whole program.
+        private fun need(n: Int) {
+            if (pos < 0 || pos + n > d.size) throw IllegalStateException("JPEG 2000 header cut off at $pos")
+        }
+        fun u8(): Int { need(1); return d[pos++].toInt() and 0xFF }
+        fun u16(): Int { need(2); val v = ((d[pos].toInt() and 0xFF) shl 8) or (d[pos + 1].toInt() and 0xFF); pos += 2; return v }
+        fun u32i(): Int { need(4); val v = u32(d, pos); pos += 4; return v.toInt() }
     }
 
     private class Siz(
@@ -187,10 +193,17 @@ public object JpxDecoder {
             return true // leaf value = low[leaf] < threshold
         }
 
-        /** Decode until the leaf's exact value is known (zero-bitplane trees). */
+        /**
+         * Decode until the leaf's exact value is known (zero-bitplane trees). Returns -1 when the
+         * data ends first, because the zero bits past the end never finish a value, or when the
+         * value passes any real bit depth.
+         */
         fun decodeValue(bio: Bio, x: Int, y: Int): Int {
             var t = 1
-            while (!decode(bio, x, y, t)) t++
+            while (!decode(bio, x, y, t)) {
+                if (bio.exhausted || t >= MAX_ZERO_BITPLANES) return -1
+                t++
+            }
             return low[idx(0, x, y)]
         }
     }
@@ -202,9 +215,12 @@ public object JpxDecoder {
         private var ct = 0
         private var lastFF = false
 
+        /** True once a read went past [end]: every later bit is a 0 that the data never held. */
+        var exhausted = false
+
         fun bit(): Int {
             if (ct == 0) {
-                if (pos >= end) { buf = 0; ct = if (lastFF) 7 else 8; lastFF = false }
+                if (pos >= end) { buf = 0; ct = if (lastFF) 7 else 8; lastFF = false; exhausted = true }
                 else {
                     buf = d[pos++].toInt() and 0xFF
                     ct = if (lastFF) 7 else 8
@@ -379,7 +395,9 @@ public object JpxDecoder {
 
         val imgW = s.xsiz - s.xosiz
         val imgH = s.ysiz - s.yosiz
-        if (imgW <= 0 || imgH <= 0 || imgW.toLong() * imgH > 64L shl 20) return null
+        // The size a header claims must fit the input's budget too, so a damaged SIZ cannot
+        // make a small file allocate planes for tens of megapixels.
+        if (imgW <= 0 || imgH <= 0 || imgW.toLong() * imgH > 64L shl 20 || !Budget.fits(imgW, imgH, data.size)) return null
 
         // Component output planes at full component resolution.
         val planeW = IntArray(s.comps) { ceilDiv(s.xsiz, s.dx[it]) - ceilDiv(s.xosiz, s.dx[it]) }
@@ -528,16 +546,14 @@ public object JpxDecoder {
                     val precincts = ArrayList<Precinct>(max(0, numPw * numPh))
                     val shift = if (rr == 0) 0 else 1
                     for (pj in 0 until numPh) for (pi in 0 until numPw) {
-                        // Precinct rect on the resolution grid...
-                        val prx0 = max(rx0, ((rx0 shr ppx) + pi) shl ppx)
-                        val pry0 = max(ry0, ((ry0 shr ppy) + pj) shl ppy)
-                        val prx1 = min(rx1, ((rx0 shr ppx) + pi + 1) shl ppx)
-                        val pry1 = min(ry1, ((ry0 shr ppy) + pj + 1) shl ppy)
-                        // ...mapped into band coordinates.
-                        val pbx0 = if (rr == 0) prx0 else ceilDiv(prx0, 2)
-                        val pby0 = if (rr == 0) pry0 else ceilDiv(pry0, 2)
-                        val pbx1 = if (rr == 0) prx1 else ceilDiv(prx1, 2)
-                        val pby1 = if (rr == 0) pry1 else ceilDiv(pry1, 2)
+                        // The precinct's grid lines on the resolution grid, in band coordinates. A band
+                        // below the top level has half the precinct size (B.6), so halve the grid lines,
+                        // not the corners clipped to the resolution: a high-pass band that starts at an
+                        // odd sample otherwise loses its first column.
+                        val pbx0 = (((rx0 shr ppx) + pi) shl ppx) shr shift
+                        val pby0 = (((ry0 shr ppy) + pj) shl ppy) shr shift
+                        val pbx1 = (((rx0 shr ppx) + pi + 1) shl ppx) shr shift
+                        val pby1 = (((ry0 shr ppy) + pj + 1) shl ppy) shr shift
                         val ibx0 = max(pbx0, bx0); val iby0 = max(pby0, by0)
                         val ibx1 = min(pbx1, bx1); val iby1 = min(pby1, by1)
                         if (ibx1 <= ibx0 || iby1 <= iby0) {
@@ -671,6 +687,12 @@ public object JpxDecoder {
                         incl = precinct.inclTree.decode(bio, gx, gy, layer + 1)
                         if (incl) {
                             cb.zeroBitplanes = precinct.zeroTree.decodeValue(bio, gx, gy)
+                            // A header cut off by the end of the data: keep the packets before it and
+                            // skip the rest of the tile, as OpenJPEG does with a short stream.
+                            if (cb.zeroBitplanes < 0) {
+                                pos = d.size
+                                return
+                            }
                             cb.lBlock = 3
                         }
                     } else {
@@ -1069,6 +1091,9 @@ public object JpxDecoder {
     }
 
     private const val FRACT = 13
+
+    /** More zero bitplanes than any sample holds: the header is damaged. */
+    private const val MAX_ZERO_BITPLANES = 64
 
     private fun pow2(e: Double): Double {
         var v = 1.0

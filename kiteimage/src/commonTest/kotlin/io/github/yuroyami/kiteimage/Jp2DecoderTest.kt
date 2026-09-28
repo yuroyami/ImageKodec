@@ -1,13 +1,21 @@
 package io.github.yuroyami.kiteimage
 
+import io.github.yuroyami.kiteimage.codec.JpxDecoder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.math.abs
+
+/** An ffmpeg-encoded JP2 file, 32 by 24 RGB. `FuzzTest` mutates it as well. */
+internal val JP2 = "0000000c6a5020200d0a870a00000014667479706a703220000000006a7032200000002d6a703268000000166968647200000018000000200003080700000000000f636f6c72010000000000100000013f6a703263ff4fff51002f000000000020000000" +
+        "180000000000000000000001000000010000000000000000000003070101070101070101ff52000c00000001000602020000ff5c0029227f207ee07ee07ea076f076f076c06f006f006ee067506750676850055005504757d357d35762ff64001100014c" +
+        "61766336322e31312e313030ff90000a0000000000b60001ff93c7f80208dfc7f40307257fcfe80405cd000000c7f2060000707fa7f80200047ec3f60283f302000478003bc7ec0c000d032ddeae49a07d6060087f5fc1f702403e70400d01e7dc08fbc1" +
+        "f503801bec034dc0d500a1f584800cbf2288dac56bab3fc0f942c0f942801bf45d852d0cbf4a893ac1f20600369cf674ee35a1f28800408e009b23c0298fc0f84381e0c0369d274acfcfc0e8805fa7c53fa062008ca4293fc023005fa7bfffd9"
 
 /**
  * JPEG 2000 through the facade: an ffmpeg-encoded JP2 (32x24, high quality),
@@ -17,10 +25,6 @@ import kotlin.math.abs
  */
 class Jp2DecoderTest {
 
-    private val JP2 = "0000000c6a5020200d0a870a00000014667479706a703220000000006a7032200000002d6a703268000000166968647200000018000000200003080700000000000f636f6c72010000000000100000013f6a703263ff4fff51002f000000000020000000" +
-            "180000000000000000000001000000010000000000000000000003070101070101070101ff52000c00000001000602020000ff5c0029227f207ee07ee07ea076f076f076c06f006f006ee067506750676850055005504757d357d35762ff64001100014c" +
-            "61766336322e31312e313030ff90000a0000000000b60001ff93c7f80208dfc7f40307257fcfe80405cd000000c7f2060000707fa7f80200047ec3f60283f302000478003bc7ec0c000d032ddeae49a07d6060087f5fc1f702403e70400d01e7dc08fbc1" +
-            "f503801bec034dc0d500a1f584800cbf2288dac56bab3fc0f942c0f942801bf45d852d0cbf4a893ac1f20600369cf674ee35a1f28800408e009b23c0298fc0f84381e0c0369d274acfcfc0e8805fa7c53fa062008ca4293fc023005fa7bfffd9"
     private val EXPECTED_RGB = "00030207030311030519030820030a29030c31030f3903114203134a03155203185a031a62031c6a031f7303217b03248303268c032894032b9c032da40330ac0332b50334bd0336c50338cd033bd5033edd0340e50342ef0345f50347ff034a000a0307" +
             "0a04110a06190a09200a0b290a0e310a10390a12420a144a0a17520a195a0a1b620a1e6a0a20730a227b0a25830a278c0a2a940a2c9c0a2ea40a31ac0a33b50a35bd0a37c50a39cd0a3cd50a3fdd0a41e50a43ef0a46f50a48ff0a4b0016050716061116" +
             "0819160b20160e2916103116123916144216174a161952161b5a161e6216206a16227316257b16278316298c162c94162e9c1631a41633ac1635b51637bd163ac5163ccd163fd51642dd1644e51645ef1648f5164aff164d00210807210911210b19210e" +
@@ -103,6 +107,47 @@ class Jp2DecoderTest {
             0x00, 0x04, 0x00, 0x00,                  // length 4, two bytes of payload
         )
         return cs.copyOfRange(0, sot) + segment + cs.copyOfRange(sot, cs.size)
+    }
+
+    @Test
+    fun aCodestreamCutInsideItsPacketsDecodesThePartItHas() {
+        // A packet header cut off by the end of the data used to loop forever on the zero bits
+        // past the end. Like OpenJPEG, the decoder keeps the packets before the cut.
+        val cs = codestream()
+        for (end in indexOfMarker(cs, 0xFF93) + 3 until cs.size) {
+            val result = assertNotNull(JpxDecoder.decode(cs.copyOf(end)), "cut at $end of ${cs.size}")
+            assertEquals(32, result.width, "cut at $end")
+            assertEquals(24, result.height, "cut at $end")
+        }
+    }
+
+    @Test
+    fun aHeaderCutOffInsideASegmentFailsCleanly() {
+        // WebAssembly traps on an index out of bounds instead of throwing, so the header reader
+        // must check its bounds itself. Without that, this test stops the wasm test run.
+        val cs = codestream()
+        val siz = indexOfMarker(cs, 0xFF51)
+        for (end in siz + 2 until siz + 40) assertNull(JpxDecoder.decode(cs.copyOf(end)), "cut at $end")
+    }
+
+    @Test
+    fun aBoxLengthPastTheEndOfTheFileIsADecodeError() {
+        // 0xB5000014 does not fit an Int. The box walk used to wrap it negative and read outside the array.
+        val bytes = hex(JP2)
+        bytes[12] = 0xB5.toByte()
+        assertFailsWith<ImageDecodeException> { KiteImage.probe(bytes) }
+    }
+
+    @Test
+    fun aSizeThatTheInputCannotHoldIsRefused() {
+        // A codestream of a few hundred bytes that claims 4,096 by 4,096 samples would allocate
+        // about 200 MB of planes. The input-size budget refuses it, as it does for a JPEG.
+        val cs = codestream()
+        val siz = indexOfMarker(cs, 0xFF51)
+        for (field in intArrayOf(siz + 6, siz + 10)) {
+            cs[field] = 0; cs[field + 1] = 0; cs[field + 2] = 0x10; cs[field + 3] = 0
+        }
+        assertNull(JpxDecoder.decode(cs))
     }
 
     @Test

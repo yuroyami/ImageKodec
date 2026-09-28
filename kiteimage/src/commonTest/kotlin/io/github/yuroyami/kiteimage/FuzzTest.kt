@@ -59,6 +59,7 @@ class FuzzTest {
         "webp-lossless" to hex(WEBP_LOSSLESS),
         "webp-animation" to hex(WEBP_ANIMATION),
         "tiff" to hex(TIFF_RGB),
+        "jp2" to hex(JP2),
     )
 
     private val WEBP_LOSSLESS = "524946462e000000574542505650384c220000002f0fc00200b93244f43f7651ffe87f8048dba622eedfeed8f13c4c404c005c07eb3f"

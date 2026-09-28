@@ -62,6 +62,20 @@ reviewable in the diff.
 
 ### Fixed
 
+- **A JPEG 2000 codestream cut off inside a packet header made the decoder loop
+  forever.** The decoder now keeps the packets before the cut and skips the rest
+  of the tile, as OpenJPEG does.
+- **A JPEG 2000 image whose origin is not zero decoded as noise.** The first
+  precinct of a high-pass band lost its first column, so every packet header
+  after it read the wrong code-blocks.
+- **On WebAssembly, a JPEG 2000 header cut off inside a segment stopped the
+  program.** WebAssembly traps on an index out of bounds instead of throwing,
+  and the header reader relied on the exception. It now checks its bounds, so
+  the decode fails cleanly.
+- The JPEG 2000 decoder now checks the input-size budget, so a damaged header in
+  a small file cannot allocate planes for tens of megapixels.
+- `KiteImage.probe` threw `ArrayIndexOutOfBoundsException` for a JP2 box whose
+  length does not fit an `Int`. It now throws `ImageDecodeException`.
 - **The Compose and Coil bindings ignored EXIF orientation**, so a phone photo
   drew on its side. Both now decode with orientation applied, which is what
   Coil's own platform decoders do; swapping in `KiteImageDecoder` is no longer a

@@ -563,7 +563,8 @@ internal object ImageProbe {
                 len = (data.size - p).toLong()                 // "to end of file"
             }
             if (type == "jp2c") return p + header
-            if (len < header) return null
+            // A box that claims to run past the file ends the walk; its length need not fit an Int.
+            if (len < header || len > data.size - p) return null
             p += len.toInt()
         }
         return null
