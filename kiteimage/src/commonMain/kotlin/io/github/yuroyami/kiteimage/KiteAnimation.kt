@@ -38,6 +38,7 @@ public class KiteAnimation(
 
     public val isAnimated: Boolean get() = frames.size > 1
 
-    /** Sum of frame delays for one loop, in milliseconds. */
-    public val durationMillis: Int get() = frames.sumOf { it.delayMillis }
+    /** Sum of frame delays for one loop, in milliseconds. It stops at [Int.MAX_VALUE] instead of wrapping. */
+    public val durationMillis: Int
+        get() = frames.sumOf { it.delayMillis.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }

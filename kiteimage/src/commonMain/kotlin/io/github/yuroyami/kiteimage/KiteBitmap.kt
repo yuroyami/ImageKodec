@@ -18,8 +18,9 @@ public class KiteBitmap(
 ) {
     init {
         require(width > 0 && height > 0) { "bitmap dimensions must be positive: ${width}x$height" }
-        require(argb.size == width * height) {
-            "argb has ${argb.size} pixels, expected ${width}x$height = ${width * height}"
+        // Long: the product of two large sides wraps an Int, and an empty array passed for 65536 x 65536.
+        require(argb.size.toLong() == width.toLong() * height) {
+            "argb has ${argb.size} pixels, expected ${width}x$height = ${width.toLong() * height}"
         }
     }
 

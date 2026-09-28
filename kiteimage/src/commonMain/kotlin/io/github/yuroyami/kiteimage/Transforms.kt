@@ -117,7 +117,8 @@ public fun KiteBitmap.oriented(orientation: Orientation): KiteBitmap = when (ori
  */
 public fun KiteBitmap.cropped(x: Int, y: Int, width: Int, height: Int): KiteBitmap {
     require(width > 0 && height > 0) { "crop size must be positive: ${width}x$height" }
-    require(x >= 0 && y >= 0 && x + width <= this.width && y + height <= this.height) {
+    // Add in Long: near Int.MAX_VALUE the Int sum wraps negative and would pass.
+    require(x >= 0 && y >= 0 && x.toLong() + width <= this.width && y.toLong() + height <= this.height) {
         "crop ${width}x$height at ($x, $y) is outside ${this.width}x${this.height}"
     }
     if (x == 0 && y == 0 && width == this.width && height == this.height) return this

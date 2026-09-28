@@ -58,13 +58,14 @@ public fun KiteAnimatedImage(
         LaunchedEffect(animation) {
             val frames = animation.frames
             // frameEnds[i] = cumulative time at which frame i stops showing.
-            val frameEnds = IntArray(frames.size)
-            var acc = 0
+            // Long: 3300 frames of a GIF's longest delay (655.35 s) already pass Int.MAX_VALUE.
+            val frameEnds = LongArray(frames.size)
+            var acc = 0L
             for (i in frames.indices) {
                 acc += frames[i].delayMillis
                 frameEnds[i] = acc
             }
-            val loopMillis = acc.toLong()
+            val loopMillis = acc
             if (loopMillis <= 0L) {
                 // Degenerate: every delay is zero; nothing meaningful to play.
                 frameIndex = frames.lastIndex
@@ -81,7 +82,7 @@ public fun KiteAnimatedImage(
                         frameIndex = frames.lastIndex   // finite loop ended: hold last frame
                         finished = true
                     } else {
-                        val t = (elapsedMillis % loopMillis).toInt()
+                        val t = elapsedMillis % loopMillis
                         var i = 0
                         while (frameEnds[i] <= t) i++
                         frameIndex = i   // same value writes don't recompose

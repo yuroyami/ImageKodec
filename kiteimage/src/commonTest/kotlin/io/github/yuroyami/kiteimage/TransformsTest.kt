@@ -154,6 +154,16 @@ class TransformsTest {
     }
 
     @Test
+    fun aCropRectangleThatOverflowsAnIntIsRejected() {
+        // Each sum wraps negative in an Int and used to pass the bounds check.
+        val src = coords(4, 4)
+        assertFailsWith<IllegalArgumentException> { src.cropped(Int.MAX_VALUE, 0, 1, 1) }
+        assertFailsWith<IllegalArgumentException> { src.cropped(0, Int.MAX_VALUE, 1, 1) }
+        assertFailsWith<IllegalArgumentException> { src.cropped(1, 0, Int.MAX_VALUE, 1) }
+        assertFailsWith<IllegalArgumentException> { src.cropped(0, 1, 1, Int.MAX_VALUE) }
+    }
+
+    @Test
     fun cropOutsideBoundsFails() {
         val src = coords(4, 4)
         assertFailsWith<IllegalArgumentException> { src.cropped(-1, 0, 2, 2) }
