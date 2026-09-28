@@ -45,6 +45,12 @@ internal object TiffDecoder {
 
     private fun err(msg: String): Nothing = throw ImageDecodeException("TIFF: $msg")
 
+    /**
+     * Bytes in one row of [width] pixels, each holding [samples] samples of [bits] bits.
+     * Long, because the product wraps an Int: 2^24 columns of 8 samples at 16 bits is 2^31 bits.
+     */
+    private fun rowBytes(width: Int, samples: Int, bits: Int): Long = (width.toLong() * samples * bits + 7) / 8
+
     private class Reader(val d: ByteArray, val le: Boolean) {
         fun u8(at: Int): Int {
             if (at < 0 || at >= d.size) err("truncated at offset $at")
@@ -169,7 +175,7 @@ internal object TiffDecoder {
         val planeRowBytes = if (ycbcrUnits) {
             unitsAcross * unitBytes
         } else {
-            ((width.toLong() * samplesPerPlane * bits + 7) / 8).toInt()
+            rowBytes(width, samplesPerPlane, bits).toInt()
         }
         val planeRows = if (ycbcrUnits) (height + subV - 1) / subV else height
         if (planeRowBytes.toLong() * planeRows * planes > MAX_BUFFER_BYTES) {
@@ -182,7 +188,7 @@ internal object TiffDecoder {
         if (tiled) {
             if (tileWidth <= 0 || tileLength <= 0) err("bad tile size ${tileWidth}x$tileLength")
             if (tileWidth > MAX_DIMENSION || tileLength > MAX_DIMENSION) err("tile ${tileWidth}x$tileLength too large")
-            val tileBytes = ((tileWidth.toLong() * samplesPerPlane * bits + 7) / 8) * tileLength
+            val tileBytes = rowBytes(tileWidth, samplesPerPlane, bits) * tileLength
             if (tileBytes > MAX_BUFFER_BYTES) err("tile of $tileBytes bytes exceeds safety limits")
         }
 
@@ -225,7 +231,8 @@ internal object TiffDecoder {
             val down = (height + tileLength - 1) / tileLength
             // Tiles are always padded to their full size, even at the right and
             // bottom edges: the padding is real data on the wire, just discarded.
-            val tileRowBytes = (tileWidth * samplesPerPlane * bits + 7) / 8
+            // Fits an Int: the whole tile passed the buffer ceiling above.
+            val tileRowBytes = rowBytes(tileWidth, samplesPerPlane, bits).toInt()
             val tilesPerPlane = across * down
             for (p in 0 until planes) {
                 val plane = ByteArray(planeRowBytes * planeRows)
