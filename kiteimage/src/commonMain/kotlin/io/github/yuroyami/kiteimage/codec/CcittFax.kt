@@ -28,6 +28,7 @@ public object CcittFax {
      * @throws ImageDecodeException if [CcittOptions.columns] is outside 1 to 2^24, if
      *   [CcittOptions.rows] is negative, or if the decoded image would pass 2^28 pixels
      */
+    @Throws(ImageDecodeException::class)
     public fun decode(input: ByteArray, k: Int, options: CcittOptions): ByteArray {
         val reader = BitReader(input)
         return if (k < 0) decodeGroup4(reader, options) else decodeGroup3OneD(reader, options)

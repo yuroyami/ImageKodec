@@ -40,6 +40,7 @@ public object KiteImage {
      * @throws ImageDecodeException if the format is unrecognised or the header
      *   is malformed past the point of reading
      */
+    @Throws(ImageDecodeException::class)
     public fun probe(data: ByteArray): ImageInfo = ImageProbe.probe(data)
 
     /** [probe], but null instead of throwing on unrecognised or malformed input. */
@@ -65,6 +66,7 @@ public object KiteImage {
      * @throws UnsupportedImageException on formats recognised but not yet decodable
      *   (see [ImageFormat]: sniffing is deliberately wider than decoding)
      */
+    @Throws(ImageDecodeException::class)
     public fun decode(data: ByteArray, applyOrientation: Boolean = false): KiteBitmap {
         val bitmap = decodeRaw(data)
         if (!applyOrientation) return bitmap
@@ -89,6 +91,7 @@ public object KiteImage {
      * @throws ImageDecodeException on malformed/truncated input or unknown format
      * @throws UnsupportedImageException on formats recognised but not yet decodable
      */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
     public fun decodeReduced(data: ByteArray, reduction: Int): KiteBitmap {
         require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
             "reduction must be 1, 2, 4 or 8, was $reduction"
@@ -134,6 +137,7 @@ public object KiteImage {
      * @throws IllegalArgumentException if a side of [bitmap] is larger than 65535, which the
      *   frame header cannot store
      */
+    @Throws(IllegalArgumentException::class)
     public fun encodeJpeg(bitmap: KiteBitmap, quality: Int = 90): ByteArray =
         JpegEncoder.encode(bitmap, quality)
 
@@ -157,6 +161,7 @@ public object KiteImage {
      * @throws IllegalArgumentException if a side of [bitmap] is larger than 65535, which a GIF
      *   cannot store
      */
+    @Throws(IllegalArgumentException::class)
     public fun encodeGif(bitmap: KiteBitmap, dither: Boolean = true): ByteArray =
         GifEncoder.encode(bitmap, dither)
 
@@ -168,6 +173,7 @@ public object KiteImage {
      * @throws IllegalArgumentException if the canvas is larger than 65535 on a side, which a GIF
      *   cannot store, or if the frames are not all canvas-sized
      */
+    @Throws(IllegalArgumentException::class)
     public fun encodeGif(animation: KiteAnimation, dither: Boolean = true): ByteArray =
         GifEncoder.encode(animation, dither)
 
@@ -205,6 +211,7 @@ public object KiteImage {
      * [applyOrientation] honours the EXIF orientation tag on every frame, the
      * same way [decode] does for a still.
      */
+    @Throws(ImageDecodeException::class)
     public fun decodeAnimation(
         data: ByteArray,
         applyOrientation: Boolean = false,

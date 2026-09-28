@@ -97,6 +97,11 @@ val bitmap = KiteImage.decode(bytes)
 val upright = KiteImage.decode(bytes, applyOrientation = true)   // honor EXIF
 ```
 
+A file that cannot be decoded throws `ImageDecodeException`. A feature this build lacks
+throws its subtype, `UnsupportedImageException`. The functions that throw carry `@Throws`.
+Swift and Objective-C therefore see them as throwing functions, and the exception arrives
+as an `NSError`.
+
 Two terms used in this table. IFD means Image File Directory, the record that
 describes one page of a TIFF file. Chroma subsampling means the file stores color
 at a lower resolution than brightness.

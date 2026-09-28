@@ -45,6 +45,7 @@ public object JpxDecoder {
      *
      * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
      */
+    @Throws(IllegalArgumentException::class)
     public fun decode(data: ByteArray, reduction: Int): Result? {
         require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
             "reduction must be 1, 2, 4 or 8, was $reduction"
