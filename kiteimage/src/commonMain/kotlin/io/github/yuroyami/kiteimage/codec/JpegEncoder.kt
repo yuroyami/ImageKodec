@@ -18,6 +18,8 @@ import io.github.yuroyami.kiteimage.internal.flate.ByteArrayBuilder
  */
 internal object JpegEncoder {
 
+    private const val MAX_SIDE = 65535                // the frame header's X and Y are 16 bits
+
     private val ZIGZAG = intArrayOf(
         0, 1, 5, 6, 14, 15, 27, 28, 2, 4, 7, 13, 16, 26, 29, 42, 3, 8, 12, 17, 25, 30, 41, 43, 9, 11, 18,
         24, 31, 40, 44, 53, 10, 19, 23, 32, 39, 45, 52, 54, 20, 22, 33, 38, 46, 51, 55, 60, 21, 34, 37, 47, 50, 56, 59, 61, 35, 36, 48, 49, 57, 58, 62, 63,
@@ -107,6 +109,9 @@ internal object JpegEncoder {
     fun encode(bitmap: KiteBitmap, quality: Int): ByteArray {
         val width = bitmap.width
         val height = bitmap.height
+        require(width <= MAX_SIDE && height <= MAX_SIDE) {
+            "JPEG stores each side in 16 bits, so ${width}x$height is larger than $MAX_SIDE"
+        }
 
         var q = if (quality == 0) 90 else quality
         val subsample = q <= 90

@@ -34,6 +34,7 @@ import io.github.yuroyami.kiteimage.internal.flate.ByteArrayBuilder
 internal object GifEncoder {
 
     private const val MAX_CODES = 4096
+    private const val MAX_SIDE = 65535                // width and height are 16-bit fields
     private const val TRANSPARENT_CUTOFF = 128       // alpha < this becomes the transparent index
 
     fun encode(bitmap: KiteBitmap, dither: Boolean = true): ByteArray =
@@ -61,6 +62,9 @@ internal object GifEncoder {
         require(frames.isNotEmpty()) { "GIF needs at least one frame" }
         val width = frames[0].width
         val height = frames[0].height
+        require(width <= MAX_SIDE && height <= MAX_SIDE) {
+            "GIF stores each side in 16 bits, so ${width}x$height is larger than $MAX_SIDE"
+        }
         require(frames.all { it.width == width && it.height == height }) {
             "every GIF frame must share the canvas size"
         }

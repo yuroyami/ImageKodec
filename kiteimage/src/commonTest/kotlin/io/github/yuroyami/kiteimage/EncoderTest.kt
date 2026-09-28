@@ -4,6 +4,7 @@ import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class EncoderTest {
@@ -104,5 +105,26 @@ class EncoderTest {
                 assertTrue(d <= 2, "solid color drifted by $d")
             }
         }
+    }
+
+    @Test
+    fun gifAndJpegRefuseAnImageTheirHeaderCannotDescribe() {
+        // Both formats store each side in 16 bits. A bitmap of 65536 or more used to be
+        // written with its size modulo 65536, and its data for the real size.
+        val wide = KiteBitmap(65536, 1, IntArray(65536))
+        val tall = KiteBitmap(1, 65536, IntArray(65536))
+        for (bitmap in listOf(wide, tall)) {
+            assertFailsWith<IllegalArgumentException> { KiteImage.encodeGif(bitmap) }
+            assertFailsWith<IllegalArgumentException> { KiteImage.encodeJpeg(bitmap) }
+        }
+        val animation = KiteAnimation(65536, 1, listOf(KiteFrame(wide, delayMillis = 100, delayRawCentiseconds = 10)), loopCount = 0)
+        assertFailsWith<IllegalArgumentException> { KiteImage.encodeGif(animation) }
+    }
+
+    @Test
+    fun gifAndJpegAcceptTheLargestSideTheirHeaderCanDescribe() {
+        val widest = KiteBitmap(65535, 1, IntArray(65535) { argb(0xFF, it and 0xFF, 0x40, 0x80) })
+        assertEquals(65535, KiteImage.probe(KiteImage.encodeGif(widest)).width)
+        assertEquals(65535, KiteImage.probe(KiteImage.encodeJpeg(widest, quality = 50)).width)
     }
 }

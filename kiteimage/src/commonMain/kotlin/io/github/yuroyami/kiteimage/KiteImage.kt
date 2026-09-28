@@ -130,6 +130,9 @@ public object KiteImage {
      * Encode [bitmap] as a baseline JPEG at [quality] 1..100 (default 90).
      * Alpha is discarded (JPEG has none); quality ≤ 90 uses 4:2:0 chroma
      * subsampling, above that 4:4:4; stb_image_write's behavior.
+     *
+     * @throws IllegalArgumentException if a side of [bitmap] is larger than 65535, which the
+     *   frame header cannot store
      */
     public fun encodeJpeg(bitmap: KiteBitmap, quality: Int = 90): ByteArray =
         JpegEncoder.encode(bitmap, quality)
@@ -150,6 +153,9 @@ public object KiteImage {
      * [dither] applies Floyd-Steinberg error diffusion when quantisation actually
      * loses colours, which is what keeps a photograph from banding. It is ignored
      * when the palette came out exact, since there is no error to spread.
+     *
+     * @throws IllegalArgumentException if a side of [bitmap] is larger than 65535, which a GIF
+     *   cannot store
      */
     public fun encodeGif(bitmap: KiteBitmap, dither: Boolean = true): ByteArray =
         GifEncoder.encode(bitmap, dither)
@@ -158,6 +164,9 @@ public object KiteImage {
      * Encode [animation] as an animated GIF89a: one shared colour table, per-frame
      * delays, and the NETSCAPE2.0 loop count. Frames must all be canvas-sized,
      * which is exactly what [decodeAnimation] produces.
+     *
+     * @throws IllegalArgumentException if the canvas is larger than 65535 on a side, which a GIF
+     *   cannot store, or if the frames are not all canvas-sized
      */
     public fun encodeGif(animation: KiteAnimation, dither: Boolean = true): ByteArray =
         GifEncoder.encode(animation, dither)
