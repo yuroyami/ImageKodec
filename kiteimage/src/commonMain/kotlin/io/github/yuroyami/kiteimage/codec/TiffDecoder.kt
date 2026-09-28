@@ -257,7 +257,8 @@ internal object TiffDecoder {
                 blocks.add(plane)
             }
         } else {
-            val rowsPerStrip = single(278, 0xFFFFFFFFL).toInt().coerceAtMost(planeRows)
+            // Clamp before narrowing: the default 2^32 - 1 is -1 as an Int.
+            val rowsPerStrip = single(278, 0xFFFFFFFFL).coerceAtMost(planeRows.toLong()).toInt()
             if (rowsPerStrip <= 0) err("rows per strip is zero")
             val stripsPerPlane = (planeRows + rowsPerStrip - 1) / rowsPerStrip
             for (p in 0 until planes) {

@@ -317,6 +317,22 @@ class TiffExtendedTest {
         }
     }
 
+    @Test
+    fun aMissingRowsPerStripMeansOneStrip() {
+        // TIFF 6.0 defaults RowsPerStrip to 2^32 - 1, which means the whole image is one
+        // strip. The value must be clamped before it is narrowed to an Int.
+        val px = bytes(0x11, 0x22)
+        for (rowsPerStrip in listOf<Field?>(null, long(278, -1))) {     // absent, and stated
+            val fields = listOfNotNull(
+                long(256, 2), long(257, 1), short(258, 8), short(259, 1), short(262, 1),
+                short(277, 1), long(273, 0), long(279, px.size), rowsPerStrip,
+            )
+            val bitmap = KiteImage.decode(tiff(fields, px))
+            assertEquals(gray(0x11), bitmap[0, 0])
+            assertEquals(gray(0x22), bitmap[1, 0])
+        }
+    }
+
     // --- probe agrees with decode ---------------------------------------------------
 
     /**
