@@ -12,6 +12,12 @@ reviewable in the diff.
 
 ### Added
 
+- **`KiteImage.decodeReduced()` and `JpxDecoder.decode(data, reduction)`.**
+  Decode with each side divided by 2, 4 or 8, rounded up. A JPEG shrinks inside
+  its inverse DCT, as libjpeg's `djpeg -scale` does, so a baseline JPEG needs
+  memory only for the smaller image. A JPEG 2000 image drops its finest wavelet
+  levels, as OpenJPEG's reduce option does. Other formats decode in full and
+  average each block.
 - **`KiteImage.probe()` and `ImageInfo`.** Header-only inspection: dimensions,
   bit depth, declared alpha, animation frame count, loop count, EXIF
   orientation, and whether this build can decode the file at all. No pixels are

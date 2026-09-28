@@ -73,6 +73,7 @@ public final class io/github/yuroyami/kiteimage/KiteImage {
 	public static synthetic fun decode$default (Lio/github/yuroyami/kiteimage/KiteImage;[BZILjava/lang/Object;)Lio/github/yuroyami/kiteimage/KiteBitmap;
 	public final fun decodeAnimation ([BZLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/kiteimage/KiteAnimation;
 	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/kiteimage/KiteImage;[BZLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/kiteimage/KiteAnimation;
+	public final fun decodeReduced ([BI)Lio/github/yuroyami/kiteimage/KiteBitmap;
 	public final fun detect ([B)Lio/github/yuroyami/kiteimage/ImageFormat;
 	public final fun encodeBmp (Lio/github/yuroyami/kiteimage/KiteBitmap;)[B
 	public final fun encodeGif (Lio/github/yuroyami/kiteimage/KiteAnimation;Z)[B
@@ -168,6 +169,7 @@ public final class io/github/yuroyami/kiteimage/codec/Jbig2Decoder {
 public final class io/github/yuroyami/kiteimage/codec/JpxDecoder {
 	public static final field INSTANCE Lio/github/yuroyami/kiteimage/codec/JpxDecoder;
 	public final fun decode ([B)Lio/github/yuroyami/kiteimage/codec/JpxDecoder$Result;
+	public final fun decode ([BI)Lio/github/yuroyami/kiteimage/codec/JpxDecoder$Result;
 	public final fun isJpx ([B)Z
 }
 

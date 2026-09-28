@@ -171,6 +171,20 @@ bitmap.oriented(info.orientation)
 
 `scaled` is an alpha-weighted box filter. It preserves aspect ratio and never
 upscales. When the image already fits the box, it returns the image unchanged.
+
+`scaled` works on a decoded image, so the full-size image exists first. To
+avoid that for a JPEG, decode at a smaller size:
+
+```kotlin
+KiteImage.decodeReduced(bytes, reduction = 4)  // each side divided by 4, rounded up
+```
+
+The reduction is 1, 2, 4 or 8. A JPEG shrinks inside its inverse DCT, as
+libjpeg's `djpeg -scale` does, so a baseline JPEG needs memory only for the
+smaller image. A progressive JPEG still keeps the coefficients of the full size
+until its last scan. A JPEG 2000 image drops its finest wavelet levels, as
+OpenJPEG's reduce option does. Other formats decode in full, then average each
+block of pixels.
 `oriented`, `cropped`, `scaled` and the three rotations also exist for a whole
 `KiteAnimation`. `cropped` throws `IllegalArgumentException` when the rectangle
 extends outside the image. It does not clamp the rectangle.

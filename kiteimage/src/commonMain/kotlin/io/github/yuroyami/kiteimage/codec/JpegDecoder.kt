@@ -4,6 +4,10 @@ import io.github.yuroyami.kiteimage.ImageDecodeException
 import io.github.yuroyami.kiteimage.KiteBitmap
 import io.github.yuroyami.kiteimage.UnsupportedImageException
 import io.github.yuroyami.kiteimage.internal.Budget
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * Baseline JPEG decoder: a faithful pure-Kotlin port of `stb_image.h`'s JPEG
@@ -138,6 +142,11 @@ internal object JpegDecoder {
         var dcPred = 0
         var x = 0; var y = 0
         var w2 = 0; var h2 = 0
+        // The plane in [data] when the decode is reduced: its stride and its rows of image.
+        var ws = 0; var ys = 0
+        // This component's own reduction, as a log2: smaller than the image's for subsampled
+        // chroma, which then decodes straight to the luma's resolution.
+        var scale = 0
         lateinit var data: ByteArray
         lateinit var linebuf: ByteArray
         // progressive only: raw coefficients, IDCT'd at EOI
@@ -171,6 +180,9 @@ internal object JpegDecoder {
         val order = IntArray(4)
         var restartInterval = 0
         var todo = 0
+
+        // The decode reduces each side by 2^scale, with the IDCT of 8 >> scale points.
+        var scale = 0
 
         var progressive = false
         var specStart = 0
@@ -468,6 +480,65 @@ internal object JpegDecoder {
 
     private fun clamp(x: Int): Int = if (x < 0) 0 else if (x > 255) 255 else x
 
+    /** The IDCT of block ([bx], [by]) of [comp] into its plane: the full one, or the reduced one of a scaled decode. */
+    private fun idctInto(j: State, comp: Component, bx: Int, by: Int, data: ShortArray, tmp: IntArray) {
+        if (comp.scale == 0) {
+            idctBlock(comp.data, comp.ws * by * 8 + bx * 8, comp.ws, data, tmp)
+        } else {
+            val n = 8 shr comp.scale
+            reducedIdct(comp.data, comp.ws * by * n + bx * n, comp.ws, data, n, tmp)
+        }
+    }
+
+    /**
+     * C(k) cos((2p + 1) k pi / 2n) in 1/8192ths, for the reduced IDCT of [n] points, with
+     * C(0) = 1/sqrt(2) (ITU-T T.81, A.3.3). Derived here rather than copied. [reducedIdct]
+     * explains where the formula comes from.
+     */
+    private fun reducedTable(n: Int): IntArray = IntArray(n * n) { i ->
+        val k = i / n
+        val p = i % n
+        val c = if (k == 0) sqrt(0.5) else 1.0
+        (c * cos((2 * p + 1) * k * PI / (2 * n)) * 8192).roundToInt()
+    }
+
+    internal val REDUCED_4 = reducedTable(4)
+    internal val REDUCED_2 = reducedTable(2)
+
+    /**
+     * The block that [data] holds, as [n] by [n] pixels, each standing for an (8/n)-pixel
+     * square of the full block. The DCT of JPEG is orthonormal, so the n-point DCT of the
+     * averaged block is, to first order, the first n coefficients scaled by sqrt(n/8). Its
+     * inverse is the 8-point formula of T.81, A.3.3 with the cosines taken over 2n points:
+     * g(x, y) = 1/4 sum over u, v < n of C(u) C(v) F(u, v) cos((2x+1)u pi/2n) cos((2y+1)v pi/2n).
+     * For n = 1 that is the DC coefficient over 8, the block's mean. libjpeg's scaled decode
+     * (jidctred.c) computes the same transform.
+     */
+    private fun reducedIdct(out: ByteArray, outOfs: Int, stride: Int, data: ShortArray, n: Int, rows: IntArray) {
+        if (n == 1) {
+            out[outOfs] = clamp(128 + ((data[0].toInt() + 4) shr 3)).toByte()
+            return
+        }
+        val t = if (n == 4) REDUCED_4 else REDUCED_2
+        // Horizontal pass: rows[v * n + x] = sum over u of F(u, v) T(u, x). It fits an Int:
+        // a coefficient is a Short and a table entry is under 2^13, over at most four terms.
+        for (v in 0 until n) {
+            for (x in 0 until n) {
+                var sum = 0
+                for (u in 0 until n) sum += data[v * 8 + u] * t[u * n + x]
+                rows[v * n + x] = sum
+            }
+        }
+        // Vertical pass, then the 1/4 and the two 2^13 scales of the table: 28 bits, rounded half up.
+        for (y in 0 until n) {
+            for (x in 0 until n) {
+                var sum = 0L
+                for (v in 0 until n) sum += rows[v * n + x].toLong() * t[v * n + y]
+                out[outOfs + y * stride + x] = clamp(128 + ((sum + (1L shl 27)) shr 28).toInt()).toByte()
+            }
+        }
+    }
+
     // stbi__idct_block (scalar). `tmp` is the 64-int intermediate.
     private fun idctBlock(out: ByteArray, outOfs: Int, outStride: Int, data: ShortArray, tmp: IntArray) {
         // columns
@@ -729,7 +800,16 @@ internal object JpegDecoder {
             comp.y = (j.imgY * comp.v + vMax - 1) / vMax
             comp.w2 = j.mcuX * comp.h * 8
             comp.h2 = j.mcuY * comp.v * 8
-            comp.data = ByteArray(comp.w2 * comp.h2)
+            // A reduced decode keeps each block at 8 >> scale pixels a side (w2 and h2 are multiples
+            // of 8). A component subsampled by the same power of two both ways reduces less, down
+            // to the luma's resolution, as libjpeg's jdmaster.c scales the chroma IDCT: it then
+            // needs no upsampling and keeps its detail.
+            val hs = hMax / comp.h
+            val vs = vMax / comp.v
+            comp.scale = if (hs == vs && hs and (hs - 1) == 0) maxOf(0, j.scale - hs.countTrailingZeroBits()) else j.scale
+            comp.ws = comp.w2 shr comp.scale
+            comp.ys = (comp.y + (1 shl comp.scale) - 1) shr comp.scale
+            comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scale))
             if (j.progressive) {
                 // w2/h2 are multiples of 8; one 64-short block per 8x8 tile
                 comp.coeffW = comp.w2 / 8
@@ -793,7 +873,7 @@ internal object JpegDecoder {
             for (jj in 0 until h) {
                 for (i in 0 until w) {
                     decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
-                    idctBlock(comp.data, comp.w2 * jj * 8 + i * 8, comp.w2, data, tmp)
+                    idctInto(j, comp, i, jj, data, tmp)
                     if (--j.todo <= 0) {
                         if (j.codeBits < 24) growBuffer(j)
                         if (!isRestart(j.marker)) return
@@ -810,10 +890,8 @@ internal object JpegDecoder {
                         val comp = j.comp[n]
                         for (y in 0 until comp.v) {
                             for (x in 0 until comp.h) {
-                                val x2 = (i * comp.h + x) * 8
-                                val y2 = (jj * comp.v + y) * 8
                                 decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
-                                idctBlock(comp.data, comp.w2 * y2 + x2, comp.w2, data, tmp)
+                                idctInto(j, comp, i * comp.h + x, jj * comp.v + y, data, tmp)
                             }
                         }
                     }
@@ -893,7 +971,7 @@ internal object JpegDecoder {
                     for (k in 0 until 64) {   // stbi__jpeg_dequantize
                         block[k] = (coeff[ofs + k] * dq[k]).toShort()
                     }
-                    idctBlock(comp.data, comp.w2 * jj * 8 + i * 8, comp.w2, block, tmp)
+                    idctInto(j, comp, i, jj, block, tmp)
                 }
             }
         }
@@ -921,9 +999,7 @@ internal object JpegDecoder {
     private fun div16(x: Int) = (x shr 4) and 0xFF
 
     // stbi__resample per component
-    private class Resampler(val comp: Component, hMax: Int, vMax: Int, imgX: Int) {
-        val hs = hMax / comp.h
-        val vs = vMax / comp.v
+    private class Resampler(val comp: Component, val hs: Int, val vs: Int, imgX: Int, val stride: Int, val rows: Int) {
         val wLores = (imgX + hs - 1) / hs
         var ystep = vs shr 1
         var ypos = 0
@@ -1006,7 +1082,7 @@ internal object JpegDecoder {
         if (++r.ystep >= r.vs) {
             r.ystep = 0
             r.line0 = r.line1
-            if (++r.ypos < comp.y) r.line1 += comp.w2
+            if (++r.ypos < r.rows) r.line1 += r.stride
         }
     }
 
@@ -1045,8 +1121,15 @@ internal object JpegDecoder {
 
     // -------------------------------------------------------------------------
 
-    fun decode(input: ByteArray): KiteBitmap {
+    /**
+     * Decodes [input]. With [scale] above 0, each side comes out reduced by 2^scale, rounded
+     * up, as libjpeg's scaled decode gives it: the IDCT itself shrinks, so the full-size image
+     * never exists. [scale] is 0 to 3.
+     */
+    fun decode(input: ByteArray, scale: Int = 0): KiteBitmap {
+        require(scale in 0..3) { "scale must be 0 to 3, was $scale" }
         val j = State(input)
+        j.scale = scale
 
         // stbi__decode_jpeg_header: SOI, then markers until SOF
         if (j.u8() != 0xFF || j.u8() != 0xD8) err("no SOI")
@@ -1105,17 +1188,24 @@ internal object JpegDecoder {
         val decodeN = if (j.imgN < 3) 1 else j.imgN
         val isRgb = j.imgN == 3 && (j.rgb == 3 || (j.app14ColorTransform == 0 && !j.jfif))
 
+        // The output size: the image reduced by 2^scale, rounded up.
+        val outX = (j.imgX + (1 shl scale) - 1) shr scale
+        val outY = (j.imgY + (1 shl scale) - 1) shr scale
         val res = Array(decodeN) { k ->
-            j.comp[k].linebuf = ByteArray(j.imgX + 3)
-            Resampler(j.comp[k], j.hMax, j.vMax, j.imgX)
+            val comp = j.comp[k]
+            comp.linebuf = ByteArray(outX + 3)
+            // The upsampling left after the component's own reduction: none for chroma that
+            // decoded straight to the luma's resolution.
+            val drop = scale - comp.scale
+            Resampler(comp, (j.hMax / comp.h) shr drop, (j.vMax / comp.v) shr drop, outX, stride = comp.ws, rows = comp.ys)
         }
 
-        val argb = IntArray(j.imgX * j.imgY)
+        val argb = IntArray(outX * outY)
         val couArr = arrayOfNulls<ByteArray>(4)
         val couOfs = IntArray(4)
 
-        for (row in 0 until j.imgY) {
-            val outOfs = row * j.imgX
+        for (row in 0 until outY) {
+            val outOfs = row * outX
             for (k in 0 until decodeN) {
                 resampleRow(res[k])
                 couArr[k] = res[k].outArr
@@ -1124,7 +1214,7 @@ internal object JpegDecoder {
             when {
                 j.imgN == 3 && isRgb -> {
                     val yA = couArr[0]!!; val cbA = couArr[1]!!; val crA = couArr[2]!!
-                    for (i in 0 until j.imgX) {
+                    for (i in 0 until outX) {
                         argb[outOfs + i] = (0xFF shl 24) or
                             ((yA[couOfs[0] + i].toInt() and 0xFF) shl 16) or
                             ((cbA[couOfs[1] + i].toInt() and 0xFF) shl 8) or
@@ -1133,14 +1223,14 @@ internal object JpegDecoder {
                 }
                 j.imgN == 3 -> ycbcrToRgbRow(
                     argb, outOfs,
-                    couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], j.imgX,
+                    couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], outX,
                 )
                 j.imgN == 4 -> {
                     val kA = couArr[3]!!
                     when (j.app14ColorTransform) {
                         0 -> {   // CMYK: blinn multiply against K
                             val cA = couArr[0]!!; val mA = couArr[1]!!; val yA = couArr[2]!!
-                            for (i in 0 until j.imgX) {
+                            for (i in 0 until outX) {
                                 val kk = kA[couOfs[3] + i].toInt() and 0xFF
                                 val r = blinn(cA[couOfs[0] + i].toInt() and 0xFF, kk)
                                 val g = blinn(mA[couOfs[1] + i].toInt() and 0xFF, kk)
@@ -1149,8 +1239,8 @@ internal object JpegDecoder {
                             }
                         }
                         2 -> {   // YCCK: YCbCr, then invert + blinn against K
-                            ycbcrToRgbRow(argb, outOfs, couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], j.imgX)
-                            for (i in 0 until j.imgX) {
+                            ycbcrToRgbRow(argb, outOfs, couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], outX)
+                            for (i in 0 until outX) {
                                 val kk = kA[couOfs[3] + i].toInt() and 0xFF
                                 val p = argb[outOfs + i]
                                 val r = blinn(255 - ((p shr 16) and 0xFF), kk)
@@ -1161,13 +1251,13 @@ internal object JpegDecoder {
                         }
                         else -> ycbcrToRgbRow(   // YCbCr + ignored 4th channel
                             argb, outOfs,
-                            couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], j.imgX,
+                            couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], outX,
                         )
                     }
                 }
                 else -> {   // grayscale
                     val yA = couArr[0]!!
-                    for (i in 0 until j.imgX) {
+                    for (i in 0 until outX) {
                         val g = yA[couOfs[0] + i].toInt() and 0xFF
                         argb[outOfs + i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
                     }
@@ -1175,6 +1265,6 @@ internal object JpegDecoder {
             }
         }
 
-        return KiteBitmap(j.imgX, j.imgY, argb)
+        return KiteBitmap(outX, outY, argb)
     }
 }

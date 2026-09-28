@@ -88,6 +88,17 @@ class JpxOracleTest {
         return kite to readPnm(out)
     }
 
+    /** Decode [jp2] with the [levels] finest wavelet levels dropped, by both decoders. */
+    private fun bothReduced(jp2: File, levels: Int): Pair<JpxDecoder.Result, Pnm> {
+        val kite = JpxDecoder.decode(jp2.readBytes(), 1 shl levels)
+        assertNotNull(kite, "JpxDecoder returned null")
+        val out = File.createTempFile("kite-jpx-ref", if (kite.colorSpace == "DeviceRGB") ".ppm" else ".pgm")
+            .apply { deleteOnExit() }
+        val code = run(decompress.absolutePath, "-i", jp2.absolutePath, "-o", out.absolutePath, "-r", "$levels")
+        assertEquals(0, code, "opj_decompress -r $levels failed")
+        return kite to readPnm(out)
+    }
+
     private fun compare(tag: String, kite: JpxDecoder.Result, ref: Pnm, tolerance: Int) {
         assertEquals(ref.w, kite.width, "$tag width")
         assertEquals(ref.h, kite.height, "$tag height")
@@ -162,6 +173,89 @@ class JpxOracleTest {
         // At (5, 3) the first precinct of a high-pass band starts at an odd sample.
         val (kite, ref) = both(encode(ppm(), "-d", "5,3"))
         compare("offset", kite, ref, tolerance = 0)
+    }
+
+    @Test
+    fun a_reduced_decode_matches_openjpeg_reduce() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        // Each case at an eighth, a quarter and a half: lossless cases must match exactly.
+        val cases = listOf(
+            Triple("lossless-rgb", encode(ppm()), 0),
+            Triple("lossless-gray", encode(ppm(gray = true)), 0),
+            Triple("lossy-97", encode(ppm(), "-I", "-r", "10"), 4),
+            Triple("rpcl-layers", encode(ppm(), "-p", "RPCL", "-r", "20,10,1"), 0),
+            Triple("tiled", encode(ppm(), "-t", "64,64"), 0),
+            Triple("precincts", encode(ppm(), "-c", "[32,32]", "-SOP", "-EPH"), 0),
+        )
+        for ((tag, jp2, tolerance) in cases) {
+            for (levels in 1..3) {
+                val (kite, ref) = bothReduced(jp2, levels)
+                compare("$tag reduced by ${1 shl levels}", kite, ref, tolerance)
+            }
+        }
+    }
+
+    @Test
+    fun an_offset_image_matches_openjpeg_where_both_have_pixels() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        // The image starts at (5, 3), so its reduced grid starts part of a sample in. OpenJPEG's
+        // reduced image can then be one pixel smaller than the rounded-up size this decoder gives.
+        val jp2 = encode(ppm(), "-d", "5,3")
+        for (levels in 1..3) {
+            val kite = assertNotNull(JpxDecoder.decode(jp2.readBytes(), 1 shl levels), "JpxDecoder returned null")
+            val out = File.createTempFile("kite-jpx-ref", ".ppm").apply { deleteOnExit() }
+            assertEquals(0, run(decompress.absolutePath, "-i", jp2.absolutePath, "-o", out.absolutePath, "-r", "$levels"))
+            val ref = readPnm(out)
+            assertEquals((97 + (1 shl levels) - 1) shr levels, kite.width, "width at level $levels")
+            assertEquals((61 + (1 shl levels) - 1) shr levels, kite.height, "height at level $levels")
+            for (y in 0 until minOf(ref.h, kite.height)) for (x in 0 until minOf(ref.w, kite.width)) for (c in 0 until 3) {
+                val a = kite.pixelBytes[(y * kite.width + x) * 3 + c].toInt() and 0xFF
+                val b = ref.data[(y * ref.w + x) * 3 + c].toInt() and 0xFF
+                assertEquals(b, a, "level $levels, pixel ($x, $y), component $c")
+            }
+        }
+    }
+
+    @Test
+    fun a_reduced_decode_allocates_for_the_smaller_image() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        // 1,600 by 1,200 lossy: the dropped levels keep neither coefficients nor samples.
+        val bytes = encode(ppm(1600, 1200), "-I", "-r", "20").readBytes()
+        val bean = java.lang.management.ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
+        fun allocated(block: () -> Unit): Long {
+            val before = bean.getThreadAllocatedBytes(Thread.currentThread().threadId())
+            block()
+            return bean.getThreadAllocatedBytes(Thread.currentThread().threadId()) - before
+        }
+        repeat(2) { JpxDecoder.decode(bytes); JpxDecoder.decode(bytes, 8) } // warm up
+        val full = allocated { JpxDecoder.decode(bytes) }
+        val eighth = allocated { JpxDecoder.decode(bytes, 8) }
+        println("jpx full: $full bytes, 1/8: $eighth bytes")
+        assertTrue(eighth < full / 8, "full $full bytes, 1/8 $eighth bytes")
+    }
+
+    @Test
+    fun a_reduction_past_the_wavelet_levels_averages_the_rest() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        // Two resolutions: one wavelet level. An eighth drops that level, then averages 4 by 4.
+        val jp2 = encode(ppm(), "-n", "2")
+        val kite = JpxDecoder.decode(jp2.readBytes(), 8)
+        assertNotNull(kite, "JpxDecoder returned null")
+        val (_, half) = bothReduced(jp2, 1)
+        val w = (half.w + 3) / 4
+        val h = (half.h + 3) / 4
+        assertEquals(w, kite.width)
+        assertEquals(h, kite.height)
+        for (oy in 0 until h) for (ox in 0 until w) for (c in 0 until 3) {
+            var sum = 0
+            var count = 0
+            for (y in oy * 4 until minOf(oy * 4 + 4, half.h)) for (x in ox * 4 until minOf(ox * 4 + 4, half.w)) {
+                sum += half.data[(y * half.w + x) * 3 + c].toInt() and 0xFF
+                count++
+            }
+            val expected = (sum + count / 2) / count
+            assertEquals(expected, kite.pixelBytes[(oy * w + ox) * 3 + c].toInt() and 0xFF, "pixel ($ox, $oy), component $c")
+        }
     }
 
     @Test

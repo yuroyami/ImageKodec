@@ -81,6 +81,40 @@ class Jp2DecoderTest {
         assertTrue(mean <= 2.0, "mean diff $mean > 2.0")
     }
 
+    @Test
+    fun aReducedDecodeKeepsEveryNthSampleOfTheFullDecode() {
+        // Dropping wavelet levels keeps the low-pass value at every r-th sample (T.800, B.5), not
+        // the mean of an r by r block, so it compares with those samples of the full decode.
+        val full = KiteImage.decode(hex(JP2))
+        for (r in listOf(2, 4, 8)) {
+            val reduced = KiteImage.decodeReduced(hex(JP2), r)
+            assertEquals((32 + r - 1) / r, reduced.width, "reduced by $r")
+            assertEquals((24 + r - 1) / r, reduced.height, "reduced by $r")
+            var worst = 0
+            var sum = 0L
+            for (y in 0 until reduced.height) for (x in 0 until reduced.width) {
+                val a = reduced.argb[y * reduced.width + x]
+                val b = full.argb[y * r * full.width + x * r]
+                for (shift in intArrayOf(16, 8, 0)) {
+                    val d = abs(((a shr shift) and 0xFF) - ((b shr shift) and 0xFF))
+                    if (d > worst) worst = d
+                    sum += d
+                }
+            }
+            // The low-pass filter smooths over about r samples, so the gap grows with r. Measured:
+            // a mean of 0.2, 1.3 and 5.2 and a worst of 2, 8 and 19 for 2, 4 and 8.
+            val mean = sum.toDouble() / (reduced.argb.size * 3)
+            assertTrue(mean <= r && worst <= 4 * r, "reduced by $r: mean $mean, worst $worst")
+        }
+    }
+
+    @Test
+    fun onlyPowersOfTwoUpToEightReduceAJpx() {
+        for (r in listOf(0, 3, 16)) {
+            assertFailsWith<IllegalArgumentException> { JpxDecoder.decode(hex(JP2), r) }
+        }
+    }
+
     // --- probe agrees with decode ---------------------------------------------------
 
     /** The bare codestream inside [JP2]; both the probe and the decoder take it alone. */

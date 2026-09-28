@@ -34,7 +34,23 @@ public object JpxDecoder {
         public val alpha: ByteArray?,
     )
 
-    public fun decode(data: ByteArray): Result? = runCatching { decodeOrThrow(data) }.getOrNull()
+    public fun decode(data: ByteArray): Result? = runCatching { decodeOrThrow(data, 0) }.getOrNull()
+
+    /**
+     * Decode [data] with each side divided by [reduction], rounded up: 1, 2, 4 or 8. The decoder
+     * drops the finest wavelet levels, as OpenJPEG's reduce option does, so the full-size samples
+     * never exist. Each output sample is the low-pass value at every [reduction]-th sample of the
+     * image, not the mean of a block. When a component has fewer levels than that, the decoder
+     * drops the levels it has and averages blocks of the result for the rest.
+     *
+     * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
+     */
+    public fun decode(data: ByteArray, reduction: Int): Result? {
+        require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
+            "reduction must be 1, 2, 4 or 8, was $reduction"
+        }
+        return runCatching { decodeOrThrow(data, reduction.countTrailingZeroBits()) }.getOrNull()
+    }
 
     /** True when [data] looks like a JP2 container or a raw J2K codestream. */
     public fun isJpx(data: ByteArray): Boolean {
@@ -261,8 +277,10 @@ public object JpxDecoder {
         val x0: Int, val y0: Int, val x1: Int, val y1: Int,
         val precincts: List<Precinct>,
         val stepExp: Int, val stepMant: Int, val guardBits: Int,
+        /** False for a band of a level that a reduced decode drops: it keeps no coefficients. */
+        keep: Boolean,
     ) {
-        val coeffs = IntArray(max(0, (x1 - x0)) * max(0, (y1 - y0)))
+        val coeffs = if (keep) IntArray(max(0, (x1 - x0)) * max(0, (y1 - y0))) else IntArray(0)
     }
 
     private class Resolution(
@@ -281,7 +299,8 @@ public object JpxDecoder {
 
     // ---- main decode -----------------------------------------------------------
 
-    private fun decodeOrThrow(data: ByteArray): Result? {
+    /** The decode with the [levels] finest wavelet levels dropped, as far as every component has them. */
+    private fun decodeOrThrow(data: ByteArray, levels: Int): Result? {
         val jp2 = parseContainer(data)
         val cs = jp2.codestream
         val r = R(cs, 0)
@@ -399,9 +418,25 @@ public object JpxDecoder {
         // make a small file allocate planes for tens of megapixels.
         if (imgW <= 0 || imgH <= 0 || imgW.toLong() * imgH > 64L shl 20 || !Budget.fits(imgW, imgH, data.size)) return null
 
-        // Component output planes at full component resolution.
-        val planeW = IntArray(s.comps) { ceilDiv(s.xsiz, s.dx[it]) - ceilDiv(s.xosiz, s.dx[it]) }
-        val planeH = IntArray(s.comps) { ceilDiv(s.ysiz, s.dy[it]) - ceilDiv(s.yosiz, s.dy[it]) }
+        // Drop at most the levels that every coding style in the file has (A.6.1 picks one of these
+        // per tile and component), and none where the reduced grid of a component would be empty.
+        val styles = buildList {
+            add(cod0); addAll(mainCoc.values); addAll(tileCod.values)
+            for (m in tileCoc.values) addAll(m.values)
+        }
+        var drop = minOf(levels, styles.minOf { it.decompositions })
+        fun empty(d: Int) = (0 until s.comps).any { c ->
+            ceilShift(ceilDiv(s.xsiz, s.dx[c]), d) <= ceilShift(ceilDiv(s.xosiz, s.dx[c]), d) ||
+                ceilShift(ceilDiv(s.ysiz, s.dy[c]), d) <= ceilShift(ceilDiv(s.yosiz, s.dy[c]), d)
+        }
+        while (drop > 0 && empty(drop)) drop--
+
+        // Component output planes at the component's resolution with those levels dropped, and
+        // where each starts on that grid (B.5: a level halves the coordinates, rounding up).
+        val planeX0 = IntArray(s.comps) { ceilShift(ceilDiv(s.xosiz, s.dx[it]), drop) }
+        val planeY0 = IntArray(s.comps) { ceilShift(ceilDiv(s.yosiz, s.dy[it]), drop) }
+        val planeW = IntArray(s.comps) { ceilShift(ceilDiv(s.xsiz, s.dx[it]), drop) - planeX0[it] }
+        val planeH = IntArray(s.comps) { ceilShift(ceilDiv(s.ysiz, s.dy[it]), drop) - planeY0[it] }
         val planes = Array(s.comps) { IntArray(planeW[it] * planeH[it]) }
 
         for (t in 0 until s.tilesW * s.tilesH) {
@@ -419,11 +454,43 @@ public object JpxDecoder {
             fun codFor(c: Int): Cod = tileCoc[t]?.get(c) ?: tileCod[t] ?: mainCoc[c] ?: cod0
             fun quantFor(c: Int): Quant = tileQcc[t]?.get(c) ?: tileQcd[t] ?: mainQcc[c] ?: qcd0
 
-            decodeTile(s, t, body, ::codFor, ::quantFor, cod, planes, planeW, planeH)
+            decodeTile(s, t, body, ::codFor, ::quantFor, cod, Planes(planes, planeW, planeH, planeX0, planeY0, drop))
         }
 
-        // Assemble output: gray or RGB, plus optional cdef opacity channel.
-        return assemble(s, jp2, cod0.mct == 1, planes, planeW, planeH, imgW, imgH)
+        // Assemble output: gray or RGB, plus optional cdef opacity channel. A reduced image takes
+        // the rounded-up size; sampling clamps to the plane, so an offset grid repeats its edge.
+        val out = assemble(s, jp2, cod0.mct == 1, planes, planeW, planeH, ceilShift(imgW, drop), ceilShift(imgH, drop))
+        return if (drop < levels) out.averaged(1 shl (levels - drop)) else out
+    }
+
+    /** The component planes of one decode, on the grid with [r] wavelet levels dropped. */
+    private class Planes(
+        val data: Array<IntArray>, val w: IntArray, val h: IntArray, val x0: IntArray, val y0: IntArray, val r: Int,
+    )
+
+    /**
+     * This result with each block of [f] by [f] samples averaged, for levels that a component
+     * does not have: `ceil(width / f)` by `ceil(height / f)`, and an edge block averages what
+     * it has.
+     */
+    private fun Result.averaged(f: Int): Result {
+        val n = pixelBytes.size / (width * height)
+        val w = ceilDiv(width, f)
+        val h = ceilDiv(height, f)
+        fun average(src: ByteArray, n: Int): ByteArray {
+            val out = ByteArray(w * h * n)
+            for (oy in 0 until h) for (ox in 0 until w) for (c in 0 until n) {
+                var sum = 0
+                var count = 0
+                for (y in oy * f until min((oy + 1) * f, height)) for (x in ox * f until min((ox + 1) * f, width)) {
+                    sum += src[(y * width + x) * n + c].toInt() and 0xFF
+                    count++
+                }
+                out[(oy * w + ox) * n + c] = ((sum + count / 2) / count).toByte()
+            }
+            return out
+        }
+        return Result(w, h, colorSpace, average(pixelBytes, n), alpha?.let { average(it, 1) })
     }
 
     private fun readCod(r: R): Cod? {
@@ -498,7 +565,7 @@ public object JpxDecoder {
     private fun decodeTile(
         s: Siz, t: Int, body: ByteArray,
         codFor: (Int) -> Cod, quantFor: (Int) -> Quant, tileCod: Cod,
-        planes: Array<IntArray>, planeW: IntArray, planeH: IntArray,
+        out: Planes,
     ) {
         val ti = t % s.tilesW
         val tj = t / s.tilesW
@@ -572,7 +639,7 @@ public object JpxDecoder {
                         }
                         precincts.add(Precinct(gw, gh, blocks))
                     }
-                    return Band(orient, bx0, by0, bx1, by1, precincts, se, sm, q.guardBits)
+                    return Band(orient, bx0, by0, bx1, by1, precincts, se, sm, q.guardBits, keep = rr <= cod.decompositions - out.r)
                 }
 
                 if (rr == 0) {
@@ -592,15 +659,15 @@ public object JpxDecoder {
 
         // Tier-1 + dequant + IDWT per component; write RAW signed samples.
         for (tc in comps) {
-            decodeTileComp(s, tc, planes[tc.comp], planeW[tc.comp], planeH[tc.comp], ceilDiv(s.xosiz, s.dx[tc.comp]), ceilDiv(s.yosiz, s.dy[tc.comp]))
+            decodeTileComp(s, tc, out.data[tc.comp], out.w[tc.comp], out.h[tc.comp], out.x0[tc.comp], out.y0[tc.comp], out.r)
         }
 
         // Multiple-component transform on the tile area, then shift + clamp.
         if (tileCod.mct == 1 && s.comps >= 3) {
-            applyInverseMct(s, comps, tileCod.reversible, planes, planeW, planeH)
+            applyInverseMct(comps, tileCod.reversible, out)
         }
         for (tc in comps) {
-            finalizeTileComp(s, tc, planes[tc.comp], planeW[tc.comp], planeH[tc.comp], ceilDiv(s.xosiz, s.dx[tc.comp]), ceilDiv(s.yosiz, s.dy[tc.comp]))
+            finalizeTileComp(s, tc, out.data[tc.comp], out.w[tc.comp], out.h[tc.comp], out.x0[tc.comp], out.y0[tc.comp], out.r)
         }
     }
 
@@ -1013,11 +1080,14 @@ public object JpxDecoder {
     // ---- component reconstruction ----------------------------------------------
 
     private fun decodeTileComp(
-        s: Siz, tc: TileComp, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int,
+        s: Siz, tc: TileComp, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int, drop: Int,
     ) {
         val cod = tc.cod
-        // Tier-1 on every code-block.
+        // The resolution that this decode stops at: the full one, or [drop] levels below it.
+        val top = cod.decompositions - drop
+        // Tier-1 on every code-block of the kept resolutions.
         for (res in tc.resolutions) {
+            if (res.r > top) break
             for (band in res.bands) {
                 val gain = when (band.orient) { 0 -> 0; 3 -> 2; else -> 1 }
                 val prec = s.prec[tc.comp]
@@ -1051,7 +1121,7 @@ public object JpxDecoder {
             tc.resolutions[0].bands[0].x1, tc.resolutions[0].bands[0].y1,
             tc.resolutions[0].bands[0].coeffs,
         )
-        for (rr in 1 until tc.resolutions.size) {
+        for (rr in 1..top) {
             val res = tc.resolutions[rr]
             current = synthesize(current, res, cod.reversible)
         }
@@ -1073,12 +1143,13 @@ public object JpxDecoder {
 
     /** DC level shift + clamp over one tile-component's rect, after any MCT. */
     private fun finalizeTileComp(
-        s: Siz, tc: TileComp, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int,
+        s: Siz, tc: TileComp, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int, drop: Int,
     ) {
         val prec = s.prec[tc.comp]
         val shiftVal = if (s.signed[tc.comp]) 0 else 1 shl (prec - 1)
         val maxV = (1 shl prec) - 1
-        for (y in tc.y0 until tc.y1) for (x in tc.x0 until tc.x1) {
+        val rect = tc.resolutions[tc.cod.decompositions - drop]
+        for (y in rect.y0 until rect.y1) for (x in rect.x0 until rect.x1) {
             val ppx = x - px0
             val ppy = y - py0
             if (ppx !in 0 until pw || ppy !in 0 until ph) continue
@@ -1219,17 +1290,16 @@ public object JpxDecoder {
 
     // ---- inverse MCT + assembly ---------------------------------------------------
 
-    private fun applyInverseMct(
-        s: Siz, comps: List<TileComp>, reversible: Boolean,
-        planes: Array<IntArray>, planeW: IntArray, planeH: IntArray,
-    ) {
+    private fun applyInverseMct(comps: List<TileComp>, reversible: Boolean, out: Planes) {
         // The three colour components must share geometry for the MCT.
-        val c0 = comps[0]
+        val planes = out.data; val planeW = out.w; val planeH = out.h
         if (planeW[0] != planeW[1] || planeW[0] != planeW[2] || planeH[0] != planeH[1] || planeH[0] != planeH[2]) return
-        val px0 = ceilDiv(s.xosiz, s.dx[0]); val py0 = ceilDiv(s.yosiz, s.dy[0])
+        val c0 = comps[0]
+        val rect = c0.resolutions[c0.cod.decompositions - out.r]
+        val px0 = out.x0[0]; val py0 = out.y0[0]
         val w = planeW[0]
-        for (ty in c0.y0 until c0.y1) {
-            for (tx in c0.x0 until c0.x1) {
+        for (ty in rect.y0 until rect.y1) {
+            for (tx in rect.x0 until rect.x1) {
                 val x = tx - px0; val y = ty - py0
                 if (x !in 0 until w || y !in 0 until planeH[0]) continue
                 val i = y * w + x

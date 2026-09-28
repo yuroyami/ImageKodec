@@ -128,6 +128,8 @@ class FuzzTest {
 
     private fun exercise(label: String, bytes: ByteArray) {
         mustFailCleanly("$label decode") { KiteImage.decode(bytes) }
+        // The reduced JPEG path allocates and indexes its own planes, so it gets the same abuse.
+        mustFailCleanly("$label decodeReduced") { KiteImage.decodeReduced(bytes, 8) }
         mustFailCleanly("$label decodeAnimation") { KiteImage.decodeAnimation(bytes) }
         mustFailCleanly("$label probe") { KiteImage.probe(bytes) }
         // probeOrNull promises never to throw on unreadable input at all.

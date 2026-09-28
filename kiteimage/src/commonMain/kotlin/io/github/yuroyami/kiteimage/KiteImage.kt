@@ -72,6 +72,35 @@ public object KiteImage {
         return bitmap.oriented(orientation)
     }
 
+    /**
+     * Decode [data] with each side divided by [reduction], rounded up: 1, 2, 4 or 8. Use it
+     * for an image that will draw smaller than its pixels, such as a scan on a phone screen
+     * or a thumbnail. Like [decode] by default, it does not apply EXIF orientation.
+     *
+     * A JPEG reduces inside its inverse DCT, as libjpeg's scaled decode does, so the
+     * full-size pixels never exist: a baseline 35-megapixel scan decoded at an eighth needs
+     * memory for about half a megapixel. A progressive JPEG still keeps the coefficients of
+     * the full size, 2 bytes a sample, until its last scan. A JPEG 2000 image drops its finest
+     * wavelet levels, as OpenJPEG's reduce option does. Other formats decode in full, then
+     * average each block of [reduction] by [reduction] pixels, weighted by alpha as [scaled]
+     * does.
+     *
+     * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
+     * @throws ImageDecodeException on malformed/truncated input or unknown format
+     * @throws UnsupportedImageException on formats recognised but not yet decodable
+     */
+    public fun decodeReduced(data: ByteArray, reduction: Int): KiteBitmap {
+        require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
+            "reduction must be 1, 2, 4 or 8, was $reduction"
+        }
+        if (reduction == 1) return decodeRaw(data)
+        return when (detect(data)) {
+            ImageFormat.JPEG -> JpegDecoder.decode(data, scale = reduction.countTrailingZeroBits())
+            ImageFormat.JP2 -> jp2ToBitmap(data, reduction)
+            else -> decodeRaw(data).reducedBy(reduction)
+        }
+    }
+
     private fun decodeRaw(data: ByteArray): KiteBitmap = when (detect(data)) {
         ImageFormat.PNG -> PngDecoder.decode(data)
         ImageFormat.BMP -> BmpDecoder.decode(data)
@@ -133,9 +162,9 @@ public object KiteImage {
     public fun encodeGif(animation: KiteAnimation, dither: Boolean = true): ByteArray =
         GifEncoder.encode(animation, dither)
 
-    /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored). */
-    private fun jp2ToBitmap(data: ByteArray): KiteBitmap {
-        val r = io.github.yuroyami.kiteimage.codec.JpxDecoder.decode(data)
+    /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored), each side divided by [reduction]. */
+    private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1): KiteBitmap {
+        val r = io.github.yuroyami.kiteimage.codec.JpxDecoder.decode(data, reduction)
             ?: throw ImageDecodeException("JPEG 2000: stream is malformed or uses an unsupported feature")
         val n = if (r.colorSpace == "DeviceRGB") 3 else 1
         val argb = IntArray(r.width * r.height)

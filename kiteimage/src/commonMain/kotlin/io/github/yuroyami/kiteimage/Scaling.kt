@@ -16,7 +16,8 @@ package io.github.yuroyami.kiteimage
  *
  * This is a post-decode scale: the decoder still materialises the full-size
  * image transiently. What it saves is *retained* memory (the thumbnail you keep
- * vs the 12MP original). Decode-time DCT-domain scaling is future work.
+ * vs the 12MP original). To shrink a JPEG while it decodes, use
+ * [KiteImage.decodeReduced] first.
  */
 public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
     require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
@@ -97,4 +98,46 @@ public fun KiteAnimation.scaled(maxWidth: Int, maxHeight: Int): KiteAnimation {
         frames = scaledFrames,
         loopCount = loopCount,
     )
+}
+
+/**
+ * This bitmap with each block of [reduction] by [reduction] pixels averaged into one, weighted
+ * by alpha as [scaled] averages: `ceil(width / reduction)` by `ceil(height / reduction)`
+ * pixels, where a block at the right or bottom edge averages the pixels it has.
+ */
+internal fun KiteBitmap.reducedBy(reduction: Int): KiteBitmap {
+    if (reduction <= 1) return this
+    val dw = (width + reduction - 1) / reduction
+    val dh = (height + reduction - 1) / reduction
+    val out = IntArray(dw * dh)
+    for (oy in 0 until dh) {
+        for (ox in 0 until dw) {
+            var a = 0L
+            var r = 0L
+            var g = 0L
+            var b = 0L
+            var n = 0
+            for (y in oy * reduction until minOf((oy + 1) * reduction, height)) {
+                for (x in ox * reduction until minOf((ox + 1) * reduction, width)) {
+                    val p = argb[y * width + x]
+                    val pa = (p ushr 24).toLong()
+                    a += pa
+                    r += ((p shr 16) and 0xFF) * pa
+                    g += ((p shr 8) and 0xFF) * pa
+                    b += (p and 0xFF) * pa
+                    n++
+                }
+            }
+            out[oy * dw + ox] = if (a == 0L) {
+                0
+            } else {
+                val oa = ((a + n / 2) / n).toInt()
+                val or = ((r + a / 2) / a).toInt()
+                val og = ((g + a / 2) / a).toInt()
+                val ob = ((b + a / 2) / a).toInt()
+                (oa shl 24) or (or shl 16) or (og shl 8) or ob
+            }
+        }
+    }
+    return KiteBitmap(dw, dh, out)
 }

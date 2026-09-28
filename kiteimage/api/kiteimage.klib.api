@@ -173,6 +173,7 @@ final object io.github.yuroyami.kiteimage.codec/Jbig2Decoder { // io.github.yuro
 
 final object io.github.yuroyami.kiteimage.codec/JpxDecoder { // io.github.yuroyami.kiteimage.codec/JpxDecoder|null[0]
     final fun decode(kotlin/ByteArray): io.github.yuroyami.kiteimage.codec/JpxDecoder.Result? // io.github.yuroyami.kiteimage.codec/JpxDecoder.decode|decode(kotlin.ByteArray){}[0]
+    final fun decode(kotlin/ByteArray, kotlin/Int): io.github.yuroyami.kiteimage.codec/JpxDecoder.Result? // io.github.yuroyami.kiteimage.codec/JpxDecoder.decode|decode(kotlin.ByteArray;kotlin.Int){}[0]
     final fun isJpx(kotlin/ByteArray): kotlin/Boolean // io.github.yuroyami.kiteimage.codec/JpxDecoder.isJpx|isJpx(kotlin.ByteArray){}[0]
 
     final class Result { // io.github.yuroyami.kiteimage.codec/JpxDecoder.Result|null[0]
@@ -194,6 +195,7 @@ final object io.github.yuroyami.kiteimage.codec/JpxDecoder { // io.github.yuroya
 final object io.github.yuroyami.kiteimage/KiteImage { // io.github.yuroyami.kiteimage/KiteImage|null[0]
     final fun decode(kotlin/ByteArray, kotlin/Boolean = ...): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/KiteImage.decode|decode(kotlin.ByteArray;kotlin.Boolean){}[0]
     final fun decodeAnimation(kotlin/ByteArray, kotlin/Boolean = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.kiteimage/KiteAnimation // io.github.yuroyami.kiteimage/KiteImage.decodeAnimation|decodeAnimation(kotlin.ByteArray;kotlin.Boolean;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun decodeReduced(kotlin/ByteArray, kotlin/Int): io.github.yuroyami.kiteimage/KiteBitmap // io.github.yuroyami.kiteimage/KiteImage.decodeReduced|decodeReduced(kotlin.ByteArray;kotlin.Int){}[0]
     final fun detect(kotlin/ByteArray): io.github.yuroyami.kiteimage/ImageFormat? // io.github.yuroyami.kiteimage/KiteImage.detect|detect(kotlin.ByteArray){}[0]
     final fun encodeBmp(io.github.yuroyami.kiteimage/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.kiteimage/KiteImage.encodeBmp|encodeBmp(io.github.yuroyami.kiteimage.KiteBitmap){}[0]
     final fun encodeGif(io.github.yuroyami.kiteimage/KiteAnimation, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.kiteimage/KiteImage.encodeGif|encodeGif(io.github.yuroyami.kiteimage.KiteAnimation;kotlin.Boolean){}[0]
