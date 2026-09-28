@@ -1,5 +1,6 @@
 package io.github.yuroyami.kiteimage
 
+import io.github.yuroyami.kiteimage.internal.flate.Zlib
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -45,6 +46,21 @@ class PngDecoderTest {
 
     // 1x1 whose IDAT CRC has one flipped byte
     private val BAD_CRC_1X1 = "89504e470d0a1a0a0000000d49484452000000010000000108000000003a7e9b550000000a4944415478da63d00200002c002b61f292940000000049454e44ae426082"
+
+    @Test
+    fun aSecondPaletteChunkIsRejected() {
+        // PLTE(1 entry), tRNS(1 byte), PLTE(2 entries), then index 1. The second palette
+        // used to outgrow the alpha array that tRNS had sized for the first one.
+        val bytes = PNG_SIGNATURE +
+            pngHeader(1, 1, bitDepth = 8, colorType = 3) +
+            pngChunk("PLTE", byteArrayOf(0xFF.toByte(), 0, 0)) +
+            pngChunk("tRNS", byteArrayOf(0x40)) +
+            pngChunk("PLTE", byteArrayOf(0xFF.toByte(), 0, 0, 0, 0, 0xFF.toByte())) +
+            pngChunk("IDAT", Zlib.compress(byteArrayOf(0, 1))) +
+            pngChunk("IEND", ByteArray(0))
+        val e = assertFailsWith<ImageDecodeException> { KiteImage.decode(bytes) }
+        assertTrue(e.message!!.contains("PLTE"), "message should name the problem: ${e.message}")
+    }
 
     @Test
     fun gray8AllFourFilters() {

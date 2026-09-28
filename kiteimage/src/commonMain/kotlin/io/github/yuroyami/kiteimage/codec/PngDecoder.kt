@@ -233,6 +233,8 @@ internal object PngDecoder {
             chunk = readChunkHeader(r)
             when (chunk.type) {
                 "PLTE" -> {
+                    // A second palette would outgrow the alpha array that tRNS sized for the first.
+                    if (palette != null) throw ImageDecodeException("PNG: more than one PLTE chunk")
                     if (chunk.length % 3 != 0 || chunk.length > 256 * 3) {
                         throw ImageDecodeException("PNG: PLTE length ${chunk.length} invalid")
                     }
