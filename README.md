@@ -146,12 +146,10 @@ anim.loopCount        // 0 means forever, in each format's own semantics
 anim.durationMillis
 ```
 
-GIF and WebP delays of 10 ms and under are reported as 100 ms, which matches
-browser behavior. KiteImage reports an APNG delay exactly as the file states it,
-so an fcTL with `delay_num = 0` gives a zero-millisecond frame.
-`KiteFrame.delayRawCentiseconds`
-is the exact figure a GIF stated. For APNG and WebP it is derived, because
-neither format stores centiseconds.
+GIF, APNG and WebP delays of 10 ms and under are reported as 100 ms, which matches
+browser behavior. An APNG `fcTL` with `delay_num = 0` therefore gives a 100 ms frame.
+`KiteFrame.delayRawCentiseconds` is the exact figure a GIF stated. For APNG and WebP
+it is derived from the stated delay, because neither format stores centiseconds.
 
 ### Write an image out
 
