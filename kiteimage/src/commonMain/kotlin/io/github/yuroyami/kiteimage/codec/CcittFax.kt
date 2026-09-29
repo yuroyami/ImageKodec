@@ -486,11 +486,7 @@ private fun peekAndTry(reader: BitReader, table: HuffmanTable): Int? {
 
 /* ─── Group 4 (T.6) decoder ──────────────────────────────────────────────── */
 
-/**
- * Decode Group 4 (T.6) 2D-only encoding. Output is `rows × bytesPerRow`
- * bytes; rows are MSB-packed and zero-padded at the line end.
- */
-/** Widest row accepted: the same dimension ceiling the container decoders use. */
+/** Widest row accepted: the ceiling the other decoders use for one side of an image. */
 private const val MAX_COLUMNS = 1 shl 24
 
 /**
@@ -514,6 +510,10 @@ private fun checkRoomForRow(rows: Int, cols: Int) {
     }
 }
 
+/**
+ * Decode Group 4 (T.6) 2D-only encoding. Output is `rows × bytesPerRow`
+ * bytes; rows are MSB-packed and zero-padded at the line end.
+ */
 internal fun decodeGroup4(reader: BitReader, opts: CcittOptions): ByteArray {
     checkGeometry(opts)
     val cols = opts.columns
