@@ -27,3 +27,24 @@ internal fun emptyScanJpeg(side: Int, scans: Int, padding: Int = 0): ByteArray {
     add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
     return out.toByteArray()
 }
+
+/**
+ * A gray 64 by 8 baseline JPEG: eight blocks in four restart intervals of two. The DC table has two
+ * one-bit codes, "0" for category 0 and "1" for category 6, and the AC table only end of block.
+ *  - a full interval: block A is "1" + 111111 + "0" (DC +63, then end of block) and block B is "0" + "0"
+ *  - the second interval is short: block A only, and block B is not in the file
+ */
+internal fun restartIntervalJpeg(): ByteArray {
+    val full = byteArrayOf(0xFE.toByte(), 0x3F)
+    val short = byteArrayOf(0xFE.toByte())
+    fun rst(n: Int) = byteArrayOf(0xFF.toByte(), (0xD0 + n).toByte())
+    val entropy = full + rst(0) + short + rst(1) + full + rst(2) + full
+    return byteArrayOf(0xFF.toByte(), 0xD8.toByte()) +
+        jpegSegment(0xDB, byteArrayOf(0) + ByteArray(64) { 1 }) +
+        jpegSegment(0xC0, byteArrayOf(8, 0, 8, 0, 64, 1, 1, 0x11, 0)) +
+        jpegSegment(0xC4, byteArrayOf(0x00, 2) + ByteArray(15) + byteArrayOf(0, 6)) +
+        jpegSegment(0xC4, byteArrayOf(0x10, 1) + ByteArray(15) + byteArrayOf(0)) +
+        jpegSegment(0xDD, byteArrayOf(0, 2)) +
+        jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 0, 63, 0)) +
+        entropy + byteArrayOf(0xFF.toByte(), 0xD9.toByte())
+}

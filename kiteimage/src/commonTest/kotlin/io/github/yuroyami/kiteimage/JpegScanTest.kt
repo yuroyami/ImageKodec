@@ -36,25 +36,10 @@ class JpegScanTest {
 
     @Test
     fun aShortRestartIntervalResyncsAtTheNextMarker() {
-        // A gray 64 by 8 image: eight blocks in four restart intervals of two. The DC table has two
-        // one-bit codes, "0" for category 0 and "1" for category 6, and the AC table only end of block.
-        //   full interval: block A = "1" + 111111 + "0" (DC +63, then EOB), block B = "0" + "0" (no change)
-        //   short interval: block A only. Block B is not in the file.
+        // See restartIntervalJpeg: eight blocks in four intervals, and the second interval is short.
         // Block B of a short interval must stay gray. Decoding zero bits instead carries the DC over
         // and shows +63 there. Every interval after it must still decode.
-        val full = byteArrayOf(0xFE.toByte(), 0x3F)
-        val short = byteArrayOf(0xFE.toByte())
-        fun rst(n: Int) = byteArrayOf(0xFF.toByte(), (0xD0 + n).toByte())
-        val entropy = full + rst(0) + short + rst(1) + full + rst(2) + full
-        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte()) +
-            jpegSegment(0xDB, byteArrayOf(0) + ByteArray(64) { 1 }) +
-            jpegSegment(0xC0, byteArrayOf(8, 0, 8, 0, 64, 1, 1, 0x11, 0)) +
-            jpegSegment(0xC4, byteArrayOf(0x00, 2) + ByteArray(15) + byteArrayOf(0, 6)) +
-            jpegSegment(0xC4, byteArrayOf(0x10, 1) + ByteArray(15) + byteArrayOf(0)) +
-            jpegSegment(0xDD, byteArrayOf(0, 2)) +
-            jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 0, 63, 0)) +
-            entropy + byteArrayOf(0xFF.toByte(), 0xD9.toByte())
-
+        val jpeg = restartIntervalJpeg()
         val bitmap = KiteImage.decode(jpeg)
         fun level(block: Int) = bitmap[block * 8 + 4, 4] and 0xFF
         for (block in intArrayOf(0, 1, 2, 4, 5, 6, 7)) assertTrue(level(block) > 130, "block $block is in the file: ${level(block)}")

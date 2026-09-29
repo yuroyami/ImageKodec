@@ -1,5 +1,6 @@
 package io.github.yuroyami.kiteimage
 
+import io.github.yuroyami.kiteimage.internal.flate.Zlib
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -60,7 +61,56 @@ class FuzzTest {
         "webp-animation" to hex(WEBP_ANIMATION),
         "tiff" to hex(TIFF_RGB),
         "jp2" to hex(JP2),
+        // Seeds for the paths a mutation cannot reach from the ones above: each needs several chunks or
+        // fields to agree, so a random edit of a plain file stops at the first check.
+        "apng" to apngSeed(),
+        "png-palette" to paletteSeed(),
+        "gif-subrect" to hex(GIF_SUBRECT),
+        "tiff-deflate" to hex(buildTiff(compression = 8)),
+        "tiff-tiled" to hex(buildTiff(tiled = true)),
+        "jpeg-progressive" to hex(JPEG_PROGRESSIVE),
+        "jpeg-restart" to restartIntervalJpeg(),
     )
+
+    /** Two frames: the default image doubles as frame 0, then a 2 by 2 frame that disposes to background. */
+    private fun apngSeed(): ByteArray {
+        fun rgba(w: Int, h: Int, tint: Int): ByteArray {
+            val raw = ByteArray(h * (1 + w * 4))
+            var o = 0
+            for (y in 0 until h) {
+                raw[o++] = 0
+                for (x in 0 until w) {
+                    raw[o++] = (x * 40 + tint).toByte(); raw[o++] = (y * 60).toByte(); raw[o++] = tint.toByte(); raw[o++] = 0xFF.toByte()
+                }
+            }
+            return Zlib.compress(raw)
+        }
+        fun fctl(seq: Int, w: Int, h: Int, x: Int, y: Int, dispose: Int, blend: Int) =
+            pngChunk(
+                "fcTL",
+                beBytes(seq) + beBytes(w) + beBytes(h) + beBytes(x) + beBytes(y) +
+                    byteArrayOf(0, 10, 0, 100, dispose.toByte(), blend.toByte()),
+            )
+        return PNG_SIGNATURE + pngHeader(4, 4, bitDepth = 8, colorType = 6) +
+            pngChunk("acTL", beBytes(2) + beBytes(0)) +
+            fctl(0, 4, 4, 0, 0, dispose = 0, blend = 0) + pngChunk("IDAT", rgba(4, 4, 50)) +
+            fctl(1, 2, 2, 1, 1, dispose = 1, blend = 1) + pngChunk("fdAT", beBytes(2) + rgba(2, 2, 130)) +
+            pngChunk("IEND", ByteArray(0))
+    }
+
+    /** A 4 by 2 palette image whose two first entries are partly transparent. */
+    private fun paletteSeed(): ByteArray =
+        PNG_SIGNATURE + pngHeader(4, 2, bitDepth = 8, colorType = 3) +
+            pngChunk("PLTE", byteArrayOf(-1, 0, 0, 0, -1, 0, 0, 0, -1, -1, -1, 0)) +
+            pngChunk("tRNS", byteArrayOf(0, 128.toByte())) +
+            pngChunk("IDAT", Zlib.compress(byteArrayOf(0, 0, 1, 2, 3, 0, 3, 2, 1, 0))) +
+            pngChunk("IEND", ByteArray(0))
+
+    /** From GifDecoderTest: a 2 by 2 screen, with frames that are 2 by 2 and 1 by 1 sub-rectangles and disposal 3. */
+    private val GIF_SUBRECT = "47494638396102000200910000ff000000ff000000ffffff0021f904040a0000002c0000000002000200000204044110050021f9040c0a0000002c000000000100010000020254010021f904040a0000002c01000100010001000002024c01003b"
+
+    /** From JpegProgressiveTest: a 9 by 7 progressive JPEG with spectral selection and refinement scans. */
+    private val JPEG_PROGRESSIVE = "ffd8ffe000104a46494600010200000100010000ffdb004300100b0c0e0c0a100e0d0e1211101318281a181616183123251d283a333d3c3933383740485c4e404457453738506d51575f626768673e4d71797064785c656763ffdb0043011112121815182f1a1a2f634238426363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363ffc20011080007000903012200021101031101ffc400160001010100000000000000000000000000000205ffc4001501010100000000000000000000000000000104ffda000c03010002100310000001d6b223ffc400161001010100000000000000000000000000000111ffda000801010001050295afffc40017110003010000000000000000000000000000010321ffda0008010301013f019ac3ffc4001811000203000000000000000000000000000001020311ffda0008010201013f01b64f4fffc40014100100000000000000000000000000000010ffda0008010100063f023fffc400161001010100000000000000000000000000000111ffda0008010100013f21830fffda000c030100020003000000108fffc4001511010100000000000000000000000000000001ffda0008010301013f1093ffc4001511010100000000000000000000000000000041ffda0008010201013f10a2ffc40017100100030000000000000000000000000000113161ffda0008010100013f108b4c5fffd9"
 
     private val WEBP_LOSSLESS = "524946462e000000574542505650384c220000002f0fc00200b93244f43f7651ffe87f8048dba622eedfeed8f13c4c404c005c07eb3f"
     private val WEBP_ANIMATION = "52494646f200000057454250565038580a00000002000000070000070000414e494d06000000ffffffff0000414e4d4638000000000000000000070000070000640000025650384c200000002f07c00100b93244f43f7611d1ff0061b65149ce1f74af23188f8809c01efa0f414e4d463e000000000000000000070000070000640000005650384c260000002f07c00100b93244f43f7611d1ff0061b65149ce1f74af231008a43892991ead9800971ee83f414e4d4640000000000000000000070000070000640000005650384c270000002f07c00100b93244f43f7611d1ff0061b65149ce1f74af2310082491cc3eead0c604b8f440ff0100"
@@ -68,17 +118,23 @@ class FuzzTest {
     /** 4x3 uncompressed RGB TIFF, little-endian, one strip. */
     private val TIFF_RGB = buildTiff()
 
-    private fun buildTiff(): String {
+    /** [compression] is the TIFF code: 1 raw, 8 deflate. [tiled] stores one padded 16 by 16 tile in place of a strip. */
+    private fun buildTiff(compression: Int = 1, tiled: Boolean = false): String {
         val w = 4
         val h = 3
-        val px = ByteArray(w * h * 3) { (it * 11).toByte() }
-        val fields = listOf(
+        val raw = ByteArray((if (tiled) 16 * 16 else w * h) * 3) { (it * 11).toByte() }
+        val px = if (compression == 8) Zlib.compress(raw) else raw
+        val fields = mutableListOf(
             intArrayOf(256, 4, 1, w), intArrayOf(257, 4, 1, h),
-            intArrayOf(258, 3, 3, 0), intArrayOf(259, 3, 1, 1),
-            intArrayOf(262, 3, 1, 2), intArrayOf(273, 4, 1, 0),
-            intArrayOf(277, 3, 1, 3), intArrayOf(278, 4, 1, h),
-            intArrayOf(279, 4, 1, px.size), intArrayOf(284, 3, 1, 1),
+            intArrayOf(258, 3, 3, 0), intArrayOf(259, 3, 1, compression),
+            intArrayOf(262, 3, 1, 2), intArrayOf(277, 3, 1, 3), intArrayOf(284, 3, 1, 1),
         )
+        if (tiled) {
+            fields += listOf(intArrayOf(322, 4, 1, 16), intArrayOf(323, 4, 1, 16), intArrayOf(324, 4, 1, 0), intArrayOf(325, 4, 1, px.size))
+        } else {
+            fields += listOf(intArrayOf(273, 4, 1, 0), intArrayOf(278, 4, 1, h), intArrayOf(279, 4, 1, px.size))
+        }
+        fields.sortBy { it[0] }                            // a TIFF directory lists its tags in ascending order
         val ifdAt = 8
         val bitsAt = ifdAt + 2 + fields.size * 12 + 4
         val pixelsAt = bitsAt + 6
@@ -94,7 +150,7 @@ class FuzzTest {
             val slot = at
             when {
                 f[0] == 258 -> u32(bitsAt)
-                f[0] == 273 -> u32(pixelsAt)
+                f[0] == 273 || f[0] == 324 -> u32(pixelsAt)
                 f[1] == 3 -> { u16(f[3]); u16(0) }
                 else -> u32(f[3])
             }
