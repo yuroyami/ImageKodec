@@ -231,12 +231,19 @@ alias.
 network fetching, disk and memory caching, and the request lifecycle.
 
 ```kotlin
-ImageLoader.Builder(context)
+val loader = ImageLoader.Builder(context)
     .components { add(KiteImageDecoder.Factory()) }
     .build()
 
-KiteAsyncImage(model = "https://example.com/reaction.gif", contentDescription = null)
+KiteAsyncImage(
+    model = "https://example.com/reaction.gif",
+    contentDescription = null,
+    imageLoader = loader,
+)
 ```
+
+Pass the loader to `KiteAsyncImage`. Without it, the composable uses Coil's singleton
+loader, which does not have the KiteImage decoder.
 
 `KiteImageDecoder.Factory` claims a file by calling `probe` on a 64 KiB peek and
 checking `isDecodable`. It therefore takes what these codecs handle and leaves
