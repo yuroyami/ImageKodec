@@ -1,16 +1,16 @@
-# KiteImage
+# KiteImageCodec
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
 BMP, TIFF, JPEG 2000 and lossless WebP from a `ByteArray`, with the same code on
 every target.
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/kiteimage)](https://central.sonatype.com/artifact/io.github.yuroyami/kiteimage)
-[![CI](https://img.shields.io/github/actions/workflow/status/yuroyami/KiteImage/ci.yml?branch=main&label=CI)](https://github.com/yuroyami/KiteImage/actions/workflows/ci.yml)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/kiteimagecodec)](https://central.sonatype.com/artifact/io.github.yuroyami/kiteimagecodec)
+[![CI](https://img.shields.io/github/actions/workflow/status/yuroyami/KiteImageCodec/ci.yml?branch=main&label=CI)](https://github.com/yuroyami/KiteImageCodec/actions/workflows/ci.yml)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Targets](https://img.shields.io/badge/targets-22%20core%2C%207%20UI-blue)](#targets)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-**[Documentation](https://yuroyami.github.io/KiteImage/)** · an overview with
+**[Documentation](https://yuroyami.github.io/KiteImageCodec/)** · an overview with
 examples, plus the generated API reference.
 
 ## What you get
@@ -21,10 +21,10 @@ on desktop, and the browser on web. Common code that needs real pixels must
 therefore call per-platform code. A thumbnail hash, a server-side resize and a
 PDF's embedded images all need this.
 
-KiteImage decodes in common Kotlin instead. Every format normalizes to
+KiteImageCodec decodes in common Kotlin instead. Every format normalizes to
 non-premultiplied ARGB_8888 in a plain `IntArray`. Non-premultiplied means the
 red, green and blue channels hold the original color, not the color already
-multiplied by the alpha value. KiteImage resolves palettes, grayscale, BGR
+multiplied by the alpha value. KiteImageCodec resolves palettes, grayscale, BGR
 ordering and chroma subsampling before it returns the pixels. Chroma subsampling
 means the file stores color at a lower resolution than brightness.
 
@@ -32,37 +32,37 @@ The core artifact depends on kotlin-stdlib and nothing else. The Compose and Coi
 bindings are separate, optional modules.
 
 ```kotlin
-import io.github.yuroyami.kiteimage.KiteImage
-import io.github.yuroyami.kiteimage.KiteBitmap
+import io.github.yuroyami.kiteimagecodec.KiteImageCodec
+import io.github.yuroyami.kiteimagecodec.KiteBitmap
 
 // Header only: no pixel buffer is allocated.
-val info = KiteImage.probe(bytes)
+val info = KiteImageCodec.probe(bytes)
 println("${info.width}x${info.height}, ${info.frameCount} frame(s)")
 
-// KiteImage reads the magic bytes to find the format.
-val bitmap: KiteBitmap = KiteImage.decode(bytes)
+// KiteImageCodec reads the magic bytes to find the format.
+val bitmap: KiteBitmap = KiteImageCodec.decode(bytes)
 val pixel = bitmap[10, 20]                       // 0xAARRGGBB
 
 // GIF, APNG and animated WebP all arrive in this shape, fully composited.
-val anim = KiteImage.decodeAnimation(bytes)
+val anim = KiteImageCodec.decodeAnimation(bytes)
 for (frame in anim.frames) draw(frame.bitmap, frame.delayMillis)
 
-val png: ByteArray = KiteImage.encodePng(bitmap)
+val png: ByteArray = KiteImageCodec.encodePng(bitmap)
 ```
 
 ## Install
 
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:kiteimage:0.1.0")
+    implementation("io.github.yuroyami:kiteimagecodec:0.1.0")
     // Optional, and both build for far fewer targets than the core.
-    implementation("io.github.yuroyami:kiteimage-compose:0.1.0")
-    implementation("io.github.yuroyami:kiteimage-coil:0.1.0")
+    implementation("io.github.yuroyami:kiteimagecodec-compose:0.1.0")
+    implementation("io.github.yuroyami:kiteimagecodec-coil:0.1.0")
 }
 ```
 
-Read [Targets](#targets) before you add the optional two. `kiteimage-coil`
-declares `kiteimage-compose` as `implementation`, so it does not arrive
+Read [Targets](#targets) before you add the optional two. `kiteimagecodec-coil`
+declares `kiteimagecodec-compose` as `implementation`, so it does not arrive
 transitively. Declare the Compose module yourself if you want the Coil module.
 
 ## What it does
@@ -73,7 +73,7 @@ transitively. Declare the Compose module yourself if you want the Coil module.
 cheap on a 50-megapixel file.
 
 ```kotlin
-val info = KiteImage.probe(bytes)
+val info = KiteImageCodec.probe(bytes)
 info.width; info.height          // as stored
 info.displayWidth                // after the EXIF orientation tag
 info.frameCount; info.hasAlpha; info.bitDepth
@@ -93,8 +93,8 @@ not decodable. Until that chunk, nothing says whether the image is lossy.
 ### Decode a still
 
 ```kotlin
-val bitmap = KiteImage.decode(bytes)
-val upright = KiteImage.decode(bytes, applyOrientation = true)   // honor EXIF
+val bitmap = KiteImageCodec.decode(bytes)
+val upright = KiteImageCodec.decode(bytes, applyOrientation = true)   // honor EXIF
 ```
 
 A file that cannot be decoded throws `ImageDecodeException`. A feature this build lacks
@@ -125,7 +125,7 @@ Two rows above are narrower than the format name suggests:
 - **The TIFF decoder reads only the first IFD.** A multi-page TIFF decodes to
   page 1 and reports no error.
 
-`ImageFormat.sniff` (and `KiteImage.detect`) recognize PNG, JPEG, GIF, BMP, WEBP,
+`ImageFormat.sniff` (and `KiteImageCodec.detect`) recognize PNG, JPEG, GIF, BMP, WEBP,
 TIFF and JP2. Sniffing is deliberately wider than decoding, which is why `probe`
 is worth calling.
 
@@ -140,7 +140,7 @@ with disposal, blending and frame offsets already applied. Playback is therefore
 "draw frame N, wait delay N".
 
 ```kotlin
-val anim = KiteImage.decodeAnimation(bytes)
+val anim = KiteImageCodec.decodeAnimation(bytes)
 anim.frames.size
 anim.loopCount        // 0 means forever, in each format's own semantics
 anim.durationMillis
@@ -154,11 +154,11 @@ it is derived from the stated delay, because neither format stores centiseconds.
 ### Write an image out
 
 ```kotlin
-KiteImage.encodePng(bitmap)                    // 8-bit RGB, or RGBA when alpha is present
-KiteImage.encodeJpeg(bitmap, quality = 85)     // baseline; 4:2:0 at quality <= 90, 4:4:4 above
-KiteImage.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colors
-KiteImage.encodeGif(anim)                      // animated, delays and loop count preserved
-KiteImage.encodeBmp(bitmap)                    // 24-bit BI_RGB, or 32-bit V4 BITFIELDS with alpha
+KiteImageCodec.encodePng(bitmap)                    // 8-bit RGB, or RGBA when alpha is present
+KiteImageCodec.encodeJpeg(bitmap, quality = 85)     // baseline; 4:2:0 at quality <= 90, 4:4:4 above
+KiteImageCodec.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colors
+KiteImageCodec.encodeGif(anim)                      // animated, delays and loop count preserved
+KiteImageCodec.encodeBmp(bitmap)                    // 24-bit BI_RGB, or 32-bit V4 BITFIELDS with alpha
 ```
 
 There is no WebP, TIFF or JPEG 2000 encoder.
@@ -181,7 +181,7 @@ upscales. When the image already fits the box, it returns the image unchanged.
 avoid that for a JPEG, decode at a smaller size:
 
 ```kotlin
-KiteImage.decodeReduced(bytes, reduction = 4)  // each side divided by 4, rounded up
+KiteImageCodec.decodeReduced(bytes, reduction = 4)  // each side divided by 4, rounded up
 ```
 
 The reduction is 1, 2, 4 or 8. A JPEG shrinks inside its inverse DCT, as
@@ -196,11 +196,11 @@ extends outside the image. It does not clamp the rectangle.
 
 ### Show an image in Compose
 
-`kiteimage-compose` provides a `KiteImage` composable. It reads the input and
+`kiteimagecodec-compose` provides a `KiteImage` composable. It reads the input and
 animates it when the input is animated.
 
 ```kotlin
-import io.github.yuroyami.kiteimage.compose.KiteImage
+import io.github.yuroyami.kiteimagecodec.compose.KiteImage
 
 KiteImage(
     data = bytes,
@@ -213,21 +213,16 @@ KiteImage(
 
 Decoding runs on `Dispatchers.Default` and re-runs when `data` changes. The
 composable holds its layout slot and draws nothing until decoding finishes. It
-applies EXIF orientation, even though `KiteImage.decode` does not apply it by
+applies EXIF orientation, even though `KiteImageCodec.decode` does not apply it by
 default.
 
 Two more composables are public, for pipelines that decode themselves: an
 overload of `KiteImage` that takes a `KiteBitmap`, and `KiteAnimatedImage` that
 takes a `KiteAnimation`. `KiteBitmap.toImageBitmap()` is public as well.
 
-Two public declarations share the name `KiteImage`. One is the `object` in
-`io.github.yuroyami.kiteimage`. The other is this `@Composable fun` in
-`io.github.yuroyami.kiteimage.compose`. Importing both in one file needs an `as`
-alias.
-
 ### Use it with Coil
 
-`kiteimage-coil` decodes the image instead of Coil's platform decoder. Coil keeps
+`kiteimagecodec-coil` decodes the image instead of Coil's platform decoder. Coil keeps
 network fetching, disk and memory caching, and the request lifecycle.
 
 ```kotlin
@@ -243,7 +238,7 @@ KiteAsyncImage(
 ```
 
 Pass the loader to `KiteAsyncImage`. Without it, the composable uses Coil's singleton
-loader, which does not have the KiteImage decoder.
+loader, which does not have `KiteImageDecoder`.
 
 `KiteImageDecoder.Factory` claims a file by calling `probe` on a 64 KiB peek and
 checking `isDecodable`. It therefore takes what these codecs handle and leaves
@@ -259,7 +254,7 @@ limit. Larger ones re-decode from the disk cache instead of evicting everything
 else.
 
 `KiteAsyncImage` passes its layout constraints to the request as a target size.
-KiteImage then box-filters still images and every animation frame to the size you
+KiteImageCodec then box-filters still images and every animation frame to the size you
 actually draw.
 
 This module declares coil3 as `api`, so coil3 types appear on your compile
@@ -267,7 +262,7 @@ classpath even when you do not use them.
 
 ## Targets
 
-`kiteimage` builds for 22 targets.
+`kiteimagecodec` builds for 22 targets.
 
 | Family | Targets |
 | --- | --- |
@@ -279,7 +274,7 @@ classpath even when you do not use them.
 `macosX64` is not built, following Kotlin's deprecation of Intel-Apple native
 targets.
 
-`kiteimage-compose` and `kiteimage-coil` build for seven targets: Android, `jvm`,
+`kiteimagecodec-compose` and `kiteimagecodec-coil` build for seven targets: Android, `jvm`,
 `iosArm64`, `iosSimulatorArm64`, `macosArm64`, `js` (browser only) and `wasmJs`
 (browser only).
 
@@ -297,13 +292,13 @@ web project that runs under Node should not use them.
   the internet. `probe` reports them as undecodable and `decode` throws
   `UnsupportedImageException`. You can therefore route them to a platform decoder
   without a failed attempt first.
-- **KiteImage keeps only the high byte of a 16-bit sample.** PNG and TIFF read
-  16-bit files, but the output buffer is 8 bits per channel. KiteImage discards
+- **KiteImageCodec keeps only the high byte of a 16-bit sample.** PNG and TIFF read
+  16-bit files, but the output buffer is 8 bits per channel. KiteImageCodec discards
   the low byte rather than dithering or scaling it. `probe` still reports the
   stored depth.
 - **The TIFF decoder reads only the first IFD.** A multi-page TIFF decodes to
   page 1 with no error and a `frameCount` of 1.
-- **KiteImage writes PNG, JPEG, GIF and BMP only.** There is no encoder for WebP,
+- **KiteImageCodec writes PNG, JPEG, GIF and BMP only.** There is no encoder for WebP,
   TIFF or JPEG 2000.
 - **The PNG encoder writes 8-bit RGB or RGBA only**, with no interlace, no
   palette and no 16-bit output. It picks a filter per row, which is a compression
@@ -358,7 +353,7 @@ run only when the binary is installed, and skip when it is not. A skipped test
 reports as a pass, so read the skip count and not only the pass result.
 
 `FuzzTest` drives seeded bit flips, truncations and cross-format splices through
-every decoder that `KiteImage.decode` dispatches to. It asserts that nothing but
+every decoder that `KiteImageCodec.decode` dispatches to. It asserts that nothing but
 `ImageDecodeException` escapes. `CcittFax` and `Jbig2Decoder` have tests of their
 own and are not part of that corpus.
 
@@ -374,11 +369,11 @@ startup. Every tile is captioned from `probe`.
 behind each codec. The rule that matters is that a decoder never trusts its
 input. Security reporting is in [SECURITY.md](SECURITY.md), the change history in
 [CHANGELOG.md](CHANGELOG.md), and open work in
-[GitHub Issues](https://github.com/yuroyami/KiteImage/issues).
+[GitHub Issues](https://github.com/yuroyami/KiteImageCodec/issues).
 
 ## License
 
-Apache-2.0. KiteImage is a clean-room implementation built from permissively
+Apache-2.0. KiteImageCodec is a clean-room implementation built from permissively
 licensed references, mainly [stb_image](https://github.com/nothings/stb) (public
 domain or MIT) and
 [Apache Commons Imaging](https://github.com/apache/commons-imaging) (Apache-2.0).

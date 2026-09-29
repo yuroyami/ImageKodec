@@ -1,6 +1,6 @@
 <div class="kite-hero" markdown>
 
-# KiteImage
+# KiteImageCodec
 
 Image codecs written in Kotlin, for Kotlin Multiplatform. Decode PNG, JPEG, GIF,
 BMP, TIFF, JPEG 2000 and lossless WebP from a `ByteArray`. The same code runs on
@@ -9,7 +9,7 @@ Android, iOS, desktop, native, the browser and Wasm.
 <div class="kite-hero-actions" markdown>
 [Get started](#install){ .kite-primary }
 [API reference](api/)
-[GitHub](https://github.com/yuroyami/KiteImage)
+[GitHub](https://github.com/yuroyami/KiteImageCodec)
 </div>
 
 </div>
@@ -20,10 +20,10 @@ and the browser on web. If your common code needs real pixels, you must write on
 decoder per platform. A thumbnail hash, a server-side resize and the images
 inside a PDF all need this.
 
-KiteImage decodes in common Kotlin. Every format normalizes to non-premultiplied
+KiteImageCodec decodes in common Kotlin. Every format normalizes to non-premultiplied
 ARGB_8888 in a plain `IntArray`. Non-premultiplied means the red, green and blue
 channels hold the original color, not the color already multiplied by the alpha
-value. KiteImage resolves palettes, grayscale, BGR ordering and chroma
+value. KiteImageCodec resolves palettes, grayscale, BGR ordering and chroma
 subsampling before it returns the pixels. Chroma subsampling means the file
 stores color at a lower resolution than brightness.
 
@@ -33,7 +33,7 @@ The core artifact depends on `kotlin-stdlib` and nothing else.
 
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:kiteimage:0.1.0")
+    implementation("io.github.yuroyami:kiteimagecodec:0.1.0")
 }
 ```
 
@@ -45,9 +45,9 @@ fail to resolve those two modules. Read the README's target table first.
 ## Decode something
 
 ```kotlin
-import io.github.yuroyami.kiteimage.KiteImage
+import io.github.yuroyami.kiteimagecodec.KiteImageCodec
 
-val bitmap = KiteImage.decode(bytes)   // format sniffed from the magic bytes
+val bitmap = KiteImageCodec.decode(bytes)   // format sniffed from the magic bytes
 val pixel = bitmap[10, 20]             // 0xAARRGGBB
 ```
 
@@ -55,7 +55,7 @@ One type covers GIF, APNG and animated WebP, already composited. Playback is
 therefore "draw frame N, wait delay N":
 
 ```kotlin
-val anim = KiteImage.decodeAnimation(bytes)
+val anim = KiteImageCodec.decodeAnimation(bytes)
 for (frame in anim.frames) draw(frame.bitmap, frame.delayMillis)
 ```
 
@@ -66,7 +66,7 @@ stays cheap on a 50-megapixel file. Use it to size a layout, or to reject an
 upload by dimension before it allocates memory.
 
 ```kotlin
-val info = KiteImage.probe(bytes)
+val info = KiteImageCodec.probe(bytes)
 info.width; info.height          // as stored
 info.displayWidth                // after EXIF orientation
 info.frameCount; info.hasAlpha
@@ -77,7 +77,7 @@ info.isDecodable                 // and info.unsupportedReason when it is not
 compression this build does not implement therefore reports `false` before you
 decode, rather than throwing later.
 
-## Check this before you choose KiteImage
+## Check this before you choose KiteImageCodec
 
 **WebP is lossless only.** VP8L still images and animations decode. Lossy VP8
 does not, and most `.webp` files published on the internet are lossy. There is no
@@ -89,7 +89,7 @@ Two more are worth knowing early:
 - The TIFF decoder reads only the first IFD. A multi-page TIFF decodes to page 1
   and reports no error. IFD means Image File Directory, the record that describes
   one page of a TIFF.
-- PNG and TIFF read 16-bit files, but KiteImage keeps only the high byte of each
+- PNG and TIFF read 16-bit files, but KiteImageCodec keeps only the high byte of each
   16-bit sample.
 
 The README's Limits section has the full list.
@@ -98,7 +98,7 @@ The README's Limits section has the full list.
 
 <div class="kite-cards" markdown>
 
-<a class="kite-card" href="https://github.com/yuroyami/KiteImage#readme">
+<a class="kite-card" href="https://github.com/yuroyami/KiteImageCodec#readme">
 <strong>README</strong>
 <span>Per-format support, encoders, geometry helpers, the target tables and the full limits.</span>
 </a>
@@ -108,7 +108,7 @@ The README's Limits section has the full list.
 <span>Every public type, generated from source.</span>
 </a>
 
-<a class="kite-card" href="https://github.com/yuroyami/KiteImage/issues">
+<a class="kite-card" href="https://github.com/yuroyami/KiteImageCodec/issues">
 <strong>Open issues</strong>
 <span>Known gaps and what is planned, grouped by format and by area.</span>
 </a>

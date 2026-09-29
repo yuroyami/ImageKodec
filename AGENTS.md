@@ -1,7 +1,7 @@
-# Working on KiteImage
+# Working on KiteImageCodec
 
 How to build, the test gate and the style rules: [CONTRIBUTING.md](CONTRIBUTING.md).
-Open work: [GitHub Issues](https://github.com/yuroyami/KiteImage/issues).
+Open work: [GitHub Issues](https://github.com/yuroyami/KiteImageCodec/issues).
 Format support and known limits: the Limits section of [README.md](README.md).
 
 ## Gotchas
@@ -24,7 +24,7 @@ being true.
 - `FuzzTest` stops at a PNG chunk's checksum and cannot make two fields agree, so
   a fault that needs either has to be found with a test built by hand (#28, #29).
 - `CcittFax` and `Jbig2Decoder` are not in the `FuzzTest` corpus, because
-  `KiteImage.decode` does not reach them (#33).
+  `KiteImageCodec.decode` does not reach them (#33).
 - `JpxOracleTest.the_corpus_fixture_jp2_decodes_exactly` looks for a PDF in a
   folder beside this repo and skips without it, so the JVM run always reports one
   skip, even with every oracle tool installed (#14).

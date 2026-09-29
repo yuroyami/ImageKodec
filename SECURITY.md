@@ -1,13 +1,13 @@
 # Security policy
 
-KiteImage parses bytes it did not write. That is the whole point of the library,
+KiteImageCodec parses bytes it did not write. That is the whole point of the library,
 and it is also the whole of its attack surface: every decoder here is fed input
 from somewhere else, often over a network, often chosen by someone else.
 
 ## Reporting a vulnerability
 
 Report privately through GitHub's
-[security advisories](https://github.com/yuroyami/KiteImage/security/advisories/new)
+[security advisories](https://github.com/yuroyami/KiteImageCodec/security/advisories/new)
 rather than a public issue. A useful report includes the input file (or a
 generator for it), the target it happens on, and what the decoder does with it.
 
@@ -27,13 +27,13 @@ decoder entry point is a bug worth reporting:
 
 ## What does not
 
-- **A refusal.** Rejecting a file KiteImage cannot decode is the documented
+- **A refusal.** Rejecting a file KiteImageCodec cannot decode is the documented
   behavior, not a denial of service.
 - **Wrong pixels.** A decode that produces the wrong picture is a correctness
   bug; file it as a normal issue with the input attached.
 - **Resource use inside the documented budget.** A legitimate 100-megapixel
   image really does need hundreds of megabytes. Check the input size against
-  `KiteImage.probe` before decoding if that matters to you.
+  `KiteImageCodec.probe` before decoding if that matters to you.
 
 ## Guards already in place
 
@@ -52,7 +52,7 @@ decoder entry point is a bug worth reporting:
 
 ## Reducing your own exposure
 
-`KiteImage.probe(bytes)` reads only the header. Use it to reject images by
+`KiteImageCodec.probe(bytes)` reads only the header. Use it to reject images by
 dimension, frame count or format before committing to a decode, and use
 `KiteBitmap.scaled` (or the Coil integration, which does it for you) so a large
 source does not stay resident at full size.

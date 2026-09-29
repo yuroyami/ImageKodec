@@ -1,11 +1,11 @@
-site_name: KiteImage
-site_url: https://yuroyami.github.io/KiteImage/
+site_name: KiteImageCodec
+site_url: https://yuroyami.github.io/KiteImageCodec/
 site_description: Decode and encode PNG, JPEG, GIF, BMP, WebP, TIFF and JPEG 2000 from common Kotlin, with no platform image APIs underneath.
 site_author: yuroyami
 copyright: Apache-2.0
 
-repo_name: yuroyami/KiteImage
-repo_url: https://github.com/yuroyami/KiteImage
+repo_name: yuroyami/KiteImageCodec
+repo_url: https://github.com/yuroyami/KiteImageCodec
 edit_uri: edit/main/docs/
 
 docs_dir: docs
@@ -70,4 +70,4 @@ plugins:
 
 nav:
   - Home: index.md
-  - API reference: https://yuroyami.github.io/KiteImage/api/
+  - API reference: https://yuroyami.github.io/KiteImageCodec/api/

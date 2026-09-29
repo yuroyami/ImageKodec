@@ -1,24 +1,24 @@
-# Contributing to KiteImage
+# Contributing to KiteImageCodec
 
 ## Building
 
 ```sh
-./gradlew :kiteimage:jvmTest
+./gradlew :kiteimagecodec:jvmTest
 ```
 
 That command is the quickest check while you work. Before you open a pull
 request, run what CI runs:
 
 ```sh
-./gradlew :kiteimage:jvmTest :kiteimage:jsNodeTest :kiteimage:wasmJsNodeTest \
-          :kiteimage:wasmWasiNodeTest :kiteimage:linuxX64Test \
-          :kiteimage-compose:jvmTest :kiteimage-coil:jvmTest checkLegacyAbi
+./gradlew :kiteimagecodec:jvmTest :kiteimagecodec:jsNodeTest :kiteimagecodec:wasmJsNodeTest \
+          :kiteimagecodec:wasmWasiNodeTest :kiteimagecodec:linuxX64Test \
+          :kiteimagecodec-compose:jvmTest :kiteimagecodec-coil:jvmTest checkLegacyAbi
 ```
 
 On a Mac, add the Apple targets:
 
 ```sh
-./gradlew :kiteimage:macosArm64Test :kiteimage:iosSimulatorArm64Test
+./gradlew :kiteimagecodec:macosArm64Test :kiteimagecodec:iosSimulatorArm64Test
 ```
 
 ## The one rule that matters
@@ -91,7 +91,7 @@ a release.
 
 ## Licensing
 
-KiteImage is Apache-2.0 and uses permissively licensed references only. If you
+KiteImageCodec is Apache-2.0 and uses permissively licensed references only. If you
 work from a new reference, add it to
 [reference/REFERENCES.md](reference/REFERENCES.md) with its license, and check
 that the license permits the use. GPL and LGPL sources are not usable here.

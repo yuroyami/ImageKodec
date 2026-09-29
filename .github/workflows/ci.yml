@@ -45,16 +45,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Core tests (JVM)
-        run: ./gradlew :kiteimage:jvmTest --stacktrace
+        run: ./gradlew :kiteimagecodec:jvmTest --stacktrace
 
       - name: Core tests (JS + wasm)
-        run: ./gradlew :kiteimage:jsNodeTest :kiteimage:wasmJsNodeTest :kiteimage:wasmWasiNodeTest --stacktrace
+        run: ./gradlew :kiteimagecodec:jsNodeTest :kiteimagecodec:wasmJsNodeTest :kiteimagecodec:wasmWasiNodeTest --stacktrace
 
       - name: Core tests (native)
-        run: ./gradlew :kiteimage:linuxX64Test --stacktrace
+        run: ./gradlew :kiteimagecodec:linuxX64Test --stacktrace
 
       - name: Compose and Coil tests
-        run: ./gradlew :kiteimage-compose:jvmTest :kiteimage-coil:jvmTest --stacktrace
+        run: ./gradlew :kiteimagecodec-compose:jvmTest :kiteimagecodec-coil:jvmTest --stacktrace
 
       - name: Public API check
         run: ./gradlew checkLegacyAbi --stacktrace
@@ -83,10 +83,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Native tests
-        run: ./gradlew :kiteimage:macosArm64Test :kiteimage:iosSimulatorArm64Test --stacktrace
+        run: ./gradlew :kiteimagecodec:macosArm64Test :kiteimagecodec:iosSimulatorArm64Test --stacktrace
 
       - name: Compose and Coil compile for every target
-        run: ./gradlew :kiteimage-compose:assemble :kiteimage-coil:assemble --stacktrace
+        run: ./gradlew :kiteimagecodec-compose:assemble :kiteimagecodec-coil:assemble --stacktrace
 
       - name: Upload test reports
         if: failure()
@@ -110,7 +110,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Assemble Android variants
-        run: ./gradlew :kiteimage:assemble :kiteimage-compose:assemble :kiteimage-coil:assemble --stacktrace
+        run: ./gradlew :kiteimagecodec:assemble :kiteimagecodec-compose:assemble :kiteimagecodec-coil:assemble --stacktrace
 
   docs:
     name: API documentation
