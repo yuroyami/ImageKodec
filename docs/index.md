@@ -33,7 +33,7 @@ The core artifact depends on `kotlin-stdlib` and nothing else.
 
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:kiteimagecodec:0.1.0")
+    implementation("io.github.yuroyami:kiteimagecodec:0.2.0")
 }
 ```
 

@@ -1,8 +1,9 @@
 # Changelog
 
-All notable changes to KiteImage are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to KiteImageCodec are recorded here. Up to 0.1.0 the library
+was published as KiteImage, under `io.github.yuroyami:kiteimage`. The format
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
+follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Until 1.0.0 the public API may still change between minor versions; every such
 change will be listed here, and the committed `api/*.api` dumps make them
@@ -10,14 +11,95 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-29
+
+### Changed
+
+- **The library is now KiteImageCodec.** It is published as
+  `io.github.yuroyami:kiteimagecodec`, `kiteimagecodec-compose` and
+  `kiteimagecodec-coil`, and its package is `io.github.yuroyami.kiteimagecodec`.
+  The `KiteImage` object is now `KiteImageCodec`, so `KiteImage.decode(bytes)`
+  becomes `KiteImageCodec.decode(bytes)`. The iOS frameworks are `KiteImageCodec`,
+  `KiteImageCodecCompose` and `KiteImageCodecCoil`. The composable `KiteImage()`,
+  `KiteAsyncImage`, `KiteAnimatedImage` and `KiteImageDecoder` keep their names.
+  0.1.0 stays on Maven Central under the old coordinates.
+- **The functions that throw are now marked `@Throws`.** `probe`, `decode`,
+  `decodeReduced`, `decodeAnimation` and `CcittFax.decode` declare
+  `ImageDecodeException`. `decodeReduced`, `encodeGif`, `encodeJpeg` and
+  `JpxDecoder.decode` with a reduction declare `IllegalArgumentException`. In
+  Swift and Objective-C a call is now a `try`, and the exception arrives as an
+  `NSError`. Before, a failed decode ended the process.
+- **A frame count is checked against the input size.** GIF, APNG and animated
+  WebP keep one full canvas per frame, so their frames together must now fit the
+  same 4096 pixels per input byte as a still image.
+- **`KiteAnimation.durationMillis` stops at `Int.MAX_VALUE`** instead of wrapping
+  negative for a very long animation.
+
 ### Added
 
-- **`KiteImage.decodeReduced()` and `JpxDecoder.decode(data, reduction)`.**
+- **`KiteImageCodec.decodeReduced()` and `JpxDecoder.decode(data, reduction)`.**
   Decode with each side divided by 2, 4 or 8, rounded up. A JPEG shrinks inside
   its inverse DCT, as libjpeg's `djpeg -scale` does, so a baseline JPEG needs
   memory only for the smaller image. A JPEG 2000 image drops its finest wavelet
   levels, as OpenJPEG's reduce option does. Other formats decode in full and
   average each block.
+
+### Fixed
+
+- **A JPEG 2000 codestream cut off inside a packet header made the decoder loop
+  forever.** The decoder now keeps the packets before the cut and skips the rest
+  of the tile, as OpenJPEG does.
+- **A JPEG 2000 image whose origin is not zero decoded as noise.** The first
+  precinct of a high-pass band lost its first column, so every packet header
+  after it read the wrong code-blocks.
+- **On WebAssembly, a JPEG 2000 header cut off inside a segment stopped the
+  program.** WebAssembly traps on an index out of bounds instead of throwing,
+  and the header reader relied on the exception. It now checks its bounds, so
+  the decode fails cleanly.
+- The JPEG 2000 decoder now checks the input-size budget, so a damaged header in
+  a small file cannot allocate planes for tens of megapixels.
+- `probe` threw `ArrayIndexOutOfBoundsException` for a JP2 box whose
+  length does not fit an `Int`. It now throws `ImageDecodeException`.
+- **`encodePng` could write a PNG that no reader could open.** An image with
+  enough detail made the literal Huffman tree deeper than the 15-bit limit, and
+  the length-limiting step left the code over-subscribed. zlib, `javax.imageio`
+  and the library itself rejected the file.
+- **A small JPEG could keep the decoder busy for minutes.** Every scan walked the
+  whole image, even a scan with no data. A scan now stops when its data ends,
+  and the blocks the file never reaches stay mid-gray. A frame may hold at most
+  512 scans.
+- A GIF frame rectangle was never checked, so a 32-byte file threw
+  `NegativeArraySizeException` or reserved a gigabyte. The frame is now checked
+  against the input size.
+- An APNG frame whose offset was near 2^31 passed the bounds check and then wrote
+  outside the canvas.
+- A PNG with two palette chunks read past the end of its transparency array. The
+  decoder now refuses a second palette chunk, as libpng does.
+- A damaged Deflate strip in a TIFF threw an internal exception instead of
+  `ImageDecodeException`.
+- A tiled TIFF whose tile row passed 2^31 bits threw `NegativeArraySizeException`.
+- A TIFF without `RowsPerStrip` was refused, although the format makes the
+  default one strip.
+- `KiteBitmap`, `cropped` and the Compose animation player compared or summed
+  sizes in `Int`, which wraps. An empty array passed for a 65536 by 65536
+  bitmap, and a 3300-frame animation showed its last frame first.
+- `encodeGif` and `encodeJpeg` wrote an image wider or taller than 65535 pixels
+  with its size modulo 65536. They now throw `IllegalArgumentException`.
+- **The public CCITT and JBIG2 decoders trusted their sizes.** A negative or zero
+  column count, a segment length that wrapped, and a page that claimed a
+  gigabyte all ended in an exception, an endless loop or, on WebAssembly, a
+  trap. Both now check their geometry, and the JBIG2 reader checks its bounds.
+- The Coil factory claimed a lossy WebP whose image chunk lay past its 64 KiB
+  peek, and the request then failed. `probe` now reads an image chunk that the
+  data cuts off, and reports data that ends before any image chunk as not
+  decodable.
+- Some README statements did not match the code: the test count, the JPEG 2000
+  budget, the streaming limit, the APNG delay rule and the Coil example.
+
+## [0.1.0] - 2026-07-25
+
+### Added
+
 - **`KiteImage.probe()` and `ImageInfo`.** Header-only inspection: dimensions,
   bit depth, declared alpha, animation frame count, loop count, EXIF
   orientation, and whether this build can decode the file at all. No pixels are
@@ -65,34 +147,9 @@ reviewable in the diff.
   `cancellationCheck`. Callers using the trailing-lambda form are unaffected.
 - The Dokka site now includes `kiteimage-coil`, which was previously missing
   from the aggregate.
-- **The functions that throw are now marked `@Throws`.** `probe`, `decode`,
-  `decodeReduced`, `decodeAnimation` and `CcittFax.decode` declare
-  `ImageDecodeException`. `decodeReduced`, `encodeGif`, `encodeJpeg` and
-  `JpxDecoder.decode` with a reduction declare `IllegalArgumentException`. In
-  Swift and Objective-C a call is now a `try`, and the exception arrives as an
-  `NSError`. Before, a failed decode ended the process.
-- **A frame count is checked against the input size.** GIF, APNG and animated
-  WebP keep one full canvas per frame, so their frames together must now fit the
-  same 4096 pixels per input byte as a still image.
-- **`KiteAnimation.durationMillis` stops at `Int.MAX_VALUE`** instead of wrapping
-  negative for a very long animation.
 
 ### Fixed
 
-- **A JPEG 2000 codestream cut off inside a packet header made the decoder loop
-  forever.** The decoder now keeps the packets before the cut and skips the rest
-  of the tile, as OpenJPEG does.
-- **A JPEG 2000 image whose origin is not zero decoded as noise.** The first
-  precinct of a high-pass band lost its first column, so every packet header
-  after it read the wrong code-blocks.
-- **On WebAssembly, a JPEG 2000 header cut off inside a segment stopped the
-  program.** WebAssembly traps on an index out of bounds instead of throwing,
-  and the header reader relied on the exception. It now checks its bounds, so
-  the decode fails cleanly.
-- The JPEG 2000 decoder now checks the input-size budget, so a damaged header in
-  a small file cannot allocate planes for tens of megapixels.
-- `KiteImage.probe` threw `ArrayIndexOutOfBoundsException` for a JP2 box whose
-  length does not fit an `Int`. It now throws `ImageDecodeException`.
 - **The Compose and Coil bindings ignored EXIF orientation**, so a phone photo
   drew on its side. Both now decode with orientation applied, which is what
   Coil's own platform decoders do; swapping in `KiteImageDecoder` is no longer a
@@ -113,38 +170,3 @@ reviewable in the diff.
 - The sample gallery hand-rolled a BMP because "BMP has no encoder yet", and
   showed none of the newer formats. It now covers APNG, lossless and animated
   WebP, both new encoders, and captions every tile from `probe`.
-- **`encodePng` could write a PNG that no reader could open.** An image with
-  enough detail made the literal Huffman tree deeper than the 15-bit limit, and
-  the length-limiting step left the code over-subscribed. zlib, `javax.imageio`
-  and KiteImage itself rejected the file.
-- **A small JPEG could keep the decoder busy for minutes.** Every scan walked the
-  whole image, even a scan with no data. A scan now stops when its data ends,
-  and the blocks the file never reaches stay mid-gray. A frame may hold at most
-  512 scans.
-- A GIF frame rectangle was never checked, so a 32-byte file threw
-  `NegativeArraySizeException` or reserved a gigabyte. The frame is now checked
-  against the input size.
-- An APNG frame whose offset was near 2^31 passed the bounds check and then wrote
-  outside the canvas.
-- A PNG with two palette chunks read past the end of its transparency array. The
-  decoder now refuses a second palette chunk, as libpng does.
-- A damaged Deflate strip in a TIFF threw an internal exception instead of
-  `ImageDecodeException`.
-- A tiled TIFF whose tile row passed 2^31 bits threw `NegativeArraySizeException`.
-- A TIFF without `RowsPerStrip` was refused, although the format makes the
-  default one strip.
-- `KiteBitmap`, `cropped` and the Compose animation player compared or summed
-  sizes in `Int`, which wraps. An empty array passed for a 65536 by 65536
-  bitmap, and a 3300-frame animation showed its last frame first.
-- `encodeGif` and `encodeJpeg` wrote an image wider or taller than 65535 pixels
-  with its size modulo 65536. They now throw `IllegalArgumentException`.
-- **The public CCITT and JBIG2 decoders trusted their sizes.** A negative or zero
-  column count, a segment length that wrapped, and a page that claimed a
-  gigabyte all ended in an exception, an endless loop or, on WebAssembly, a
-  trap. Both now check their geometry, and the JBIG2 reader checks its bounds.
-- The Coil factory claimed a lossy WebP whose image chunk lay past its 64 KiB
-  peek, and the request then failed. `probe` now reads an image chunk that the
-  data cuts off, and reports data that ends before any image chunk as not
-  decodable.
-- Some README statements did not match the code: the test count, the JPEG 2000
-  budget, the streaming limit, the APNG delay rule and the Coil example.

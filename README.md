@@ -54,10 +54,10 @@ val png: ByteArray = KiteImageCodec.encodePng(bitmap)
 
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:kiteimagecodec:0.1.0")
+    implementation("io.github.yuroyami:kiteimagecodec:0.2.0")
     // Optional, and both build for far fewer targets than the core.
-    implementation("io.github.yuroyami:kiteimagecodec-compose:0.1.0")
-    implementation("io.github.yuroyami:kiteimagecodec-coil:0.1.0")
+    implementation("io.github.yuroyami:kiteimagecodec-compose:0.2.0")
+    implementation("io.github.yuroyami:kiteimagecodec-coil:0.2.0")
 }
 ```
 
