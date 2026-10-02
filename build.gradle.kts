@@ -11,13 +11,13 @@ plugins {
 }
 
 dependencies {
-    dokka(project(":kiteimagecodec"))
-    dokka(project(":kiteimagecodec-compose"))
-    dokka(project(":kiteimagecodec-coil"))
+    dokka(project(":imagekodec"))
+    dokka(project(":imagekodec-compose"))
+    dokka(project(":imagekodec-coil"))
 }
 
 dokka {
-    moduleName.set("KiteImageCodec")
+    moduleName.set("ImageKodec")
 }
 
 // Shared Kite theme. Sources live in ../_kite-docs; ./_kite-docs/sync.sh copies
@@ -37,7 +37,7 @@ allprojects {
                 templatesDir.set(
                     rootProject.layout.projectDirectory.dir("dokka-templates"),
                 )
-                footerMessage.set("Apache-2.0 · KiteImageCodec is part of the Kite family.")
+                footerMessage.set("Apache-2.0 · ImageKodec is part of the Kite family.")
             }
 
             // A module with a Module.md gets its description onto the aggregated

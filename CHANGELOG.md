@@ -1,7 +1,8 @@
 # Changelog
 
-All notable changes to KiteImageCodec are recorded here. Up to 0.1.0 the library
-was published as KiteImage, under `io.github.yuroyami:kiteimage`. The format
+All notable changes to ImageKodec are recorded here. Version 0.1.0 was published
+as KiteImage, under `io.github.yuroyami:kiteimage`. Version 0.2.0 was published as
+KiteImageCodec, under `io.github.yuroyami:kiteimagecodec`. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -10,6 +11,18 @@ change will be listed here, and the committed `api/*.api` dumps make them
 reviewable in the diff.
 
 ## [Unreleased]
+
+### Changed
+
+- **The library is now ImageKodec.** It is published as
+  `io.github.yuroyami:imagekodec`, `imagekodec-compose` and `imagekodec-coil`, and
+  its package is `io.github.yuroyami.imagekodec`. The `KiteImageCodec` object is
+  now `ImageKodec`, so `KiteImageCodec.decode(bytes)` becomes
+  `ImageKodec.decode(bytes)`. The iOS frameworks are `ImageKodec`,
+  `ImageKodecCompose` and `ImageKodecCoil`. The composables `KiteImage()`,
+  `KiteAsyncImage` and `KiteAnimatedImage`, the Coil `KiteImageDecoder` and the
+  `KiteBitmap`, `KiteFrame` and `KiteAnimation` types keep their names. 0.2.0
+  stays on Maven Central under the old coordinates.
 
 ## [0.2.0] - 2026-09-29
 

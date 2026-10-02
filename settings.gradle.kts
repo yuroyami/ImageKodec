@@ -19,23 +19,23 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-rootProject.name = "KiteImageCodec-KMP"
+rootProject.name = "ImageKodec-KMP"
 
-// :kiteimagecodec: the pure-Kotlin image codec core (stdlib only). Format sniffing,
+// :imagekodec: the pure-Kotlin image codec core (stdlib only). Format sniffing,
 // decoders (BMP, PNG, GIF, …), the ARGB pixel-buffer type, and the
 // malformed-input guards all live here and port cleanly to every KMP target.
-include(":kiteimagecodec")
+include(":imagekodec")
 
-// :kiteimagecodec-compose: the optional Compose Multiplatform binding: the
+// :imagekodec-compose: the optional Compose Multiplatform binding: the
 // KiteImage() composable (auto-detects animated vs static input) and the
 // KiteBitmap → ImageBitmap conversion. Keeps Compose off core consumers.
-include(":kiteimagecodec-compose")
+include(":imagekodec-compose")
 
-// :kiteimagecodec-coil: Coil interop: KiteImageDecoder plugs our codecs into Coil's
+// :imagekodec-coil: Coil interop: KiteImageDecoder plugs our codecs into Coil's
 // pipeline (network, disk/memory cache, lifecycle stay Coil's), and
 // KiteAsyncImage() renders the result with our frame loop so animation works on
 // every target, not just Android.
-include(":kiteimagecodec-coil")
+include(":imagekodec-coil")
 
 // :sample — desktop-first gallery app: every decodable format through the
 // KiteImage() composable. ./gradlew :sample:run

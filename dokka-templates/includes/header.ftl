@@ -5,7 +5,7 @@
   the guide site and the repository. Without it the API reference is a dead end:
   you can go deeper, but never back out to prose.
 
-  https://yuroyami.github.io/KiteImageCodec/ and https://github.com/yuroyami/KiteImageCodec are substituted per repository by
+  https://yuroyami.github.io/ImageKodec/ and https://github.com/yuroyami/ImageKodec are substituted per repository by
   _kite-docs/sync.sh. Edit the source in _kite-docs/, not the copies.
 -->
 <#import "source_set_selector.ftl" as source_set_selector>
@@ -27,8 +27,8 @@
             <@version/>
         </div>
         <nav class="kite-nav-links" aria-label="Kite documentation">
-            <a href="https://yuroyami.github.io/KiteImageCodec/">Guide</a>
-            <a href="https://github.com/yuroyami/KiteImageCodec">GitHub</a>
+            <a href="https://yuroyami.github.io/ImageKodec/">Guide</a>
+            <a href="https://github.com/yuroyami/ImageKodec">GitHub</a>
         </nav>
         <div class="navigation-controls">
             <@source_set_selector.display/>

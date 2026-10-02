@@ -5,7 +5,7 @@ plugins {
 }
 
 /*
- * Desktop-first sample gallery: every format KiteImageCodec decodes rendered through
+ * Desktop-first sample gallery: every format ImageKodec decodes rendered through
  * the KiteImage() composable, including a real animated GIF and both encoders
  * dogfooded at runtime. `./gradlew :sample:run` launches it.
  */
@@ -16,8 +16,8 @@ kotlin {
     sourceSets {
         val jvmMain by getting {
             dependencies {
-                implementation(projects.kiteimagecodec)
-                implementation(projects.kiteimagecodecCompose)
+                implementation(projects.imagekodec)
+                implementation(projects.imagekodecCompose)
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
             }
@@ -27,6 +27,6 @@ kotlin {
 
 compose.desktop {
     application {
-        mainClass = "io.github.yuroyami.kiteimagecodec.sample.MainKt"
+        mainClass = "io.github.yuroyami.imagekodec.sample.MainKt"
     }
 }
