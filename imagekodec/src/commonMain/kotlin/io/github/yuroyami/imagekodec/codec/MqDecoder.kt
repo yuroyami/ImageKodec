@@ -17,6 +17,18 @@ internal class MqDecoder(val d: ByteArray, start: Int, val end: Int) {
     var a = 0
     var ct = 0
 
+    /**
+     * How many bytes the coder has made up because its data had ended: past [end], or at a
+     * marker, the coder feeds 1-bits for as long as it is asked to (T.88 E.3.4, T.800 C.3.4).
+     * An encoder's flush leaves a valid stream needing at most a few of them, so a large count
+     * means the decoder is reading symbols nobody encoded. [exhausted] lets a caller whose loop
+     * count comes from a damaged header stop there, as pdfium's JBIG2 decoder does.
+     */
+    private var madeUp = 0
+
+    /** True once the coder has made up far more bytes than any encoder's flush needs. */
+    val exhausted: Boolean get() = madeUp > MADE_UP_LIMIT
+
     init {
         byteIn()
         chigh = ((chigh shl 7) and 0xFFFF) or ((clow shr 9) and 0x7F)
@@ -28,10 +40,10 @@ internal class MqDecoder(val d: ByteArray, start: Int, val end: Int) {
     private fun byteIn() {
         if (bp < end && (d[bp].toInt() and 0xFF) == 0xFF) {
             val b1 = if (bp + 1 < end) d[bp + 1].toInt() and 0xFF else 0xFF
-            if (b1 > 0x8F) { clow += 0xFF00; ct = 8 } else { bp++; clow += b1 shl 9; ct = 7 }
+            if (b1 > 0x8F) { clow += 0xFF00; ct = 8; madeUp++ } else { bp++; clow += b1 shl 9; ct = 7 }
         } else {
             bp++
-            clow += if (bp < end) (d[bp].toInt() and 0xFF) shl 8 else 0xFF00
+            if (bp < end) clow += (d[bp].toInt() and 0xFF) shl 8 else { clow += 0xFF00; madeUp++ }
             ct = 8
         }
         if (clow > 0xFFFF) { chigh += clow shr 16; clow = clow and 0xFFFF }
@@ -65,6 +77,14 @@ internal class MqDecoder(val d: ByteArray, start: Int, val end: Int) {
     }
 
     companion object {
+        /**
+         * A flush (T.88 E.2.9) ends the data with the two bytes the decoder still needs, and the
+         * decoder reads at most a couple of bytes ahead of the symbol it is on, so a valid stream
+         * makes up fewer than 4. 32 leaves a wide margin and still ends a loop that a damaged
+         * count would otherwise run for billions of steps.
+         */
+        private const val MADE_UP_LIMIT = 32
+
         // T.88 Table E.1 == T.800 Table C.2.
         val QE = intArrayOf(
             0x5601, 0x3401, 0x1801, 0x0AC1, 0x0521, 0x0221, 0x5601, 0x5401, 0x4801, 0x3801,

@@ -74,6 +74,12 @@ public object Jbig2Decoder {
         return prev - (1 shl codeLen)
     }
 
+    /**
+     * The largest side of a dictionary symbol or a refined text symbol. A symbol is a glyph, and
+     * this decoder has always refused larger ones in its Huffman path and in symbol refinement.
+     */
+    private const val MAX_SYMBOL_SIDE = 10000
+
     private fun newCx() = IntArray(1 shl 16)
     private fun newIntCx() = IntArray(512)
 
@@ -655,14 +661,21 @@ public object Jbig2Decoder {
 
             val newSyms = ArrayList<Bitmap>(numNewSyms)
             var hcHeight = 0
-            while (newSyms.size < numNewSyms) {
+            var area = 0L
+            // The count is a header field, so a damaged one asks for symbols the data never coded.
+            // Once the coder runs out, the classes it reads are noise, and a class that holds no
+            // symbol makes no progress, so the walk stops there and keeps what it has.
+            while (newSyms.size < numNewSyms && !mq.exhausted) {
                 val dh = decodeInt(mq, iadh) ?: break
                 hcHeight += dh
+                if (hcHeight !in 0..MAX_SYMBOL_SIDE) throw ImageDecodeException("JBIG2: a symbol height class of $hcHeight")
                 var symWidth = 0
-                while (true) {
+                while (!mq.exhausted) {
                     val dw = decodeInt(mq, iadw) ?: break // OOB ends the height class
                     symWidth += dw
+                    if (symWidth !in 0..MAX_SYMBOL_SIDE) throw ImageDecodeException("JBIG2: a symbol width of $symWidth")
                     if (newSyms.size >= numNewSyms) break
+                    area += symbolArea(symWidth, hcHeight, area)
                     if (refAgg == 0) {
                         newSyms.add(decodeGeneric(mq, genCx, symWidth, hcHeight, template, at, false))
                     } else {
@@ -688,17 +701,48 @@ public object Jbig2Decoder {
                 }
             }
 
-            // Export flags (6.5.10): run-lengths of ex/not-ex over input+new symbols.
-            val all = ArrayList<Bitmap>(input.size + newSyms.size).apply { addAll(input); addAll(newSyms) }
-            val exported = ArrayList<Bitmap>(numExSyms)
-            var i = 0; var cur = false
-            while (i < all.size && exported.size < numExSyms) {
-                val runLen = decodeInt(mq, iaex) ?: break
-                if (cur) for (j in 0 until runLen) { if (i < all.size) exported.add(all[i]); i++ } else i += runLen
-                cur = !cur
-            }
+            val exported = exportFlags(input, newSyms, numExSyms) { if (mq.exhausted) null else decodeInt(mq, iaex) }
             // Fall back to the trailing new symbols if export flags were degenerate.
             return if (exported.isNotEmpty()) exported else newSyms
+        }
+
+        /**
+         * The export flags (6.5.10): alternating runs of symbols left out and symbols exported, over
+         * the [input] symbols followed by the [newSyms]. [nextRun] reads one run length, null for OOB.
+         *
+         * 6.5.10 requires every run to fit in the symbols still left. A damaged one did not, and
+         * nothing else ended the walk: a negative run moved the index back, a run of zero left it in
+         * place, and a run near 2^31 counted through two billion symbols that were not there. A
+         * damaged PDF page held the decoder there for longer than a 10-second watchdog. A run that
+         * does not fit now ends the walk, and so do more runs than there are symbols to separate.
+         */
+        private fun exportFlags(input: List<Bitmap>, newSyms: List<Bitmap>, numExSyms: Int, nextRun: () -> Int?): List<Bitmap> {
+            val all = ArrayList<Bitmap>(input.size + newSyms.size).apply { addAll(input); addAll(newSyms) }
+            val exported = ArrayList<Bitmap>(minOf(numExSyms, all.size))
+            var i = 0
+            var cur = false
+            // Each symbol can open a run of its own, and a run of zero can sit before each of them.
+            var runsLeft = 2L * all.size + 2
+            while (i < all.size && exported.size < numExSyms && runsLeft-- > 0) {
+                val runLen = nextRun() ?: break
+                if (runLen < 0 || runLen > all.size - i) break
+                if (cur) for (j in i until i + runLen) exported.add(all[j])
+                i += runLen
+                cur = !cur
+            }
+            return exported
+        }
+
+        /**
+         * The pixels a [w] by [h] symbol adds to a dictionary that already holds [held]. Every symbol
+         * is kept at a byte a pixel until the page is done, so the dictionary as a whole answers to
+         * the same ceiling as a page: thousands of blank glyphs of the largest size cost a few bytes
+         * of coded data each and would otherwise reserve gigabytes.
+         */
+        private fun symbolArea(w: Int, h: Int, held: Long): Long {
+            val a = w.toLong() * h
+            if (held + a > Budget.MAX_PIXELS) throw ImageDecodeException("JBIG2: the symbol dictionary passes ${Budget.MAX_PIXELS} pixels")
+            return a
         }
 
         /** Huffman symbol dictionary (6.5, SDHUFF=1, SDREFAGG=0): collective bitmaps per height class. */
@@ -716,27 +760,35 @@ public object Jbig2Decoder {
             val hr = HuffReader(s.data, r.pos, s.end)
             val newSyms = ArrayList<Bitmap>(numNewSyms)
             var hcHeight = 0
+            var area = 0L
             while (newSyms.size < numNewSyms) {
                 hcHeight += tDH.decode(hr) ?: throw IllegalStateException("OOB height class delta")
-                if (hcHeight !in 1..10000) throw IllegalStateException("bad height class")
+                if (hcHeight !in 1..MAX_SYMBOL_SIDE) throw IllegalStateException("bad height class")
                 var symWidth = 0
                 val widths = ArrayList<Int>()
                 while (true) {
                     val dw = tDW.decode(hr) ?: break // OOB ends the height class
                     symWidth += dw
-                    if (symWidth !in 1..10000 || newSyms.size + widths.size >= numNewSyms) {
+                    if (symWidth !in 1..MAX_SYMBOL_SIDE || newSyms.size + widths.size >= numNewSyms) {
                         throw IllegalStateException("bad symbol width run")
                     }
                     widths.add(symWidth)
                 }
                 if (widths.isEmpty()) continue
                 val totWidth = widths.sum()
+                area += symbolArea(totWidth, hcHeight, area)
                 // 6.5.9: collective bitmap; 0 size means uncompressed rows padded to bytes.
                 val bmSize = tBM.decode(hr) ?: throw IllegalStateException("OOB BMSIZE")
                 hr.align()
+                // Both forms are read straight from the segment, and on webassembly a read past the
+                // end is a trap that no catch sees, so the bytes they claim have to be there first.
+                val stride = (totWidth + 7) / 8
+                val need = if (bmSize == 0) hcHeight.toLong() * stride else bmSize.toLong()
+                if (bmSize < 0 || need > s.end - hr.pos) {
+                    throw ImageDecodeException("JBIG2: a collective bitmap of $need bytes runs past the symbol dictionary")
+                }
                 val coll: Bitmap
                 if (bmSize == 0) {
-                    val stride = (totWidth + 7) / 8
                     coll = Bitmap(totWidth, hcHeight)
                     for (y in 0 until hcHeight) for (x in 0 until totWidth) {
                         val b = s.data[hr.pos + y * stride + (x shr 3)].toInt()
@@ -756,14 +808,7 @@ public object Jbig2Decoder {
             }
 
             // Export flags use Table B.1 in Huffman mode (6.5.10).
-            val all = ArrayList<Bitmap>(input.size + newSyms.size).apply { addAll(input); addAll(newSyms) }
-            val exported = ArrayList<Bitmap>(numExSyms)
-            var i = 0; var cur = false
-            while (i < all.size && exported.size < numExSyms) {
-                val runLen = TABLE_B1.decode(hr) ?: break
-                if (cur) for (j in 0 until runLen) { if (i < all.size) exported.add(all[i]); i++ } else i += runLen
-                cur = !cur
-            }
+            val exported = exportFlags(input, newSyms, numExSyms) { TABLE_B1.decode(hr) }
             return if (exported.isNotEmpty()) exported else newSyms
         }
 
@@ -771,6 +816,8 @@ public object Jbig2Decoder {
 
         /** Per-field readers so the arithmetic and Huffman variants share one 6.4.5 loop. */
         private class TextIo(
+            /** True once the coder has run out of data; the Huffman reader throws instead. */
+            val exhausted: () -> Boolean,
             val dt: () -> Int?,
             val fs: () -> Int?,
             val ds: () -> Int?,
@@ -845,6 +892,7 @@ public object Jbig2Decoder {
                 hr.align()
                 val symTable = HuffTable(List(numSyms) { HuffLine(symLens[it], 0, it) }, oob = false, lowHigh = false)
                 io = TextIo(
+                    exhausted = { false },
                     dt = { tDT!!.decode(hr) },
                     fs = { tFS!!.decode(hr) },
                     ds = { tDS!!.decode(hr) },
@@ -872,6 +920,7 @@ public object Jbig2Decoder {
                 val iardx = newIntCx(); val iardy = newIntCx()
                 val iaid = IntArray(1 shl (symCodeLen + 1))
                 io = TextIo(
+                    exhausted = { mq.exhausted },
                     dt = { decodeInt(mq, iadt) },
                     fs = { decodeInt(mq, iafs) },
                     ds = { decodeInt(mq, iads) },
@@ -899,7 +948,7 @@ public object Jbig2Decoder {
         ): Bitmap {
             val w = sym.w + rdw
             val h = sym.h + rdh
-            if (w <= 0 || h <= 0 || w > 10000 || h > 10000) return sym
+            if (w <= 0 || h <= 0 || w > MAX_SYMBOL_SIDE || h > MAX_SYMBOL_SIDE) return sym
             return decodeRefinement(mq, cx, w, h, template, sym, (rdw shr 1) + rdx, (rdh shr 1) + rdy, at, false)
         }
 
@@ -912,11 +961,13 @@ public object Jbig2Decoder {
             var firstS = 0
             var placed = 0
             var guard = 0
-            while (placed < numInstances && guard++ < numInstances + 4096) {
+            // The instance count is a header field, up to 2^32. Placing symbols the coder makes up
+            // from no data would draw noise for as long as a damaged count says, so stop there.
+            while (placed < numInstances && guard++ < numInstances + 4096 && !io.exhausted()) {
                 stripT += (io.dt() ?: break) * strips
                 var curS = 0
                 var first = true
-                while (true) {
+                while (!io.exhausted()) {
                     if (first) {
                         firstS += io.fs() ?: return
                         curS = firstS

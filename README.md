@@ -350,8 +350,9 @@ expectations:
 | WebP lossless | libwebp `cwebp` and `dwebp` | pixel-exact |
 | JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 4/255 for irreversible 9/7 |
 | TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1 |
+| JBIG2 | jbig2enc's streams: generic regions against the source page, symbol mode against jbig2dec | exact |
 
-The first two rows need no external tool, so they always run. The last three rows
+The first two rows need no external tool, so they always run. The last four rows
 run only when the binary is installed, and skip when it is not. A skipped test
 reports as a pass, so read the skip count and not only the pass result. CI sets
 `IMAGEKODEC_REQUIRE_ORACLES=1`, which turns a missing tool into a failure.
@@ -359,7 +360,8 @@ reports as a pass, so read the skip count and not only the pass result. CI sets
 `FuzzTest` drives seeded bit flips, truncations and cross-format splices through
 every decoder that `ImageKodec.decode` dispatches to. It asserts that nothing but
 `ImageDecodeException` escapes. `CcittFax` and `Jbig2Decoder` have tests of their
-own and are not part of that corpus.
+own and are not part of that corpus. `Jbig2DecoderTest` mutates committed jbig2enc
+streams in the same way.
 
 Every unsupported feature fails at a named point, not silently.
 

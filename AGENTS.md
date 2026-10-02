@@ -9,7 +9,7 @@ Format support and known limits: the Limits section of [README.md](README.md).
 Things that already cost someone time. One line each. Delete a line when it stops
 being true.
 
-- The OpenJPEG, libtiff, libwebp and libjpeg suites skip themselves when their
+- The OpenJPEG, libtiff, libwebp, libjpeg and jbig2enc suites skip themselves when their
   binary is missing, and a skipped test reports as a pass, so read the skip count
   and not only the green run. CI sets `IMAGEKODEC_REQUIRE_ORACLES=1` to fail
   instead; set it locally to check the same (#14).
@@ -28,6 +28,10 @@ being true.
 - `FuzzTest` stops at a PNG chunk's checksum and cannot make two fields agree, so
   a fault that needs either has to be found with a test built by hand (#28, #29).
 - `CcittFax` and `Jbig2Decoder` are not in the `FuzzTest` corpus, because
-  `ImageKodec.decode` does not reach them (#33).
+  `ImageKodec.decode` does not reach them (#33). `Jbig2DecoderTest` mutates its own
+  jbig2enc streams instead.
+- jbig2enc's symbol mode moves some glyphs by a pixel, with no pattern to derive.
+  jbig2dec decodes the same moved page, so symbol-mode tests compare against
+  jbig2dec, not against the source page (#40).
 - `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh
   clone, because `kotlin-js-store/` is ignored and yarn has no lockfile to work from.
