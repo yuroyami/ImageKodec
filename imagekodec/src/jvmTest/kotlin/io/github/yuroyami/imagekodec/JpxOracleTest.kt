@@ -258,43 +258,20 @@ class JpxOracleTest {
         }
     }
 
+    /**
+     * A file no OpenJPEG run produced: the ffmpeg-encoded JP2 that `Jp2DecoderTest` and
+     * `FuzzTest` share. It used to be a JPX stream cut out of a PDF in a sibling repository,
+     * so the test skipped on every checkout without that repository, CI included. The file
+     * uses the irreversible 9/7 wavelet, so it gets the same allowance as `lossy-97`.
+     */
     @Test
-    fun the_corpus_fixture_jp2_decodes_exactly() {
+    fun a_jp2_from_another_encoder_matches_openjpeg() {
         assumeTrue("OpenJPEG tools not found, skipping.", tools())
-        // Pull the embedded codestream straight out of the corpus PDF.
-        var dir: File? = File(System.getProperty("user.dir")).absoluteFile
-        var pdf: File? = null
-        while (dir != null) {
-            val f = File(dir, "corpus/pdf/testPDF_JPX.pdf")
-            if (f.isFile) { pdf = f; break }
-            dir = dir.parentFile
-        }
-        assumeTrue("corpus fixture not found, skipping.", pdf != null)
-        val bytes = pdf!!.readBytes()
-        val marker = "JPXDecode".encodeToByteArray()
-        var at = -1
-        outer@ for (i in 0 until bytes.size - marker.size) {
-            for (j in marker.indices) if (bytes[i + j] != marker[j]) continue@outer
-            at = i; break
-        }
-        assumeTrue("no JPXDecode stream in fixture", at >= 0)
-        val streamTag = "stream\n".encodeToByteArray()
-        var start = -1
-        outer2@ for (i in at until bytes.size - streamTag.size) {
-            for (j in streamTag.indices) if (bytes[i + j] != streamTag[j]) continue@outer2
-            start = i + streamTag.size; break
-        }
-        val endTag = "\nendstream".encodeToByteArray()
-        var end = -1
-        outer3@ for (i in start until bytes.size - endTag.size) {
-            for (j in endTag.indices) if (bytes[i + j] != endTag[j]) continue@outer3
-            end = i; break
-        }
-        val jp2 = File.createTempFile("kite-jpx-corpus", ".jp2").apply {
+        val jp2 = File.createTempFile("kite-jpx-ffmpeg", ".jp2").apply {
             deleteOnExit()
-            writeBytes(bytes.copyOfRange(start, end))
+            writeBytes(hex(JP2))
         }
         val (kite, ref) = both(jp2)
-        compare("corpus-fixture", kite, ref, tolerance = 0)
+        compare("ffmpeg-fixture", kite, ref, tolerance = 4)
     }
 }

@@ -9,9 +9,13 @@ Format support and known limits: the Limits section of [README.md](README.md).
 Things that already cost someone time. One line each. Delete a line when it stops
 being true.
 
-- The OpenJPEG, libtiff and libwebp suites skip themselves when their binary is
-  missing, and a skipped test reports as a pass, so read the skip count and not
-  only the green run (#14).
+- The OpenJPEG, libtiff, libwebp and libjpeg suites skip themselves when their
+  binary is missing, and a skipped test reports as a pass, so read the skip count
+  and not only the green run. CI sets `IMAGEKODEC_REQUIRE_ORACLES=1` to fail
+  instead; set it locally to check the same (#14).
+- Ubuntu's ImageMagick is version 6, which has no `magick` command, only
+  `convert`. `Tools.find("magick")` falls back to it; before it did, the TIFF
+  oracle suite skipped on every Ubuntu machine, CI included (#14).
 - The JPEG 2000 probe does not check the shared `Budget` guard that the decoder
   checks, and both keep their own pixel ceiling, so the probe can call a file
   decodable that the decoder refuses (#2).
@@ -25,8 +29,5 @@ being true.
   a fault that needs either has to be found with a test built by hand (#28, #29).
 - `CcittFax` and `Jbig2Decoder` are not in the `FuzzTest` corpus, because
   `ImageKodec.decode` does not reach them (#33).
-- `JpxOracleTest.the_corpus_fixture_jp2_decodes_exactly` looks for a PDF in a
-  folder beside this repo and skips without it, so the JVM run always reports one
-  skip, even with every oracle tool installed (#14).
 - `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh
   clone, because `kotlin-js-store/` is ignored and yarn has no lockfile to work from.

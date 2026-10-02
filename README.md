@@ -353,7 +353,8 @@ expectations:
 
 The first two rows need no external tool, so they always run. The last three rows
 run only when the binary is installed, and skip when it is not. A skipped test
-reports as a pass, so read the skip count and not only the pass result.
+reports as a pass, so read the skip count and not only the pass result. CI sets
+`IMAGEKODEC_REQUIRE_ORACLES=1`, which turns a missing tool into a failure.
 
 `FuzzTest` drives seeded bit flips, truncations and cross-format splices through
 every decoder that `ImageKodec.decode` dispatches to. It asserts that nothing but

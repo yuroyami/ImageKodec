@@ -47,16 +47,20 @@ Every codec's tests compare its output against an independent implementation:
 | JPEG decode | `stb_image`, bit-identical, through committed vectors that a clang-compiled `stb_image` produced |
 | JPEG 2000 | OpenJPEG (`opj_compress` and `opj_decompress`) |
 | WebP lossless | libwebp (`cwebp` and `dwebp`), bit-identical |
-| TIFF | libtiff (`tiffcp`) and ImageMagick (`magick`) |
+| TIFF | libtiff (`tiffcp`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
+| JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
 
-The last three suites `assumeTrue`-skip when their binary is missing, and a
+The suites that need a binary `assumeTrue`-skip when it is missing, and a
 skipped test reports as a pass. If you touch those codecs, install the tools and
 check the skip count, not only whether the run passed:
 
 ```sh
-brew install webp libtiff imagemagick openjpeg     # macOS
-sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools   # Debian/Ubuntu
+brew install webp libtiff imagemagick openjpeg jpeg-turbo     # macOS
+sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs   # Debian/Ubuntu
 ```
+
+CI sets `IMAGEKODEC_REQUIRE_ORACLES=1`, which makes a missing tool fail the test
+instead of skipping it. Set it yourself to check that every oracle suite ran.
 
 New format work needs a vector in `commonTest`, so that every target runs it. It
 also needs an oracle test in `jvmTest` wherever a reference tool exists.

@@ -17,12 +17,14 @@ jobs:
   # The JVM, JS, wasm and Linux/Windows native targets. This is the job that
   # runs the full test suite: the codecs are pure computation, so a pass here
   # covers the decoders everywhere. The stb_image oracle needs no tool (its
-  # vectors are committed); the OpenJPEG, libwebp and libtiff suites skip
-  # themselves when their binary is missing, so those are installed rather than
-  # left to no-op silently.
+  # vectors are committed); the OpenJPEG, libwebp, libtiff and libjpeg suites
+  # skip themselves when their binary is missing on a contributor's machine, and
+  # IMAGEKODEC_REQUIRE_ORACLES turns that skip into a failure here.
   linux:
     name: JVM / JS / wasm / native (Linux)
     runs-on: ubuntu-latest
+    env:
+      IMAGEKODEC_REQUIRE_ORACLES: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -33,14 +35,19 @@ jobs:
 
       # The oracle suites skip themselves when their tool is missing, and a
       # skipped test reads exactly like a passing one, so these are installed
-      # rather than left to chance. The tests find them on PATH.
+      # rather than left to chance, and a missing one fails this step. The tests
+      # find them on PATH. Ubuntu's ImageMagick is version 6, whose command is
+      # `convert`; the tests fall back to it when there is no `magick`.
       - name: Install codec oracles
         run: |
           sudo apt-get update
-          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools
-          for t in cwebp dwebp tiffcp magick opj_compress opj_decompress; do
-            command -v "$t" >/dev/null || echo "::warning::oracle tool $t not on PATH; its suite will skip"
+          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs
+          missing=0
+          for t in cwebp dwebp tiffcp opj_compress opj_decompress djpeg jpegtran; do
+            command -v "$t" >/dev/null || { echo "::error::oracle tool $t not on PATH"; missing=1; }
           done
+          command -v magick >/dev/null || command -v convert >/dev/null || { echo "::error::ImageMagick not on PATH"; missing=1; }
+          exit $missing
 
       - uses: gradle/actions/setup-gradle@v4
 
