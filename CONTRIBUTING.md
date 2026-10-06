@@ -53,7 +53,7 @@ Every codec's tests compare its output against an independent implementation:
 | JPEG decode | `stb_image`, bit-identical, through committed vectors that a clang-compiled `stb_image` produced |
 | JPEG 2000 | OpenJPEG (`opj_compress` and `opj_decompress`) |
 | WebP lossless | libwebp (`cwebp` and `dwebp`), bit-identical |
-| TIFF | libtiff (`tiffcp`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
+| TIFF | libtiff (`tiffcp`, `tiff2rgba`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
 | JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
 | JBIG2 | jbig2enc (`jbig2`) writes the streams: generic regions must decode to the source page, symbol mode must match jbig2dec |
 

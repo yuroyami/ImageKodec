@@ -379,9 +379,9 @@ input. Security reporting is in [SECURITY.md](SECURITY.md), the change history i
 
 ## License
 
-Apache-2.0. ImageKodec is a clean-room implementation built from permissively
-licensed references, mainly [stb_image](https://github.com/nothings/stb) (public
-domain or MIT) and
+Apache-2.0. ImageKodec combines specification implementations with ports of
+permissively licensed code, including [stb_image](https://github.com/nothings/stb)
+(public domain or MIT) and
 [Apache Commons Imaging](https://github.com/apache/commons-imaging) (Apache-2.0).
 The flate paths derive from zlib references by way of ArchiveKodec. Per-codec
 attribution is in [reference/REFERENCES.md](reference/REFERENCES.md) and

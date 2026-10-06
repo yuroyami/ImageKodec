@@ -1,23 +1,28 @@
 ImageKodec
 Copyright 2026 yuroyami
 
-This product is a from-scratch, clean-room Kotlin Multiplatform reimplementation of
-established image formats. The PNG inflate path derives from Mark Adler's
-public-domain `puff` reference (vendored from ArchiveKodec, via the KiteTorrent /
-libtorrent lineage).
+This Kotlin Multiplatform library combines specification implementations with
+ports of permissively licensed image and compression code. Per-codec origins,
+reference links and licenses are recorded in reference/REFERENCES.md.
 
-Format references consulted for porting (study only, not redistributed; see
-reference/REFERENCES.md) are each under permissive licenses: stb_image /
-stb_image_write (public domain / MIT), lodepng (zlib), Apache Commons Imaging
-(Apache-2.0).
+The JPEG 2000, JBIG2, CCITT and MQ decoders include software developed by the
+KitePDF authors under the Apache License, Version 2.0. They were adapted from
+KitePDF in commit 24bee5954a0e44f09f606400b05446a8380f416c. Their format references
+are ITU-T T.800 (JPEG 2000 and MQ), T.88 (JBIG2 and MQ), and T.4/T.6 (CCITT).
 
-Several codecs were written from their published specification rather than
-ported from any source tree, and verified against a reference binary used only
-as a test oracle: WebP lossless and the WebP container (Google's WebP specs;
-checked against libwebp's cwebp/dwebp, BSD-3-Clause, neither read nor
-redistributed), APNG (Mozilla's APNG specification), and the TIFF and BMP
-feature sets added on top of the ported baselines (TIFF 6.0, Microsoft DIB
-documentation).
+The PNG inflate path is an altered Kotlin translation of Mark Adler's puff
+(2002-2013), vendored from ArchiveKodec via KiteTorrent and libtorrent. puff is
+zlib-licensed; Inflate.kt retains the original copyright and license notice.
+The DEFLATE encoder's length-limited Huffman construction follows zlib's trees.c
+(Jean-loup Gailly and Mark Adler). Deflate.kt retains the zlib notice.
 
-AVIF and HEIC are deliberately excluded: AV1/HEVC decoders are beyond a realistic
-pure-Kotlin port, and HEVC carries patent-licensing baggage besides.
+The porting references include stb_image and stb_image_write (public domain /
+MIT), lodepng (zlib), and Apache Commons Imaging (Apache-2.0). Original reference
+source trees are used for study and are not redistributed in this repository.
+
+WebP lossless and its container were implemented from Google's WebP
+specifications and verified against libwebp's cwebp/dwebp binaries.
+The prefix-tree correction additionally consulted libwebp's huffman_utils.c
+(BSD-3-Clause); no libwebp source is vendored. APNG follows the published PNG/APNG
+specification. TIFF extensions follow TIFF 6.0 and BMP extensions follow
+Microsoft's DIB documentation.
