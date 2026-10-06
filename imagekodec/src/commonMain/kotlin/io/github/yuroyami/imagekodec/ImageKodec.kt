@@ -179,7 +179,7 @@ public object ImageKodec {
 
     /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored), each side divided by [reduction]. */
     private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1): KiteBitmap {
-        val r = io.github.yuroyami.imagekodec.codec.JpxDecoder.decode(data, reduction)
+        val r = io.github.yuroyami.imagekodec.codec.JpxDecoder.decodeForFacade(data, reduction)
             ?: throw ImageDecodeException("JPEG 2000: stream is malformed or uses an unsupported feature")
         val n = if (r.colorSpace == "DeviceRGB") 3 else 1
         val argb = IntArray(r.width * r.height)

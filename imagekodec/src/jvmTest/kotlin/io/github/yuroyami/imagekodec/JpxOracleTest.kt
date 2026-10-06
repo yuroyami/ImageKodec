@@ -7,6 +7,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import org.junit.Assume.assumeTrue
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -48,6 +49,18 @@ class JpxOracleTest {
         proc.inputStream.copyTo(out)
         if (!proc.waitFor(60, TimeUnit.SECONDS)) { proc.destroyForcibly(); return -1 }
         return proc.exitValue()
+    }
+
+    @Test
+    fun malformedTileOriginsAreRejectedByOpenjpeg() {
+        assumeTrue("OpenJPEG tools not installed", tools())
+        val jp2 = File.createTempFile("kite-grid", ".jp2").apply { deleteOnExit() }
+        val decoded = File.createTempFile("kite-grid", ".ppm").apply { deleteOnExit() }
+        for (bytes in invalidJp2Geometries()) {
+            jp2.writeBytes(bytes)
+            assertTrue(run(decompress.path, "-i", jp2.path, "-o", decoded.path) != 0)
+            assertFailsWith<ImageDecodeException> { ImageKodec.decode(bytes) }
+        }
     }
 
     private class Pnm(val w: Int, val h: Int, val comps: Int, val data: ByteArray)

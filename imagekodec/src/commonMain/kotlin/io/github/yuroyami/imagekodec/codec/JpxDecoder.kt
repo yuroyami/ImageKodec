@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.internal.Budget
+import io.github.yuroyami.imagekodec.ImageDecodeException
 import kotlin.math.max
 import kotlin.math.min
 
@@ -51,6 +52,15 @@ public object JpxDecoder {
             "reduction must be 1, 2, 4 or 8, was $reduction"
         }
         return runCatching { decodeOrThrow(data, reduction.countTrailingZeroBits()) }.getOrNull()
+    }
+
+    /** Preserve diagnostic failures for the facade without changing the nullable public API. */
+    internal fun decodeForFacade(data: ByteArray, reduction: Int): Result? = try {
+        decodeOrThrow(data, reduction.countTrailingZeroBits())
+    } catch (e: ImageDecodeException) {
+        throw e
+    } catch (e: Exception) {
+        throw ImageDecodeException("JPEG 2000: ${e.message ?: "malformed codestream"}", e)
     }
 
     /** True when [data] looks like a JP2 container or a raw J2K codestream. */
@@ -141,8 +151,14 @@ public object JpxDecoder {
         val comps: Int, val prec: IntArray, val signed: BooleanArray,
         val dx: IntArray, val dy: IntArray,
     ) {
-        val tilesW: Int get() = ceilDiv(xsiz - xtosiz, xtsiz)
-        val tilesH: Int get() = ceilDiv(ysiz - ytosiz, ytsiz)
+        val grid = Jp2TileGrid(
+            xsiz.toLong() and 0xffffffffL, ysiz.toLong() and 0xffffffffL,
+            xosiz.toLong() and 0xffffffffL, yosiz.toLong() and 0xffffffffL,
+            xtsiz.toLong() and 0xffffffffL, ytsiz.toLong() and 0xffffffffL,
+            xtosiz.toLong() and 0xffffffffL, ytosiz.toLong() and 0xffffffffL,
+        )
+        val tilesW: Int get() = grid.width
+        val tilesH: Int get() = grid.height
     }
 
     /** Coding style for one component (COD/COC). */
@@ -160,8 +176,8 @@ public object JpxDecoder {
 
     // ---- geometry helpers -----------------------------------------------------
 
-    private fun ceilDiv(a: Int, b: Int): Int = (a + b - 1) / b
-    private fun ceilShift(a: Int, s: Int): Int = (a + (1 shl s) - 1) shr s
+    private fun ceilDiv(a: Int, b: Int): Int = ((a.toLong() + b - 1) / b).toInt()
+    private fun ceilShift(a: Int, s: Int): Int = ((a.toLong() + (1L shl s) - 1) shr s).toInt()
 
     // ---- tag tree -------------------------------------------------------------
 
@@ -379,6 +395,8 @@ public object JpxDecoder {
                 0xFF90 -> { // SOT
                     r.u16() // Lsot
                     val isot = r.u16()
+                    val grid = siz?.grid ?: throw ImageDecodeException("JPEG 2000: SOT before SIZ")
+                    if (isot >= grid.count) throw ImageDecodeException("JPEG 2000: tile index $isot outside ${grid.count} tiles")
                     val psot = r.u32i()
                     r.u8() // TPsot
                     r.u8() // TNsot
@@ -440,14 +458,14 @@ public object JpxDecoder {
         val planeH = IntArray(s.comps) { ceilShift(ceilDiv(s.ysiz, s.dy[it]), drop) - planeY0[it] }
         val planes = Array(s.comps) { IntArray(planeW[it] * planeH[it]) }
 
-        for (t in 0 until s.tilesW * s.tilesH) {
-            val body = tileBodies[t]?.let { parts ->
+        for ((t, parts) in tileBodies) {
+            val body = parts.let {
                 if (parts.size == 1) parts[0]
                 else ByteArray(parts.sumOf { it.size }).also { out ->
                     var o = 0
                     for (p in parts) { p.copyInto(out, o); o += p.size }
                 }
-            } ?: continue
+            }
 
             val cod = tileCod[t] ?: cod0
             val qcd = tileQcd[t] ?: qcd0
@@ -570,10 +588,10 @@ public object JpxDecoder {
     ) {
         val ti = t % s.tilesW
         val tj = t / s.tilesW
-        val tx0 = max(s.xtosiz + ti * s.xtsiz, s.xosiz)
-        val ty0 = max(s.ytosiz + tj * s.ytsiz, s.yosiz)
-        val tx1 = min(s.xtosiz + (ti + 1) * s.xtsiz, s.xsiz)
-        val ty1 = min(s.ytosiz + (tj + 1) * s.ytsiz, s.ysiz)
+        val tx0 = max(s.xtosiz.toLong() + ti.toLong() * s.xtsiz, s.xosiz.toLong()).toInt()
+        val ty0 = max(s.ytosiz.toLong() + tj.toLong() * s.ytsiz, s.yosiz.toLong()).toInt()
+        val tx1 = min(s.xtosiz.toLong() + (ti + 1L) * s.xtsiz, s.xsiz.toLong()).toInt()
+        val ty1 = min(s.ytosiz.toLong() + (tj + 1L) * s.ytsiz, s.ysiz.toLong()).toInt()
         if (tx1 <= tx0 || ty1 <= ty0) return
 
         // Build the component/resolution/band/precinct/code-block model.

@@ -458,6 +458,7 @@ internal object ImageProbe {
         val ysiz = u32(siz + 8)
         val xo = u32(siz + 12)
         val yo = u32(siz + 16)
+        Jp2TileGrid(xsiz, ysiz, xo, yo, u32(siz + 20), u32(siz + 24), u32(siz + 28), u32(siz + 32))
         val comps = u16(siz + 36)
         val ssiz = if (siz + 38 < data.size) (data[siz + 38].toInt() and 0x7F) + 1 else 8
 
