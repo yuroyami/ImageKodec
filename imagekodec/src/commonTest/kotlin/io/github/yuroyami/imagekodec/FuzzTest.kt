@@ -47,6 +47,10 @@ class FuzzTest {
         "png" to ImageKodec.encodePng(sample(9, 7)),
         "png-opaque" to ImageKodec.encodePng(KiteBitmap(8, 8, IntArray(64) { argb(0xFF, it, 255 - it, 128) })),
         "jpeg" to ImageKodec.encodeJpeg(sample(16, 16), quality = 70),
+        "jpeg-exif" to jpegWithTiffHeader(
+            ImageKodec.encodeJpeg(sample(16, 16), quality = 70),
+            tiffHeaderWithOffset(8, true) + hex("010012010300010000000600000000000000"),
+        ),
         "gif" to ImageKodec.encodeGif(sample(12, 9)),
         "bmp24" to ImageKodec.encodeBmp(KiteBitmap(7, 5, IntArray(35) { argb(0xFF, it * 3, it * 5, it * 7) })),
         "bmp32" to ImageKodec.encodeBmp(sample(6, 4)),
@@ -183,10 +187,10 @@ class FuzzTest {
     }
 
     private fun exercise(label: String, bytes: ByteArray) {
-        mustFailCleanly("$label decode") { ImageKodec.decode(bytes) }
+        mustFailCleanly("$label decode") { ImageKodec.decode(bytes, applyOrientation = true) }
         // The reduced JPEG path allocates and indexes its own planes, so it gets the same abuse.
         mustFailCleanly("$label decodeReduced") { ImageKodec.decodeReduced(bytes, 8) }
-        mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes) }
+        mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes, applyOrientation = true) }
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
         // probeOrNull promises never to throw on unreadable input at all.
         try {
@@ -274,6 +278,22 @@ class FuzzTest {
                 bytes[at] = nasty[rng.nextInt(nasty.size)].toByte()
                 if (at + 1 < bytes.size) bytes[at + 1] = nasty[rng.nextInt(nasty.size)].toByte()
                 exercise("$name header@$at", bytes)
+            }
+        }
+    }
+
+    @Test
+    fun extremeFourByteHeaderFieldsNeverLeakARuntimeFault() {
+        val values = intArrayOf(0, 1, 0x7FFFFFF7, 0x7FFFFFF8, 0x7FFFFFF9, 0x7FFFFFFE, Int.MAX_VALUE, Int.MIN_VALUE, -1)
+        for ((name, seed) in corpus().filter { it.first == "jpeg-exif" || it.first == "tiff" }) {
+            for (at in 0 until minOf(seed.size - 3, 64)) {
+                for (value in values) {
+                    for (littleEndian in listOf(true, false)) {
+                        val bytes = seed.copyOf()
+                        for (i in 0..3) bytes[at + i] = (value ushr (8 * if (littleEndian) i else 3 - i)).toByte()
+                        exercise("$name u32@$at=$value", bytes)
+                    }
+                }
             }
         }
     }

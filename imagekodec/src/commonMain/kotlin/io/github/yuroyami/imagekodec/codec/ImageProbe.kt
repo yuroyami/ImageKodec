@@ -314,12 +314,13 @@ internal object ImageProbe {
     private fun tiff(data: ByteArray): ImageInfo {
         val le = data[0] == 'I'.code.toByte()
         fun u16(at: Int): Int {
-            if (at < 0 || at + 2 > data.size) throw ImageDecodeException("TIFF: truncated at $at")
+            if (at < 0 || at > data.size - 2) throw ImageDecodeException("TIFF: truncated at $at")
             val a = data[at].toInt() and 0xFF
             val b = data[at + 1].toInt() and 0xFF
             return if (le) a or (b shl 8) else (a shl 8) or b
         }
         fun u32(at: Int): Int {
+            if (at < 0 || at > data.size - 4) throw ImageDecodeException("TIFF: truncated at $at")
             val lo = u16(if (le) at else at + 2)
             val hi = u16(if (le) at + 2 else at)
             val v = lo.toLong() or (hi.toLong() shl 16)
@@ -345,7 +346,7 @@ internal object ImageProbe {
 
         for (i in 0 until count) {
             val at = ifd + 2 + i * 12
-            if (at + 12 > data.size) break
+            if (at > data.size - 12) break
             val tag = u16(at)
             val type = u16(at + 2)
             val n = u32(at + 4)

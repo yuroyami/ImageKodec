@@ -39,7 +39,7 @@ internal object Exif {
      * tag of the same IFD.
      */
     fun orientationFromTiffHeader(data: ByteArray, base: Int): Orientation? {
-        if (base < 0 || base + 8 > data.size) return null
+        if (base < 0 || base > data.size - 8) return null
         val le = when {
             data[base] == 'I'.code.toByte() && data[base + 1] == 'I'.code.toByte() -> true
             data[base] == 'M'.code.toByte() && data[base + 1] == 'M'.code.toByte() -> false
@@ -47,13 +47,14 @@ internal object Exif {
         }
 
         fun u16(at: Int): Int? {
-            if (at < 0 || at + 2 > data.size) return null
+            if (at < 0 || at > data.size - 2) return null
             val a = data[at].toInt() and 0xFF
             val b = data[at + 1].toInt() and 0xFF
             return if (le) a or (b shl 8) else (a shl 8) or b
         }
 
         fun u32(at: Int): Int? {
+            if (at < 0 || at > data.size - 4) return null
             val lo = u16(if (le) at else at + 2) ?: return null
             val hi = u16(if (le) at + 2 else at) ?: return null
             // EXIF offsets are file positions; anything past 2 GiB is nonsense here.
@@ -62,14 +63,16 @@ internal object Exif {
         }
 
         if (u16(base + 2) != 42) return null
-        val ifd0 = base + (u32(base + 4) ?: return null)
+        val offset = u32(base + 4) ?: return null
+        if (offset > data.size - base - 2) return null
+        val ifd0 = base + offset
         val count = u16(ifd0) ?: return null
         // A sane IFD0 is a few dozen entries; a corrupt count could otherwise walk far.
         if (count <= 0 || count > 512) return null
 
         for (i in 0 until count) {
             val at = ifd0 + 2 + i * 12
-            if (at + 12 > data.size) return null
+            if (at > data.size - 12) return null
             if ((u16(at) ?: return null) != 274) continue
             val type = u16(at + 2) ?: return null
             // Orientation is a SHORT. Its value is inline (fits in the 4-byte

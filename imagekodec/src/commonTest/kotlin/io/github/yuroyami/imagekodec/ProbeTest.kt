@@ -15,6 +15,32 @@ import kotlin.test.assertTrue
  */
 class ProbeTest {
 
+    @Test
+    fun extremeTiffOffsetsFailCleanlyInBothByteOrders() {
+        for (littleEndian in listOf(true, false)) {
+            for (offset in listOf(0x7FFFFFFD, 0x7FFFFFFE, 0x7FFFFFFF, -1)) {
+                val bytes = tiffHeaderWithOffset(offset, littleEndian) + ByteArray(8)
+                assertFailsWith<ImageDecodeException> { ImageKodec.probe(bytes) }
+                assertNull(ImageKodec.probeOrNull(bytes))
+            }
+        }
+    }
+
+    @Test
+    fun extremeExifOffsetsLeavePixelsAndOrientationAlone() {
+        val base = ImageKodec.encodeJpeg(sampleBitmap(4, 3))
+        val expected = ImageKodec.decode(base)
+        for (littleEndian in listOf(true, false)) {
+            for (offset in listOf(0x7FFFFFF7, 0x7FFFFFF8, 0x7FFFFFF9, 0x7FFFFFFA, Int.MAX_VALUE, -1)) {
+                val bytes = jpegWithTiffHeader(base, tiffHeaderWithOffset(offset, littleEndian))
+                assertEquals(Orientation.Normal, ImageKodec.probe(bytes).orientation)
+                assertEquals(Orientation.Normal, ImageKodec.probeOrNull(bytes)?.orientation)
+                assertTrue(expected.argb.contentEquals(ImageKodec.decode(bytes, applyOrientation = true).argb))
+                assertTrue(expected.argb.contentEquals(ImageKodec.decodeAnimation(bytes, applyOrientation = true).frames[0].bitmap.argb))
+            }
+        }
+    }
+
     // PNG vectors (shared with PngDecoderTest).
     private val GRAY8_4X4 = "89504e470d0a1a0a0000000d49484452000000040000000408000000008c9ac1a2000000184944415478da6360e0129163d4e0e2e262d2000216100b000d5701704e711c6a0000000049454e44ae426082"
     private val RGBA8_2X2 = "89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d24000000174944415478da63f8cfc0f01f081b1881b4c3ffff0c07003ee3077ce9dbb2f80000000049454e44ae426082"
