@@ -40,7 +40,7 @@ provenance is not guesswork later.
 
 | What | Where it lives | Why |
 |---|---|---|
-| **inflate / zlib / CRC-32 / Adler-32** | vendored from `KiteArchive` (`imagekodec/…/internal/flate/`): itself a clean port of zlib's `contrib/puff` | PNG IDAT needs it; KiteArchive already ported + tested it. Vendored (not a dependency) so the core keeps zero deps and no publish-order coupling. Swap to the `kitearchive` artifact once it's on Central. |
+| **inflate / zlib / CRC-32 / Adler-32** | vendored from `ArchiveKodec` (`imagekodec/…/internal/flate/`): itself a clean port of zlib's `contrib/puff` | PNG IDAT needs it; ArchiveKodec already ported + tested it. Vendored (not a dependency) so the core keeps zero deps and no publish-order coupling. Swap to the `archivekodec` artifact once it's on Central. |
 | PNG spec (RFC 2083 / W3C PNG 3) | w3.org/TR/png-3 | filter + chunk semantics ground truth |
 | GIF89a spec | w3.org/Graphics/GIF/spec-gif89a.txt | disposal methods, NETSCAPE2.0 loop extension |
 

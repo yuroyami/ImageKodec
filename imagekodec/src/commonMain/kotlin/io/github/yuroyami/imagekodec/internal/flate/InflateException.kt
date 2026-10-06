@@ -1,10 +1,10 @@
 package io.github.yuroyami.imagekodec.internal.flate
 
 /*
- * Vendored from KiteArchive (io.github.yuroyami.kitearchive.codec.deflate), itself a
+ * Vendored from ArchiveKodec (io.github.yuroyami.archivekodec.codec.deflate), itself a
  * faithful pure-Kotlin port of Mark Adler's `puff()` (zlib contrib/puff, zlib license).
  * Kept `internal`: PNG IDAT needs an inflater and the ImageKodec core takes zero
- * dependencies. Swap for the `kitearchive` artifact once it is on Maven Central.
+ * dependencies. Swap for the `archivekodec` artifact once it is on Maven Central.
  */
 
 /**

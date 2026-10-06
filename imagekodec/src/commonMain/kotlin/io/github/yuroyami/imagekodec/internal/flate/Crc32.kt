@@ -1,9 +1,9 @@
 package io.github.yuroyami.imagekodec.internal.flate
 
 /*
- * Vendored from KiteArchive (io.github.yuroyami.kitearchive.checksum), minus the
+ * Vendored from ArchiveKodec (io.github.yuroyami.archivekodec.checksum), minus the
  * Checksum interface: ImageKodec only needs the incremental CRC for PNG chunk
- * verification. Swap for the `kitearchive` artifact once it is on Maven Central.
+ * verification. Swap for the `archivekodec` artifact once it is on Maven Central.
  */
 
 /**

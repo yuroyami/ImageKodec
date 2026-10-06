@@ -1,16 +1,16 @@
 package io.github.yuroyami.imagekodec.internal.flate
 
 /*
- * Vendored from KiteArchive (io.github.yuroyami.kitearchive.wrapper.Zlib), trimmed
+ * Vendored from ArchiveKodec (io.github.yuroyami.archivekodec.wrapper.Zlib), trimmed
  * to the decompress path: PNG only inflates here; the PNG *encoder* will bring the
- * deflate side when it lands. Swap for the `kitearchive` artifact once it is on
+ * deflate side when it lands. Swap for the `archivekodec` artifact once it is on
  * Maven Central.
  */
 
 /**
  * zlib (RFC 1950) framing over [Inflate]/[Deflate]: a 2-byte CMF/FLG header and
  * a big-endian Adler-32 trailer. This is the wrapper PNG `IDAT` uses. The
- * compress side arrived with the PNG encoder (vendored from KiteArchive like the
+ * compress side arrived with the PNG encoder (vendored from ArchiveKodec like the
  * rest of this package).
  */
 internal object Zlib {

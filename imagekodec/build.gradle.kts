@@ -10,7 +10,7 @@ plugins {
 
 /*
  * :imagekodec is the pure-Kotlin image codec core. NO external runtime deps: only
- * kotlin-stdlib is on the classpath, exactly like :kitearchive, :kitepdf and
+ * kotlin-stdlib is on the classpath, exactly like :archivekodec, :kitepdf and
  * :kitetorrent. Everything here is pure computation (no sockets, no threads, no
  * disk): format sniffing, the decoders, the ARGB pixel buffer, and the
  * malformed-input / decompression-bomb guards.

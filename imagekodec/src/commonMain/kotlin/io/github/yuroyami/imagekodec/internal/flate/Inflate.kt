@@ -4,10 +4,10 @@ package io.github.yuroyami.imagekodec.internal.flate
  * Raw DEFLATE (RFC 1951) decompressor: a pure-Kotlin port of Mark Adler's
  * `puff()` (the canonical reference inflate, bundled with zlib at
  * `contrib/puff/puff.c`), accelerated with a table-driven Huffman fast path.
- * Vendored from KiteArchive, which carried it over from the KiteTorrent port,
+ * Vendored from ArchiveKodec, which carried it over from the KiteTorrent port,
  * which itself took it from libtorrent's `src/puff.cpp`. Kept `internal`: PNG
  * IDAT needs an inflater and the ImageKodec core takes zero dependencies: swap
- * for the `kitearchive` artifact once it is on Maven Central.
+ * for the `archivekodec` artifact once it is on Maven Central.
  *
  * Differences from the C, all behaviour-preserving:
  *
