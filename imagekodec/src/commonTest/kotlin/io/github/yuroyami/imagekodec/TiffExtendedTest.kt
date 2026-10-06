@@ -21,6 +21,36 @@ import kotlin.test.assertTrue
  */
 class TiffExtendedTest {
 
+    @Test
+    fun malformedOptionalTagShapesNameTheTag() {
+        val cases = listOf(
+            short(530), short(530, 1), short(530, 1, 1, 1), long(530, 1, 1),
+            long(292), long(292, 0, 0), short(292, 0),
+        )
+        for (field in cases) {
+            val bytes = if (field.tag == 530) {
+                greyTiff(short(262, 6), short(277, 3), field)
+            } else {
+                greyTiff(short(259, 3), field)
+            }
+            val error = assertFailsWith<ImageDecodeException> { ImageKodec.decode(bytes) }
+            assertTrue(field.tag.toString() in error.message.orEmpty(), error.message)
+        }
+    }
+
+    @Test
+    fun absentAndValidSubsamplingKeepTheirSpecifiedMeanings() {
+        val fields = listOf(
+            long(256, 1), long(257, 1), short(258, 8, 8, 8),
+            short(259, 1), short(262, 6), short(277, 3),
+            long(278, 1), long(273, 0), long(279, 6),
+        )
+        val default = ImageKodec.decode(tiff(fields, bytes(100, 100, 100, 100, 128, 128)))
+        assertEquals(gray(100), default[0, 0])
+        val explicit = fields.filter { it.tag != 279 } + long(279, 3) + short(530, 1, 1)
+        assertEquals(gray(100), ImageKodec.decode(tiff(explicit, bytes(100, 128, 128)))[0, 0])
+    }
+
     // --- IFD builder --------------------------------------------------------------
 
     private class Field(val tag: Int, val type: Int, val values: LongArray)

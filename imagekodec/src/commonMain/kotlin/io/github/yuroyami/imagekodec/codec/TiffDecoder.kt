@@ -137,6 +137,17 @@ internal object TiffDecoder {
         val planar = single(284, 1).toInt()
         if (planar != 1 && planar != 2) err("unknown planar configuration $planar")
 
+        // TIFF 6.0 specifies exact shapes for these optional fields. Defaults
+        // apply to absent tags; a present malformed field cannot supply them.
+        fun optionalValues(tag: Int, name: String, type: Int, count: Long): LongArray? =
+            entries[tag]?.let {
+                if (it.type != type || it.count != count) {
+                    err("$name ($tag) requires type $type and $count values, got type ${it.type} and ${it.count}")
+                }
+                values(it)
+            }
+        val t4Options = if (compression == 3) optionalValues(292, "T4Options", 4, 1)?.first() ?: 0L else 0L
+
         val bitsEntry = entries[258]?.let { values(it) }?.takeIf { it.isNotEmpty() } ?: longArrayOf(1)
         val bits = bitsEntry[0].toInt()
         if (bitsEntry.any { it != bits.toLong() }) err("heterogeneous bits per sample")
@@ -147,12 +158,12 @@ internal object TiffDecoder {
 
         // Chroma subsampling only exists for YCbCr; everything else is 1:1.
         val subSampling = if (photometric == 6) {
-            entries[530]?.let { values(it) } ?: longArrayOf(2, 2)
+            optionalValues(530, "YCbCrSubSampling", 3, 2) ?: longArrayOf(2, 2)
         } else {
             longArrayOf(1, 1)
         }
         val subH = subSampling[0].toInt()
-        val subV = subSampling.getOrElse(1) { 2L }.toInt()
+        val subV = subSampling[1].toInt()
         if (photometric == 6) {
             if (subH !in intArrayOf(1, 2, 4) || subV !in intArrayOf(1, 2, 4)) {
                 err("YCbCr subsampling ${subH}x$subV is not legal")
@@ -217,9 +228,8 @@ internal object TiffDecoder {
                 32773 -> packBits(comp, expect)
                 2 -> ccittStrip(comp, k = 0, columns, rows, byteAligned = true)
                 3 -> {
-                    val t4 = entries[292]?.let { values(it)[0] } ?: 0L
-                    if (t4 and 1L != 0L) throw UnsupportedImageException("TIFF: G3 2D (T4Options bit 0) is not supported")
-                    ccittStrip(comp, k = 0, columns, rows, byteAligned = (t4 and 4L) != 0L)
+                    if (t4Options and 1L != 0L) throw UnsupportedImageException("TIFF: G3 2D (T4Options bit 0) is not supported")
+                    ccittStrip(comp, k = 0, columns, rows, byteAligned = (t4Options and 4L) != 0L)
                 }
                 4 -> ccittStrip(comp, k = -1, columns, rows, byteAligned = false)
                 else -> throw UnsupportedImageException("TIFF: compression $compression is not supported")

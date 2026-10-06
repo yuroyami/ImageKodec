@@ -64,6 +64,7 @@ class FuzzTest {
         "webp-lossless" to hex(WEBP_LOSSLESS),
         "webp-animation" to hex(WEBP_ANIMATION),
         "tiff" to hex(TIFF_RGB),
+        "tiff-ycbcr" to hex(buildTiff(ycbcr = true)),
         "jp2" to hex(JP2),
         // Seeds for the paths a mutation cannot reach from the ones above: each needs several chunks or
         // fields to agree, so a random edit of a plain file stops at the first check.
@@ -123,7 +124,7 @@ class FuzzTest {
     private val TIFF_RGB = buildTiff()
 
     /** [compression] is the TIFF code: 1 raw, 8 deflate. [tiled] stores one padded 16 by 16 tile in place of a strip. */
-    private fun buildTiff(compression: Int = 1, tiled: Boolean = false): String {
+    private fun buildTiff(compression: Int = 1, tiled: Boolean = false, ycbcr: Boolean = false): String {
         val w = 4
         val h = 3
         val raw = ByteArray((if (tiled) 16 * 16 else w * h) * 3) { (it * 11).toByte() }
@@ -131,8 +132,9 @@ class FuzzTest {
         val fields = mutableListOf(
             intArrayOf(256, 4, 1, w), intArrayOf(257, 4, 1, h),
             intArrayOf(258, 3, 3, 0), intArrayOf(259, 3, 1, compression),
-            intArrayOf(262, 3, 1, 2), intArrayOf(277, 3, 1, 3), intArrayOf(284, 3, 1, 1),
+            intArrayOf(262, 3, 1, if (ycbcr) 6 else 2), intArrayOf(277, 3, 1, 3), intArrayOf(284, 3, 1, 1),
         )
+        if (ycbcr) fields += intArrayOf(530, 3, 2, 1 or (1 shl 16))
         if (tiled) {
             fields += listOf(intArrayOf(322, 4, 1, 16), intArrayOf(323, 4, 1, 16), intArrayOf(324, 4, 1, 0), intArrayOf(325, 4, 1, px.size))
         } else {
@@ -155,7 +157,7 @@ class FuzzTest {
             when {
                 f[0] == 258 -> u32(bitsAt)
                 f[0] == 273 || f[0] == 324 -> u32(pixelsAt)
-                f[1] == 3 -> { u16(f[3]); u16(0) }
+                f[1] == 3 -> { u16(f[3]); u16(f[3] ushr 16) }
                 else -> u32(f[3])
             }
             at = slot + 4
