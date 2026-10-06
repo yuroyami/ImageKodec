@@ -52,6 +52,8 @@ reviewable in the diff.
   and computes tile geometry without overflow (#88).
 - TIFF refuses incomplete uncompressed, PackBits, LZW and Deflate blocks, and
   copies subsampled YCbCr tiles in unit rows (#94, #95).
+- TIFF restores horizontal prediction within each strip or padded tile row,
+  keeping tile boundaries correct for 8/16-bit and separate-plane images (#93).
 - GIF accepts a missing trailer after a complete frame at a block boundary,
   preserving animation pixels, delays and loop count (#80).
 - Codec origins and licenses are recorded, and the original zlib notices are

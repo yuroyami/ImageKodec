@@ -13,7 +13,7 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *
  *  - both byte orders (II/MM), first IFD only (multi-page: first page)
  *  - **strips and tiles**: tiled files assemble edge-padded tiles back into full
- *    rows before anything else looks at the samples
+ *    rows after restoring any per-tile horizontal predictor
  *  - compressions: none (1), CCITT G3-1D (2, byte-aligned rows), G3 via
  *    T4Options bit0=0 (3), G4 (4), the absorbed [CcittFax] codec, TIFF-LZW
  *    with EarlyChange (5), Deflate (8 / 32946), PackBits (32773)
@@ -248,6 +248,34 @@ internal object TiffDecoder {
             }
         }
 
+        // TIFF 6.0 sections 14/15: prediction starts anew at each tile row,
+        // including padding, before that row is joined to its neighbours.
+        fun restorePredictor(buffer: ByteArray, rowBytes: Int, rows: Int) {
+            if (predictor == 1) return
+            if (predictor != 2) throw UnsupportedImageException("TIFF: predictor $predictor is not supported")
+            val stride = samplesPerPlane
+            for (y in 0 until rows) {
+                val ro = y * rowBytes
+                when (bits) {
+                    8 -> for (i in stride until rowBytes) {
+                        buffer[ro + i] = (buffer[ro + i] + buffer[ro + i - stride]).toByte()
+                    }
+                    16 -> {
+                        // Differencing is per 16-bit sample, in the file's byte order.
+                        val samples = rowBytes / 2
+                        for (i in stride until samples) {
+                            val prev = read16(buffer, ro + (i - stride) * 2, le)
+                            val cur = read16(buffer, ro + i * 2, le)
+                            write16(buffer, ro + i * 2, (cur + prev) and 0xFFFF, le)
+                        }
+                    }
+                    else -> throw UnsupportedImageException(
+                        "TIFF: predictor 2 with $bits-bit samples is not supported",
+                    )
+                }
+            }
+        }
+
         if (tiled) {
             val across = (width + tileWidth - 1) / tileWidth
             val down = (height + tileLength - 1) / tileLength
@@ -264,6 +292,7 @@ internal object TiffDecoder {
                     for (tx in 0 until across) {
                         val index = p * tilesPerPlane + ty * across + tx
                         val tile = block(index, tileRowBytes * tileRows, tileLength, tileWidth)
+                        restorePredictor(tile, tileRowBytes, tileRows)
                         val copyBytes = minOf(tileRowBytes, planeRowBytes - tx * tileRowBytes)
                         if (copyBytes <= 0) continue
                         for (row in 0 until minOf(tileRows, planeRows - ty * tileRows)) {
@@ -293,42 +322,12 @@ internal object TiffDecoder {
                     if (stripRows <= 0) break
                     val expect = planeRowBytes * stripRows
                     val strip = block(p * stripsPerPlane + s, expect, stripRows, width)
+                    restorePredictor(strip, planeRowBytes, stripRows)
                     strip.copyInto(plane, at, 0, minOf(expect, strip.size))
                     at += expect
                 }
                 blocks.add(plane)
             }
-        }
-
-        // --- predictor ----------------------------------------------------------
-        if (predictor == 2) {
-            val stride = samplesPerPlane
-            for (plane in blocks) {
-                for (y in 0 until planeRows) {
-                    val ro = y * planeRowBytes
-                    when (bits) {
-                        8 -> for (i in stride until planeRowBytes) {
-                            plane[ro + i] = (plane[ro + i] + plane[ro + i - stride]).toByte()
-                        }
-                        16 -> {
-                            // Differencing is per 16-bit sample, in the file's byte order.
-                            val samples = planeRowBytes / 2
-                            for (i in stride until samples) {
-                                val prev = read16(plane, ro + (i - stride) * 2, le)
-                                val cur = read16(plane, ro + i * 2, le)
-                                write16(plane, ro + i * 2, (cur + prev) and 0xFFFF, le)
-                            }
-                        }
-                        // Horizontal differencing is defined for whole-byte
-                        // samples; sub-byte depths have no implementation here.
-                        else -> throw UnsupportedImageException(
-                            "TIFF: predictor 2 with $bits-bit samples is not supported",
-                        )
-                    }
-                }
-            }
-        } else if (predictor != 1) {
-            throw UnsupportedImageException("TIFF: predictor $predictor is not supported")
         }
 
         // --- sample access --------------------------------------------------------

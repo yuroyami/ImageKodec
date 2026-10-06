@@ -71,6 +71,7 @@ class FuzzTest {
         "tiff-packbits" to tiffBlock(32773, byteArrayOf(31) + ByteArray(32) { it.toByte() }),
         "tiff-ycbcr" to hex(buildTiff(ycbcr = true)),
         "tiff-ycbcr-tiled" to TiffExtendedTest().tiledYcbcr(2, 2),
+        "tiff-predictor-tiled" to predictorTiff(),
         "jp2" to hex(JP2),
         // Seeds for the paths a mutation cannot reach from the ones above: each needs several chunks or
         // fields to agree, so a random edit of a plain file stops at the first check.

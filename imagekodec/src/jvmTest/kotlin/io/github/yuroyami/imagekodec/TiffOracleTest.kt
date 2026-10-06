@@ -59,8 +59,8 @@ class TiffOracleTest {
     }
 
     /** Decode [tiff] both ways and require agreement within [tolerance] per channel. */
-    private fun compare(name: String, tiff: File, tolerance: Int = 0) {
-        val reference = assertNotNull(ImageIO.read(tiff), "$name: ImageIO could not read the fixture")
+    private fun compare(name: String, tiff: File, tolerance: Int = 0, referenceTiff: File = tiff) {
+        val reference = assertNotNull(ImageIO.read(referenceTiff), "$name: ImageIO could not read the fixture")
         val ours = ImageKodec.decode(tiff.readBytes())
 
         assertEquals(reference.width, ours.width, "$name width")
@@ -214,6 +214,42 @@ class TiffOracleTest {
             )
             compare("predictor-$codec", out)
         }
+    }
+
+    @Test
+    fun tiledPredictorWithCompressionAgrees() {
+        assumeTrue("TIFF tools not installed", tools())
+        for (bits in listOf(8, 16)) for (planar in listOf(false, true)) {
+            // tiffcp cannot convert 16-bit chunky/separate layouts. Supply the
+            // source in its desired layout so it only encodes compression/prediction.
+            val base = temp("predictor-base-$bits-$planar", ".tif")
+            base.writeBytes(predictorTiff(bits = bits, planar = planar, compression = 1, predictor = 1))
+            for (codec in listOf("lzw:2", "zip:2")) {
+                val out = temp("tiled-predictor-$bits-${codec.first()}-$planar", ".tif")
+                assertEquals(0, run(tiffcp.path, "-c", codec, "-t",
+                    "-w", "32", "-l", "32", base.path, out.path), "$bits/$planar/$codec")
+                comparePredictor("tiled-predictor-$bits-$codec-$planar", out, bits)
+            }
+        }
+    }
+
+    @Test
+    fun commonPredictorVectorsAgreeWithIndependentReader() {
+        assumeTrue("TIFF tools not installed", tools())
+        for (bits in listOf(8, 16)) for (le in listOf(true, false)) for (planar in listOf(false, true)) {
+            val file = temp("predictor-vector-$bits-$le-$planar", ".tif")
+            file.writeBytes(predictorTiff(bits = bits, le = le, planar = planar))
+            comparePredictor("predictor-vector-$bits-$le-$planar", file, bits)
+        }
+    }
+
+    private fun comparePredictor(name: String, tiff: File, bits: Int) {
+        // ImageIO refuses 16-bit prediction. Read libtiff's decoded RGBA output
+        // instead, including separate 16-bit planes without a layout conversion.
+        assumeTrue("tiff2rgba not installed", Tools.hasAll("tiff2rgba"))
+        val decoded = temp("predictor-decoded", ".tif")
+        assertEquals(0, run(Tools.require("tiff2rgba").path, "-c", "none", tiff.path, decoded.path))
+        compare(name, tiff, tolerance = if (bits == 16) 1 else 0, referenceTiff = decoded)
     }
 
     @Test
