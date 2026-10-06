@@ -20,11 +20,12 @@ class BmpDecoderTest {
         palette: List<Int> = emptyList(),        // 0xRRGGBB
         pixels: List<Int>,                       // palette indices, 0xRRGGBB, or 0xAARRGGBB rows top-to-bottom
         compression: Int = 0,
+        masks: IntArray = intArrayOf(),
     ): ByteArray {
         val absHeight = if (height < 0) -height else height
         val bytesPerPixel = bpp / 8
         val rowStride = (width * bytesPerPixel + 3) and 3.inv()
-        val headerSize = 14 + 40 + palette.size * 4
+        val headerSize = 14 + 40 + masks.size * 4 + palette.size * 4
         val out = ArrayList<Byte>(headerSize + rowStride * absHeight)
 
         fun u8(v: Int) = out.add((v and 0xFF).toByte())
@@ -44,6 +45,7 @@ class BmpDecoderTest {
         u32(0); u32(0); u32(0)                    // image size, x/y ppm
         u32(palette.size)                         // clrUsed
         u32(0)                                    // clrImportant
+        for (mask in masks) u32(mask)
         for (c in palette) { u8(c); u8(c ushr 8); u8(c ushr 16); u8(0) }   // BGRX
 
         // Rows: `pixels` is top-to-bottom; storage order depends on sign of height.
@@ -52,6 +54,7 @@ class BmpDecoderTest {
             for (x in 0 until width) {
                 val p = pixels[y * width + x]
                 when (bpp) {
+                    16 -> u16(p)
                     8 -> u8(p)
                     24 -> { u8(p); u8(p ushr 8); u8(p ushr 16) }             // BGR
                     32 -> { u8(p); u8(p ushr 8); u8(p ushr 16); u8(p ushr 24) }  // BGRA
@@ -60,6 +63,29 @@ class BmpDecoderTest {
             repeat(rowStride - width * bytesPerPixel) { u8(0) }
         }
         return out.toByteArray()
+    }
+
+    @Test
+    fun explicitAlphaPreservesFullyTransparentPixels() {
+        val colors = intArrayOf(0x00FF0000, 0x0000FF00, 0x000000FF, 0x00ABCDEF)
+        val source = KiteBitmap(2, 2, colors)
+        assertContentEquals(colors, ImageKodec.decode(ImageKodec.encodeBmp(source)).argb)
+        val explicit32 = bmp(2, 2, 32, pixels = colors.toList(), compression = 6,
+            masks = intArrayOf(0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000.toInt()))
+        assertContentEquals(colors, ImageKodec.decode(explicit32).argb)
+        val explicit16 = bmp(3, 1, 16, pixels = listOf(0x7C00, 0x03E0, 0x001F), compression = 6,
+            masks = intArrayOf(0x7C00, 0x03E0, 0x001F, 0x8000))
+        assertContentEquals(colors.copyOf(3), ImageKodec.decode(explicit16).argb)
+    }
+
+    @Test
+    fun wideUnsignedChannelMasksReachTheirMaximum() {
+        val white = bmp(1, 1, 32, pixels = listOf(-1), compression = 3,
+            masks = intArrayOf(0x00FFFFFF, 0x0F000000, 0xF0000000.toInt()))
+        assertEquals(-1, ImageKodec.decode(white)[0, 0])
+        val thirtyTwoBits = bmp(1, 1, 32, pixels = listOf(-1), compression = 3,
+            masks = intArrayOf(-1, 0, 0))
+        assertEquals(argb(255, 255, 0, 0), ImageKodec.decode(thirtyTwoBits)[0, 0])
     }
 
     @Test

@@ -20,8 +20,8 @@ import io.github.yuroyami.imagekodec.internal.ByteReader
  *    max-value ratio rather than a bit shift, so 5-bit 31 lands on 255)
  *  - bottom-up (positive height, the norm) and top-down (negative) row order
  *  - rows padded to 4-byte boundaries
- *  - the stb pragmatism: a 32-bit image whose alpha plane is entirely zero is
- *    treated as opaque; countless real files write 0 there and mean "no alpha"
+ *  - legacy 32-bit BI_RGB with inferred alpha treats an all-zero alpha plane
+ *    as opaque; an explicit alpha mask always preserves its samples
  *
  * Pixels an RLE stream never writes (a delta jump, or a row that ends early)
  * stay fully transparent. The format calls them undefined; leaving a hole is
@@ -142,11 +142,15 @@ internal object BmpDecoder {
                 inlineMaskBytes = 16
             }
         }
+        val inferredAlpha = bpp == 32 && compression == BI_RGB && maskA == 0
         if ((maskR or maskG or maskB) == 0) {
             // Defaults for BI_RGB (and for a BI_BITFIELDS file that left them blank).
             when (bpp) {
                 16 -> { maskR = 0x7C00; maskG = 0x03E0; maskB = 0x001F }
-                32 -> { maskR = 0x00FF0000; maskG = 0x0000FF00; maskB = 0x000000FF; maskA = 0xFF shl 24 }
+                32 -> {
+                    maskR = 0x00FF0000; maskG = 0x0000FF00; maskB = 0x000000FF
+                    if (inferredAlpha) maskA = 0xFF shl 24
+                }
             }
         }
 
@@ -194,7 +198,7 @@ internal object BmpDecoder {
             BI_RLE8 -> { decodeRle(r, argb, width, height, palette!!, fourBit = false); KiteBitmap(width, height, argb) }
             BI_RLE4 -> { decodeRle(r, argb, width, height, palette!!, fourBit = true); KiteBitmap(width, height, argb) }
             else -> {
-                decodeUncompressed(r, argb, width, height, topDown, bpp, palette, maskR, maskG, maskB, maskA)
+                decodeUncompressed(r, argb, width, height, topDown, bpp, palette, maskR, maskG, maskB, maskA, inferredAlpha)
                 KiteBitmap(width, height, argb)
             }
         }
@@ -211,6 +215,7 @@ internal object BmpDecoder {
         bpp: Int,
         palette: IntArray?,
         maskR: Int, maskG: Int, maskB: Int, maskA: Int,
+        inferredAlpha: Boolean,
     ) {
         // Rows are padded to a 4-byte boundary; the padding is part of the stride.
         val rowBits = width * bpp
@@ -273,8 +278,8 @@ internal object BmpDecoder {
             if (padding > 0) r.skip(padding)
         }
 
-        // The stb rule: an all-zero alpha plane means the writer meant "opaque".
-        if ((bpp == 32 || bpp == 16) && maskA != 0 && alphaSeen == 0) {
+        // Only the reserved byte of legacy BI_RGB admits this compatibility guess.
+        if (inferredAlpha && alphaSeen == 0) {
             for (j in argb.indices) argb[j] = argb[j] or (0xFF shl 24)
         }
     }
@@ -292,12 +297,12 @@ internal object BmpDecoder {
     private fun maskLow(mask: Int, shift: Int): Int = mask ushr shift
 
     /** Maximum value a mask's field can hold, i.e. `2^width - 1`. */
-    private fun channelScale(mask: Int): Int {
-        if (mask == 0) return 0
+    private fun channelScale(mask: Int): Long {
+        if (mask == 0) return 0L
         var m = mask ushr lowestSetBit(mask)
         var bits = 0
         while (m != 0) { m = m ushr 1; bits++ }
-        return (1 shl bits) - 1
+        return (1L shl bits) - 1
     }
 
     /**
@@ -305,8 +310,9 @@ internal object BmpDecoder {
      * maximum 31 must become 255, and `v shl 3` would stop at 248 (visibly grey
      * whites). This is the same `v * 255 / max` every reference decoder uses.
      */
-    private fun scale(value: Int, max: Int): Int =
-        if (max <= 0) 0 else if (max == 255) value else (value * 255 + max / 2) / max
+    private fun scale(value: Int, max: Long): Int =
+        if (max <= 0) 0 else if (max == 255L) value else
+            (((value.toLong() and 0xFFFFFFFFL) * 255 + max / 2) / max).toInt()
 
     // --- run-length rows ---------------------------------------------------------
 

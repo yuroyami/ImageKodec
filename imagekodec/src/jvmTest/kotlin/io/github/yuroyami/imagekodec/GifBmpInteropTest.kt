@@ -16,6 +16,30 @@ import kotlin.test.assertTrue
  */
 class GifBmpInteropTest {
 
+    @Test
+    fun fullyTransparentBmpMatchesImageIo() {
+        val source = KiteBitmap(2, 2, intArrayOf(0x00FF0000, 0x0000FF00, 0x000000FF, 0x00ABCDEF))
+        val bytes = ImageKodec.encodeBmp(source)
+        val reference = assertNotNull(ImageIO.read(ByteArrayInputStream(bytes)))
+        val decoded = ImageKodec.decode(bytes)
+        for (y in 0..1) for (x in 0..1) assertEquals(reference.getRGB(x, y), decoded[x, y])
+    }
+
+    @Test
+    fun wideBmpMasksMatchImageIo() {
+        val file = java.nio.ByteBuffer.allocate(70).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        file.put('B'.code.toByte()).put('M'.code.toByte()).putInt(70).putInt(0).putInt(66)
+        file.putInt(40).putInt(1).putInt(1).putShort(1).putShort(32)
+        file.putInt(3).putInt(4).putInt(0).putInt(0).putInt(0).putInt(0)
+        file.putInt(0x00FFFFFF).putInt(0x0F000000).putInt(0xF0000000.toInt())
+        for (pixel in intArrayOf(-1, 0, 0x007FFFFF, 0x07800000, 0xF0FFFFFF.toInt())) {
+            file.putInt(66, pixel)
+            val bytes = file.array()
+            val reference = assertNotNull(ImageIO.read(ByteArrayInputStream(bytes)))
+            assertEquals(reference.getRGB(0, 0), ImageKodec.decode(bytes)[0, 0], "pixel=$pixel")
+        }
+    }
+
     private fun card(w: Int, h: Int, colors: Int): KiteBitmap {
         val px = IntArray(w * h)
         for (y in 0 until h) for (x in 0 until w) {
