@@ -7,6 +7,7 @@ import javax.imageio.ImageIO
 import org.junit.Assume.assumeTrue
 import kotlin.math.abs
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -89,6 +90,44 @@ class TiffOracleTest {
             "magick failed",
         )
         return out
+    }
+
+    @Test
+    fun shortStripsAndRecoverableCountsMatchLibtiff() {
+        assumeTrue("TIFF tools not installed", tools())
+        val input = temp("short", ".tif")
+        val output = temp("short-copy", ".tif")
+        for (bytes in listOf(tiffBlock(1, ByteArray(16), count = 32),
+            tiffBlock(32773, byteArrayOf(15) + ByteArray(16)))) {
+            input.writeBytes(bytes)
+            assertTrue(run(tiffcp.path, input.path, output.path) != 0)
+            assertTrue(run(magick.path, input.path, temp("short", ".png").path) != 0)
+            assertFailsWith<ImageDecodeException> { ImageKodec.decode(bytes) }
+        }
+        for (count in listOf(0, 1, 16)) {
+            input.writeBytes(tiffBlock(1, ByteArray(32) { (it * 7).toByte() }, count))
+            assertEquals(0, run(tiffcp.path, input.path, output.path))
+            val repaired = ImageKodec.decode(output.readBytes())
+            val ours = ImageKodec.decode(input.readBytes())
+            for (i in ours.argb.indices) assertEquals(repaired.argb[i], ours.argb[i])
+        }
+    }
+
+    @Test
+    fun subsampledYcbcrTilesMatchLibtiff() {
+        assumeTrue("TIFF tools not installed", tools())
+        assumeTrue("tiff2rgba not installed", Tools.hasAll("tiff2rgba"))
+        for ((h, v) in listOf(2 to 1, 2 to 2, 4 to 1, 4 to 2, 4 to 4)) {
+            val input = temp("ycbcr-$h-$v", ".tif")
+            val decoded = temp("ycbcr-$h-$v", ".tif")
+            input.writeBytes(TiffExtendedTest().tiledYcbcr(h, v))
+            assertEquals(0, run(Tools.require("tiff2rgba").path, "-c", "none", input.path, decoded.path))
+            val reference = assertNotNull(ImageIO.read(decoded))
+            val ours = ImageKodec.decode(input.readBytes())
+            for (y in 0 until 17) for (x in 0 until 19) {
+                assertEquals(reference.getRGB(x, y), ours[x, y], "$h x $v at $x, $y")
+            }
+        }
     }
 
     @Test

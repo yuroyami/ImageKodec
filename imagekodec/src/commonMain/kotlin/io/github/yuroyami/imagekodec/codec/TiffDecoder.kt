@@ -199,7 +199,12 @@ internal object TiffDecoder {
         if (tiled) {
             if (tileWidth <= 0 || tileLength <= 0) err("bad tile size ${tileWidth}x$tileLength")
             if (tileWidth > MAX_DIMENSION || tileLength > MAX_DIMENSION) err("tile ${tileWidth}x$tileLength too large")
-            val tileBytes = rowBytes(tileWidth, samplesPerPlane, bits) * tileLength
+            if (ycbcrUnits && (tileWidth % subH != 0 || tileLength % subV != 0)) {
+                err("tile ${tileWidth}x$tileLength does not align with YCbCr subsampling ${subH}x$subV")
+            }
+            val tileBytes = if (ycbcrUnits) {
+                (tileWidth / subH).toLong() * (tileLength / subV) * unitBytes
+            } else rowBytes(tileWidth, samplesPerPlane, bits) * tileLength
             if (tileBytes > MAX_BUFFER_BYTES) err("tile of $tileBytes bytes exceeds safety limits")
         }
 
@@ -215,13 +220,20 @@ internal object TiffDecoder {
             if (index >= offsets.size) err("block $index beyond the ${offsets.size} declared")
             val ofs = offsets[index].toInt()
             if (ofs < 0 || ofs > data.size) err("block $index offset out of range")
+            if (compression == 1) {
+                // TIFF's uncompressed size is determined by geometry. Like libtiff,
+                // recover a bogus byte count only when all those bytes are present.
+                if (expect > data.size - ofs) err("block $index ends early: need $expect bytes, have ${data.size - ofs}")
+                return data.copyOfRange(ofs, ofs + expect)
+            }
             val len = minOf(counts[index], (data.size - ofs).toLong()).toInt()
             val comp = data.copyOfRange(ofs, ofs + len)
             return when (compression) {
-                1 -> comp.copyOf(expect)
                 5 -> tiffLzw(comp, expect)
                 8, 32946 -> try {
-                    Zlib.decompress(comp, expect.toLong()).copyOf(expect)
+                    val decoded = Zlib.decompress(comp, expect.toLong())
+                    if (decoded.size != expect) err("block $index inflate ended after ${decoded.size} of $expect bytes")
+                    decoded
                 } catch (e: InflateException) {
                     throw ImageDecodeException("TIFF: strip inflate failed: ${e.message}", e)
                 }
@@ -242,22 +254,24 @@ internal object TiffDecoder {
             // Tiles are always padded to their full size, even at the right and
             // bottom edges: the padding is real data on the wire, just discarded.
             // Fits an Int: the whole tile passed the buffer ceiling above.
-            val tileRowBytes = rowBytes(tileWidth, samplesPerPlane, bits).toInt()
+            val tileRowBytes = if (ycbcrUnits) (tileWidth / subH) * unitBytes
+                else rowBytes(tileWidth, samplesPerPlane, bits).toInt()
+            val tileRows = if (ycbcrUnits) tileLength / subV else tileLength
             val tilesPerPlane = across * down
             for (p in 0 until planes) {
                 val plane = ByteArray(planeRowBytes * planeRows)
                 for (ty in 0 until down) {
                     for (tx in 0 until across) {
                         val index = p * tilesPerPlane + ty * across + tx
-                        val tile = block(index, tileRowBytes * tileLength, tileLength, tileWidth)
+                        val tile = block(index, tileRowBytes * tileRows, tileLength, tileWidth)
                         val copyBytes = minOf(tileRowBytes, planeRowBytes - tx * tileRowBytes)
                         if (copyBytes <= 0) continue
-                        for (row in 0 until minOf(tileLength, height - ty * tileLength)) {
+                        for (row in 0 until minOf(tileRows, planeRows - ty * tileRows)) {
                             val src = row * tileRowBytes
                             if (src + copyBytes > tile.size) break
                             tile.copyInto(
                                 plane,
-                                destinationOffset = (ty * tileLength + row) * planeRowBytes + tx * tileRowBytes,
+                                destinationOffset = (ty * tileRows + row) * planeRowBytes + tx * tileRowBytes,
                                 startIndex = src,
                                 endIndex = src + copyBytes,
                             )
@@ -557,6 +571,7 @@ internal object TiffDecoder {
                 }
             }
         }
+        if (outAt != expected) err("LZW data ended after $outAt of $expected bytes")
         return out
     }
 
@@ -584,6 +599,7 @@ internal object TiffDecoder {
                 // -128: no-op
             }
         }
+        if (o != expected) err("PackBits data ended after $o of $expected bytes")
         return out
     }
 }

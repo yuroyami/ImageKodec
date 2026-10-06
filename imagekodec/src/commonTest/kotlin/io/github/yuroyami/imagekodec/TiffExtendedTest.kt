@@ -247,6 +247,39 @@ class TiffExtendedTest {
         assertTrue(((bm[0, 0] ushr 16) and 0xFF) < ((bm[1, 0] ushr 16) and 0xFF))
     }
 
+    internal fun tiledYcbcr(subH: Int, subV: Int, defaultSampling: Boolean = false): ByteArray {
+        val width = 19; val height = 17
+        val tileSize = (16 / subH) * (16 / subV) * (subH * subV + 2)
+        val pixels = ByteArray(tileSize * 4)
+        var at = 0
+        for (ty in 0..1) for (tx in 0..1) {
+            for (uy in 0 until 16 step subV) for (ux in 0 until 16 step subH) {
+                for (dy in 0 until subV) for (dx in 0 until subH) {
+                    pixels[at++] = ((tx * 16 + ux + dx) * 5 + (ty * 16 + uy + dy) * 3).toByte()
+                }
+                pixels[at++] = 128.toByte(); pixels[at++] = 128.toByte()
+            }
+        }
+        return tiff(
+            listOfNotNull(long(256, width), long(257, height), short(258, 8, 8, 8),
+                short(259, 1), short(262, 6), short(277, 3), short(284, 1),
+                if (defaultSampling) null else short(530, subH, subV),
+                long(322, 16), long(323, 16), long(324, 0, tileSize, tileSize * 2, tileSize * 3),
+                long(325, tileSize, tileSize, tileSize, tileSize)), pixels, stripOffsetTag = 324,
+        )
+    }
+
+    @Test
+    fun subsampledYcbcrTilesUseUnitRowsAndPreserveEdgePadding() {
+        val sampling = listOf(1 to 1, 2 to 1, 2 to 2, 4 to 1, 4 to 2, 4 to 4)
+        for ((h, v) in sampling) {
+            val bitmap = ImageKodec.decode(tiledYcbcr(h, v))
+            for (y in 0 until 17) for (x in 0 until 19) assertEquals(gray(x * 5 + y * 3), bitmap[x, y], "$h x $v at $x, $y")
+        }
+        val bitmap = ImageKodec.decode(tiledYcbcr(2, 2, defaultSampling = true))
+        for (y in 0 until 17) for (x in 0 until 19) assertEquals(gray(x * 5 + y * 3), bitmap[x, y])
+    }
+
     // --- planar configuration --------------------------------------------------------
 
     @Test

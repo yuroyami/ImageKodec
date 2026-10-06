@@ -68,7 +68,9 @@ class FuzzTest {
         "webp-normal-prefix" to prefixWebp(intArrayOf(1, 1)),
         "webp-animation" to hex(WEBP_ANIMATION),
         "tiff" to hex(TIFF_RGB),
+        "tiff-packbits" to tiffBlock(32773, byteArrayOf(31) + ByteArray(32) { it.toByte() }),
         "tiff-ycbcr" to hex(buildTiff(ycbcr = true)),
+        "tiff-ycbcr-tiled" to TiffExtendedTest().tiledYcbcr(2, 2),
         "jp2" to hex(JP2),
         // Seeds for the paths a mutation cannot reach from the ones above: each needs several chunks or
         // fields to agree, so a random edit of a plain file stops at the first check.
