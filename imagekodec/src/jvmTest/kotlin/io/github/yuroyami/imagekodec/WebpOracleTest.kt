@@ -5,6 +5,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import org.junit.Assume.assumeTrue
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -108,6 +109,39 @@ class WebpOracleTest {
 
     private fun make(w: Int, h: Int, f: (Int, Int) -> Int) =
         KiteBitmap(w, h, IntArray(w * h) { f(it % w, it / w) })
+
+    @Test
+    fun uniformHistogramAndNoiseMatchAtSeveralMethods() {
+        assumeTrue("libwebp tools not installed", tools())
+        val histogram = KiteBitmap(32, 16, uniformHistogramPixels())
+        var seed = 7
+        val noise = make(150, 150) { _, _ ->
+            seed = seed * 1664525 + 1013904223
+            argb(255, seed ushr 24, (seed ushr 16) and 255, (seed ushr 8) and 255)
+        }
+        for (method in listOf(0, 4, 6)) {
+            checkLossless("histogram-$method", histogram, listOf("-m", "$method"))
+            checkLossless("noise-$method", noise, listOf("-m", "$method"))
+        }
+    }
+
+    @Test
+    fun handBuiltPrefixTreesMatchLibwebpAcceptance() {
+        assumeTrue("libwebp tools not installed", tools())
+        val webp = File.createTempFile("kite-prefix", ".webp").apply { deleteOnExit() }
+        val pam = File.createTempFile("kite-prefix", ".pam").apply { deleteOnExit() }
+        val valid = listOf(prefixWebp(intArrayOf(1, 0)), prefixWebp(intArrayOf(1, 1)),
+            prefixWebp(intArrayOf(1, 0), duplicateSimple = true))
+        for (bytes in valid) {
+            webp.writeBytes(bytes)
+            assertEquals(0, run(dwebp.path, "-pam", webp.path, "-o", pam.path))
+            assertContentEquals(readPam(pam).argb, ImageKodec.decode(bytes).argb)
+        }
+        for (lengths in listOf(intArrayOf(1, 2), intArrayOf(1, 1, 1), intArrayOf(0, 0))) {
+            webp.writeBytes(prefixWebp(lengths))
+            assertTrue(run(dwebp.path, "-pam", webp.path, "-o", pam.path) != 0)
+        }
+    }
 
     @Test
     fun smoothGradientMatchesLibwebp() {

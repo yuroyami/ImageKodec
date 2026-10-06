@@ -64,6 +64,8 @@ class FuzzTest {
             ),
         ),
         "webp-lossless" to hex(WEBP_LOSSLESS),
+        "webp-singleton" to hex(WEBP_UNIFORM_HISTOGRAM),
+        "webp-normal-prefix" to prefixWebp(intArrayOf(1, 1)),
         "webp-animation" to hex(WEBP_ANIMATION),
         "tiff" to hex(TIFF_RGB),
         "tiff-ycbcr" to hex(buildTiff(ycbcr = true)),

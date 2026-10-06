@@ -9,8 +9,9 @@ import io.github.yuroyami.imagekodec.internal.Budget
  * Written from the *WebP Lossless Bitstream Specification* rather than ported
  * from a reference tree, and then verified bit-exact against libwebp's own
  * `dwebp` binary across every transform, both palette packings, all ten encoder
- * effort levels and a meta-prefix-sized image. The provenance matters for a
- * clean-room library, so: spec in, oracle out, no libwebp source consulted.
+ * effort levels and a meta-prefix-sized image. Prefix-tree validation was
+ * subsequently checked against libwebp's BSD-3-Clause huffman_utils.c; see
+ * reference/REFERENCES.md. No reference source is vendored here.
  *
  * The format is a small stack of ideas rather than one big algorithm:
  *
@@ -381,14 +382,25 @@ internal object Vp8lDecoder {
         constructor(lengths: IntArray) : this(
             counts = IntArray(MAX_ALLOWED_CODE_LENGTH + 1).also { c ->
                 for (l in lengths) {
-                    if (l > MAX_ALLOWED_CODE_LENGTH) err("code length $l out of range")
+                    if (l !in 0..MAX_ALLOWED_CODE_LENGTH) err("code length $l out of range")
                     c[l]++
                 }
                 c[0] = 0
             },
             symbols = IntArray(lengths.size),
-            single = -1,
+            single = if (lengths.count { it != 0 } == 1) lengths.indexOfFirst { it != 0 } else -1,
         ) {
+            // VP8L section 6.2.1: a single leaf consumes no bits even when its
+            // length is explicitly encoded. Every other tree must be full.
+            if (counts.sum() == 0) err("empty prefix code")
+            if (single < 0) {
+                var available = 1
+                for (length in 1..MAX_ALLOWED_CODE_LENGTH) {
+                    available = (available shl 1) - counts[length]
+                    if (available < 0) err("oversubscribed prefix code")
+                }
+                if (available != 0) err("incomplete prefix code")
+            }
             // Sort symbols by (length, symbol) so the canonical order matches.
             val offsets = IntArray(MAX_ALLOWED_CODE_LENGTH + 2)
             for (l in 1..MAX_ALLOWED_CODE_LENGTH) offsets[l + 1] = offsets[l] + counts[l]
