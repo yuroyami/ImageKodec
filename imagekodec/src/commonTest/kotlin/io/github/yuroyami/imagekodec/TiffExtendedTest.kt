@@ -22,6 +22,20 @@ import kotlin.test.assertTrue
 class TiffExtendedTest {
 
     @Test
+    fun deflateStripBoundariesAndInvalidCodesUseTheSameContract() {
+        fun deflateTiff(width: Int, height: Int, compressed: ByteArray): ByteArray = tiff(
+            listOf(long(256, width), long(257, height), short(258, 8), short(259, 8),
+                short(262, 1), short(277, 1), long(278, height), long(273, 0), long(279, compressed.size)),
+            compressed,
+        )
+        val expected = hex(FLUSHED_RAW)
+        val decoded = ImageKodec.decode(deflateTiff(expected.size, 1, hex(FLUSHED_ZLIB)))
+        for (x in expected.indices) assertEquals(gray(expected[x].toInt() and 255), decoded[x, 0])
+        val damaged = deflateTiff(4, 4, hex(INVALID_DISTANCE_ZLIB))
+        assertFailsWith<ImageDecodeException> { ImageKodec.decode(damaged) }
+    }
+
+    @Test
     fun malformedOptionalTagShapesNameTheTag() {
         val cases = listOf(
             short(530), short(530, 1), short(530, 1, 1, 1), long(530, 1, 1),

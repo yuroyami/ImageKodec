@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec
 import io.github.yuroyami.imagekodec.internal.flate.InflateException
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 import java.util.zip.Deflater
+import java.io.ByteArrayOutputStream
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -16,6 +17,47 @@ import kotlin.test.assertFailsWith
  * larger than any single block.
  */
 class InflateOracleTest {
+
+    @Test
+    fun streamingFlushesMatchZlibAtEveryBlockBoundary() {
+        for (strategy in intArrayOf(Deflater.DEFAULT_STRATEGY, Deflater.FILTERED, Deflater.HUFFMAN_ONLY)) {
+            for (flush in intArrayOf(Deflater.SYNC_FLUSH, Deflater.FULL_FLUSH)) {
+                for (width in intArrayOf(2, 7, 16, 31, 40)) {
+                    val random = Random(76 + width)
+                    val rows = List(6) { ByteArray(width + 1) { i -> if (i == 0) 0 else (random.nextInt(4) * 37).toByte() } }
+                    val expected = rows.reduce { a, b -> a + b }
+                    val deflater = Deflater(6)
+                    deflater.setStrategy(strategy)
+                    val compressed = ByteArrayOutputStream()
+                    val buffer = ByteArray(4096)
+                    try {
+                        for (row in rows) {
+                            deflater.setInput(row)
+                            var n: Int
+                            do {
+                                n = deflater.deflate(buffer, 0, buffer.size, flush)
+                                compressed.write(buffer, 0, n)
+                            } while (!deflater.needsInput() || n == buffer.size)
+                        }
+                        deflater.finish()
+                        while (!deflater.finished()) {
+                            val n = deflater.deflate(buffer)
+                            compressed.write(buffer, 0, n)
+                        }
+                    } finally {
+                        deflater.end()
+                    }
+                    val stream = compressed.toByteArray()
+                    assertContentEquals(expected, Zlib.decompress(stream, expected.size.toLong()), "strategy=$strategy flush=$flush width=$width")
+                    val png = PNG_SIGNATURE + pngHeader(width, rows.size, 8, 0) + pngChunk("IDAT", stream) + pngChunk("IEND", ByteArray(0))
+                    val bitmap = ImageKodec.decode(png)
+                    for (y in rows.indices) for (x in 0 until width) {
+                        kotlin.test.assertEquals(gray(rows[y][x + 1].toInt() and 255), bitmap[x, y])
+                    }
+                }
+            }
+        }
+    }
 
     private fun zlibCompress(data: ByteArray, level: Int, strategy: Int = Deflater.DEFAULT_STRATEGY): ByteArray {
         val d = Deflater(level, /* nowrap = */ false)

@@ -46,6 +46,8 @@ class FuzzTest {
     private fun corpus(): List<Pair<String, ByteArray>> = listOf(
         "png" to ImageKodec.encodePng(sample(9, 7)),
         "png-opaque" to ImageKodec.encodePng(KiteBitmap(8, 8, IntArray(64) { argb(0xFF, it, 255 - it, 128) })),
+        "png-flushed" to (PNG_SIGNATURE + pngHeader(16, 2, 8, 0) +
+            pngChunk("IDAT", hex(FLUSHED_ZLIB)) + pngChunk("IEND", ByteArray(0))),
         "jpeg" to ImageKodec.encodeJpeg(sample(16, 16), quality = 70),
         "jpeg-exif" to jpegWithTiffHeader(
             ImageKodec.encodeJpeg(sample(16, 16), quality = 70),

@@ -160,6 +160,14 @@ internal object Inflate {
 
         fun rawByte(): Int = inBuf[incnt++].toInt() and 0xff
 
+        fun alignToByte() {
+            // The fast decoder may have read whole bytes beyond the block.
+            // Return them to the cursor and drop only the partial-byte padding.
+            incnt -= bitcnt ushr 3
+            bitbuf = 0
+            bitcnt = 0
+        }
+
         fun bits(need: Int): Int {
             var value = bitbuf
             while (bitcnt < need) {
@@ -257,8 +265,7 @@ internal object Inflate {
     }
 
     private fun stored(s: State): Int {
-        s.bitbuf = 0
-        s.bitcnt = 0
+        s.alignToByte()
 
         if (s.inAvailable < 4) return InflateError.DATA_DID_NOT_TERMINATE.code
         var len = s.rawByte()
@@ -298,10 +305,10 @@ internal object Inflate {
         return decodeSlow(s, h)
     }
 
-    /** puff's exact bit-by-bit canonical walk (unchanged semantics). */
+    /** puff's canonical walk, bounded even when the fast path prefetched 16 bits. */
     private fun decodeSlow(s: State, h: Huffman): Int {
         var bitbuf = s.bitbuf
-        var left = s.bitcnt
+        var left = minOf(s.bitcnt, MAXBITS)
         var code = 0
         var first = 0
         var index = 0
