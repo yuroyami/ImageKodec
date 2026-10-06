@@ -80,6 +80,9 @@ internal object GifDecoder {
         var transparentIndex = -1
 
         while (true) {
+            // A missing trailer is recoverable only at a block boundary after
+            // a complete frame. Reads inside blocks retain their bounds checks.
+            if (r.remaining == 0 && frames.isNotEmpty()) break
             when (val block = r.u8()) {
                 0x2C -> {   // image descriptor
                     val fx = r.u16le()

@@ -133,6 +133,39 @@ class GifDecoderTest {
     }
 
     @Test
+    fun missingTrailerAtACompleteFrameBoundaryPreservesTheAnimation() {
+        for (vector in listOf(STATIC_3X2, ANIM_KEEP_2F, ANIM_DISPOSE_BG, ANIM_DISPOSE_PREV,
+            ANIM_LCT, ANIM_TRANSPARENT_OVERLAY)) {
+            val full = hex(vector)
+            assertEquals(0x3b, full.last().toInt())
+            val shortened = full.copyOf(full.size - 1)
+            val expected = ImageKodec.decodeAnimation(full)
+            val actual = ImageKodec.decodeAnimation(shortened)
+            assertEquals(expected.loopCount, actual.loopCount)
+            assertEquals(expected.frames.size, actual.frames.size)
+            for (i in actual.frames.indices) {
+                assertEquals(expected.frames[i].delayMillis, actual.frames[i].delayMillis)
+                assertEquals(expected.frames[i].delayRawCentiseconds, actual.frames[i].delayRawCentiseconds)
+                assertContentEquals(expected.frames[i].bitmap.argb, actual.frames[i].bitmap.argb)
+            }
+            assertContentEquals(ImageKodec.decode(full).argb, ImageKodec.decode(shortened).argb)
+            assertEquals(expected.frames.size, ImageKodec.probe(shortened).frameCount)
+        }
+    }
+
+    @Test
+    fun eofWithoutAFrameOrInsideFrameDataIsStillAnError() {
+        val full = hex(STATIC_3X2)
+        for (end in listOf(25, full.size - 2, full.size - 4)) {
+            val cut = full.copyOf(end)
+            assertFailsWith<ImageDecodeException> { ImageKodec.decode(cut) }
+            assertFailsWith<ImageDecodeException> { ImageKodec.decodeAnimation(cut) }
+        }
+        val unfinishedExtension = full.copyOf(full.size - 1) + byteArrayOf(0x21, 0xf9.toByte(), 4, 0)
+        assertFailsWith<ImageDecodeException> { ImageKodec.decodeAnimation(unfinishedExtension) }
+    }
+
+    @Test
     fun truncatedThrowsDecodeError() {
         assertFailsWith<ImageDecodeException> { ImageKodec.decode(hex(TRUNCATED)) }
     }

@@ -17,6 +17,30 @@ import kotlin.test.assertTrue
 class GifBmpInteropTest {
 
     @Test
+    fun imageIoReadsEveryFrameWithoutATrailer() {
+        val frames = List(3) { i ->
+            KiteFrame(KiteBitmap(7, 5, IntArray(35) { argb(255, i * 70, 210 - i * 70, 50) }),
+                delayMillis = 50 + i * 10, delayRawCentiseconds = 5 + i)
+        }
+        val full = ImageKodec.encodeGif(KiteAnimation(7, 5, frames, loopCount = 3))
+        val bytes = full.copyOf(full.size - 1)
+        ImageIO.createImageInputStream(ByteArrayInputStream(bytes)).use { stream ->
+            val reader = ImageIO.getImageReadersByFormatName("GIF").next()
+            try {
+                reader.input = stream
+                val ours = ImageKodec.decodeAnimation(bytes)
+                assertEquals(3, ours.frames.size)
+                for (i in frames.indices) {
+                    val reference = reader.read(i)
+                    for (y in 0 until 5) for (x in 0 until 7) {
+                        assertEquals(reference.getRGB(x, y), ours.frames[i].bitmap[x, y])
+                    }
+                }
+            } finally { reader.dispose() }
+        }
+    }
+
+    @Test
     fun fullyTransparentBmpMatchesImageIo() {
         val source = KiteBitmap(2, 2, intArrayOf(0x00FF0000, 0x0000FF00, 0x000000FF, 0x00ABCDEF))
         val bytes = ImageKodec.encodeBmp(source)
