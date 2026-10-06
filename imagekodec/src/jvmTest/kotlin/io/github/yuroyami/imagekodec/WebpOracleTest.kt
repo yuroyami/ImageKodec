@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit
 import org.junit.Assume.assumeTrue
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -140,6 +141,19 @@ class WebpOracleTest {
         for (lengths in listOf(intArrayOf(1, 2), intArrayOf(1, 1, 1), intArrayOf(0, 0))) {
             webp.writeBytes(prefixWebp(lengths))
             assertTrue(run(dwebp.path, "-pam", webp.path, "-o", pam.path) != 0)
+        }
+    }
+
+    @Test
+    fun truncatedPayloadsAreRejectedByBothDecoders() {
+        assumeTrue("libwebp tools not installed", tools())
+        val webp = File.createTempFile("kite-truncated", ".webp").apply { deleteOnExit() }
+        val pam = File.createTempFile("kite-truncated", ".pam").apply { deleteOnExit() }
+        for (percentage in listOf(90, 50, 10)) {
+            val bytes = truncatedWebp(percentage)
+            webp.writeBytes(bytes)
+            assertTrue(run(dwebp.path, "-pam", webp.path, "-o", pam.path) != 0, "$percentage percent")
+            assertFailsWith<ImageDecodeException> { ImageKodec.decode(bytes) }
         }
     }
 

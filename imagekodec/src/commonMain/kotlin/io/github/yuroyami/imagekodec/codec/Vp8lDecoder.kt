@@ -611,11 +611,17 @@ internal object Vp8lDecoder {
     /**
      * LSB-first bit reader. VP8L, like DEFLATE, fills each byte from bit 0 upward
      * and stores prefix codes most-significant-bit first inside that stream.
-     * Reading past the end yields zero bits rather than throwing: a truncated
-     * stream surfaces as a decode error from the layer above, with context.
+     * Bytes are loaded only when required, so reaching the end while filling
+     * a read is truncation, even if zero bits would form a valid prefix code.
      */
     private class BitReader(private val data: ByteArray, offset: Int, length: Int) {
-        private val end = minOf(data.size, offset + length)
+        private val end: Int
+        init {
+            if (offset < 0 || length < 0 || offset > data.size || length > data.size - offset) {
+                err("chunk range outside input: offset $offset, length $length")
+            }
+            end = offset + length
+        }
         private var pos = offset
         private var buf = 0L
         private var bits = 0
@@ -623,7 +629,8 @@ internal object Vp8lDecoder {
         fun read(n: Int): Int {
             if (n == 0) return 0
             while (bits < n) {
-                val b = if (pos < end) data[pos].toLong() and 0xFF else 0L
+                if (pos >= end) err("bitstream ends early at byte $pos")
+                val b = data[pos].toLong() and 0xFF
                 pos++
                 buf = buf or (b shl bits)
                 bits += 8
