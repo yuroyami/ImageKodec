@@ -14,6 +14,10 @@ reviewable in the diff.
 
 ### Changed
 
+- `encodeJpeg` rejects quality values outside its documented 1..100 range with
+  `IllegalArgumentException`. The default remains 90; zero no longer acts as a
+  second spelling of that default.
+
 - **The library is now ImageKodec.** It is published as
   `io.github.yuroyami:imagekodec`, `imagekodec-compose` and `imagekodec-coil`, and
   its package is `io.github.yuroyami.imagekodec`. The `KiteImageCodec` object is

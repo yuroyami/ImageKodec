@@ -134,8 +134,8 @@ public object ImageKodec {
      * Alpha is discarded (JPEG has none); quality ≤ 90 uses 4:2:0 chroma
      * subsampling, above that 4:4:4; stb_image_write's behavior.
      *
-     * @throws IllegalArgumentException if a side of [bitmap] is larger than 65535, which the
-     *   frame header cannot store
+     * @throws IllegalArgumentException if [quality] is outside 1..100, or a side of [bitmap]
+     *   is larger than 65535, which the frame header cannot store
      */
     @Throws(IllegalArgumentException::class)
     public fun encodeJpeg(bitmap: KiteBitmap, quality: Int = 90): ByteArray =

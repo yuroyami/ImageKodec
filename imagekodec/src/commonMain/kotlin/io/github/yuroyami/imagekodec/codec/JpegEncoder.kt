@@ -107,16 +107,15 @@ internal object JpegEncoder {
     }
 
     fun encode(bitmap: KiteBitmap, quality: Int): ByteArray {
+        require(quality in 1..100) { "JPEG quality must be 1..100, was $quality" }
         val width = bitmap.width
         val height = bitmap.height
         require(width <= MAX_SIDE && height <= MAX_SIDE) {
             "JPEG stores each side in 16 bits, so ${width}x$height is larger than $MAX_SIDE"
         }
 
-        var q = if (quality == 0) 90 else quality
-        val subsample = q <= 90
-        q = q.coerceIn(1, 100)
-        q = if (q < 50) 5000 / q else 200 - q * 2
+        val subsample = quality <= 90
+        val q = if (quality < 50) 5000 / quality else 200 - quality * 2
 
         val yTable = ByteArray(64)
         val uvTable = ByteArray(64)

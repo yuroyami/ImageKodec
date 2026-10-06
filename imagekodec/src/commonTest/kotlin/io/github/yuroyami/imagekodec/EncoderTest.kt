@@ -9,6 +9,21 @@ import kotlin.test.assertTrue
 
 class EncoderTest {
 
+    @Test
+    fun jpegQualityUsesTheDocumentedRangeAndDefault() {
+        val source = testCard(16, 16, alpha = false)
+        for (quality in intArrayOf(Int.MIN_VALUE, -100, -1, 0, 101, 1000, Int.MAX_VALUE)) {
+            val error = assertFailsWith<IllegalArgumentException> { ImageKodec.encodeJpeg(source, quality) }
+            assertTrue("quality" in error.message.orEmpty())
+        }
+        assertContentEquals(ImageKodec.encodeJpeg(source, 90), ImageKodec.encodeJpeg(source))
+        for (quality in intArrayOf(1, 100)) {
+            val decoded = ImageKodec.decode(ImageKodec.encodeJpeg(source, quality))
+            assertEquals(source.width, decoded.width)
+            assertEquals(source.height, decoded.height)
+        }
+    }
+
     private fun testCard(w: Int, h: Int, alpha: Boolean): KiteBitmap {
         val px = IntArray(w * h)
         for (y in 0 until h) for (x in 0 until w) {
