@@ -56,7 +56,7 @@ public object JpxDecoder {
     /** True when [data] looks like a JP2 container or a raw J2K codestream. */
     public fun isJpx(data: ByteArray): Boolean {
         if (data.size < 4) return false
-        if (data[0].toInt() == 0xFF && (data[1].toInt() and 0xFF) == 0x4F) return true // SOC
+        if ((data[0].toInt() and 0xFF) == 0xFF && (data[1].toInt() and 0xFF) == 0x4F) return true // SOC
         return data.size >= 12 && u32(data, 0) == 12L && u32(data, 4) == 0x6A502020L
     }
 

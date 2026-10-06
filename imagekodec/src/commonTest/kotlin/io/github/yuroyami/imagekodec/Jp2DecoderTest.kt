@@ -25,6 +25,24 @@ internal val JP2 = "0000000c6a5020200d0a870a00000014667479706a703220000000006a70
  */
 class Jp2DecoderTest {
 
+    @Test
+    fun publicSniffRecognizesBothContainerAndRawCodestream() {
+        val container = hex(JP2)
+        val start = (0 until container.size - 1).first {
+            container[it] == 0xFF.toByte() && container[it + 1] == 0x4F.toByte()
+        }
+        val raw = container.copyOfRange(start, container.size)
+        for (bytes in listOf(container, raw)) {
+            assertTrue(JpxDecoder.isJpx(bytes))
+            assertEquals(ImageFormat.JP2, ImageKodec.detect(bytes))
+            val decoded = assertNotNull(JpxDecoder.decode(bytes))
+            assertEquals(32, decoded.width)
+            assertEquals(24, decoded.height)
+        }
+        assertFalse(JpxDecoder.isJpx(byteArrayOf(0xFF.toByte())))
+        assertFalse(JpxDecoder.isJpx(byteArrayOf(0, 0, 0, 0)))
+    }
+
     private val EXPECTED_RGB = "00030207030311030519030820030a29030c31030f3903114203134a03155203185a031a62031c6a031f7303217b03248303268c032894032b9c032da40330ac0332b50334bd0336c50338cd033bd5033edd0340e50342ef0345f50347ff034a000a0307" +
             "0a04110a06190a09200a0b290a0e310a10390a12420a144a0a17520a195a0a1b620a1e6a0a20730a227b0a25830a278c0a2a940a2c9c0a2ea40a31ac0a33b50a35bd0a37c50a39cd0a3cd50a3fdd0a41e50a43ef0a46f50a48ff0a4b0016050716061116" +
             "0819160b20160e2916103116123916144216174a161952161b5a161e6216206a16227316257b16278316298c162c94162e9c1631a41633ac1635b51637bd163ac5163ccd163fd51642dd1644e51645ef1648f5164aff164d00210807210911210b19210e" +
