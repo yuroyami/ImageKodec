@@ -64,7 +64,7 @@ private fun tiles(): List<Tile> {
         Tile("JPEG: OUR encoder, q85", ImageKodec.encodeJpeg(card(96, 96, alpha = false), quality = 85)),
         Tile("PNG: OUR encoder, alpha", ImageKodec.encodePng(card(96, 96, alpha = true))),
         Tile("BMP: OUR encoder, 32-bit\nwith alpha", ImageKodec.encodeBmp(card(96, 96, alpha = true))),
-        Tile("JPEG 2000 (absorbed JPX codec)", SAMPLE_JP2),
+        Tile("JPEG 2000", SAMPLE_JP2),
         Tile("TIFF deflate (ffmpeg-encoded)", SAMPLE_TIFF),
     )
 }

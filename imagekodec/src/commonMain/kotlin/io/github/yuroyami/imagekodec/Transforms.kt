@@ -1,9 +1,9 @@
 package io.github.yuroyami.imagekodec
 
 /**
- * Geometric pixel operations on a decoded [KiteBitmap]. All of them allocate a
- * new bitmap and copy: pixels are packed ints, so this is a straight index
- * remap with no colour maths and no precision loss.
+ * Geometric pixel operations on a decoded [KiteBitmap]. Pixel remaps copy packed
+ * ints without colour maths or precision loss. A full-size [cropped] rectangle
+ * and [Orientation.Normal] return the original bitmap, sharing its pixel array.
  *
  * They exist mostly so [oriented] can exist: EXIF orientation is unfixable
  * without rotate and flip, and "the photo is sideways" is the single most
@@ -110,7 +110,9 @@ public fun KiteBitmap.oriented(orientation: Orientation): KiteBitmap = when (ori
 }
 
 /**
- * Copy the [width]×[height] region whose top-left corner is ([x], [y]).
+ * Return the [width]×[height] region whose top-left corner is ([x], [y]).
+ * A full-size rectangle returns this bitmap and shares its pixel array;
+ * every smaller rectangle allocates and copies the selected pixels.
  *
  * @throws IllegalArgumentException if the rectangle is empty or reaches outside
  *   the bitmap: silently clamping a bad crop hides the caller's bug.

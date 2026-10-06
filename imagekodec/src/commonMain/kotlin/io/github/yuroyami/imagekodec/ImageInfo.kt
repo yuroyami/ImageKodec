@@ -60,13 +60,14 @@ public enum class Orientation(public val exifValue: Int) {
  *
  * ```kotlin
  * val info = ImageKodec.probe(bytes)
- * if (info.width * info.height > budget) reject()
+ * if (info.width.toLong() * info.height > budget) reject()
  * grid.reserve(info.displayWidth, info.displayHeight)   // orientation applied
  * ```
  *
  * Cost is proportional to the header, not the image: a few hundred bytes for
- * PNG/JPEG/BMP/TIFF/WebP. GIF and APNG walk the frame structure (skipping every
- * compressed byte) so [frameCount] is exact rather than a guess.
+ * PNG/JPEG/BMP/TIFF/WebP. GIF walks frame descriptors while skipping compressed
+ * sub-blocks. APNG reports the frame count declared by `acTL`; only animation
+ * decoding validates that the complete frame sequence matches that declaration.
  *
  * @property format the container, same value [ImageKodec.detect] returns
  * @property width stored pixel width, before [orientation]

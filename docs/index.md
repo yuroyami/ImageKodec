@@ -31,6 +31,11 @@ The core artifact depends on `kotlin-stdlib` and nothing else.
 
 ## Install
 
+This example describes the next 0.3.0 release; the new coordinates are not yet
+published. For the current 0.2.0 release, use
+`io.github.yuroyami:kiteimagecodec:0.2.0` and the
+`io.github.yuroyami.kiteimagecodec` Kotlin package.
+
 ```kotlin
 commonMain.dependencies {
     implementation("io.github.yuroyami:imagekodec:0.3.0")

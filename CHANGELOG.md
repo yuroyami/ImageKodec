@@ -33,6 +33,30 @@ reviewable in the diff.
   `KiteBitmap`, `KiteFrame` and `KiteAnimation` types keep their names. 0.2.0
   stays on Maven Central under the old coordinates.
 
+### Fixed
+
+- Malformed JBIG2 symbol dictionaries end decoding instead of emitting blank
+  symbols (#40).
+- TIFF/EXIF probe offsets are checked without overflowing (#66), and optional
+  TIFF tags validate their types and counts (#49).
+- BMP preserves explicit transparent alpha and correctly scales wide bitfield
+  masks (#43, #44).
+- Scaling keeps the exact aspect-fit geometry, bounds its allocations to the
+  output pixels, and handles long thin images without overflow (#45, #55, #81).
+- The raw JPEG 2000 signature is recognized by `JpxDecoder.isJpx` (#51).
+- Inflate preserves prefetched bits at stored-block boundaries and refuses
+  invalid distance codes without a raw index exception (#76, #77).
+- WebP decodes normal singleton prefix codes, validates complete trees, and
+  rejects bitstream truncation at the payload boundary (#73, #79).
+- JPEG 2000 validates tile origins and counts before processing tile bodies
+  and computes tile geometry without overflow (#88).
+- TIFF refuses incomplete uncompressed, PackBits, LZW and Deflate blocks, and
+  copies subsampled YCbCr tiles in unit rows (#94, #95).
+- GIF accepts a missing trailer after a complete frame at a block boundary,
+  preserving animation pixels, delays and loop count (#80).
+- Codec origins and licenses are recorded, and the original zlib notices are
+  retained in the altered source ports (#86).
+
 ## [0.2.0] - 2026-09-29
 
 ### Changed

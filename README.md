@@ -52,6 +52,12 @@ val png: ByteArray = ImageKodec.encodePng(bitmap)
 
 ## Install
 
+The coordinates below describe the next 0.3.0 release. They are not yet on
+Maven Central. The published 0.2.0 artifacts are `io.github.yuroyami:kiteimagecodec`,
+`kiteimagecodec-compose` and `kiteimagecodec-coil`, all at version `0.2.0`.
+Their Kotlin package is `io.github.yuroyami.kiteimagecodec`; this repository's
+examples use the next release's names.
+
 ```kotlin
 commonMain.dependencies {
     implementation("io.github.yuroyami:imagekodec:0.3.0")
@@ -62,8 +68,14 @@ commonMain.dependencies {
 ```
 
 Read [Targets](#targets) before you add the optional two. `imagekodec-coil`
-declares `imagekodec-compose` as `implementation`, so it does not arrive
-transitively. Declare the Compose module yourself if you want the Coil module.
+declares `imagekodec-compose` as an implementation dependency, so it arrives
+at runtime. Declare the Compose module directly when you want to call its
+public functions, such as `KiteImage` or `KiteAnimatedImage`.
+
+The optional bindings depend on Compose Multiplatform `1.12.0-beta02`.
+Gradle can raise an application's Compose version to that beta during dependency
+resolution. Android consumers of those bindings need `compileSdk` 37 or newer;
+the core does not impose that Compose dependency.
 
 Versions before 0.3.0 use older coordinates. 0.2.0 is `io.github.yuroyami:kiteimagecodec`,
 and 0.1.0 is `io.github.yuroyami:kiteimage`.
@@ -193,6 +205,7 @@ smaller image. A progressive JPEG still keeps the coefficients of the full size
 until its last scan. A JPEG 2000 image drops its finest wavelet levels, as
 OpenJPEG's reduce option does. Other formats decode in full, then average each
 block of pixels.
+
 `oriented`, `cropped`, `scaled` and the three rotations also exist for a whole
 `KiteAnimation`. `cropped` throws `IllegalArgumentException` when the rectangle
 extends outside the image. It does not clamp the rectangle.
@@ -346,14 +359,17 @@ expectations:
 | Codec | Checked against | Tolerance |
 | --- | --- | --- |
 | JPEG decode | stb_image, through committed vectors that a clang-compiled stb_image produced | bit-identical |
-| PNG, GIF, BMP, JPEG encode | `javax.imageio` reads the output back | exact |
+| PNG, GIF, BMP encode | `javax.imageio` reads the output back | exact |
+| JPEG encode | `javax.imageio` reads the output back | lossy: per-pixel/mean-error and PSNR thresholds |
+| JPEG reduced decode | libjpeg-turbo `djpeg -scale` | pixel comparisons with a stated tolerance |
 | WebP lossless | libwebp `cwebp` and `dwebp` | pixel-exact |
 | JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 4/255 for irreversible 9/7 |
 | TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1 |
 | JBIG2 | jbig2enc's streams: generic regions against the source page, symbol mode against jbig2dec | exact |
 
-The first two rows need no external tool, so they always run. The last four rows
-run only when the binary is installed, and skip when it is not. A skipped test
+The committed stb vectors and ImageIO tests need no external binary. The
+libjpeg-turbo, libwebp, OpenJPEG, libtiff/ImageMagick and JBIG2 oracle tests run
+when their binaries are installed, and skip when they are not. A skipped test
 reports as a pass, so read the skip count and not only the pass result. CI sets
 `IMAGEKODEC_REQUIRE_ORACLES=1`, which turns a missing tool into a failure.
 

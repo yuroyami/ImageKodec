@@ -52,9 +52,10 @@ public object ImageKodec {
         }
 
     /**
-     * Decode [data] into a [KiteBitmap], sniffing the format first. Animated
-     * inputs yield their first frame (composited); use [decodeAnimation] for the
-     * full sequence.
+     * Decode [data] into a [KiteBitmap], sniffing the format first.
+     * GIF and WebP inputs yield their first composited frame. APNG yields its
+     * default image, which may be separate from the animation; use
+     * [decodeAnimation] for the full sequence.
      *
      * With [applyOrientation] the EXIF orientation tag is honoured, so a phone
      * photo comes back the way it was shot instead of on its side. It defaults

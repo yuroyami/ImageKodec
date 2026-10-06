@@ -43,7 +43,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec
           missing=0
-          for t in cwebp dwebp tiffcp opj_compress opj_decompress djpeg jpegtran jbig2 jbig2dec; do
+          for t in cwebp dwebp tiffcp opj_compress opj_decompress djpeg tiff2rgba jbig2 jbig2dec; do
             command -v "$t" >/dev/null || { echo "::error::oracle tool $t not on PATH"; missing=1; }
           done
           command -v magick >/dev/null || command -v convert >/dev/null || { echo "::error::ImageMagick not on PATH"; missing=1; }
