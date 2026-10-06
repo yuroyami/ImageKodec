@@ -144,6 +144,7 @@ internal object JpegDecoder {
         var id = 0
         var h = 0; var v = 0
         var tq = 0
+        var quantization: IntArray? = null
         var hd = 0; var ha = 0
         var dcPred = 0
         var x = 0; var y = 0
@@ -165,7 +166,7 @@ internal object JpegDecoder {
 
         val huffDc = Array(4) { Huffman() }
         val huffAc = Array(4) { Huffman() }
-        val dequant = Array(4) { IntArray(64) }
+        val dequant = arrayOfNulls<IntArray>(4)
         val fastAc = Array(4) { ShortArray(1 shl FAST_BITS) }
 
         var imgX = 0; var imgY = 0; var imgN = 0
@@ -695,9 +696,11 @@ internal object JpegDecoder {
                     if (p != 0 && p != 1) err("bad DQT type")
                     if (t > 3) err("bad DQT table")
                     val sixteen = p != 0
+                    val table = IntArray(64)
                     for (i in 0 until 64) {
-                        j.dequant[t][DEZIGZAG[i]] = if (sixteen) j.u16be() else j.u8()
+                        table[DEZIGZAG[i]] = if (sixteen) j.u16be() else j.u8()
                     }
+                    j.dequant[t] = table
                     l -= if (sixteen) 129 else 65
                 }
                 if (l != 0) err("bad DQT len")
@@ -869,6 +872,15 @@ internal object JpegDecoder {
             if (j.succHigh != 0 || j.succLow != 0) err("bad SOS")
             j.specEnd = 63
         }
+        // T.81 permits reusing a slot between components. Like libjpeg-turbo's
+        // latch_quant_tables, keep the table from each component's first scan.
+        for (i in 0 until j.scanN) {
+            val comp = j.comp[j.order[i]]
+            if (comp.quantization == null) {
+                comp.quantization = j.dequant[comp.tq]?.copyOf()
+                    ?: err("quantization table ${comp.tq} was not defined")
+            }
+        }
     }
 
     // stbi__parse_entropy_coded_data
@@ -892,7 +904,7 @@ internal object JpegDecoder {
                     val live = !starved(j)
                     if (!live && j.restartInterval == 0) return
                     if (live) {
-                        decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
+                        decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, comp.quantization!!)
                         idctInto(j, comp, i, jj, data, tmp)
                     }
                     if (--j.todo <= 0) {
@@ -914,7 +926,7 @@ internal object JpegDecoder {
                             val comp = j.comp[n]
                             for (y in 0 until comp.v) {
                                 for (x in 0 until comp.h) {
-                                    decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, j.dequant[comp.tq])
+                                    decodeBlock(j, data, j.huffDc[comp.hd], j.huffAc[comp.ha], j.fastAc[comp.ha], n, comp.quantization!!)
                                     idctInto(j, comp, i * comp.h + x, jj * comp.v + y, data, tmp)
                                 }
                             }
@@ -996,7 +1008,7 @@ internal object JpegDecoder {
         for (n in 0 until j.imgN) {
             val comp = j.comp[n]
             val coeff = comp.coeff ?: continue
-            val dq = j.dequant[comp.tq]
+            val dq = comp.quantization ?: continue
             val w = (comp.x + 7) shr 3
             val h = (comp.y + 7) shr 3
             for (jj in 0 until h) {

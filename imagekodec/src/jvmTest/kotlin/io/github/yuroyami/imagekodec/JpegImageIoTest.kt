@@ -91,6 +91,13 @@ class JpegImageIoTest {
     }
 
     @Test
+    fun quantizationSlotReuseAgreesWithImageIo() {
+        for (progressive in listOf(false, true)) {
+            assertCloseToImageIo(quantizationJpeg(progressive), "table reuse progressive=$progressive", maxDiff = 2, maxMean = 1.0)
+        }
+    }
+
+    @Test
     fun qualitySweepAgreesWithImageIo() {
         val img = photoish(64, 48)
         for (q in floatArrayOf(0.3f, 0.75f, 0.95f)) {
