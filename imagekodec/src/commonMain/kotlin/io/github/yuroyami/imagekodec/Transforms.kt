@@ -115,6 +115,7 @@ public fun KiteBitmap.oriented(orientation: Orientation): KiteBitmap = when (ori
  * @throws IllegalArgumentException if the rectangle is empty or reaches outside
  *   the bitmap: silently clamping a bad crop hides the caller's bug.
  */
+@Throws(IllegalArgumentException::class)
 public fun KiteBitmap.cropped(x: Int, y: Int, width: Int, height: Int): KiteBitmap {
     require(width > 0 && height > 0) { "crop size must be positive: ${width}x$height" }
     // Add in Long: near Int.MAX_VALUE the Int sum wraps negative and would pass.
@@ -141,7 +142,11 @@ public fun KiteAnimation.oriented(orientation: Orientation): KiteAnimation {
     return mapFrames { it.oriented(orientation) }
 }
 
-/** [cropped] applied to every frame, preserving delays and loop count. */
+/**
+ * [cropped] applied to every frame, preserving delays and loop count.
+ * @throws IllegalArgumentException if the rectangle is empty or outside a frame
+ */
+@Throws(IllegalArgumentException::class)
 public fun KiteAnimation.cropped(x: Int, y: Int, width: Int, height: Int): KiteAnimation =
     mapFrames { it.cropped(x, y, width, height) }
 

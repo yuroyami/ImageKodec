@@ -41,5 +41,16 @@ class ThrowsContractTest {
         declares(ImageKodec::class.java, "encodeGif", ex, KiteAnimation::class.java, boolean)
         declares(ImageKodec::class.java, "encodeJpeg", ex, KiteBitmap::class.java, int)
         declares(JpxDecoder::class.java, "decode", ex, bytes, int)
+        declares(KiteBitmap::class.java, "get", ex, int, int)
+        val scaling = Class.forName("io.github.yuroyami.imagekodec.ScalingKt")
+        val transforms = Class.forName("io.github.yuroyami.imagekodec.TransformsKt")
+        for (receiver in listOf(KiteBitmap::class.java, KiteAnimation::class.java)) {
+            declares(scaling, "scaled", ex, receiver, int, int)
+            declares(transforms, "cropped", ex, receiver, int, int, int, int)
+        }
+        val bitmapConstructor = KiteBitmap::class.java.getConstructor(int, int, IntArray::class.java)
+        assertTrue(ex in bitmapConstructor.exceptionTypes, "KiteBitmap constructor should declare IllegalArgumentException")
+        val animationConstructor = KiteAnimation::class.java.getConstructor(int, int, List::class.java, int)
+        assertTrue(ex in animationConstructor.exceptionTypes, "KiteAnimation constructor should declare IllegalArgumentException")
     }
 }

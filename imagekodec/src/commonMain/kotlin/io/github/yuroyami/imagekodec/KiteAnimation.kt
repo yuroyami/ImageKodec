@@ -25,8 +25,10 @@ public class KiteFrame(
  * `n > 0` = play the sequence `n` times. A file that carries no loop count at
  * all gets `1` (play once), which is what its absence has always meant in
  * practice.
+ *
+ * @throws IllegalArgumentException if [frames] is empty
  */
-public class KiteAnimation(
+public class KiteAnimation @Throws(IllegalArgumentException::class) public constructor(
     public val width: Int,
     public val height: Int,
     public val frames: List<KiteFrame>,

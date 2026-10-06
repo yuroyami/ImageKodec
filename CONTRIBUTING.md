@@ -21,6 +21,12 @@ On a Mac, add the Apple targets:
 ./gradlew :imagekodec:macosArm64Test :imagekodec:iosSimulatorArm64Test
 ```
 
+`tools/ThrowsContract.swift` checks the exported API from a Swift caller:
+all seven checked API operations must return recoverable `NSError`s.
+Build `:imagekodec:linkDebugFrameworkIosSimulatorArm64`, compile the source
+against that framework with the simulator SDK, and run it in a booted simulator.
+This complements the JVM reflection test, which checks declarations alone.
+
 ## The one rule that matters
 
 **A decoder must never trust its input.** An attacker controls every field in

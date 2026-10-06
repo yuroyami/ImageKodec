@@ -18,7 +18,10 @@ package io.github.yuroyami.imagekodec
  * image transiently. What it saves is *retained* memory (the thumbnail you keep
  * vs the 12MP original). To shrink a JPEG while it decodes, use
  * [ImageKodec.decodeReduced] first.
+ *
+ * @throws IllegalArgumentException if either target dimension is not positive
  */
+@Throws(IllegalArgumentException::class)
 public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
     require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
     if (width <= maxWidth && height <= maxHeight) return this
@@ -81,7 +84,10 @@ public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
  * GIF shown as an avatar keeps W×H×4 bytes *per frame* unless scaled down.
  *
  * Never upscales: if the canvas already fits, the same instance returns.
+ *
+ * @throws IllegalArgumentException if either target dimension is not positive
  */
+@Throws(IllegalArgumentException::class)
 public fun KiteAnimation.scaled(maxWidth: Int, maxHeight: Int): KiteAnimation {
     require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
     if (width <= maxWidth && height <= maxHeight) return this

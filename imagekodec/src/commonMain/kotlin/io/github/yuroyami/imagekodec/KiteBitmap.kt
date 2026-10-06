@@ -10,8 +10,11 @@ package io.github.yuroyami.imagekodec
  * [argb] is exposed directly (not copied) so a full-screen photo doesn't pay a
  * second multi-megabyte allocation on the way to `ImageBitmap`. Treat it as
  * read-only; mutate it only if you own the instance.
+ *
+ * @throws IllegalArgumentException if the dimensions are not positive or [argb]
+ *   does not contain exactly [width] × [height] pixels
  */
-public class KiteBitmap(
+public class KiteBitmap @Throws(IllegalArgumentException::class) public constructor(
     public val width: Int,
     public val height: Int,
     public val argb: IntArray,
@@ -24,7 +27,11 @@ public class KiteBitmap(
         }
     }
 
-    /** The packed ARGB pixel at ([x], [y]). */
+    /**
+     * The packed ARGB pixel at ([x], [y]).
+     * @throws IllegalArgumentException if the coordinates are outside the bitmap
+     */
+    @Throws(IllegalArgumentException::class)
     public operator fun get(x: Int, y: Int): Int {
         require(x in 0 until width && y in 0 until height) {
             "($x, $y) outside ${width}x$height"

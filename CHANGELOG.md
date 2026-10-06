@@ -14,6 +14,11 @@ reviewable in the diff.
 
 ### Changed
 
+- Bitmap and animation constructors, `cropped`, `scaled` and bitmap indexing
+  declare `IllegalArgumentException` through `@Throws`. Their Swift and
+  Objective-C signatures expose an error, so invalid geometry can be caught
+  as an `NSError`.
+
 - `encodeJpeg` rejects quality values outside its documented 1..100 range with
   `IllegalArgumentException`. The default remains 90; zero no longer acts as a
   second spelling of that default.
