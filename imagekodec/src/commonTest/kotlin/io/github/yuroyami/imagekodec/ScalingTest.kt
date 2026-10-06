@@ -1,10 +1,74 @@
 package io.github.yuroyami.imagekodec
 
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 
 class ScalingTest {
+
+    @Test
+    fun nonExactRatiosFillTheLimitingSide() {
+        val cases = listOf(
+            intArrayOf(22, 1, 15, 15, 15, 1),
+            intArrayOf(1370, 767, 200, 200, 200, 111),
+            intArrayOf(1765, 608, 256, 256, 256, 88),
+            intArrayOf(499, 473, 128, 128, 128, 121),
+            intArrayOf(841, 499, 128, 128, 128, 75),
+        )
+        for (case in cases) {
+            val w = case[0]; val h = case[1]
+            val mw = case[2]; val mh = case[3]
+            val dw = case[4]; val dh = case[5]
+            for (transpose in listOf(false, true)) {
+                val source = KiteBitmap(if (transpose) h else w, if (transpose) w else h, IntArray(w * h))
+                val scaled = source.scaled(if (transpose) mh else mw, if (transpose) mw else mh)
+                assertEquals(if (transpose) dh else dw, scaled.width)
+                assertEquals(if (transpose) dw else dh, scaled.height)
+            }
+        }
+    }
+
+    @Test
+    fun longRowsAndColumnsDoNotOverflow() {
+        val pixels = IntArray(50000) { gray(it and 255) }
+        val row = KiteBitmap(50000, 1, pixels).scaled(49999, 1)
+        val column = KiteBitmap(1, 50000, pixels).scaled(1, 49999)
+        assertEquals(49999, row.width)
+        assertEquals(49999, column.height)
+        assertEquals(gray(1), row[0, 0])
+        assertEquals(pixels.last(), row[49998, 0])
+        assertContentEquals(row.argb, column.argb)
+    }
+
+    @Test
+    fun destinationBinsMatchIndependentSourceAccumulation() {
+        for (w in 2..19) for (h in 2..13) {
+            val source = KiteBitmap(w, h, IntArray(w * h) { i -> argb((i * 61) and 255, (i * 37) and 255, (i * 13) and 255, (i * 79) and 255) })
+            val output = source.scaled(maxOf(1, w - 3), maxOf(1, h - 2))
+            val sums = Array(output.argb.size) { LongArray(5) }
+            for (y in 0 until h) for (x in 0 until w) {
+                val bin = sums[(y.toLong() * output.height / h).toInt() * output.width + (x.toLong() * output.width / w).toInt()]
+                val pixel = source[x, y]
+                val alpha = (pixel ushr 24).toLong()
+                bin[0] += alpha
+                bin[1] += ((pixel ushr 16) and 255) * alpha
+                bin[2] += ((pixel ushr 8) and 255) * alpha
+                bin[3] += (pixel and 255) * alpha
+                bin[4]++
+            }
+            val expected = IntArray(sums.size) { i ->
+                val s = sums[i]
+                if (s[0] == 0L) 0 else argb(
+                    ((s[0] + s[4] / 2) / s[4]).toInt(),
+                    ((s[1] + s[0] / 2) / s[0]).toInt(),
+                    ((s[2] + s[0] / 2) / s[0]).toInt(),
+                    ((s[3] + s[0] / 2) / s[0]).toInt(),
+                )
+            }
+            assertContentEquals(expected, output.argb, "$w x $h")
+        }
+    }
 
     @Test
     fun integerRatioAveragesExactly() {

@@ -23,51 +23,52 @@ public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
     require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
     if (width <= maxWidth && height <= maxHeight) return this
 
-    // Fit inside, keep aspect, floor: but never to zero.
-    val scale = minOf(maxWidth.toDouble() / width, maxHeight.toDouble() / height)
-    val dw = maxOf(1, (width * scale).toInt())
-    val dh = maxOf(1, (height * scale).toInt())
-
-    val sumA = LongArray(dw * dh)
-    val sumR = LongArray(dw * dh)
-    val sumG = LongArray(dw * dh)
-    val sumB = LongArray(dw * dh)
-    val count = IntArray(dw * dh)
-
-    // Source column → destination column, computed once instead of one integer
-    // division per pixel (the row map amortises per row already).
-    val colMap = IntArray(width) { x -> minOf(dw - 1, x * dw / width) }
-
-    for (y in 0 until height) {
-        val dy = minOf(dh - 1, y * dh / height)
-        val rowBase = dy * dw
-        val srcBase = y * width
-        for (x in 0 until width) {
-            val p = argb[srcBase + x]
-            val i = rowBase + colMap[x]
-            val a = (p ushr 24) and 0xFF
-            sumA[i] += a.toLong()
-            // Premultiplied accumulation: weight = alpha. a == 0 contributes 0.
-            sumR[i] += (((p ushr 16) and 0xFF) * a).toLong()
-            sumG[i] += (((p ushr 8) and 0xFF) * a).toLong()
-            sumB[i] += ((p and 0xFF) * a).toLong()
-            count[i]++
-        }
+    val dw: Int
+    val dh: Int
+    if (maxWidth.toLong() * height <= maxHeight.toLong() * width) {
+        dw = maxWidth
+        dh = maxOf(1, (height.toLong() * maxWidth / width).toInt())
+    } else {
+        dh = maxHeight
+        dw = maxOf(1, (width.toLong() * maxHeight / height).toInt())
     }
 
+    // Invert floor(source * destinationSize / sourceSize) with ceiling
+    // division. Each source sample belongs to exactly one destination bin.
+    fun boundary(bin: Int, sourceSize: Int, destinationSize: Int): Int =
+        ((bin.toLong() * sourceSize + destinationSize - 1) / destinationSize).toInt()
+
     val out = IntArray(dw * dh)
-    for (i in out.indices) {
-        val n = count[i]
-        val a = ((sumA[i] + n / 2) / n).toInt()
-        val w = sumA[i]
-        if (w == 0L) {
-            // Bin is fully transparent: no color information survives.
-            out[i] = 0
-        } else {
-            out[i] = (a shl 24) or
-                (((sumR[i] + w / 2) / w).toInt() shl 16) or
-                (((sumG[i] + w / 2) / w).toInt() shl 8) or
-                ((sumB[i] + w / 2) / w).toInt()
+    for (dy in 0 until dh) {
+        val y0 = boundary(dy, height, dh)
+        val y1 = boundary(dy + 1, height, dh)
+        for (dx in 0 until dw) {
+            val x0 = boundary(dx, width, dw)
+            val x1 = boundary(dx + 1, width, dw)
+            var sumA = 0L
+            var sumR = 0L
+            var sumG = 0L
+            var sumB = 0L
+            for (y in y0 until y1) {
+                val srcBase = y * width
+                for (x in x0 until x1) {
+                    val p = argb[srcBase + x]
+                    val a = (p ushr 24).toLong()
+                    sumA += a
+                    sumR += ((p ushr 16) and 0xFF) * a
+                    sumG += ((p ushr 8) and 0xFF) * a
+                    sumB += (p and 0xFF) * a
+                }
+            }
+            val n = (x1 - x0).toLong() * (y1 - y0)
+            out[dy * dw + dx] = if (sumA == 0L) {
+                0
+            } else {
+                (((sumA + n / 2) / n).toInt() shl 24) or
+                    (((sumR + sumA / 2) / sumA).toInt() shl 16) or
+                    (((sumG + sumA / 2) / sumA).toInt() shl 8) or
+                    ((sumB + sumA / 2) / sumA).toInt()
+            }
         }
     }
     return KiteBitmap(dw, dh, out)
