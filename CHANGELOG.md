@@ -53,6 +53,14 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- A JPEG frame with 2 or more than 4 components, or with sampling factors that
+  do not divide the largest one, throws `UnsupportedImageException` naming the
+  feature, as the 12-bit, lossless, arithmetic and hierarchical refusals do,
+  instead of a plain `ImageDecodeException`. `probe` and the decoder take their
+  refusals from one list, so `probe` no longer calls a file with unsupported
+  sampling decodable, and each refusal's message starts with the reason `probe`
+  reports (#70).
+
 - A reduced JPEG decode reduces each chroma plane across and down by its own
   power of two, as libjpeg 9 does, so a file sampled differently each way, such
   as 4:2:2, 4:1:1 or 4x2, keeps the chroma detail of its finer direction instead

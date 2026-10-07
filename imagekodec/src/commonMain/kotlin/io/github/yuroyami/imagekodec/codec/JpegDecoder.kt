@@ -940,14 +940,56 @@ internal object JpegDecoder {
         }
     }
 
-    // stbi__process_frame_header (scan == STBI__SCAN_load)
-    private fun processFrameHeader(j: State) {
+    /**
+     * Why this decoder refuses a frame of type [marker] with these fields, or null when it decodes
+     * it: one list that [processFrameHeader] throws from and that ImageProbe reports, so the two
+     * cannot drift apart (#70). [factors] holds each component's sampling factors as the frame
+     * header stores them, H in the high nibble and V in the low one. T.81 allows 1 to 255
+     * components and any factor from 1 to 4, so each of these is a feature this decoder lacks, not
+     * a fault in the file. A factor outside 1 to 4 is a fault, which [processFrameHeader] reports.
+     */
+    internal fun unsupportedFrame(marker: Int, precision: Int, height: Int, factors: IntArray): String? {
+        when (marker) {
+            0xC0, 0xC1, 0xC2 -> {}
+            0xC3, 0xC7, 0xCB, 0xCF -> return "lossless JPEG"
+            0xC5, 0xC6 -> return "hierarchical/differential JPEG"
+            0xC9, 0xCA, 0xCD, 0xCE -> return "arithmetic-coded JPEG"
+            else -> return "JPEG SOF marker 0x${marker.toString(16)}"
+        }
+        if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
+        if (height == 0) return "JPEG with its height deferred to a DNL marker"
+        val n = factors.size
+        if (n != 1 && n != 3 && n != 4) return "$n-component JPEG"
+        if (factors.any { (it shr 4) !in 1..4 || (it and 15) !in 1..4 }) return null
+        // libjpeg refuses them too (JERR_FRACT_SAMPLE_NOTIMPL in jdsample.c): an upsampling by a
+        // fraction.
+        val hMax = factors.maxOf { it shr 4 }
+        val vMax = factors.maxOf { it and 15 }
+        if (factors.any { hMax % (it shr 4) != 0 || vMax % (it and 15) != 0 }) {
+            return "JPEG with $n components sampled ${factors.joinToString { "${it shr 4}x${it and 15}" }} (factors must divide the largest)"
+        }
+        return null
+    }
+
+    // stbi__process_frame_header (scan == STBI__SCAN_load), for any SOF [marker]
+    private fun processFrameHeader(j: State, marker: Int) {
         val lf = j.u16be()
         if (lf < 11) err("bad SOF len")
-        if (j.u8() != 8) throw UnsupportedImageException("JPEG: only 8-bit precision is supported")
+        val precision = j.u8()
         j.imgY = j.u16be()
-        if (j.imgY == 0) throw UnsupportedImageException("JPEG: delayed-height (DNL, height 0) files are not supported")
         j.imgX = j.u16be()
+        val c = j.u8()
+        if (lf != 8 + 3 * c) err("bad SOF len")
+        val ids = IntArray(c)
+        val factors = IntArray(c)
+        val tables = IntArray(c)
+        for (i in 0 until c) {
+            ids[i] = j.u8()
+            factors[i] = j.u8()
+            tables[i] = j.u8()
+        }
+        unsupportedFrame(marker, precision, j.imgY, factors)?.let { throw UnsupportedImageException("$it is not supported") }
+
         if (j.imgX == 0) err("zero width")
         if (j.imgX > MAX_DIMENSION || j.imgY > MAX_DIMENSION || j.imgX.toLong() * j.imgY > MAX_PIXELS) {
             err("${j.imgX}x${j.imgY} exceeds safety limits")
@@ -955,23 +997,19 @@ internal object JpegDecoder {
         if (!Budget.fits(j.imgX, j.imgY, j.input.size)) {
             err("${j.imgX}x${j.imgY} cannot come from ${j.input.size} bytes")
         }
-        val c = j.u8()
-        if (c != 3 && c != 1 && c != 4) err("bad component count $c")
         j.imgN = c
-        if (lf != 8 + 3 * c) err("bad SOF len")
 
         j.rgb = 0
         val rgbIds = intArrayOf('R'.code, 'G'.code, 'B'.code)
         for (i in 0 until c) {
             val comp = j.comp[i]
-            comp.id = j.u8()
+            comp.id = ids[i]
             if (c == 3 && comp.id == rgbIds[i]) j.rgb++
-            val q = j.u8()
-            comp.h = q shr 4
+            comp.h = factors[i] shr 4
             if (comp.h == 0 || comp.h > 4) err("bad H")
-            comp.v = q and 15
+            comp.v = factors[i] and 15
             if (comp.v == 0 || comp.v > 4) err("bad V")
-            comp.tq = j.u8()
+            comp.tq = tables[i]
             if (comp.tq > 3) err("bad TQ")
         }
 
@@ -980,10 +1018,6 @@ internal object JpegDecoder {
         for (i in 0 until c) {
             if (j.comp[i].h > hMax) hMax = j.comp[i].h
             if (j.comp[i].v > vMax) vMax = j.comp[i].v
-        }
-        for (i in 0 until c) {
-            if (hMax % j.comp[i].h != 0) err("bad H")
-            if (vMax % j.comp[i].v != 0) err("bad V")
         }
         j.hMax = hMax
         j.vMax = vMax
@@ -1449,15 +1483,9 @@ internal object JpegDecoder {
         var m = getMarker(j)
         while (true) {
             when (m) {
-                0xC0, 0xC1 -> break                          // SOF0 baseline / SOF1 extended sequential
-                0xC2 -> {                                    // SOF2 progressive
-                    j.progressive = true
-                    break
-                }
-                0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF ->
-                    throw UnsupportedImageException(
-                        "JPEG with SOF marker 0x${m.toString(16)} (lossless/arithmetic/hierarchical) is not supported",
-                    )
+                // SOF0 baseline, SOF1 extended sequential, SOF2 progressive, and the frame types
+                // processFrameHeader refuses by name
+                0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF -> break
                 MARKER_NONE -> err("expected marker")
                 else -> {
                     processMarker(j, m)
@@ -1465,7 +1493,8 @@ internal object JpegDecoder {
                 }
             }
         }
-        processFrameHeader(j)
+        j.progressive = m == 0xC2
+        processFrameHeader(j, m)
 
         // stbi__decode_jpeg_image: scans until EOI
         m = getMarker(j)

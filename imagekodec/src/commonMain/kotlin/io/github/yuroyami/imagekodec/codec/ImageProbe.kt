@@ -133,21 +133,12 @@ internal object ImageProbe {
             val height = f.u16be()
             val width = f.u16be()
             val components = f.u8()
-
-            // Everything JpegDecoder.processFrameHeader refuses, in its order.
-            val why = when (marker) {
-                0xC3, 0xC7, 0xCB, 0xCF -> "lossless JPEG"
-                0xC5, 0xC6 -> "hierarchical/differential JPEG"
-                0xC9, 0xCA, 0xCD, 0xCE -> "arithmetic-coded JPEG"
-                0xC0, 0xC1, 0xC2 -> when {
-                    precision != 8 -> "$precision-bit JPEG (8-bit samples only)"
-                    height == 0 -> "JPEG with its height deferred to a DNL marker"
-                    components != 1 && components != 3 && components != 4 ->
-                        "$components-component JPEG"
-                    else -> null
-                }
-                else -> "JPEG SOF marker 0x${marker.toString(16)}"
+            // Each component: its id, its sampling factors, its quantization table.
+            val factors = IntArray(components) {
+                f.u8()
+                f.u8().also { f.u8() }
             }
+            val why = JpegDecoder.unsupportedFrame(marker, precision, height, factors)
 
             return ImageInfo(
                 format = ImageFormat.JPEG,
