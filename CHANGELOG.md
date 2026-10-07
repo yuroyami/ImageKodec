@@ -14,6 +14,15 @@ reviewable in the diff.
 
 ### Added
 
+- Every page of a multi-page TIFF is reachable. `ImageInfo.pageCount` counts
+  the image file directories in the file's main chain, as libtiff, ImageIO and
+  libvips do, and `ImageKodec.decodePage` and `ImageKodec.probePage` decode and
+  describe any of them, each with its own size and orientation. `decode` still
+  returns the first page. Pages are not frames, so `frameCount` stays 1. A
+  chain ends at a link that loops back, leads outside the file or is cut off,
+  and the pages before it stay readable, as in libtiff; `probe` counted one
+  page and nothing said the others were there (#7).
+
 - `ImageKodec.decodeAnimation` takes `maxFrames` and stops after that many
   frames without reading past them, so a damaged later frame does not fail
   them. `maxFrames = 1` gives the first frame of the animation as it plays,
@@ -74,6 +83,9 @@ reviewable in the diff.
   frame's timing and the play count (#15).
 
 ### Changed
+
+- `ImageInfo`'s constructor takes `pageCount` last, defaulting to 1. Code
+  compiled against the old constructor must be compiled again (#7).
 
 - `decodeAnimation` takes `maxFrames` before `cancellationCheck`. A call that
   passes the check as a trailing lambda or by name compiles unchanged; one that

@@ -11,7 +11,8 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  * Baseline TIFF decoder (commons-imaging as the semantic reference). Scope:
  * the strip-based baseline that covers the files people actually have:
  *
- *  - both byte orders (II/MM), first IFD only (multi-page: first page)
+ *  - both byte orders (II/MM), and every page: each image file directory in the
+ *    main chain is one, as libtiff, ImageIO and libvips count them
  *  - **strips and tiles**: tiled files assemble edge-padded tiles back into full
  *    rows after restoring any per-tile horizontal predictor
  *  - compressions: none (1), CCITT G3-1D (2, byte-aligned rows), G3 via
@@ -82,22 +83,58 @@ internal object TiffDecoder {
 
     private class Entry(val tag: Int, val type: Int, val count: Long, val valueOfs: Int)
 
-    fun decode(data: ByteArray): KiteBitmap {
+    private fun reader(data: ByteArray): Reader {
         if (data.size < 8) err("too short")
         val le = data[0].toInt() == 'I'.code && data[1].toInt() == 'I'.code
         val be = data[0].toInt() == 'M'.code && data[1].toInt() == 'M'.code
         if (!le && !be) err("bad byte-order mark")
         val r = Reader(data, le)
         if (r.u16(2) != 42) err("bad magic")
+        return r
+    }
 
-        val ifdOfs = r.u32(4)
-        if (ifdOfs < 8 || ifdOfs >= data.size) err("bad IFD offset $ifdOfs")
+    /**
+     * The offsets of the first [limit] image file directories in the file's main
+     * chain, one a page, in order. Each directory ends with the offset of the next,
+     * and the chain ends at a zero offset. It also ends where that offset leads
+     * outside the file or back to a directory already visited, or where the offset
+     * itself is cut off, and the pages before stay readable: libtiff stops at the
+     * same places, so damage past a page costs the pages after it, not the file.
+     * The visited set is what keeps a chain that loops from running forever.
+     */
+    fun pages(data: ByteArray, limit: Int = Int.MAX_VALUE): IntArray {
+        val r = reader(data)
+        val first = r.u32(4)
+        if (first < 8 || first >= data.size) err("bad IFD offset $first")
+        val out = ArrayList<Int>()
+        val seen = HashSet<Int>()
+        var ifd = first.toInt()
+        while (out.size < limit) {
+            out += ifd
+            seen += ifd
+            if (ifd > data.size - 2) break   // the entry count itself is missing: decoding that page says so
+            val link = ifd + 2 + 12L * r.u16(ifd)
+            if (link > data.size - 4) break
+            val next = r.u32(link.toInt())
+            if (next < 8 || next > data.size - 2 || next.toInt() in seen) break
+            ifd = next.toInt()
+        }
+        return out.toIntArray()
+    }
+
+    /** Decodes page [page], counting from 0. */
+    fun decode(data: ByteArray, page: Int = 0): KiteBitmap {
+        val r = reader(data)
+        val le = r.le
+        val chain = pages(data, limit = page + 1)
+        require(page < chain.size) { "TIFF: page $page asked of a file with ${chain.size} page(s)" }
+        val ifdOfs = chain[page]
 
         // --- IFD walk -----------------------------------------------------------
         val entries = HashMap<Int, Entry>()
-        val count = r.u16(ifdOfs.toInt())
+        val count = r.u16(ifdOfs)
         for (i in 0 until count) {
-            val at = ifdOfs.toInt() + 2 + i * 12
+            val at = ifdOfs + 2 + i * 12
             entries[r.u16(at)] = Entry(r.u16(at), r.u16(at + 2), r.u32(at + 4), at + 8)
         }
 

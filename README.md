@@ -129,13 +129,20 @@ at a lower resolution than brightness.
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
-| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4, photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, first IFD only |
+| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4, photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
 | JPEG 2000 | JP2 container and raw J2K codestream, part 1 baseline |
 
-One row above is narrower than the format name suggests:
+A TIFF can hold any number of pages. `decode` returns the first,
+`probe(bytes).pageCount` says how many there are, and `decodePage` and
+`probePage` reach the others:
 
-- **The TIFF decoder reads only the first IFD.** A multi-page TIFF decodes to
-  page 1 and reports no error.
+```kotlin
+val pages = ImageKodec.probe(bytes).pageCount
+val third = ImageKodec.decodePage(bytes, page = 2)
+```
+
+Pages are separate images with their own size and orientation, not animation
+frames, so `frameCount` stays 1 and `decodeAnimation` returns the first page.
 
 Lossy WebP decodes to the pixels libwebp's `dwebp` writes: its VP8 decoder is a
 port of libwebp's, and the chroma is upsampled as dwebp's default output does.
@@ -374,8 +381,6 @@ web project that runs under Node should not use them.
   16-bit files, but the output buffer is 8 bits per channel. ImageKodec discards
   the low byte rather than dithering or scaling it. `probe` still reports the
   stored depth.
-- **The TIFF decoder reads only the first IFD.** A multi-page TIFF decodes to
-  page 1 with no error and a `frameCount` of 1.
 - **ImageKodec writes PNG, JPEG, GIF and BMP only.** There is no encoder for WebP,
   TIFF or JPEG 2000.
 - **The PNG encoder writes 8-bit RGB or RGBA only**, with no interlace, no

@@ -308,7 +308,10 @@ internal object ImageProbe {
 
     // --- TIFF -------------------------------------------------------------------
 
-    private fun tiff(data: ByteArray): ImageInfo {
+    /** The header of TIFF page [page], with the number of pages in the file. */
+    fun tiff(data: ByteArray, page: Int = 0): ImageInfo {
+        val chain = TiffDecoder.pages(data)
+        require(page in chain.indices) { "TIFF: page $page asked of a file with ${chain.size} page(s)" }
         val le = data[0] == 'I'.code.toByte()
         fun u16(at: Int): Int {
             if (at < 0 || at > data.size - 2) throw ImageDecodeException("TIFF: truncated at $at")
@@ -325,7 +328,7 @@ internal object ImageProbe {
             return v.toInt()
         }
 
-        val ifd = u32(4)
+        val ifd = chain[page]
         val count = u16(ifd)
         var width = 0
         var height = 0
@@ -443,6 +446,7 @@ internal object ImageProbe {
             orientation = orientation,
             isDecodable = reason == null,
             unsupportedReason = reason,
+            pageCount = chain.size,
         )
     }
 

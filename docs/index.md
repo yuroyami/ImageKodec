@@ -87,11 +87,8 @@ decode, rather than throwing later.
 **WebP decodes, lossy and lossless, but does not encode.** Lossy files decode to
 the pixels libwebp's `dwebp` writes. There is no WebP encoder.
 
-Two more limits are worth knowing early:
+One more limit is worth knowing early:
 
-- The TIFF decoder reads only the first IFD. A multi-page TIFF decodes to page 1
-  and reports no error. IFD means Image File Directory, the record that describes
-  one page of a TIFF.
 - PNG and TIFF read 16-bit files, but ImageKodec keeps only the high byte of each
   16-bit sample.
 

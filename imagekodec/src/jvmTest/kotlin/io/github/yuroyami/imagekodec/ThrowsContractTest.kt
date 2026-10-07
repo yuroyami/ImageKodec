@@ -28,6 +28,8 @@ class ThrowsContractTest {
         val ex = ImageDecodeException::class.java
         declares(ImageKodec::class.java, "probe", ex, bytes)
         declares(ImageKodec::class.java, "decode", ex, bytes, boolean)
+        declares(ImageKodec::class.java, "probePage", ex, bytes, int)
+        declares(ImageKodec::class.java, "decodePage", ex, bytes, int, boolean)
         declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
         declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)
@@ -39,6 +41,8 @@ class ThrowsContractTest {
     @Test
     fun theEntryPointsThatRefuseAnArgumentDeclareIllegalArgumentException() {
         val ex = IllegalArgumentException::class.java
+        declares(ImageKodec::class.java, "probePage", ex, bytes, int)
+        declares(ImageKodec::class.java, "decodePage", ex, bytes, int, boolean)
         declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
         declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)

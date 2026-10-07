@@ -76,7 +76,8 @@ public enum class Orientation(public val exifValue: Int) {
  * @property hasAlpha the file declares an alpha channel or transparency. This is
  *   what the container says, not a pixel scan: an RGBA PNG whose pixels are all
  *   opaque still reports true. Use [KiteBitmap.hasTransparency] for the truth.
- * @property frameCount number of animation frames; 1 for stills
+ * @property frameCount number of animation frames; 1 for stills, and 1 for every
+ *   page of a TIFF, whose pages are separate images rather than frames
  * @property loopCount total animation plays, normalized across formats: 0 = forever,
  *   1 for stills. Long preserves the full unsigned APNG play field.
  * @property orientation the EXIF orientation, [Orientation.Normal] when absent
@@ -85,6 +86,9 @@ public enum class Orientation(public val exifValue: Int) {
  *   isn't implemented; [unsupportedReason] names it. It is also false for WebP data
  *   that ends before its first image chunk, because nothing yet says what the image holds.
  * @property unsupportedReason human-readable reason when [isDecodable] is false
+ * @property pageCount number of pages: every image file directory in a TIFF's
+ *   main chain, and 1 for every other format. The other fields describe the page
+ *   that was probed, the first unless [ImageKodec.probePage] asked for another.
  */
 public class ImageInfo(
     public val format: ImageFormat,
@@ -97,6 +101,7 @@ public class ImageInfo(
     public val orientation: Orientation,
     public val isDecodable: Boolean,
     public val unsupportedReason: String? = null,
+    public val pageCount: Int = 1,
 ) {
     /** True when [frameCount] > 1. */
     public val isAnimated: Boolean get() = frameCount > 1
@@ -112,6 +117,7 @@ public class ImageInfo(
         if (bitDepth != 8) append(" ${bitDepth}bit")
         if (hasAlpha) append(" alpha")
         if (isAnimated) append(" ${frameCount}f")
+        if (pageCount > 1) append(" ${pageCount}p")
         if (orientation != Orientation.Normal) append(" $orientation")
         if (!isDecodable) append(" UNDECODABLE")
         append(")")

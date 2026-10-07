@@ -31,9 +31,10 @@ public object ImageKodec {
 
     /**
      * Read [data]'s header and report what it says: dimensions, bit depth,
-     * declared alpha, animation frame count, EXIF orientation, and whether this
-     * build can decode it. No pixels are decoded and no image-sized buffer is
-     * allocated, so this stays cheap on a 50 MP file.
+     * declared alpha, animation frame count, EXIF orientation, page count, and
+     * whether this build can decode it. No pixels are decoded and no image-sized
+     * buffer is allocated, so this stays cheap on a 50 MP file. A TIFF reports its
+     * first page; [probePage] reads another.
      *
      * Use it to size a layout before the decode, to reject hostile uploads by
      * dimension, or to decide whether to claim a file at all.
@@ -43,6 +44,25 @@ public object ImageKodec {
      */
     @Throws(ImageDecodeException::class)
     public fun probe(data: ByteArray): ImageInfo = ImageProbe.probe(data)
+
+    /**
+     * [probe] for page [page] of [data], counting from 0: that page's dimensions,
+     * depth, alpha, orientation and decodability, and the file's
+     * [ImageInfo.pageCount]. A TIFF has a page for each image file directory in its
+     * main chain, and every other format has one.
+     *
+     * @throws ImageDecodeException if the format is unrecognised or the header
+     *   is malformed past the point of reading
+     * @throws IllegalArgumentException if [page] is negative or the file has no such page
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun probePage(data: ByteArray, page: Int): ImageInfo {
+        require(page >= 0) { "page must not be negative, was $page" }
+        if (detect(data) == ImageFormat.TIFF) return ImageProbe.tiff(data, page)
+        val info = ImageProbe.probe(data)
+        require(page == 0) { "page $page asked of a one-page ${info.format} image" }
+        return info
+    }
 
     /** [probe], but null instead of throwing on unrecognised or malformed input. */
     public fun probeOrNull(data: ByteArray): ImageInfo? =
@@ -56,7 +76,8 @@ public object ImageKodec {
      * Decode [data] into a [KiteBitmap], sniffing the format first.
      * GIF and WebP inputs yield their first composited frame. APNG yields its
      * default image, which may be separate from the animation; use
-     * [decodeAnimation] for the full sequence.
+     * [decodeAnimation] for the full sequence. A TIFF yields its first page;
+     * [ImageInfo.pageCount] says how many there are and [decodePage] decodes them.
      *
      * With [applyOrientation] the EXIF orientation tag is honoured, so a phone
      * photo comes back the way it was shot instead of on its side. It defaults
@@ -73,6 +94,40 @@ public object ImageKodec {
         val bitmap = decodeRaw(data)
         if (!applyOrientation) return bitmap
         val orientation = probeOrNull(data)?.orientation ?: Orientation.Normal
+        return bitmap.oriented(orientation)
+    }
+
+    /**
+     * Decode page [page] of [data], counting from 0. A TIFF has a page for each
+     * image file directory in its main chain, as libtiff, ImageIO and libvips count
+     * them, and [decode] gives the first; [ImageInfo.pageCount] says how many there
+     * are. Every other format has one page. Pages are separate images with their own
+     * size, depth and orientation, not animation frames, so [decodeAnimation]
+     * gives a TIFF's first page alone.
+     *
+     * With [applyOrientation] the page's own orientation tag is honoured, as
+     * [decode] does for the first.
+     *
+     * @throws ImageDecodeException on malformed/truncated input or unknown format
+     * @throws UnsupportedImageException on formats or features recognised but not yet decodable
+     * @throws IllegalArgumentException if [page] is negative or the file has no such page
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun decodePage(data: ByteArray, page: Int, applyOrientation: Boolean = false): KiteBitmap {
+        require(page >= 0) { "page must not be negative, was $page" }
+        val format = detect(data)
+        if (format != ImageFormat.TIFF) {
+            // Data that is no image fails as decode fails, whatever the page.
+            if (format == null || page == 0) return decode(data, applyOrientation)
+            throw IllegalArgumentException("page $page asked of a one-page $format image")
+        }
+        val bitmap = TiffDecoder.decode(data, page)
+        if (!applyOrientation) return bitmap
+        val orientation = try {
+            ImageProbe.tiff(data, page).orientation
+        } catch (_: ImageDecodeException) {
+            Orientation.Normal
+        }
         return bitmap.oriented(orientation)
     }
 

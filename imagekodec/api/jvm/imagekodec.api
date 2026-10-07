@@ -22,8 +22,8 @@ public final class io/github/yuroyami/imagekodec/ImageFormat$Companion {
 }
 
 public final class io/github/yuroyami/imagekodec/ImageInfo {
-	public fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;)V
-	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;I)V
+	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getBitDepth ()I
 	public final fun getDisplayHeight ()I
 	public final fun getDisplayWidth ()I
@@ -33,6 +33,7 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 	public final fun getHeight ()I
 	public final fun getLoopCount ()J
 	public final fun getOrientation ()Lio/github/yuroyami/imagekodec/Orientation;
+	public final fun getPageCount ()I
 	public final fun getUnsupportedReason ()Ljava/lang/String;
 	public final fun getWidth ()I
 	public final fun isAnimated ()Z
@@ -50,6 +51,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeJpegComponents ([BI)Lio/github/yuroyami/imagekodec/JpegComponents;
 	public static synthetic fun decodeJpegComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpegComponents;
+	public final fun decodePage ([BIZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodePage$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeReduced ([BI)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeScaled ([BIIZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decodeScaled$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
@@ -64,6 +67,7 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun probe ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probeOrNull ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
+	public final fun probePage ([BI)Lio/github/yuroyami/imagekodec/ImageInfo;
 }
 
 public final class io/github/yuroyami/imagekodec/JpegComponents {

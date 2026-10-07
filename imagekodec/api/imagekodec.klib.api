@@ -80,7 +80,7 @@ final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuro
 }
 
 final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imagekodec/ImageInfo|null[0]
-    constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Long, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Long;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?){}[0]
+    constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Long, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Long;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?;kotlin.Int){}[0]
 
     final val bitDepth // io.github.yuroyami.imagekodec/ImageInfo.bitDepth|{}bitDepth[0]
         final fun <get-bitDepth>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
@@ -104,6 +104,8 @@ final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imag
         final fun <get-loopCount>(): kotlin/Long // io.github.yuroyami.imagekodec/ImageInfo.loopCount.<get-loopCount>|<get-loopCount>(){}[0]
     final val orientation // io.github.yuroyami.imagekodec/ImageInfo.orientation|{}orientation[0]
         final fun <get-orientation>(): io.github.yuroyami.imagekodec/Orientation // io.github.yuroyami.imagekodec/ImageInfo.orientation.<get-orientation>|<get-orientation>(){}[0]
+    final val pageCount // io.github.yuroyami.imagekodec/ImageInfo.pageCount|{}pageCount[0]
+        final fun <get-pageCount>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.pageCount.<get-pageCount>|<get-pageCount>(){}[0]
     final val unsupportedReason // io.github.yuroyami.imagekodec/ImageInfo.unsupportedReason|{}unsupportedReason[0]
         final fun <get-unsupportedReason>(): kotlin/String? // io.github.yuroyami.imagekodec/ImageInfo.unsupportedReason.<get-unsupportedReason>|<get-unsupportedReason>(){}[0]
     final val width // io.github.yuroyami.imagekodec/ImageInfo.width|{}width[0]
@@ -215,6 +217,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun decodeAnimation(kotlin/ByteArray, kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteAnimation // io.github.yuroyami.imagekodec/ImageKodec.decodeAnimation|decodeAnimation(kotlin.ByteArray;kotlin.Boolean;kotlin.Int;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeDownscaledTo(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/Boolean = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeDownscaledTo|decodeDownscaledTo(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.Boolean){}[0]
     final fun decodeJpegComponents(kotlin/ByteArray, kotlin/Int = ...): io.github.yuroyami.imagekodec/JpegComponents // io.github.yuroyami.imagekodec/ImageKodec.decodeJpegComponents|decodeJpegComponents(kotlin.ByteArray;kotlin.Int){}[0]
+    final fun decodePage(kotlin/ByteArray, kotlin/Int, kotlin/Boolean = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodePage|decodePage(kotlin.ByteArray;kotlin.Int;kotlin.Boolean){}[0]
     final fun decodeReduced(kotlin/ByteArray, kotlin/Int): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeReduced|decodeReduced(kotlin.ByteArray;kotlin.Int){}[0]
     final fun decodeScaled(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/Boolean = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeScaled|decodeScaled(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.Boolean){}[0]
     final fun detect(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageFormat? // io.github.yuroyami.imagekodec/ImageKodec.detect|detect(kotlin.ByteArray){}[0]
@@ -225,6 +228,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun probe(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probe|probe(kotlin.ByteArray){}[0]
     final fun probeOrNull(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo? // io.github.yuroyami.imagekodec/ImageKodec.probeOrNull|probeOrNull(kotlin.ByteArray){}[0]
+    final fun probePage(kotlin/ByteArray, kotlin/Int): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probePage|probePage(kotlin.ByteArray;kotlin.Int){}[0]
 }
 
 final fun (io.github.yuroyami.imagekodec/KiteAnimation).io.github.yuroyami.imagekodec/cropped(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int): io.github.yuroyami.imagekodec/KiteAnimation // io.github.yuroyami.imagekodec/cropped|cropped@io.github.yuroyami.imagekodec.KiteAnimation(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int){}[0]

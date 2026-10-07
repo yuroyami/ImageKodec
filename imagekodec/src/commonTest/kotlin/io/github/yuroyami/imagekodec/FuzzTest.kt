@@ -100,6 +100,10 @@ class FuzzTest {
         "gif-subrect" to hex(GIF_SUBRECT),
         "tiff-deflate" to hex(buildTiff(compression = 8)),
         "tiff-tiled" to hex(buildTiff(tiled = true)),
+        "tiff-pages" to TiffPagesTest().let { it.tiff(it.pages) },
+        "tiff-pages-be" to TiffPagesTest().let {
+            it.tiff(listOf(TiffPagesTest.Page(3, 2, 40), TiffPagesTest.Page(2, 5, 90, orientation = 6)), littleEndian = false)
+        },
         "jpeg-progressive" to hex(JPEG_PROGRESSIVE),
         "jpeg-restart" to restartIntervalJpeg(),
         "tiff-ccitt-g4" to faxTiff(faxBits("001000111010".repeat(4) + "11111111"), 4),
@@ -283,6 +287,12 @@ class FuzzTest {
         if (variant == 0) mustFailCleanly("$label decodeScaled") { ImageKodec.decodeScaled(bytes, 7, 5, applyOrientation = true) }
         mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes, applyOrientation = true) }
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
+        // A damaged chain of TIFF pages: the last page the probe counts must be reachable.
+        val pages = ImageKodec.probeOrNull(bytes)?.pageCount ?: 1
+        if (pages > 1) {
+            mustFailCleanly("$label decodePage") { ImageKodec.decodePage(bytes, pages - 1, applyOrientation = true) }
+            mustFailCleanly("$label probePage") { ImageKodec.probePage(bytes, pages - 1) }
+        }
         // probeOrNull promises never to throw on unreadable input at all.
         try {
             ImageKodec.probeOrNull(bytes)
