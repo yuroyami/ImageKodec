@@ -65,6 +65,8 @@ class ProbeTest {
         "png roundtrip" to ImageKodec.encodePng(sampleBitmap(7, 3)),
         "bmp" to ImageKodec.encodeBmp(sampleBitmap(5, 4)),
         "bmp with alpha" to ImageKodec.encodeBmp(KiteBitmap(3, 2, IntArray(6) { argb(it * 40, 10, 20, 30) })),
+        "bmp holding a png" to embeddedBmp(5, hex(RGBA8_2X2), width = 7, height = 7),
+        "bmp holding a jpeg" to embeddedBmp(4, ImageKodec.encodeJpeg(sampleBitmap(9, 5), quality = 80)),
         "tiff" to tiffBlock(1, ByteArray(32) { (it * 9).toByte() }),
         "webp lossless" to constantWebp(6, 4, argb(0xFF, 10, 200, 30)),
         "webp with alpha" to constantExtendedWebp(6, 4, listOf(argb(0x40, 10, 200, 30)), animated = false),

@@ -14,6 +14,14 @@ reviewable in the diff.
 
 ### Added
 
+- A BMP whose header declares BI_JPEG or BI_PNG, as printer drivers and some
+  Windows clipboard paths write them, decodes to the JPEG or PNG file its pixel
+  array holds, where it used to be refused. As in ImageMagick, the file runs
+  from the pixel offset to the end of the data and its own size is what decodes
+  and what `probe` reports. It must be the declared format, so a BMP inside a
+  BMP is refused rather than read recursively, and `decodeReduced` reduces an
+  embedded JPEG inside its inverse DCT (#17).
+
 - `ImageKodec.decodeJpegComponents` and `JpegComponents` return a JPEG's samples
   after the inverse DCT and the upsampling, before any color conversion: every
   component in the frame header's order, and the Adobe transform flag. It takes

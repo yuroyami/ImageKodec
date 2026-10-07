@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
@@ -27,9 +28,10 @@ import io.github.yuroyami.imagekodec.internal.ByteReader
  * stay fully transparent. The format calls them undefined; leaving a hole is
  * what browsers do and it is the only choice that can't invent colour.
  *
- * BI_JPEG and BI_PNG (a whole other image embedded in the pixel array) are
- * rejected by name: they are a container trick, not a BMP encoding, and the
- * caller can simply hand the inner bytes back to `ImageKodec.decode`.
+ * BI_JPEG and BI_PNG hold a whole JPEG or PNG file as the pixel array, as
+ * printer drivers and some Windows clipboard paths write them. [embedded] finds
+ * that file and the JPEG or PNG decoder reads it, so the result is the embedded
+ * image, whatever size the outer header gives (#17).
  */
 internal object BmpDecoder {
 
@@ -44,6 +46,36 @@ internal object BmpDecoder {
     private const val BI_PNG = 5
     private const val BI_ALPHABITFIELDS = 6
 
+    /**
+     * The JPEG or PNG file that a BI_JPEG or BI_PNG BMP in [data] holds as its pixel array, or null
+     * for a BMP of any other compression. The file runs from bfOffBits to the end of the data, as
+     * ImageMagick reads it: biSizeImage is not trusted, since both decoders stop at their own end
+     * marker. It must sniff as the format the header declares, so a BI_PNG header cannot smuggle in
+     * another format, and a BMP inside a BMP, which could nest until the stack ran out, is refused.
+     */
+    internal fun embedded(data: ByteArray): ByteArray? {
+        val r = ByteReader(data, pos = 10)
+        val offset = r.u32le()
+        val dibSize = r.u32le()
+        // A BITMAPCOREHEADER has no compression field, and an unknown header size is refused by decode.
+        if (dibSize !in longArrayOf(40, 52, 56, 64, 108, 124)) return null
+        r.pos = 30
+        val declared = when (r.u32le().toInt()) {
+            BI_JPEG -> ImageFormat.JPEG
+            BI_PNG -> ImageFormat.PNG
+            else -> return null
+        }
+        if (offset < 14 + dibSize || offset >= data.size) {
+            throw ImageDecodeException("BMP: the BI_${declared.name} pixel array at $offset lies outside the ${data.size} bytes")
+        }
+        val payload = data.copyOfRange(offset.toInt(), data.size)
+        val found = ImageFormat.sniff(payload)
+        if (found != declared) {
+            throw ImageDecodeException("BMP: the pixel array of a BI_${declared.name} file holds ${found?.name ?: "no known format"}")
+        }
+        return payload
+    }
+
     fun decode(data: ByteArray): KiteBitmap {
         val r = ByteReader(data)
 
@@ -51,6 +83,9 @@ internal object BmpDecoder {
         // u32 offset from file start to the pixel array.
         if (r.u8() != 'B'.code || r.u8() != 'M'.code) {
             throw ImageDecodeException("not a BMP: missing 'BM' magic")
+        }
+        embedded(data)?.let { file ->
+            return if (ImageFormat.sniff(file) == ImageFormat.JPEG) JpegDecoder.decode(file) else PngDecoder.decode(file)
         }
         r.skip(8)
         val pixelOffset = r.u32le()
@@ -102,8 +137,6 @@ internal object BmpDecoder {
             throw ImageDecodeException("BMP: ${width}x$height cannot come from ${data.size} bytes")
         }
         when (compression) {
-            BI_JPEG -> throw UnsupportedImageException("BMP wrapping a JPEG (BI_JPEG) is not a BMP encoding")
-            BI_PNG -> throw UnsupportedImageException("BMP wrapping a PNG (BI_PNG) is not a BMP encoding")
             BI_RGB, BI_RLE8, BI_RLE4, BI_BITFIELDS, BI_ALPHABITFIELDS -> Unit
             else -> throw UnsupportedImageException("BMP compression $compression is not supported")
         }

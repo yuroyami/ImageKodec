@@ -58,6 +58,8 @@ class FuzzTest {
         "gif" to ImageKodec.encodeGif(sample(12, 9)),
         "bmp24" to ImageKodec.encodeBmp(KiteBitmap(7, 5, IntArray(35) { argb(0xFF, it * 3, it * 5, it * 7) })),
         "bmp32" to ImageKodec.encodeBmp(sample(6, 4)),
+        "bmp-png" to embeddedBmp(5, ImageKodec.encodePng(sample(9, 7)), width = 3, height = 2),
+        "bmp-jpeg" to embeddedBmp(4, ImageKodec.encodeJpeg(sample(16, 16), quality = 70)),
         "gif-animated" to ImageKodec.encodeGif(
             KiteAnimation(
                 4, 4,
@@ -114,6 +116,8 @@ class FuzzTest {
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
         "jp2-short-cod" to jp2ShortCodSeed(),
         "jp2-oversize-siz" to jp2OversizeSeed(),
+        // A BMP that declares BI_PNG and holds another BMP must be refused, not read recursively (#17).
+        "bmp-nested" to embeddedBmp(5, ImageKodec.encodeBmp(sample(6, 4))),
     )
 
     private fun corpus(): List<Pair<String, ByteArray>> = validCorpus() + malformedCorpus()

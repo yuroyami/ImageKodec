@@ -83,7 +83,8 @@ public object ImageKodec {
      * A JPEG reduces inside its inverse DCT, as libjpeg's scaled decode does, so the
      * full-size pixels never exist: a baseline 35-megapixel scan decoded at an eighth needs
      * memory for about half a megapixel. A progressive JPEG still keeps the coefficients of
-     * the full size, 2 bytes a sample, until its last scan. A JPEG 2000 image drops its finest
+     * the full size, 2 bytes a sample, until its last scan. A BMP that holds a JPEG as its pixel
+     * array reduces as that JPEG does. A JPEG 2000 image drops its finest
      * wavelet levels, as OpenJPEG's reduce option does. Other formats decode in full, then
      * average each block of [reduction] by [reduction] pixels, weighted by alpha as [scaled]
      * does.
@@ -101,6 +102,8 @@ public object ImageKodec {
         return when (detect(data)) {
             ImageFormat.JPEG -> JpegDecoder.decode(data, scale = reduction.countTrailingZeroBits())
             ImageFormat.JP2 -> jp2ToBitmap(data, reduction)
+            // A BMP that holds a JPEG reduces inside that JPEG's inverse DCT.
+            ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { decodeReduced(it, reduction) } ?: decodeRaw(data).reducedBy(reduction)
             else -> decodeRaw(data).reducedBy(reduction)
         }
     }

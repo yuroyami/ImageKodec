@@ -265,6 +265,23 @@ internal object ImageProbe {
             else -> throw ImageDecodeException("BMP: unknown DIB header size $dibSize")
         }
 
+        // BI_JPEG and BI_PNG: the embedded file is what a decode returns, so its header answers (#17).
+        BmpDecoder.embedded(data)?.let { file ->
+            val inner = probe(file)
+            return ImageInfo(
+                format = ImageFormat.BMP,
+                width = inner.width,
+                height = inner.height,
+                bitDepth = inner.bitDepth,
+                hasAlpha = inner.hasAlpha,
+                frameCount = 1,
+                loopCount = 1,
+                orientation = inner.orientation,
+                isDecodable = inner.isDecodable,
+                unsupportedReason = inner.unsupportedReason,
+            )
+        }
+
         // 32-bit BI_RGB alpha is usually a lie (all zero); BI_BITFIELDS/V4/V5 with
         // an alpha mask is the honest signal. Report the optimistic answer and let
         // the decoder's all-zero-alpha rule settle it.
@@ -282,8 +299,6 @@ internal object ImageProbe {
             isDecodable = compression in intArrayOf(0, 1, 2, 3, 6) &&
                 bpp in intArrayOf(1, 2, 4, 8, 16, 24, 32),
             unsupportedReason = when {
-                compression == 4 -> "BMP wrapping a JPEG (BI_JPEG)"
-                compression == 5 -> "BMP wrapping a PNG (BI_PNG)"
                 compression !in intArrayOf(0, 1, 2, 3, 6) -> "BMP compression $compression"
                 bpp !in intArrayOf(1, 2, 4, 8, 16, 24, 32) -> "BMP with $bpp bpp"
                 else -> null

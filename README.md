@@ -127,7 +127,7 @@ at a lower resolution than brightness.
 | APNG | dispose none/background/previous, blend source/over, frame rects, loop count |
 | JPEG | baseline SOF0, extended sequential SOF1, progressive SOF2, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
-| BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up |
+| BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L only, still and animated. Lossy VP8 is not implemented at all |
 | TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4, photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, first IFD only |
 | JPEG 2000 | JP2 container and raw J2K codestream, part 1 baseline |

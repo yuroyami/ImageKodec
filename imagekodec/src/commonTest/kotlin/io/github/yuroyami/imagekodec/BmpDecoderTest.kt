@@ -139,17 +139,15 @@ class BmpDecoderTest {
     }
 
     @Test
-    fun embeddedJpegAndPngPayloadsAreRejectedByName() {
-        // BI_JPEG / BI_PNG smuggle a whole other image into the pixel array. That
-        // is a container trick, not a BMP encoding, so it is declined by name.
-        val jpeg = assertFailsWith<UnsupportedImageException> {
-            ImageKodec.decode(bmp(2, 2, 24, pixels = List(4) { 0 }, compression = 4))
+    fun bmpPixelsUnderAnEmbeddedCompressionAreRefusedByName() {
+        // BI_JPEG and BI_PNG mean the pixel array is a whole JPEG or PNG file (#17), so BMP pixel data
+        // under either is a damaged file, and the message names what the header declared.
+        for ((compression, name) in listOf(4 to "BI_JPEG", 5 to "BI_PNG")) {
+            val error = assertFailsWith<ImageDecodeException> {
+                ImageKodec.decode(bmp(2, 2, 24, pixels = List(4) { 0 }, compression = compression))
+            }
+            assertTrue(name in error.message!!, error.message!!)
         }
-        assertTrue("JPEG" in jpeg.message!!, jpeg.message!!)
-        val png = assertFailsWith<UnsupportedImageException> {
-            ImageKodec.decode(bmp(2, 2, 24, pixels = List(4) { 0 }, compression = 5))
-        }
-        assertTrue("PNG" in png.message!!, png.message!!)
     }
 
     @Test
