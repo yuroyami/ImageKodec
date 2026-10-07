@@ -509,51 +509,113 @@ internal object JpegDecoder {
     }
 
     /**
-     * C(k) cos((2p + 1) k pi / 2n) in 1/8192ths, for the reduced IDCT of [n] points, with
-     * C(0) = 1/sqrt(2) (ITU-T T.81, A.3.3). Derived here rather than copied. [reducedIdct]
-     * explains where the formula comes from.
+     * The reduced IDCT's table for [n] output points, in 1/8192ths: T(u, x) = C(u) times the mean
+     * of cos((2p + 1) u pi / 16) over the 8 / n full-size samples p that output x stands for, with
+     * C(0) = 1/sqrt(2) (ITU-T T.81, A.3.3). Row u holds the n values of frequency u. Derived here
+     * rather than copied. [reducedIdct] explains where the formula comes from.
      */
-    private fun reducedTable(n: Int): IntArray = IntArray(n * n) { i ->
-        val k = i / n
-        val p = i % n
-        val c = if (k == 0) sqrt(0.5) else 1.0
-        (c * cos((2 * p + 1) * k * PI / (2 * n)) * 8192).roundToInt()
+    private fun reducedTable(n: Int): IntArray {
+        val m = 8 / n
+        return IntArray(8 * n) { i ->
+            val u = i / n
+            val x = i % n
+            var sum = 0.0
+            for (p in x * m until (x + 1) * m) sum += cos((2 * p + 1) * u * PI / 16)
+            val c = if (u == 0) sqrt(0.5) else 1.0
+            (c * sum / m * 8192).roundToInt()
+        }
     }
 
     internal val REDUCED_4 = reducedTable(4)
     internal val REDUCED_2 = reducedTable(2)
 
     /**
-     * The block that [data] holds, as [n] by [n] pixels, each standing for an (8/n)-pixel
-     * square of the full block. The DCT of JPEG is orthonormal, so the n-point DCT of the
-     * averaged block is, to first order, the first n coefficients scaled by sqrt(n/8). Its
-     * inverse is the 8-point formula of T.81, A.3.3 with the cosines taken over 2n points:
-     * g(x, y) = 1/4 sum over u, v < n of C(u) C(v) F(u, v) cos((2x+1)u pi/2n) cos((2y+1)v pi/2n).
-     * For n = 1 that is the DC coefficient over 8, the block's mean. libjpeg's scaled decode
-     * (jidctred.c) computes the same transform.
+     * The block that [data] holds, as [n] by [n] pixels, each the mean of the (8/n)-pixel square
+     * of the full 8 by 8 IDCT it stands for. The full IDCT of T.81, A.3.3 is
+     * f(p, q) = 1/4 sum over u, v of C(u) C(v) F(u, v) cos((2p+1)u pi/16) cos((2q+1)v pi/16),
+     * so the mean over a square is the same sum with each cosine replaced by its mean over the
+     * square's samples, which is the table T: g(x, y) = 1/4 sum over u, v of F(u, v) T(u, x) T(v, y).
+     * Every frequency contributes, except those whose cosine averages to zero (4 at n = 4; 2, 4
+     * and 6 at n = 2), as in libjpeg's jidctred.c, which derives its 4x4 and 2x2 IDCTs as the
+     * averages of adjacent outputs of the full one. Keeping only the low n frequencies instead
+     * left stripes where libjpeg gives a flat average (#62). For n = 1 the mean is the DC
+     * coefficient over 8.
      */
     private fun reducedIdct(out: ByteArray, outOfs: Int, stride: Int, data: ShortArray, n: Int, rows: IntArray) {
-        if (n == 1) {
-            out[outOfs] = clamp(128 + ((data[0].toInt() + 4) shr 3)).toByte()
-            return
+        when (n) {
+            1 -> out[outOfs] = clamp(128 + ((data[0].toInt() + 4) shr 3)).toByte()
+            2 -> reducedIdct2(out, outOfs, stride, data, rows)
+            else -> reducedIdct4(out, outOfs, stride, data, rows)
         }
-        val t = if (n == 4) REDUCED_4 else REDUCED_2
-        // Horizontal pass: rows[v * n + x] = sum over u of F(u, v) T(u, x). It fits an Int:
-        // a coefficient is a Short and a table entry is under 2^13, over at most four terms.
-        for (v in 0 until n) {
-            for (x in 0 until n) {
-                var sum = 0
-                for (u in 0 until n) sum += data[v * 8 + u] * t[u * n + x]
-                rows[v * n + x] = sum
+    }
+
+    // The table's entries as plain fields, for the two transforms below. An even frequency has
+    // the same mean over output x and its mirror n - 1 - x, and an odd one the negated mean, so
+    // each pass sums the even and the odd frequencies for the first half of the outputs and takes
+    // the second half as their difference. A frequency whose row of the table is zero is left out:
+    // 4 at n = 4, and 2, 4 and 6 at n = 2.
+    private val R4 = IntArray(16) { REDUCED_4[(it / 2) * 4 + it % 2] }
+    private val R2 = IntArray(8) { REDUCED_2[it * 2] }
+
+    /**
+     * [reducedIdct] at n = 4. The first pass descales by 2^11 and so keeps 2 bits above the
+     * integer, as libjpeg's PASS1_BITS does; the second takes off 2^13 from the table, the 2^2
+     * kept and the 1/4 of the IDCT, 2^17 in all, rounded half up.
+     */
+    private fun reducedIdct4(out: ByteArray, outOfs: Int, stride: Int, data: ShortArray, rows: IntArray) {
+        val t = R4
+        val a0 = t[0]; val a1 = t[1]; val b0 = t[2]; val b1 = t[3]; val c0 = t[4]; val c1 = t[5]
+        val d0 = t[6]; val d1 = t[7]; val f0 = t[10]; val f1 = t[11]; val g0 = t[12]; val g1 = t[13]
+        val h0 = t[14]; val h1 = t[15]
+        for (v in 0 until 8) {
+            val k = v * 8
+            val r = v * 4
+            val s0 = data[k].toInt(); val s1 = data[k + 1].toInt(); val s2 = data[k + 2].toInt(); val s3 = data[k + 3].toInt()
+            val s5 = data[k + 5].toInt(); val s6 = data[k + 6].toInt(); val s7 = data[k + 7].toInt()
+            if ((s1 or s2 or s3 or s5 or s6 or s7) == 0) {
+                val dc = (s0 * a0 + (1 shl 10)) shr 11
+                rows[r] = dc; rows[r + 1] = dc; rows[r + 2] = dc; rows[r + 3] = dc
+                continue
             }
+            val e0 = s0 * a0 + s2 * c0 + s6 * g0
+            val e1 = s0 * a1 + s2 * c1 + s6 * g1
+            val o0 = s1 * b0 + s3 * d0 + s5 * f0 + s7 * h0
+            val o1 = s1 * b1 + s3 * d1 + s5 * f1 + s7 * h1
+            rows[r] = (e0 + o0 + (1 shl 10)) shr 11
+            rows[r + 1] = (e1 + o1 + (1 shl 10)) shr 11
+            rows[r + 2] = (e1 - o1 + (1 shl 10)) shr 11
+            rows[r + 3] = (e0 - o0 + (1 shl 10)) shr 11
         }
-        // Vertical pass, then the 1/4 and the two 2^13 scales of the table: 28 bits, rounded half up.
-        for (y in 0 until n) {
-            for (x in 0 until n) {
-                var sum = 0L
-                for (v in 0 until n) sum += rows[v * n + x].toLong() * t[v * n + y]
-                out[outOfs + y * stride + x] = clamp(128 + ((sum + (1L shl 27)) shr 28).toInt()).toByte()
-            }
+        for (x in 0 until 4) {
+            val s0 = rows[x]; val s1 = rows[4 + x]; val s2 = rows[8 + x]; val s3 = rows[12 + x]
+            val s5 = rows[20 + x]; val s6 = rows[24 + x]; val s7 = rows[28 + x]
+            val e0 = s0 * a0 + s2 * c0 + s6 * g0 + (1 shl 16)
+            val e1 = s0 * a1 + s2 * c1 + s6 * g1 + (1 shl 16)
+            val o0 = s1 * b0 + s3 * d0 + s5 * f0 + s7 * h0
+            val o1 = s1 * b1 + s3 * d1 + s5 * f1 + s7 * h1
+            out[outOfs + x] = clamp(128 + ((e0 + o0) shr 17)).toByte()
+            out[outOfs + stride + x] = clamp(128 + ((e1 + o1) shr 17)).toByte()
+            out[outOfs + 2 * stride + x] = clamp(128 + ((e1 - o1) shr 17)).toByte()
+            out[outOfs + 3 * stride + x] = clamp(128 + ((e0 - o0) shr 17)).toByte()
+        }
+    }
+
+    /** [reducedIdct] at n = 2, scaled as [reducedIdct4]. */
+    private fun reducedIdct2(out: ByteArray, outOfs: Int, stride: Int, data: ShortArray, rows: IntArray) {
+        val t = R2
+        val a = t[0]; val b = t[1]; val d = t[3]; val f = t[5]; val h = t[7]
+        for (v in 0 until 8) {
+            val k = v * 8
+            val e = data[k] * a
+            val o = data[k + 1] * b + data[k + 3] * d + data[k + 5] * f + data[k + 7] * h
+            rows[v * 2] = (e + o + (1 shl 10)) shr 11
+            rows[v * 2 + 1] = (e - o + (1 shl 10)) shr 11
+        }
+        for (x in 0 until 2) {
+            val e = rows[x] * a + (1 shl 16)
+            val o = rows[2 + x] * b + rows[6 + x] * d + rows[10 + x] * f + rows[14 + x] * h
+            out[outOfs + x] = clamp(128 + ((e + o) shr 17)).toByte()
+            out[outOfs + stride + x] = clamp(128 + ((e - o) shr 17)).toByte()
         }
     }
 

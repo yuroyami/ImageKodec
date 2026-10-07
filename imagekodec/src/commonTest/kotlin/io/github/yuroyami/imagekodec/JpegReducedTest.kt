@@ -25,12 +25,41 @@ class JpegReducedTest {
 
     @Test
     fun theReducedTablesAreTheDerivedValues() {
-        // C(k) cos((2p+1) k pi / 2n) in 1/8192ths. Every target must derive the same integers.
+        // C(u) times the mean of cos((2p+1) u pi / 16) over each output's samples, in 1/8192ths, one
+        // row of n per frequency. Every target must derive the same integers. The frequencies whose
+        // cosine averages to zero over each output come out as zero rows.
         assertContentEquals(
-            intArrayOf(5793, 5793, 5793, 5793, 7568, 3135, -3135, -7568, 5793, -5793, -5793, 5793, 3135, -7568, 7568, -3135),
+            intArrayOf(
+                5793, 5793, 5793, 5793, 7423, 3075, -3075, -7423, 5352, -5352, -5352, 5352, 2607, -6293, 6293, -2607,
+                0, 0, 0, 0, -1742, 4205, -4205, 1742, -2217, 2217, 2217, -2217, -1477, -612, 612, 1477,
+            ),
             JpegDecoder.REDUCED_4,
         )
-        assertContentEquals(intArrayOf(5793, 5793, 5793, -5793), JpegDecoder.REDUCED_2)
+        assertContentEquals(
+            intArrayOf(5793, 5793, 5249, -5249, 0, 0, -1843, 1843, 0, 0, 1232, -1232, 0, 0, -1044, 1044),
+            JpegDecoder.REDUCED_2,
+        )
+    }
+
+    @Test
+    fun fineDetailAveragesOut() {
+        // One-pixel stripes, then a fine checkerboard: every reduced pixel covers whole periods, so
+        // it is their mean. Keeping only the low frequencies of each block left stripes here (#62).
+        val w = 64
+        val patterns = listOf<(Int, Int) -> Int>({ x, _ -> 255 * (x % 2) }, { x, y -> 255 * ((x + y) % 2) })
+        for ((index, pattern) in patterns.withIndex()) {
+            val bitmap = KiteBitmap(w, w, IntArray(w * w) { i -> pattern(i % w, i / w).let { argb(0xFF, it, it, it) } })
+            val jpeg = ImageKodec.encodeJpeg(bitmap, quality = 100)
+            val full = ImageKodec.decode(jpeg)
+            for (r in listOf(2, 4, 8)) {
+                val reduced = ImageKodec.decodeReduced(jpeg, r)
+                val average = full.reducedBy(r)
+                for (i in reduced.argb.indices) for (shift in intArrayOf(16, 8, 0)) {
+                    val d = abs(((reduced.argb[i] shr shift) and 0xFF) - ((average.argb[i] shr shift) and 0xFF))
+                    assertTrue(d <= 2, "pattern $index, reduced by $r, pixel $i: ${reduced.argb[i].toUInt().toString(16)} against ${average.argb[i].toUInt().toString(16)}")
+                }
+            }
+        }
     }
 
     @Test

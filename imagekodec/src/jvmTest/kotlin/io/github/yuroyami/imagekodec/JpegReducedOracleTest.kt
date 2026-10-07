@@ -39,14 +39,23 @@ class JpegReducedOracleTest {
         return img
     }
 
-    private fun jpeg(img: BufferedImage, progressive: Boolean): ByteArray {
+    /** One-pixel gray stripes, or a one-pixel checkerboard, [w] by [w]: all detail, no average. */
+    private fun fineDetail(w: Int, checkerboard: Boolean): BufferedImage {
+        val img = BufferedImage(w, w, BufferedImage.TYPE_BYTE_GRAY)
+        for (y in 0 until w) for (x in 0 until w) {
+            img.raster.setSample(x, y, 0, 255 * ((if (checkerboard) x + y else x) % 2))
+        }
+        return img
+    }
+
+    private fun jpeg(img: BufferedImage, progressive: Boolean, quality: Float = 0.9f): ByteArray {
         val writer = ImageIO.getImageWritersByFormatName("jpeg").next()
         val out = ByteArrayOutputStream()
         ImageIO.createImageOutputStream(out).use { stream ->
             writer.output = stream
             val param = writer.defaultWriteParam.apply {
                 compressionMode = ImageWriteParam.MODE_EXPLICIT
-                compressionQuality = 0.9f
+                compressionQuality = quality
                 if (progressive) progressiveMode = ImageWriteParam.MODE_DEFAULT
             }
             writer.write(null, IIOImage(img, null, null), param)
@@ -94,42 +103,72 @@ class JpegReducedOracleTest {
         assumeTrue("djpeg is not installed", Tools.hasAll("djpeg"))
         val dir = Files.createTempDirectory("imagekodec-reduced").toFile()
         try {
-            val cases = listOf(
-                "colour 4:2:0" to jpeg(picture(203, 157, BufferedImage.TYPE_INT_RGB), progressive = false),
-                "grey" to jpeg(picture(203, 157, BufferedImage.TYPE_BYTE_GRAY), progressive = false),
-                "colour progressive" to jpeg(picture(203, 157, BufferedImage.TYPE_INT_RGB), progressive = true),
+            compare(
+                listOf(
+                    "colour 4:2:0" to jpeg(picture(203, 157, BufferedImage.TYPE_INT_RGB), progressive = false),
+                    "grey" to jpeg(picture(203, 157, BufferedImage.TYPE_BYTE_GRAY), progressive = false),
+                    "colour progressive" to jpeg(picture(203, 157, BufferedImage.TYPE_INT_RGB), progressive = true),
+                ),
+                dir,
             )
-            val report = StringBuilder()
-            for ((name, bytes) in cases) {
-                for (r in listOf(2, 4, 8)) {
-                    val ours = ImageKodec.decodeReduced(bytes, r)
-                    val theirs = djpeg(bytes, r, dir)
-                    assertEquals(theirs.width, ours.width, "$name, 1/$r width")
-                    assertEquals(theirs.height, ours.height, "$name, 1/$r height")
-                    var total = 0L
-                    var worst = 0
-                    for (i in ours.argb.indices) for (shift in intArrayOf(16, 8, 0)) {
-                        val d = abs(((ours.argb[i] shr shift) and 0xFF) - ((theirs.argb[i] shr shift) and 0xFF))
-                        total += d
-                        worst = maxOf(worst, d)
-                    }
-                    val mean = total.toDouble() / (ours.argb.size * 3)
-                    report.appendLine("$name 1/$r: mean $mean worst $worst")
-                    assertTrue(mean < MEAN_LIMIT && worst <= WORST_LIMIT, "$name, 1/$r: mean $mean, worst $worst\n$report")
-                    // A grey eighth is the DC coefficient over 8 in both, so it matches exactly.
-                    if (name == "grey" && r == 8) assertEquals(0, worst, "grey, 1/8 must match djpeg exactly")
-                }
-            }
-            println(report)
         } finally {
             dir.deleteRecursively()
         }
     }
 
+    /**
+     * All detail and no average: each reduced pixel is the mean of whole periods, which is a
+     * tie at 127.5 for the checkerboard, so either rounding is right there. Keeping only the
+     * low frequencies of each block left stripes here, 33 levels off djpeg (#62).
+     */
+    @Test
+    fun fineDetailMatchesDjpegScale() {
+        assumeTrue("djpeg is not installed", Tools.hasAll("djpeg"))
+        val dir = Files.createTempDirectory("imagekodec-reduced").toFile()
+        try {
+            compare(
+                listOf(
+                    "stripes" to jpeg(fineDetail(64, checkerboard = false), progressive = false, quality = 1f),
+                    "checkerboard" to jpeg(fineDetail(64, checkerboard = true), progressive = false, quality = 1f),
+                ),
+                dir,
+                meanLimit = 0.5,
+                worstLimit = 1,
+            )
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    private fun compare(cases: List<Pair<String, ByteArray>>, dir: File, meanLimit: Double = MEAN_LIMIT, worstLimit: Int = WORST_LIMIT) {
+        val report = StringBuilder()
+        for ((name, bytes) in cases) {
+            for (r in listOf(2, 4, 8)) {
+                val ours = ImageKodec.decodeReduced(bytes, r)
+                val theirs = djpeg(bytes, r, dir)
+                assertEquals(theirs.width, ours.width, "$name, 1/$r width")
+                assertEquals(theirs.height, ours.height, "$name, 1/$r height")
+                var total = 0L
+                var worst = 0
+                for (i in ours.argb.indices) for (shift in intArrayOf(16, 8, 0)) {
+                    val d = abs(((ours.argb[i] shr shift) and 0xFF) - ((theirs.argb[i] shr shift) and 0xFF))
+                    total += d
+                    worst = maxOf(worst, d)
+                }
+                val mean = total.toDouble() / (ours.argb.size * 3)
+                report.appendLine("$name 1/$r: mean $mean worst $worst")
+                assertTrue(mean <= meanLimit && worst <= worstLimit, "$name, 1/$r: mean $mean, worst $worst\n$report")
+                // A grey eighth is the DC coefficient over 8 in both, so it matches exactly.
+                if (name == "grey" && r == 8) assertEquals(0, worst, "grey, 1/8 must match djpeg exactly")
+            }
+        }
+        println(report)
+    }
+
     private companion object {
-        // Measured against libjpeg-turbo 3: a mean of 1.6 and a worst of 12 at most, from how the
-        // reduced IDCT keeps coefficients and how the YCbCr conversion rounds.
-        const val MEAN_LIMIT = 2.5
-        const val WORST_LIMIT = 20
+        // Measured against libjpeg-turbo 2.1: a mean of 0.06 and a worst of 3 at most, from the
+        // rounding of the reduced IDCT and of the YCbCr conversion.
+        const val MEAN_LIMIT = 0.25
+        const val WORST_LIMIT = 4
     }
 }
