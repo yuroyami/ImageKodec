@@ -520,7 +520,8 @@ class TiffExtendedTest {
     @Test
     fun probeRefusesTheTiffFeaturesTheDecoderRefuses() {
         val cases = listOf(
-            "JPEG-in-TIFF" to greyTiff(short(259, 7)),
+            "16-bit JPEG" to greyTiff(short(259, 7), short(258, 16)),
+            "old-style lossless JPEG" to greyTiff(short(259, 6), short(512, 14)),
             "32-bit samples" to greyTiff(short(258, 32)),
             "floating-point predictor" to greyTiff(short(317, 3)),
             "predictor 2 at 4 bits" to greyTiff(short(317, 2), short(258, 4)),

@@ -97,7 +97,8 @@ info.isDecodable                 // and info.unsupportedReason when it is false
 
 `isDecodable` is a statement about features. It is false when the file uses
 something this build does not implement, and `unsupportedReason` names it.
-Examples are a CgBI PNG, an arithmetic-coded JPEG and JPEG-in-TIFF.
+Examples are a CgBI PNG, an arithmetic-coded JPEG and a TIFF with floating-point
+samples.
 The Coil decoder uses this flag to decide which files to claim.
 
 `isDecodable` stays true for a file that declares only supported features and is
@@ -129,7 +130,7 @@ at a lower resolution than brightness.
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
-| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4, photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
+| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
 | JPEG 2000 | JP2 container and raw J2K codestream, part 1 baseline |
 
 A TIFF can hold any number of pages. `decode` returns the first,
@@ -442,7 +443,7 @@ expectations:
 | WebP lossless | libwebp `cwebp` and `dwebp` | pixel-exact |
 | WebP lossy | libwebp `cwebp`, `dwebp`, `img2webp` and `anim_dump`, and libvpx key frames through ffmpeg | pixel-exact |
 | JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 1/255 and a mean of 0.05 for irreversible 9/7, 16-bit included |
-| TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1 |
+| TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1, and JPEG strips, which allow the last bits of a JPEG decoder |
 | JBIG2 | jbig2enc's streams: generic regions against the source page, symbol mode against jbig2dec | exact |
 
 The committed stb vectors and ImageIO tests need no external binary. The

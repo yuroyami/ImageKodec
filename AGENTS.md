@@ -41,5 +41,11 @@ being true.
   libvpx with `-slices` and a tight `-b:v` writes both (#11).
 - libtiff before 4.7.2, Ubuntu 24.04's included, reads a clipped 4:4 YCbCr tile
   wrong in `tiff2rgba`, so that oracle case skips on older versions (#104).
+- libtiff's fixed-point ReferenceBlackWhite tables truncate, so a studio-range
+  YCbCr TIFF reads about a third of a level darker in `tiff2rgba` than our exact
+  conversion, mean 0.5 and worst 3 on every value. ImageIO agrees with ours (#8).
+- ImageMagick 6 writes a JPEG TIFF with RGB photometric unless told
+  `-colorspace YCbCr`, and then only at 4:4:4; `tiffcp -c jpeg` writes 4:2:0.
+  A `cjpeg` stream wrapped in a strip reaches the other subsamplings (#8).
 - `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh
   clone, because `kotlin-js-store/` is ignored and yarn has no lockfile to work from.

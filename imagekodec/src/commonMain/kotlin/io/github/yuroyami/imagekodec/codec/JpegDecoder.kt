@@ -1495,6 +1495,27 @@ internal object JpegDecoder {
         return Components(JpegComponents(outX, outSize(j.imgY, scale), n, samples, j.app14ColorTransform), colorModel(j))
     }
 
+    /** One component as the inverse DCT leaves it: [width] by [height] samples in rows of [stride]. */
+    internal class Plane(val samples: ByteArray, val stride: Int, val width: Int, val height: Int, val h: Int, val v: Int)
+
+    /** Every component of a frame [width] by [height] pixels, in the frame header's order. */
+    internal class Planes(val width: Int, val height: Int, val hMax: Int, val vMax: Int, val planes: List<Plane>)
+
+    /**
+     * The components of [input] at their own resolutions, before upsampling and color
+     * conversion, as libjpeg's raw data output gives them: a chroma plane sampled 1 by 1
+     * against luma sampled 2 by 2 comes back at half the size each way. The planes run on
+     * to whole MCUs, so they hold at least the samples the image needs.
+     */
+    fun decodePlanes(input: ByteArray): Planes {
+        val j = decodeFrame(input, 0)
+        val planes = List(j.imgN) { k ->
+            val c = j.comp[k]
+            Plane(c.data, c.ws, c.x, c.y, c.h, c.v)
+        }
+        return Planes(j.imgX, j.imgY, j.hMax, j.vMax, planes)
+    }
+
     /** [components] through the color conversion of [model], row by row as [decode] converts its rows. */
     internal fun toBitmap(components: JpegComponents, model: ColorModel): KiteBitmap {
         val w = components.width

@@ -101,6 +101,8 @@ class FuzzTest {
         "tiff-deflate" to hex(buildTiff(compression = 8)),
         "tiff-tiled" to hex(buildTiff(tiled = true)),
         "tiff-pages" to TiffPagesTest().let { it.tiff(it.pages) },
+        "tiff-jpeg" to TiffJpegTest().seed(),
+        "tiff-old-jpeg" to TiffOldJpegTest().interchangeFormat(),
         "tiff-pages-be" to TiffPagesTest().let {
             it.tiff(listOf(TiffPagesTest.Page(3, 2, 40), TiffPagesTest.Page(2, 5, 90, orientation = 6)), littleEndian = false)
         },

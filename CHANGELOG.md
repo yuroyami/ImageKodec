@@ -14,6 +14,18 @@ reviewable in the diff.
 
 ### Added
 
+- TIFFs whose strips or tiles are JPEG decode. Compression 7, which Technical
+  Note 2 defines and current writers use, splices the JPEGTables into each
+  block, converts YCbCr as libtiff's RGB color mode has libjpeg do it, which is
+  what ImageMagick and Pillow read, and passes RGB and gray samples through.
+  Old-style JPEG, compression 6, is rebuilt into one stream the way libtiff
+  does it, from headers at JPEGInterchangeFormat or bare tables behind the
+  table tags, with a restart marker between strips, and its samples go to the
+  TIFF YCbCr path with the file's ReferenceBlackWhite. Every layout decodes
+  within 4 levels of libtiff's `tiff2rgba`, and so do the old-style samples in
+  libtiff's own test images. ReferenceBlackWhite stored as SHORT or LONG values
+  is read as libtiff reads it, where it was refused (#8).
+
 - Every page of a multi-page TIFF is reachable. `ImageInfo.pageCount` counts
   the image file directories in the file's main chain, as libtiff, ImageIO and
   libvips do, and `ImageKodec.decodePage` and `ImageKodec.probePage` decode and

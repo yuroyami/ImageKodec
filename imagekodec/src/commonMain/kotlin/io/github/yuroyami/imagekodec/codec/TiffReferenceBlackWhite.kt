@@ -7,16 +7,25 @@ internal class TiffReferenceBlackWhite private constructor(private val pairs: Lo
     companion object {
         fun read(data: ByteArray, le: Boolean, type: Int, count: Long, valueOffset: Int): TiffReferenceBlackWhite {
             fun err(message: String): Nothing = throw ImageDecodeException("TIFF: ReferenceBlackWhite $message")
-            if (type != 5 || count != 6L) err("requires six RATIONAL values")
-            fun u32(at: Int): Long {
-                if (at < 0 || at > data.size - 4) err("is truncated")
+            // RATIONAL is what TIFF 6.0 names, and libtiff reads SHORT and LONG values too, as
+            // fractions over 1: old-style JPEG writers stored the studio range that way.
+            if (count != 6L || (type != 3 && type != 4 && type != 5)) err("requires six RATIONAL values")
+            fun unsigned(at: Int, bytes: Int): Long {
+                if (at < 0 || at > data.size - bytes) err("is truncated")
                 var value = 0L
-                for (i in 0..3) value = value or ((data[at + i].toLong() and 255) shl (if (le) i * 8 else (3 - i) * 8))
+                for (i in 0 until bytes) {
+                    value = value or ((data[at + i].toLong() and 255) shl (if (le) i * 8 else (bytes - 1 - i) * 8))
+                }
                 return value
             }
-            val offset = u32(valueOffset)
-            if (offset > data.size.toLong() - 48) err("values are truncated")
-            val pairs = LongArray(12) { u32(offset.toInt() + it * 4) }
+            val size = when (type) { 3 -> 2; 4 -> 4; else -> 8 }
+            val offset = unsigned(valueOffset, 4)
+            if (offset > data.size.toLong() - 6 * size) err("values are truncated")
+            val pairs = if (type == 5) {
+                LongArray(12) { unsigned(offset.toInt() + it * 4, 4) }
+            } else {
+                LongArray(12) { if (it % 2 == 1) 1L else unsigned(offset.toInt() + it / 2 * size, size) }
+            }
             for (i in 0..2) {
                 if (pairs[i * 4 + 1] == 0L || pairs[i * 4 + 3] == 0L) err("has a zero denominator")
                 val a = pairs[i * 4].toULong() * pairs[i * 4 + 3].toULong()

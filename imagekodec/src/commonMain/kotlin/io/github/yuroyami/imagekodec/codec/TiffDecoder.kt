@@ -17,7 +17,9 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    rows after restoring any per-tile horizontal predictor
  *  - compressions: none (1), CCITT G3-1D (2, byte-aligned rows), G3 via
  *    T4Options 1D/mixed 2D (3), G4 (4), the absorbed [CcittFax] codec, TIFF-LZW
- *    with EarlyChange (5), Deflate (8 / 32946), PackBits (32773)
+ *    with EarlyChange (5), old-style JPEG rebuilt into one stream as libtiff
+ *    does it ([TiffOldJpeg], 6), JPEG as Technical Note 2 defines it (7),
+ *    Deflate (8 / 32946), PackBits (32773)
  *  - photometric 0/1 (bilevel + gray, either polarity, optional alpha), 2 (RGB,
  *    optional associated or straight alpha via ExtraSamples), 3 (palette, 16-bit
  *    ColorMap entries), 6 (**YCbCr**, including chroma subsampling in both the
@@ -29,9 +31,8 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *  - both FillOrder values, independent of sample byte order and compression
  *  - unsigned integer samples; undefined SampleFormat follows the unsigned default
  *
- * What is left out is named at the point of failure: JPEG-in-TIFF (compression 6
- * and 7) is a container trick rather than a TIFF encoding, and floating-point
- * samples have no home in an 8-bit-per-channel bitmap.
+ * What is left out is named at the point of failure: floating-point samples have
+ * no home in an 8-bit-per-channel bitmap.
  */
 internal object TiffDecoder {
 
@@ -163,6 +164,16 @@ internal object TiffDecoder {
             }
         }
 
+        /** The raw bytes of a BYTE, ASCII or UNDEFINED field, such as JPEGTables. */
+        fun bytesOf(e: Entry): ByteArray {
+            if (e.type != 1 && e.type != 2 && e.type != 7) err("field ${e.tag} requires bytes, got type ${e.type}")
+            if (e.count < 0 || e.count > data.size) err("field ${e.tag} declares ${e.count} bytes, more than the file holds")
+            val n = e.count.toInt()
+            val base = if (n <= 4) e.valueOfs.toLong() else r.u32(e.valueOfs)
+            if (base > data.size - n) err("field ${e.tag} runs past the end of the file")
+            return data.copyOfRange(base.toInt(), base.toInt() + n)
+        }
+
         // A field with a zero count carries no value at all, so it falls back to
         // the default exactly like an absent one.
         fun single(tag: Int, default: Long? = null): Long =
@@ -198,6 +209,11 @@ internal object TiffDecoder {
         val fillOrder = optionalValues(266, "FillOrder", 3, 1)?.first()?.toInt() ?: 1
         if (fillOrder != 1 && fillOrder != 2) err("unknown FillOrder $fillOrder")
 
+        // JPEG strips and tiles (Technical Note 2). Each is a JPEG stream of its own,
+        // usually abbreviated: the tables they share sit in JPEGTables (347).
+        val jpeg = compression == 7
+        val jpegTables = if (jpeg) entries[347]?.let { bytesOf(it) } else null
+
         val bitsEntry = entries[258]?.let { values(it) }?.takeIf { it.isNotEmpty() } ?: longArrayOf(1)
         val bits = bitsEntry[0].toInt()
         if (bitsEntry.any { it != bits.toLong() }) err("heterogeneous bits per sample")
@@ -224,12 +240,56 @@ internal object TiffDecoder {
             throw UnsupportedImageException("TIFF: SampleFormat $it is not supported (unsigned integer samples only)")
         }
 
-        val references = if (photometric == 2 || photometric == 6) entries[532]?.let {
+        if (jpeg) {
+            if (bits != 8) throw UnsupportedImageException("TIFF: JPEG with $bits-bit samples is not supported (8-bit only)")
+            if (photometric == 6 && planar == 2) {
+                throw UnsupportedImageException("TIFF: JPEG YCbCr in separate planes is not supported")
+            }
+        }
+        // JPEG YCbCr leaves the JPEG decoder as RGB, upsampled and converted the way
+        // libtiff's RGB color mode has libjpeg do it, which is what ImageMagick and
+        // Pillow read; the TIFF fields about subsampling and ranges then describe
+        // nothing that is left.
+        val jpegRgb = jpeg && photometric == 6
+        val pixels = if (jpegRgb) 2 else photometric
+
+        val tiled = entries.containsKey(322)
+        val oldJpeg = if (compression == 6) {
+            if (bits != 8) throw UnsupportedImageException("TIFF: old-style JPEG with $bits-bit samples is not supported (8-bit only)")
+            if (planar == 2 && spp > 1) throw UnsupportedImageException("TIFF: old-style JPEG in separate planes is not supported")
+            if (single(512, 1) == 14L) throw UnsupportedImageException("TIFF: old-style lossless JPEG is not supported")
+            val subsampling = if (photometric == 6) optionalValues(530, "YCbCrSubSampling", 3, 2) ?: longArrayOf(2, 2) else longArrayOf(1, 1)
+            fun longs(tag: Int) = entries[tag]?.let { values(it) }
+            TiffOldJpeg.decode(data, TiffOldJpeg.Source(
+                width = width,
+                height = height,
+                tiled = tiled,
+                strileWidth = if (tiled) single(322).toInt() else width,
+                strileLength = if (tiled) single(323).toInt() else single(278, height.toLong()).coerceAtMost(height.toLong()).toInt(),
+                samples = spp,
+                ycbcr = photometric == 6,
+                tagSubH = subsampling[0].toInt(),
+                tagSubV = subsampling[1].toInt(),
+                interchangeFormat = single(513, 0),
+                interchangeFormatLength = single(514, 0),
+                restartIntervalTag = single(515, 0).toInt(),
+                qTables = longs(519),
+                dcTables = longs(520),
+                acTables = longs(521),
+                strileOffsets = longs(if (tiled) 324 else 273) ?: err("missing block offsets"),
+                strileCounts = longs(if (tiled) 325 else 279),
+            ))
+        } else null
+
+        val references = if (pixels == 2 || pixels == 6) entries[532]?.takeUnless { jpegRgb }?.let {
             TiffReferenceBlackWhite.read(data, le, it.type, it.count, it.valueOfs)
         } else null
 
-        // Chroma subsampling only exists for YCbCr; everything else is 1:1.
-        val subSampling = if (photometric == 6) {
+        // Chroma subsampling only exists for YCbCr; everything else is 1:1. An old-style JPEG
+        // stream says what it really has, which libtiff trusts over the tag.
+        val subSampling = if (oldJpeg != null) {
+            longArrayOf(oldJpeg.subH.toLong(), oldJpeg.subV.toLong())
+        } else if (pixels == 6) {
             optionalValues(530, "YCbCrSubSampling", 3, 2) ?: longArrayOf(2, 2)
         } else {
             longArrayOf(1, 1)
@@ -245,13 +305,12 @@ internal object TiffDecoder {
         }
 
         // --- geometry: strips or tiles, one plane or several ---------------------
-        val tiled = entries.containsKey(322)
         val planes = if (planar == 2) spp else 1
         val samplesPerPlane = if (planar == 2) 1 else spp
 
         // A subsampled YCbCr row group stores h×v luma plus one of each chroma per
         // unit, so its "row" is a group of `subV` image rows.
-        val ycbcrUnits = photometric == 6 && planar == 1 && (subH > 1 || subV > 1)
+        val ycbcrUnits = pixels == 6 && planar == 1 && (subH > 1 || subV > 1)
         val unitsAcross = (width + subH - 1) / subH
         val unitBytes = subH * subV + 2
 
@@ -284,7 +343,7 @@ internal object TiffDecoder {
         val countsTag = if (tiled) 325 else 279
         val offsets = entries[offsetsTag]?.let { values(it) } ?: err("missing block offsets")
         val counts = entries[countsTag]?.let { values(it) }
-            ?: if (compression == 1) LongArray(offsets.size) { Long.MAX_VALUE } else err("missing block byte counts")
+            ?: if (compression == 1 || oldJpeg != null) LongArray(offsets.size) { Long.MAX_VALUE } else err("missing block byte counts")
         if (offsets.size != counts.size) err("block offset/count mismatch")
 
         // Reject missing/out-of-range blocks before reserving the sample plane.
@@ -295,7 +354,8 @@ internal object TiffDecoder {
         } else ((planeRows + rowsPerStrip - 1) / rowsPerStrip).toLong()
         val requiredBlocks = blocksPerPlane * planes
         if (requiredBlocks > offsets.size) err("need $requiredBlocks blocks, only ${offsets.size} declared")
-        for (index in 0 until requiredBlocks.toInt()) {
+        // An old-style JPEG reads its blocks as libtiff does, skipping an empty or missing one.
+        if (oldJpeg == null) for (index in 0 until requiredBlocks.toInt()) {
             if (offsets[index] < 0 || offsets[index] >= data.size) err("block $index offset out of range")
             if (compression != 1 && counts[index] == 0L) err("block $index is empty")
         }
@@ -312,6 +372,8 @@ internal object TiffDecoder {
                 return normalizeFillOrder(data.copyOfRange(ofs, ofs + expect), fillOrder)
             }
             val len = minOf(counts[index], (data.size - ofs).toLong()).toInt()
+            // libtiff never reverses the bits of a JPEG stream, whatever FillOrder says.
+            if (jpeg) return jpegBlock(index, data.copyOfRange(ofs, ofs + len), jpegTables, rows, columns, samplesPerPlane, jpegRgb)
             val comp = normalizeFillOrder(data.copyOfRange(ofs, ofs + len), fillOrder)
             fun fax(k: Int, byteAligned: Boolean, endOfLine: Boolean = false): ByteArray {
                 if (bits != 1 || spp != 1) err("CCITT requires one bilevel sample")
@@ -340,7 +402,8 @@ internal object TiffDecoder {
         // TIFF 6.0 sections 14/15: prediction starts anew at each tile row,
         // including padding, before that row is joined to its neighbours.
         fun restorePredictor(buffer: ByteArray, rowBytes: Int, rows: Int) {
-            if (predictor == 1) return
+            // A predictor belongs to the lossless codecs; libtiff's JPEG codec never sets one up.
+            if (predictor == 1 || jpeg) return
             if (predictor != 2) throw UnsupportedImageException("TIFF: predictor $predictor is not supported")
             val stride = samplesPerPlane
             for (y in 0 until rows) {
@@ -365,7 +428,9 @@ internal object TiffDecoder {
             }
         }
 
-        if (tiled) {
+        if (oldJpeg != null) {
+            blocks.add(oldJpegSamples(oldJpeg, width, height, spp, planeRowBytes, planeRows, ycbcrUnits, unitsAcross, unitBytes))
+        } else if (tiled) {
             val across = (width + tileWidth - 1) / tileWidth
             val down = (height + tileLength - 1) / tileLength
             // Tiles are always padded to their full size, even at the right and
@@ -453,7 +518,7 @@ internal object TiffDecoder {
 
         // --- to ARGB ------------------------------------------------------------
         val argb = IntArray(width * height)
-        when (photometric) {
+        when (pixels) {
             0, 1 -> {
                 val invert = photometric == 0    // WhiteIsZero
                 for (y in 0 until height) for (x in 0 until width) {
@@ -530,11 +595,124 @@ internal object TiffDecoder {
                     } else ycbcrToArgb(yy, cb, cr)
                 }
             }
-            else -> throw UnsupportedImageException("TIFF: photometric $photometric is not supported")
+            else -> throw UnsupportedImageException("TIFF: photometric $pixels is not supported")
         }
 
         return KiteBitmap(width, height, argb)
     }
+
+    /**
+     * JPEG block [index]: the shared [tables] with their EOI removed, then the block's
+     * own stream with its SOI removed, as Technical Note 2 lays them out and libtiff
+     * feeds them to libjpeg. The block must code [columns] by [rows] pixels of
+     * [samples] components; a last strip coded at the full strip height is cut to its
+     * rows, as libtiff allows. With [ycbcr] the components convert to RGB.
+     */
+    private fun jpegBlock(
+        index: Int,
+        block: ByteArray,
+        tables: ByteArray?,
+        rows: Int,
+        columns: Int,
+        samples: Int,
+        ycbcr: Boolean,
+    ): ByteArray {
+        val stream = if (tables == null) block else {
+            val head = if (tables.size >= 4 && marker(tables, tables.size - 2) == 0xD9) tables.size - 2 else tables.size
+            val skip = if (block.size >= 2 && marker(block, 0) == 0xD8) 2 else 0
+            tables.copyOf(head) + block.copyOfRange(skip, block.size)
+        }
+        val decoded = try {
+            JpegDecoder.decodeComponents(stream)
+        } catch (e: UnsupportedImageException) {
+            throw UnsupportedImageException("TIFF: JPEG block $index: ${e.message}", e)
+        } catch (e: ImageDecodeException) {
+            throw ImageDecodeException("TIFF: JPEG block $index: ${e.message}", e)
+        }
+        val c = decoded.components
+        if (c.width != columns || c.height < rows) {
+            err("JPEG block $index codes ${c.width}x${c.height} pixels for a ${columns}x$rows block")
+        }
+        if (c.componentCount != samples) {
+            err("JPEG block $index has ${c.componentCount} components for $samples samples")
+        }
+        val out = ByteArray(columns * rows * samples)
+        if (ycbcr) {
+            val rgb = JpegDecoder.toBitmap(c, JpegDecoder.ColorModel.YCBCR).argb
+            for (i in 0 until columns * rows) {
+                val p = rgb[i]
+                out[i * 3] = (p ushr 16).toByte()
+                out[i * 3 + 1] = (p ushr 8).toByte()
+                out[i * 3 + 2] = p.toByte()
+            }
+        } else {
+            c.samples.copyInto(out, 0, 0, out.size)
+        }
+        return out
+    }
+
+    /**
+     * The samples of an old-style JPEG image laid out as an uncompressed TIFF holds them:
+     * YCbCr units of [unitBytes] when the chroma is subsampled, else [samples] a pixel.
+     */
+    private fun oldJpegSamples(
+        image: TiffOldJpeg.Image,
+        width: Int,
+        height: Int,
+        samples: Int,
+        planeRowBytes: Int,
+        planeRows: Int,
+        units: Boolean,
+        unitsAcross: Int,
+        unitBytes: Int,
+    ): ByteArray {
+        val out = ByteArray(planeRowBytes * planeRows)
+        val upsampled = image.upsampled
+        if (upsampled != null) {
+            if (upsampled.componentCount != samples || upsampled.width < width || upsampled.height < height) {
+                err("old-style JPEG frame does not cover the ${width}x$height image")
+            }
+            val stride = upsampled.width * samples
+            for (y in 0 until height) {
+                upsampled.samples.copyInto(out, y * planeRowBytes, y * stride, y * stride + width * samples)
+            }
+            return out
+        }
+        val planes = image.planes!!.planes
+        if (planes.size != samples) err("old-style JPEG has ${planes.size} components for $samples samples")
+        // Every plane must hold what the layout reads from it; a frame whose sampling
+        // disagrees with the TIFF fields is damaged.
+        fun covers(plane: JpegDecoder.Plane, across: Int, down: Int) =
+            plane.stride >= across && plane.samples.size / plane.stride >= down
+        if (units) {
+            val subH = image.subH
+            val subV = image.subV
+            val (luma, cb, cr) = planes
+            if (!covers(luma, unitsAcross * subH, planeRows * subV) || !covers(cb, unitsAcross, planeRows) ||
+                !covers(cr, unitsAcross, planeRows)
+            ) {
+                err("old-style JPEG planes do not cover the ${width}x$height image")
+            }
+            for (uy in 0 until planeRows) for (ux in 0 until unitsAcross) {
+                val base = uy * planeRowBytes + ux * unitBytes
+                for (j in 0 until subV) {
+                    val row = (uy * subV + j) * luma.stride + ux * subH
+                    for (i in 0 until subH) out[base + j * subH + i] = luma.samples[row + i]
+                }
+                out[base + subH * subV] = cb.samples[uy * cb.stride + ux]
+                out[base + subH * subV + 1] = cr.samples[uy * cr.stride + ux]
+            }
+        } else {
+            if (planes.any { !covers(it, width, height) }) err("old-style JPEG planes do not cover the ${width}x$height image")
+            for (y in 0 until height) for (x in 0 until width) for (c in 0 until samples) {
+                out[y * planeRowBytes + x * samples + c] = planes[c].samples[y * planes[c].stride + x]
+            }
+        }
+        return out
+    }
+
+    private fun marker(d: ByteArray, at: Int): Int =
+        if ((d[at].toInt() and 0xFF) == 0xFF) d[at + 1].toInt() and 0xFF else -1
 
     private fun normalizeFillOrder(buffer: ByteArray, fillOrder: Int): ByteArray {
         // Like libtiff's TIFFFillStrip/Tile, reverse stored bytes before the codec:
