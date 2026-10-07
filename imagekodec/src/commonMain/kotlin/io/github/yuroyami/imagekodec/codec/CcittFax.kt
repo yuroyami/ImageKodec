@@ -567,12 +567,13 @@ private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): Int
     var a0 = -1
     var a0Color = 0  // 0 = white (the color of the imaginary element before column 0)
     var safetyHops = 0
+    val changes = ReferenceChanges(refLine)
 
     while (a0 < cols) {
         if (safetyHops++ > cols * 4) return null  // pathological; bail
 
-        val b1 = findB1(refLine, a0, a0Color)
-        val b2 = findNextChange(refLine, b1)
+        val b1 = changes.b1(a0, a0Color)
+        val b2 = changes.b2(a0Color)
 
         val mode = CcittFaxTables.twoDimensional.decode(reader)
         when (mode) {
@@ -606,7 +607,10 @@ private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): Int
                     CcittFaxTables.MODE_VL2 -> -2
                     else -> -3
                 }
-                val a1 = (b1 + offset).coerceIn(0, cols)
+                val a1 = b1 + offset
+                if (a1 < maxOf(a0, 0) || a1 > cols) {
+                    throw ImageDecodeException("CCITT: vertical code moves outside the remaining row")
+                }
                 fillRange(coding, maxOf(a0, 0), a1, a0Color)
                 a0 = a1
                 a0Color = 1 - a0Color
@@ -621,6 +625,24 @@ private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): Int
         }
     }
     return coding
+}
+
+/** Each color reuses its next reference run while the coding position advances. */
+private class ReferenceChanges(private val line: IntArray) {
+    private val first = intArrayOf(-1, -1)
+    private val second = intArrayOf(-1, -1)
+    fun b1(a0: Int, color: Int): Int {
+        // T.6 advances a0 monotonically; vertical destinations are checked
+        // before becoming a0, so each cached run is scanned a bounded number
+        // of times even on a hostile stream.
+        if (first[color] <= a0) {
+            first[color] = findB1(line, a0, color)
+            second[color] = findNextChange(line, first[color])
+        }
+        return first[color]
+    }
+
+    fun b2(color: Int): Int = second[color]
 }
 
 private fun findB1(refLine: IntArray, a0: Int, a0Color: Int): Int {

@@ -40,6 +40,8 @@ TIFF alpha follows TIFF 6.0 section 18 and the straight-ARGB bitmap contract. Th
 
 TIFF ReferenceBlackWhite follows TIFF 6.0 sections 20/21. The review consulted libtiff's [tif_color.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_color.c) under the same permissive Sam Leffler / Silicon Graphics license; no source is vendored. Unsigned RATIONAL expansion uses bounded 128-bit integers with 16 fractional bits and exact CCIR 601-1 matrix fractions. `TiffReferenceOracleTest` checks libtiff and ImageIO channel codes, and independently checks wide arithmetic and full-domain range expansion against JVM BigInteger and exact rational color conversion.
 
+CCITT Group 4 reference-run caching was reviewed against libtiff's [tif_fax3.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_fax3.c), under its permissive Sam Leffler / Silicon Graphics license; no source is vendored. The implementation keeps separate next-change pairs for each coding color with constant extra storage. `CcittReferenceTest` checks hand-built horizontal, vertical and pass modes; `CcittReferenceOracleTest` compares varied ImageIO-written Group 4 pages with libtiff.
+
 ## Adapted code from the Kite libraries
 
 | Implementation | Origin and format reference | Code license |
