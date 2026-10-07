@@ -151,13 +151,13 @@ class Jp2DecoderTest {
     }
 
     /** [codestream], with a [marker] segment spliced in ahead of the first tile-part. */
-    private fun withMainHeaderMarker(marker: Int): ByteArray {
+    private fun withMainHeaderMarker(marker: Int, payload: ByteArray): ByteArray {
         val cs = codestream()
         val sot = indexOfMarker(cs, 0xFF90)
         val segment = byteArrayOf(
             ((marker shr 8) and 0xFF).toByte(), (marker and 0xFF).toByte(),
-            0x00, 0x04, 0x00, 0x00,                  // length 4, two bytes of payload
-        )
+            0x00, (payload.size + 2).toByte(),
+        ) + payload
         return cs.copyOfRange(0, sot) + segment + cs.copyOfRange(sot, cs.size)
     }
 
@@ -212,34 +212,33 @@ class Jp2DecoderTest {
     }
 
     /**
-     * The main-header features the JPX decoder gives up on have to be visible to
-     * a header read, or `probe` promises pixels `decode` will not produce.
+     * RGN and POC segments that change nothing, a zero shift and one change to the COD's own
+     * order over everything, probe decodable and decode to the same pixels (#5); every
+     * component up to 256 is CEpoc 0.
      */
     @Test
-    fun probeNamesTheMainHeaderFeaturesTheDecoderDeclines() {
-        val cases = listOf(
-            0xFF5E to "region of interest",
-            0xFF5F to "progression order change",
-            0xFF60 to "packed packet headers",
-        )
-        for ((marker, label) in cases) {
-            val spliced = withMainHeaderMarker(marker)
+    fun featureSegmentsThatChangeNothingDecodeTheSame() {
+        val plain = ImageKodec.decode(codestream()).argb
+        for ((marker, payload) in listOf(
+            0xFF5E to byteArrayOf(1, 0, 0),
+            0xFF5F to byteArrayOf(0, 0, 0xFF.toByte(), 0xFF.toByte(), 33, 0, 0),
+        )) {
+            val spliced = withMainHeaderMarker(marker, payload)
             val info = ImageKodec.probe(spliced)
-            assertFalse(info.isDecodable, "$label should probe undecodable")
-            assertNotNull(info.unsupportedReason, "$label reason")
-            assertFailsWith<ImageDecodeException>(label) { ImageKodec.decode(spliced) }
+            assertTrue(info.isDecodable, "reason: ${info.unsupportedReason}")
+            assertTrue(plain.contentEquals(ImageKodec.decode(spliced).argb), "marker ${marker.toString(16)}")
         }
     }
 
     @Test
-    fun probeRejectsANonBaselineCodeBlockStyle() {
+    fun probeRejectsHighThroughputCodeBlocks() {
         val cs = codestream()
         // COD: marker(2) Lcod(2) Scod SGcod(4), then the SPcod code-block style byte.
         val patched = cs.copyOf()
-        patched[indexOfMarker(cs, 0xFF52) + 12] = 0x01   // selective arithmetic bypass
+        patched[indexOfMarker(cs, 0xFF52) + 12] = 0x40   // HTJ2K, Part 15
         val info = ImageKodec.probe(patched)
         assertFalse(info.isDecodable)
-        assertTrue(info.unsupportedReason!!.contains("code-block"), info.unsupportedReason)
-        assertFailsWith<ImageDecodeException> { ImageKodec.decode(patched) }
+        assertTrue(info.unsupportedReason!!.contains("high-throughput"), info.unsupportedReason)
+        assertFailsWith<UnsupportedImageException> { ImageKodec.decode(patched) }
     }
 }

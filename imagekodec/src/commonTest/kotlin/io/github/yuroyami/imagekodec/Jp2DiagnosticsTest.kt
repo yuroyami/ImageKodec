@@ -70,15 +70,21 @@ class Jp2DiagnosticsTest {
     }
 
     @Test
-    fun unsupportedMarkersKeepTypedFeatureNames() {
-        for ((value, name) in listOf(0xff5e to "region of interest", 0xff5f to "progression order change",
-            0xff60 to "packed packet headers", 0xff61 to "packed packet headers")) {
-            val cs = stream(); val at = marker(cs, 0xff90)
-            val segment = byteArrayOf((value ushr 8).toByte(), value.toByte(), 0, 4, 0, 0)
-            val ex = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(cs.copyOfRange(0, at) + segment + cs.copyOfRange(at, cs.size)) }
-            assertTrue(ex.message.orEmpty().contains(name), ex.message)
-            assertTrue(ex.message.orEmpty().contains("byte"), ex.message)
+    fun damagedFeatureSegmentsNameTheirField() {
+        error(withSegment(0xff5e, byteArrayOf(0, 1, 4)), "RGN", "ROI style 1", "byte")
+        error(withSegment(0xff5e, byteArrayOf(0, 0)), "RGN", "cut off")
+        error(withSegment(0xff5f, byteArrayOf(0, 0, 0, 1, 1, 3)), "POC", "whole number of entries", "byte")
+        error(withSegment(0xff5f, byteArrayOf(0, 0, 0, 1, 1, 3, 5)), "POC", "progression order 5")
+        error(withSegment(0xff61, byteArrayOf(0)), "PPT", "main header")
+        val twice = withSegment(0xff60, byteArrayOf(0, 1, 2)).let { cs ->
+            val at = marker(cs, 0xff90)
+            cs.copyOfRange(0, at) + byteArrayOf(0xff.toByte(), 0x60, 0, 3, 0) + cs.copyOfRange(at, cs.size)
         }
+        error(twice, "PPM", "repeats index 0")
+        // Past OpenJPEG's limit of progression order changes: typed as unsupported, not damaged.
+        val many = withSegment(0xff5f, ByteArray(7 * 33) { if (it % 7 == 3) 1 else 0 })
+        val ex = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(many) }
+        assertTrue(ex.message.orEmpty().contains("more than 32"), ex.message)
     }
 
     @Test
@@ -87,7 +93,7 @@ class Jp2DiagnosticsTest {
         error(data.copyOf().also { it[cod + 9] = 33 }, "COD", "decomposition", "33")
         error(data.copyOf().also { it[cod + 6] = 0; it[cod + 7] = 0 }, "COD", "layers", "0")
         error(data.copyOf().also { it[cod + 10] = 10 }, "COD", "code-block")
-        val style = data.copyOf().also { it[cod + 12] = 1 }
+        val style = data.copyOf().also { it[cod + 12] = 0x40 }
         val ex = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(style) }
         assertTrue(ex.message.orEmpty().startsWith(assertNotNull(ImageKodec.probe(style).unsupportedReason)), ex.message)
     }

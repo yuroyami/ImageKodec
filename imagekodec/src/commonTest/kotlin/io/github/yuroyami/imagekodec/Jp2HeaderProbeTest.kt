@@ -70,15 +70,21 @@ class Jp2HeaderProbeTest {
     }
 
     @Test
-    fun tileCodingParametersAndUnsupportedMarkersAgree() {
+    fun tileCodingParametersAndFeatureSegmentsAgree() {
         for ((offset, value, field) in listOf(Triple(1, 5, "progression"),
-            Triple(5, 33, "decomposition"), Triple(8, 1, "code-block"))) {
+            Triple(5, 33, "decomposition"), Triple(8, 0x40, "high-throughput"))) {
             refused(withHeader(0xff52, payload(0xff52).also { it[offset] = value.toByte() }, true), field)
         }
-        for ((value, field) in listOf(0xff5e to "region of interest", 0xff5f to "progression order change",
-            0xff60 to "packed packet headers", 0xff61 to "packed packet headers")) {
-            refused(withHeader(value, byteArrayOf(0, 0), true), field)
+        // RGN, POC, PPM and PPT decode (#5), so only damaged ones are refused, the same way in both header scopes.
+        for (tile in listOf(false, true)) {
+            refused(withHeader(0xff5e, byteArrayOf(0, 1, 4), tile), "ROI style 1")
+            refused(withHeader(0xff5e, byteArrayOf(7, 0, 4), tile), "component index 7")
+            refused(withHeader(0xff5f, byteArrayOf(0, 0, 0, 1, 1, 3), tile), "whole number of entries")
+            refused(withHeader(0xff5f, byteArrayOf(0, 0, 0, 1, 1, 3, 9), tile), "progression order 9")
+            refused(withHeader(0xff5f, ByteArray(7 * 33) { if (it % 7 == 3) 1 else 0 }, tile), "more than 32")
         }
+        refused(withHeader(0xff60, byteArrayOf(0), true), "PPM in a tile-part header")
+        refused(withHeader(0xff61, byteArrayOf(0), false), "PPT in the main header")
     }
 
     @Test
@@ -87,7 +93,7 @@ class Jp2HeaderProbeTest {
         val coc = byteArrayOf(0, (cod[0].toInt() and 1).toByte()) + cod.copyOfRange(5, cod.size)
         for (tile in listOf(false, true)) {
             for ((offset, value, field) in listOf(Triple(1, 2, "Scoc"), Triple(2, 33, "decomposition"),
-                Triple(3, 0x14, "code-block"), Triple(5, 1, "code-block"), Triple(6, 2, "wavelet transform"))) {
+                Triple(3, 0x14, "code-block"), Triple(5, 0x80, "high-throughput"), Triple(6, 2, "wavelet transform"))) {
                 refused(withHeader(0xff53, coc.copyOf().also { it[offset] = value.toByte() }, tile), field)
             }
         }
@@ -128,17 +134,17 @@ class Jp2HeaderProbeTest {
     fun laterTilePartHeadersAreInspected() {
         val cs = stream(); val eoc = marker(cs, 0xffd9); val sot = marker(cs, 0xff90)
         cs[sot + 11] = 2
-        val cod = segment(0xff52, payload(0xff52).also { it[8] = 1 })
+        val cod = segment(0xff52, payload(0xff52).also { it[8] = 0x40 })
         val part = byteArrayOf(0xff.toByte(), 0x90.toByte(), 0, 10, 0, 0, 0, 0, 0, 0, 1, 2) + cod +
             byteArrayOf(0xff.toByte(), 0x93.toByte())
         put32(part, 6, part.size)
-        refused(cs.copyOfRange(0, eoc) + part + cs.copyOfRange(eoc, cs.size), "code-block")
+        refused(cs.copyOfRange(0, eoc) + part + cs.copyOfRange(eoc, cs.size), "high-throughput")
     }
 
     @Test
     fun packetBytesAreSkippedInsteadOfInterpretedAsMarkers() {
         val cs = stream(); val sot = marker(cs, 0xff90); val eoc = marker(cs, 0xffd9)
-        val fakeHeader = segment(0xff52, payload(0xff52).also { it[8] = 1 })
+        val fakeHeader = segment(0xff52, payload(0xff52).also { it[8] = 0x40 })
         val psot = (0..3).fold(0) { n, i -> (n shl 8) or (cs[sot + 6 + i].toInt() and 255) }
         put32(cs, sot + 6, psot + fakeHeader.size)
         val modified = cs.copyOfRange(0, eoc) + fakeHeader + cs.copyOfRange(eoc, cs.size)
@@ -149,7 +155,7 @@ class Jp2HeaderProbeTest {
     @Test
     fun aShortSegmentDoesNotBorrowAnUnsupportedStyleFromOutsideItsBounds() {
         val cs = stream(); val at = marker(cs, 0xff52)
-        cs[at + 3] = 2; cs[at + 12] = 1
+        cs[at + 3] = 2; cs[at + 12] = 0x40
         assertTrue(ImageKodec.probe(cs).isDecodable)
         val ex = assertFailsWith<ImageDecodeException> { ImageKodec.decode(cs) }
         assertTrue(ex.message.orEmpty().contains("COD header cut off"), ex.message)

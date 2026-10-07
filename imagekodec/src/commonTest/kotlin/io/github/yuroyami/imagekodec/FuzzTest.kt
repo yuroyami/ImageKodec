@@ -141,6 +141,12 @@ class FuzzTest {
         "jp2-palette" to Jp2ColorFixtures.palette,
         "jp2-cmyk" to Jp2ColorFixtures.cmyk,
         "jp2-premultiplied" to Jp2ColorFixtures.premultiplied,
+        // Every Part 1 code-block style, an ROI shift, POC with PPT, and PPM over interleaved tile-parts (#5).
+        "jp2-styles" to Jp2FeatureFixtures.styles,
+        "jp2-bypass-vsc" to Jp2FeatureFixtures.bypassVsc,
+        "jp2-roi" to Jp2FeatureFixtures.roi,
+        "jp2-poc-ppt" to Jp2FeatureFixtures.pocPpt,
+        "jp2-ppm" to Jp2FeatureFixtures.ppm,
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(

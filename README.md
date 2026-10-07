@@ -142,7 +142,7 @@ at a lower resolution than brightness.
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
 | TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
-| JPEG 2000 | JP2 container and raw J2K codestream, part 1 baseline |
+| JPEG 2000 | JP2 container and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN) |
 
 A TIFF can hold any number of pages. `decode` returns the first,
 `probe(bytes).pageCount` says how many there are, and `decodePage` and
@@ -418,9 +418,10 @@ web project that runs under Node should not use them.
   no streaming or partial-decode API. `decodeScaled`, `decodeDownscaledTo` and
   `decodeReduced` shrink a JPEG or a JPEG 2000 image inside the decoder, and
   `scaled` works after a full-size decode.
-- **JPEG 2000 refusals name their cause.** Unsupported RGN, POC, PPM/PPT and
-  non-baseline code-block styles throw `UnsupportedImageException`; files with
-  more than 1000 layers are also refused. Malformed
+- **JPEG 2000 refusals name their cause.** The high-throughput block coder of
+  Part 15 (HTJ2K) throws `UnsupportedImageException`, and so do files with more
+  than 1000 layers or more than 32 progression order changes in one header,
+  OpenJPEG's limit. Malformed
   headers name the marker, field and byte position. The public nullable
   `JpxDecoder.decode` overloads still return null on failure; `probe` names
   unsupported features in main and tile-part headers.

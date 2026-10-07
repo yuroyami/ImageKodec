@@ -581,6 +581,10 @@ internal object ImageProbe {
         val r = Jp2Headers.Reader(data, sizEnd, stream.end, stream.start)
         var mainCod: Jp2Headers.Coding? = null
         val tileCod = HashMap<Int, Jp2Headers.Coding>()
+        var mainPoc = emptyList<Jp2Headers.Poc>()
+        val tilePoc = HashMap<Int, List<Jp2Headers.Poc>>()
+        val ppm = HashSet<Int>()
+        val ppt = HashMap<Int, HashSet<Int>>()
         var inTile = -1
         var tileEnd = stream.end.toLong()
         try {
@@ -602,7 +606,6 @@ internal object ImageProbe {
                 val segmentEnd = r.pos.toLong() + len - 2
                 if (segmentEnd > stream.end || (inTile >= 0 && segmentEnd > tileEnd)) return null
                 r.end = segmentEnd.toInt()
-                Jp2Headers.unsupportedMarker(marker)?.let { r.unsupported(it) }
                 when (marker) {
                     0xFF52 -> {
                         val cod = Jp2Headers.readCod(r)
@@ -617,6 +620,15 @@ internal object ImageProbe {
                     0xFF5D -> {
                         Jp2Headers.component(r, comps)
                         Jp2Headers.readQuant(r, r.end)
+                    }
+                    0xFF5E -> Jp2Headers.readRgn(r, comps)
+                    0xFF5F -> {
+                        if (inTile >= 0) tilePoc[inTile] = Jp2Headers.readPoc(r, comps, tilePoc[inTile].orEmpty())
+                        else mainPoc = Jp2Headers.readPoc(r, comps, mainPoc)
+                    }
+                    0xFF60, 0xFF61 -> {
+                        val seen = if (inTile >= 0) ppt.getOrPut(inTile) { HashSet() } else ppm
+                        seen += Jp2Headers.readPacked(r, marker, inTile >= 0, ppm.isNotEmpty(), seen)
                     }
                     0xFF90 -> {
                         if (inTile >= 0 || len != 10) return null

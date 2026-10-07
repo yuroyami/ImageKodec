@@ -14,6 +14,19 @@ reviewable in the diff.
 
 ### Added
 
+- JPEG 2000 decodes all of Part 1. Every code-block style: the arithmetic coding
+  bypass with its raw passes, context reset, termination on each pass,
+  vertically causal contexts and segmentation symbols, alone or together, each
+  codeword segment its own decoder run as T.800 Annex D lays them out; progression
+  order changes, a packet read where the first change reaches it and a tile's
+  changes replacing the main header's as A.6.6 orders them; packet headers packed
+  into PPM or PPT segments, a PPM chunk going to the tile-part it belongs to even
+  when tiles take turns; and RGN regions of interest by the Maxshift method. Every
+  style and mix of them, ROI shifts and POC orders match opj_decompress sample for
+  sample on lossless files, and PPM and PPT files rebuilt from OpenJPEG's SOP and
+  EPH codestreams decode as the codestream they came from. Only the high-throughput
+  coder of Part 15 is still refused, by name (#5).
+
 - `ImageInfo.colorProfile` reports what a file declares about its color space,
   as `probe` reads it from the header area: the embedded ICC profile byte for
   byte (PNG `iCCP`, JPEG `APP2` segments joined in sequence order, TIFF tag

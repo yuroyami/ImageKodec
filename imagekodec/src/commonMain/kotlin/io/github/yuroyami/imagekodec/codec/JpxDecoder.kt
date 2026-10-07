@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec.codec
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Reader as R
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Coding as Cod
+import io.github.yuroyami.imagekodec.codec.Jp2Headers.Poc
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Quant
 import kotlin.math.max
 import kotlin.math.min
@@ -10,20 +11,21 @@ import kotlin.math.roundToLong
 
 /**
  * A pure-Kotlin JPEG 2000 decoder (ITU-T T.800), taking either JP2 container
- * boxes or a raw codestream, part 1 baseline. Produces an 8-bpc Gray or RGB
+ * boxes or a raw codestream, all of Part 1. Produces an 8-bpc Gray or RGB
  * raster plus an optional alpha plane from a `cdef` opacity channel.
  *
  * Handled: SIZ/COD/QCD with COC/QCC overrides, multiple tiles and tile-parts,
- * LRCP/RLCP/RPCL/PCRL/CPRL progressions, general precincts, tag trees,
- * multi-layer tier-2 packet headers (with SOP/EPH), EBCOT tier-1 at the baseline
- * code-block style, reversible 5/3 and irreversible 9/7 inverse DWT, RCT and ICT
- * multiple-component transforms, DC level shift, component subsampling by
- * nearest upsample, and bit depths up to 16.
+ * LRCP/RLCP/RPCL/PCRL/CPRL progressions and POC progression order changes, general
+ * precincts, tag trees, multi-layer tier-2 packet headers (with SOP/EPH), in the
+ * bitstream or packed into PPM or PPT segments, EBCOT tier-1 with every Part 1
+ * code-block style (selective arithmetic coding bypass, context reset, termination
+ * on each pass, vertically causal contexts, segmentation symbols), RGN regions of
+ * interest by the Maxshift method, reversible 5/3 and irreversible 9/7 inverse DWT,
+ * RCT and ICT multiple-component transforms, DC level shift, component subsampling
+ * by nearest upsample, and bit depths up to 16.
  *
- * Not handled, each of which makes [decode] return null: RGN regions of
- * interest, POC progression changes, PPM/PPT packed headers, and non-baseline
- * code-block styles (bypass, reset, termall, vsc, segsym). `ImageKodec.probe`
- * names them in main and tile-part headers, so a caller can find out without
+ * Not handled: the high-throughput block coder of Part 15 (HTJ2K), and the Part 2
+ * extensions. `ImageKodec.probe` names them, so a caller can find out without
  * attempting a decode.
  */
 public object JpxDecoder {
@@ -216,13 +218,49 @@ public object JpxDecoder {
 
     // ---- code-block / precinct / band model -----------------------------------
 
+    /**
+     * One codeword segment of a code-block (T.800 D.4.1): the passes that one run of the MQ
+     * coder, or of the raw bits of the bypass mode, codes, and the bytes of every layer that
+     * added to it.
+     */
+    private class Segment(val maxPasses: Int) {
+        var passes = 0
+        val chunks = ArrayList<ByteArray>()
+
+        fun bytes(): ByteArray {
+            if (chunks.size == 1) return chunks[0]
+            val out = ByteArray(chunks.sumOf { it.size })
+            var o = 0
+            for (c in chunks) { c.copyInto(out, o); o += c.size }
+            return out
+        }
+    }
+
     private class CodeBlock(val x0: Int, val y0: Int, val x1: Int, val y1: Int) {
         var included = false
         var zeroBitplanes = 0
         var lBlock = 3
-        var passes = 0
-        val data = ArrayList<ByteArray>()
-        var newPasses = 0
+        val segments = ArrayList<Segment>()
+
+        /**
+         * Opens the next segment with as many passes as [style] lets it hold, as OpenJPEG's
+         * `opj_t2_init_seg` sizes it: one with termination on each pass; with the bypass, the
+         * ten passes of the first four bitplanes, then the two raw passes and the one MQ pass
+         * of each later plane in turn; otherwise all of them.
+         */
+        fun newSegment(style: Int): Segment {
+            val previous = segments.lastOrNull()?.maxPasses
+            val max = when {
+                style and Jp2Headers.STYLE_TERMALL != 0 -> 1
+                style and Jp2Headers.STYLE_BYPASS != 0 -> when (previous) {
+                    null -> 10
+                    1, 10 -> 2
+                    else -> 1
+                }
+                else -> MAX_SEGMENT_PASSES
+            }
+            return Segment(max).also { segments += it }
+        }
     }
 
     private class Precinct(val cbW: Int, val cbH: Int, val blocks: List<CodeBlock?>) {
@@ -253,6 +291,8 @@ public object JpxDecoder {
         val x0: Int, val y0: Int, val x1: Int, val y1: Int,
         val cod: Cod,
         val resolutions: List<Resolution>,
+        /** The RGN segment's Maxshift for this component and tile, 0 without one. */
+        val roiShift: Int,
     )
 
     // ---- main decode -----------------------------------------------------------
@@ -274,6 +314,14 @@ public object JpxDecoder {
         val tileCoc = HashMap<Int, HashMap<Int, Cod>>()
         val tileQcd = HashMap<Int, Quant>()
         val tileQcc = HashMap<Int, HashMap<Int, Quant>>()
+        val mainRoi = HashMap<Int, Int>()
+        val tileRoi = HashMap<Int, HashMap<Int, Int>>()
+        var mainPoc: List<Poc>? = null
+        val tilePoc = HashMap<Int, List<Poc>>()
+        val ppm = HashMap<Int, ByteArray>()
+        val ppt = HashMap<Int, HashMap<Int, ByteArray>>()
+        // The tile of each tile-part in codestream order, which PPM's chunks follow.
+        val partTiles = ArrayList<Int>()
 
         var inTile = -1
         var tileEnd = 0L
@@ -303,7 +351,6 @@ public object JpxDecoder {
             // OpenJPEG bounds each marker reader by its payload length. A short
             // header must not read plausible fields from the following marker.
             r.end = segmentEnd.toInt()
-            Jp2Headers.unsupportedMarker(marker)?.let { r.unsupported(it) }
             when (marker) {
                 0xFF51 -> {
                     r.u16()
@@ -347,6 +394,21 @@ public object JpxDecoder {
                     val q = Jp2Headers.readQuant(r, r.end)
                     if (inTile >= 0) tileQcc.getOrPut(inTile) { HashMap() }[c] = q else mainQcc[c] = q
                 }
+                0xFF5E -> {
+                    val (c, shift) = Jp2Headers.readRgn(r, siz?.comps ?: r.fail("before SIZ"))
+                    if (inTile >= 0) tileRoi.getOrPut(inTile) { HashMap() }[c] = shift else mainRoi[c] = shift
+                }
+                0xFF5F -> {
+                    val nComps = siz?.comps ?: r.fail("before SIZ")
+                    // A tile's changes, over all its tile-parts, replace the main header's (A.6.6).
+                    if (inTile >= 0) tilePoc[inTile] = Jp2Headers.readPoc(r, nComps, tilePoc[inTile].orEmpty())
+                    else mainPoc = Jp2Headers.readPoc(r, nComps, mainPoc.orEmpty())
+                }
+                0xFF60, 0xFF61 -> {
+                    val tilePpt = if (inTile >= 0) ppt.getOrPut(inTile) { HashMap() } else null
+                    val z = Jp2Headers.readPacked(r, marker, inTile >= 0, ppm.isNotEmpty(), (tilePpt ?: ppm).keys)
+                    (tilePpt ?: ppm)[z] = cs.copyOfRange(r.pos, r.end)
+                }
                 0xFF90 -> {
                     if (inTile >= 0) r.fail("missing SOD before the next SOT")
                     if (len != 10) r.fail("invalid segment length $len (expected 10)")
@@ -358,6 +420,7 @@ public object JpxDecoder {
                     inTile = isot
                     tileEnd = if (psot == 0L) cs.size.toLong() else markerAt.toLong() + psot
                     if (tileEnd < r.end.toLong() + 2) r.fail("tile-part length $psot leaves no SOD header")
+                    partTiles += isot
                 }
             }
             r.pos = r.end
@@ -407,23 +470,22 @@ public object JpxDecoder {
         val planeW = IntArray(s.comps) { ceilShift(ceilDiv(s.xsiz, s.dx[it]), drop) - planeX0[it] }
         val planeH = IntArray(s.comps) { ceilShift(ceilDiv(s.ysiz, s.dy[it]), drop) - planeY0[it] }
         val planes = Array(s.comps) { IntArray(planeW[it] * planeH[it]) }
+        val packed = packedHeaders(r, ppm, ppt, partTiles)
 
         for ((t, parts) in tileBodies) {
-            val body = parts.let {
-                if (parts.size == 1) parts[0]
-                else ByteArray(parts.sumOf { it.size }).also { out ->
-                    var o = 0
-                    for (p in parts) { p.copyInto(out, o); o += p.size }
-                }
-            }
+            val body = concat(parts)
 
             val cod = tileCod[t] ?: cod0
-            val qcd = tileQcd[t] ?: qcd0
-            // Precedence (A.6.1): tile COC > tile COD > main COC > main COD.
+            // Precedence (A.6.1): tile COC > tile COD > main COC > main COD, and the same for
+            // quantization and regions of interest.
             fun codFor(c: Int): Cod = tileCoc[t]?.get(c) ?: tileCod[t] ?: mainCoc[c] ?: cod0
             fun quantFor(c: Int): Quant = tileQcc[t]?.get(c) ?: tileQcd[t] ?: mainQcc[c] ?: qcd0
+            fun roiFor(c: Int): Int = tileRoi[t]?.get(c) ?: mainRoi[c] ?: 0
 
-            decodeTile(s, t, body, ::codFor, ::quantFor, cod, Planes(planes, planeW, planeH, planeX0, planeY0, drop))
+            decodeTile(
+                s, t, TileStream(body, packed[t], tilePoc[t] ?: mainPoc), ::codFor, ::quantFor, ::roiFor, cod,
+                Planes(planes, planeW, planeH, planeX0, planeY0, drop),
+            )
         }
 
         // Assemble output: gray or RGB, plus optional cdef opacity channel. A reduced image takes
@@ -436,6 +498,47 @@ public object JpxDecoder {
     private class Planes(
         val data: Array<IntArray>, val w: IntArray, val h: IntArray, val x0: IntArray, val y0: IntArray, val r: Int,
     )
+
+    /**
+     * What tier-2 reads for one tile: its tile-parts' bodies joined, the packet headers PPM or
+     * PPT moved out of them, and the progression order changes that apply to it.
+     */
+    private class TileStream(val body: ByteArray, val headers: ByteArray?, val pocs: List<Poc>?)
+
+    private fun concat(parts: Collection<ByteArray>): ByteArray {
+        if (parts.size == 1) return parts.first()
+        val out = ByteArray(parts.sumOf { it.size })
+        var o = 0
+        for (p in parts) { p.copyInto(out, o); o += p.size }
+        return out
+    }
+
+    /**
+     * Each tile's packed packet headers (A.7.4, A.7.5). PPT segments join in their Zppt order. PPM
+     * segments join in their Zppm order into one run of chunks, each a 32-bit length Nppm and that
+     * many bytes, which may cross from one segment into the next; chunk k holds the headers of the
+     * k-th tile-part of the codestream, and a tile reads its tile-parts' chunks one after another.
+     * A tile whose tile-parts the chunks run out before reads no packets.
+     */
+    private fun packedHeaders(
+        r: R, ppm: Map<Int, ByteArray>, ppt: Map<Int, Map<Int, ByteArray>>, partTiles: List<Int>,
+    ): Map<Int, ByteArray> {
+        fun inOrder(segments: Map<Int, ByteArray>) = concat(segments.entries.sortedBy { it.key }.map { it.value })
+        if (ppm.isEmpty()) return ppt.mapValues { (_, segments) -> inOrder(segments) }
+        val run = inOrder(ppm)
+        val chunks = HashMap<Int, ArrayList<ByteArray>>()
+        var at = 0
+        for (t in partTiles) {
+            val list = chunks.getOrPut(t) { ArrayList() }
+            if (at > run.size - 4) continue
+            val n = u32(run, at)
+            at += 4
+            if (n > run.size - at) r.fail("PPM chunk of $n bytes runs past the packed headers")
+            list += run.copyOfRange(at, at + n.toInt())
+            at += n.toInt()
+        }
+        return chunks.mapValues { (_, list) -> concat(list) }
+    }
 
     /**
      * This result with each block of [f] by [f] samples averaged, for levels that a component
@@ -465,8 +568,8 @@ public object JpxDecoder {
     // ---- tile decode -----------------------------------------------------------
 
     private fun decodeTile(
-        s: Siz, t: Int, body: ByteArray,
-        codFor: (Int) -> Cod, quantFor: (Int) -> Quant, tileCod: Cod,
+        s: Siz, t: Int, stream: TileStream,
+        codFor: (Int) -> Cod, quantFor: (Int) -> Quant, roiFor: (Int) -> Int, tileCod: Cod,
         out: Planes,
     ) {
         val ti = t % s.tilesW
@@ -553,11 +656,11 @@ public object JpxDecoder {
                 }
                 res.add(Resolution(rr, rx0, ry0, rx1, ry1, numPw, numPh, bands))
             }
-            comps.add(TileComp(c, cx0, cy0, cx1, cy1, cod, res))
+            comps.add(TileComp(c, cx0, cy0, cx1, cy1, cod, res, roiFor(c)))
         }
 
         // Tier-2: walk packets in progression order, filling code-block data.
-        readPackets(body, comps, tileCod, s, tx0, ty0)
+        readPackets(stream, comps, tileCod, s, tx0, ty0)
 
         // Tier-1 + dequant + IDWT per component, tile-local and before any shift.
         val samples = comps.map { decodeTileComp(s, it, out.r) }
@@ -585,47 +688,60 @@ public object JpxDecoder {
 
     // ---- tier-2 packet reading ---------------------------------------------------
 
-    private fun readPackets(body: ByteArray, comps: List<TileComp>, cod: Cod, s: Siz, tx0: Int, ty0: Int) {
-        val bio = PacketReader(body, cod.sop, cod.eph)
+    private fun readPackets(stream: TileStream, comps: List<TileComp>, cod: Cod, s: Siz, tx0: Int, ty0: Int) {
+        val reader = PacketReader(stream.body, stream.headers, cod.sop, cod.eph)
         val maxRes = comps.maxOf { it.resolutions.size }
         val layers = cod.layers
+        // Progression order changes may reach a packet twice; it is read where the first one
+        // reaches it (A.6.6), as OpenJPEG's packet iterators share one include array.
+        val seen = if (stream.pocs != null) HashSet<Long>() else null
 
         fun packet(l: Int, rr: Int, c: Int, p: Int) {
             val tc = comps.getOrNull(c) ?: return
             val res = tc.resolutions.getOrNull(rr) ?: return
             if (p >= res.numPw * res.numPh) return
-            bio.readPacket(res, p, l)
+            if (seen != null && !seen.add((((l.toLong() shl 6) or rr.toLong()) shl 5 or c.toLong()) shl 32 or p.toLong())) return
+            reader.readPacket(res, p, l, tc.cod.cbStyle)
         }
 
         // The three spatial orders visit each precinct where T.800 B.12.1.3 to B.12.1.5 reach it on
         // the reference grid, which depends on the component's subsampling and the resolution, not
         // on the precinct's ordinal: ordinal k of two resolutions or two components sit apart (#56).
-        fun visits(order: Int): List<Visit> {
-            val out = ArrayList<Visit>()
-            for ((c, tc) in comps.withIndex()) for (rr in tc.resolutions.indices) {
-                precinctVisits(tc, rr, s.dx[tc.comp], s.dy[tc.comp], tx0, ty0, c, out)
+        var all: List<Visit>? = null
+        fun visits(order: Int, r0: Int, r1: Int, c0: Int, c1: Int): List<Visit> {
+            val every = all ?: ArrayList<Visit>().also { out ->
+                for ((c, tc) in comps.withIndex()) for (rr in tc.resolutions.indices) {
+                    precinctVisits(tc, rr, s.dx[tc.comp], s.dy[tc.comp], tx0, ty0, c, out)
+                }
+                all = out
             }
-            out.sortWith(
+            return every.filter { it.r in r0 until r1 && it.c in c0 until c1 }.sortedWith(
                 when (order) {
                     2 -> compareBy<Visit>({ it.r }, { it.y }, { it.x }, { it.c })   // RPCL
                     3 -> compareBy({ it.y }, { it.x }, { it.c }, { it.r })          // PCRL
                     else -> compareBy({ it.c }, { it.y }, { it.x }, { it.r })       // CPRL
                 },
             )
-            return out
         }
 
-        when (cod.progression) {
-            0 -> for (l in 0 until layers) for (rr in 0 until maxRes) for (c in comps.indices) {
-                val res = comps[c].resolutions.getOrNull(rr) ?: continue
-                for (p in 0 until res.numPw * res.numPh) packet(l, rr, c, p)
+        // Without a POC segment the whole tile is one progression in the COD's order.
+        for (e in stream.pocs ?: listOf(Poc(0, 0, layers, maxRes, comps.size, cod.progression))) {
+            val l1 = min(e.layerEnd, layers)
+            val r0 = e.resStart
+            val r1 = min(e.resEnd, maxRes)
+            val c0 = e.compStart
+            val c1 = min(e.compEnd, comps.size)
+            when (e.progression) {
+                0 -> for (l in 0 until l1) for (rr in r0 until r1) for (c in c0 until c1) {
+                    val res = comps[c].resolutions.getOrNull(rr) ?: continue
+                    for (p in 0 until res.numPw * res.numPh) packet(l, rr, c, p)
+                }
+                1 -> for (rr in r0 until r1) for (l in 0 until l1) for (c in c0 until c1) {
+                    val res = comps[c].resolutions.getOrNull(rr) ?: continue
+                    for (p in 0 until res.numPw * res.numPh) packet(l, rr, c, p)
+                }
+                else -> for (v in visits(e.progression, r0, r1, c0, c1)) for (l in 0 until l1) packet(l, v.r, v.c, v.p)
             }
-            1 -> for (rr in 0 until maxRes) for (l in 0 until layers) for (c in comps.indices) {
-                val res = comps[c].resolutions.getOrNull(rr) ?: continue
-                for (p in 0 until res.numPw * res.numPh) packet(l, rr, c, p)
-            }
-            2, 3, 4 -> for (v in visits(cod.progression)) for (l in 0 until layers) packet(l, v.r, v.c, v.p)
-            else -> {}
         }
     }
 
@@ -654,27 +770,38 @@ public object JpxDecoder {
         }
     }
 
-    /** Reads packet headers + bodies sequentially from a tile bitstream. */
-    private class PacketReader(val d: ByteArray, val sop: Boolean, val eph: Boolean) {
+    /**
+     * Reads packets one after another from a tile's bitstream. With PPM or PPT the headers come
+     * from [headers] instead, and only the bodies, each after its SOP marker, from [d]; EPH
+     * follows the header wherever it is (A.8.1, A.8.2).
+     */
+    private class PacketReader(val d: ByteArray, val headers: ByteArray?, val sop: Boolean, val eph: Boolean) {
         var pos = 0
+        private var headerPos = 0
 
-        fun readPacket(res: Resolution, p: Int, layer: Int) {
-            if (pos >= d.size) return
+        fun readPacket(res: Resolution, p: Int, layer: Int, style: Int) {
+            if (headers == null && pos >= d.size || headers != null && headerPos >= headers.size) return
             if (sop && pos + 6 <= d.size &&
                 (d[pos].toInt() and 0xFF) == 0xFF && (d[pos + 1].toInt() and 0xFF) == 0x91
             ) {
                 pos += 6
             }
-            val bio = Bio(d, pos, d.size)
-            val included = ArrayList<CodeBlock>()
-            val newPassCounts = ArrayList<Int>()
-            val segLens = ArrayList<Int>()
+            val src = headers ?: d
+            val bio = Bio(src, if (headers != null) headerPos else pos, src.size)
+            fun endHeader() {
+                bio.align()
+                var at = bio.pos
+                if (eph && at + 2 <= src.size && (src[at].toInt() and 0xFF) == 0xFF && (src[at + 1].toInt() and 0xFF) == 0x92) at += 2
+                if (headers != null) headerPos = at else pos = at
+            }
+            // Each length the header gives, with the segment it adds to and how many passes.
+            val segments = ArrayList<Segment>()
+            val passes = ArrayList<Int>()
+            val lengths = ArrayList<Int>()
 
             if (bio.bit() == 0) {
                 // Empty packet.
-                bio.align()
-                pos = bio.pos
-                if (eph && pos + 2 <= d.size && (d[pos].toInt() and 0xFF) == 0xFF && (d[pos + 1].toInt() and 0xFF) == 0x92) pos += 2
+                endHeader()
                 return
             }
 
@@ -693,6 +820,7 @@ public object JpxDecoder {
                             // skip the rest of the tile, as OpenJPEG does with a short stream.
                             if (cb.zeroBitplanes < 0) {
                                 pos = d.size
+                                if (headers != null) headerPos = headers.size
                                 return
                             }
                             cb.lBlock = 3
@@ -703,7 +831,7 @@ public object JpxDecoder {
                     if (!incl) continue
                     cb.included = true
                     // Number of new coding passes (B.10.6).
-                    val np = when {
+                    var n = when {
                         bio.bit() == 0 -> 1
                         bio.bit() == 0 -> 2
                         else -> {
@@ -715,31 +843,33 @@ public object JpxDecoder {
                             }
                         }
                     }
-                    // Lblock update (unary), then the single segment length.
+                    // Lblock update (unary), then one length for each segment the new passes reach
+                    // (B.10.7.2): the open segment first, then as many new ones as the rest fill.
                     while (bio.bit() == 1) cb.lBlock++
-                    var bits = cb.lBlock
-                    var passes = np
-                    while (passes > 1) { bits++; passes = passes shr 1 }
-                    // OpenJPEG refuses a length of more than 32 bits ("Invalid bit number"): no data is
-                    // that long, and the read would wrap an Int to a negative length (#102).
-                    if (bits > 32) throw ImageDecodeException("JPEG 2000: a packet header gives a code-block length of $bits bits")
-                    val segLen = bio.bits(bits)
-                    included.add(cb)
-                    newPassCounts.add(np)
-                    segLens.add(segLen)
+                    var segment = cb.segments.lastOrNull()?.takeIf { it.passes < it.maxPasses } ?: cb.newSegment(style)
+                    while (true) {
+                        val take = min(segment.maxPasses - segment.passes, n)
+                        val bits = cb.lBlock + 31 - take.countLeadingZeroBits()
+                        // OpenJPEG refuses a length of more than 32 bits ("Invalid bit number"): no data is
+                        // that long, and the read would wrap an Int to a negative length (#102).
+                        if (bits > 32) throw ImageDecodeException("JPEG 2000: a packet header gives a code-block length of $bits bits")
+                        segments += segment
+                        passes += take
+                        lengths += bio.bits(bits)
+                        n -= take
+                        if (n == 0) break
+                        segment = cb.newSegment(style)
+                    }
                 }
             }
-            bio.align()
-            pos = bio.pos
-            if (eph && pos + 2 <= d.size && (d[pos].toInt() and 0xFF) == 0xFF && (d[pos + 1].toInt() and 0xFF) == 0x92) pos += 2
+            endHeader()
 
-            for (k in included.indices) {
-                val cb = included[k]
-                val len = segLens[k]
+            for (k in segments.indices) {
+                val len = lengths[k]
                 // A length past the data, or a 32-bit one that reads as a negative Int, runs to its end.
                 val end = if (len < 0 || len > d.size - pos) d.size else pos + len
-                cb.data.add(d.copyOfRange(pos, end))
-                cb.passes += newPassCounts[k]
+                segments[k].chunks += d.copyOfRange(pos, end)
+                segments[k].passes += passes[k]
                 pos = end
             }
         }
@@ -802,7 +932,7 @@ public object JpxDecoder {
         return t
     }
 
-    private class T1(val w: Int, val h: Int) {
+    private class T1(val w: Int, val h: Int, val vsc: Boolean) {
         val sig = IntArray(w * h)      // 1 = significant
         val visited = IntArray(w * h)  // pass-local flag
         val refined = IntArray(w * h)  // has had a refinement pass
@@ -810,60 +940,111 @@ public object JpxDecoder {
         val mag = IntArray(w * h)
         /** Bitplane of the last pass that touched the coefficient (for the r=0.5 bias). */
         val lastPlane = IntArray(w * h)
+
+        /**
+         * False where the vertically causal mode (D.7) hides the row below: on the last row of a
+         * stripe, the next stripe counts as insignificant, for significance and sign alike.
+         */
+        fun seesBelow(y: Int): Boolean = !vsc || y and 3 != 3
     }
 
-    private fun decodeCodeBlock(cb: CodeBlock, band: Band, cod: Cod, mb: Int) {
-        if (cb.data.isEmpty() || cb.passes <= 0) return
-        val w = cb.x1 - cb.x0
-        val h = cb.y1 - cb.y0
-        if (w <= 0 || h <= 0) return
-        val total = ByteArray(cb.data.sumOf { it.size })
-        var o = 0
-        for (seg in cb.data) { seg.copyInto(total, o); o += seg.size }
+    /**
+     * The raw bits of the selective arithmetic coding bypass (D.6), read as OpenJPEG's
+     * `opj_mqc_raw_decode` reads them: a byte after 0xFF holds 7 bits, its first bit the stuffed
+     * 0, unless it is above 0x8F, a marker, where the data ends; past the end every bit is 1.
+     */
+    private class RawBits(val d: ByteArray) {
+        private var pos = 0
+        private var c = 0
+        private var ct = 0
 
-        val mq = MqDecoder(total, 0, total.size)
-        val cx = IntArray(19)
+        private fun byte(i: Int): Int = if (i < d.size) d[i].toInt() and 0xFF else 0xFF
+
+        fun bit(): Int {
+            if (ct == 0) {
+                if (c == 0xFF) {
+                    if (byte(pos) > 0x8F) { ct = 8 } else { c = byte(pos); pos++; ct = 7 }
+                } else {
+                    c = byte(pos); pos++; ct = 8
+                }
+            }
+            ct--
+            return (c shr ct) and 1
+        }
+    }
+
+    private fun resetContexts(cx: IntArray) {
+        cx.fill(0)
         cx[0] = 4 shl 1
         cx[CTX_RLC] = 3 shl 1
         cx[CTX_UNI] = 46 shl 1
+    }
 
-        val t1 = T1(w, h)
+    private fun decodeCodeBlock(cb: CodeBlock, band: Band, cod: Cod, mb: Int, roiShift: Int) {
+        if (cb.segments.isEmpty()) return
+        val w = cb.x1 - cb.x0
+        val h = cb.y1 - cb.y0
+        if (w <= 0 || h <= 0) return
+        val style = cod.cbStyle
+        val cx = IntArray(19)
+        resetContexts(cx)
+
+        val t1 = T1(w, h, style and Jp2Headers.STYLE_VSC != 0)
         val zc = when (band.orient) {
             1 -> ZC_HL
             3 -> ZC_HH
             else -> ZC_LL
         }
 
-        var bp = mb - 1 - cb.zeroBitplanes
-        // A magnitude of bp + 1 bits, doubled for the irreversible half step, must fit an Int. No
-        // sample of 16 bits or fewer needs more, so a block that claims more is damaged.
-        if (bp > MAX_MAGNITUDE_PLANE) throw ImageDecodeException("JPEG 2000: a code-block with ${bp + 1} magnitude bitplanes")
-        var passNo = 0
+        // OpenJPEG's numbps and bpno_plus_one: the block's magnitude bitplanes, and one more than
+        // the plane the next pass codes, which an ROI shift (H.1) raises by the shift.
+        val numbps = mb - cb.zeroBitplanes
+        var plane = roiShift + numbps
+        // A magnitude of that many bits, doubled for the half step, must fit an Int. No sample of
+        // 16 bits or fewer needs more, so a block that claims more is damaged.
+        if (plane > MAX_MAGNITUDE_PLANE + 1) throw ImageDecodeException("JPEG 2000: a code-block with $plane magnitude bitplanes")
         var passType = 2 // start with cleanup
-        var passes = cb.passes
-        while (passes > 0 && bp >= 0) {
-            when (passType) {
-                0 -> sigPropPass(t1, mq, cx, zc, bp)
-                1 -> magRefPass(t1, mq, cx, bp)
-                2 -> cleanupPass(t1, mq, cx, zc, bp)
+        val bypass = style and Jp2Headers.STYLE_BYPASS != 0
+        val reset = style and Jp2Headers.STYLE_RESET != 0
+        val segsym = style and Jp2Headers.STYLE_SEGSYM != 0
+        for (segment in cb.segments) {
+            if (segment.passes == 0) continue
+            val data = segment.bytes()
+            // Each segment starts its own decoder (D.4.1); the contexts carry on. The bypass codes
+            // the significance and refinement passes after the first four bitplanes raw (D.6).
+            val raw = if (bypass && passType < 2 && plane <= numbps - 4) RawBits(data) else null
+            var mqDecoder: MqDecoder? = null
+            fun mq(): MqDecoder = mqDecoder ?: MqDecoder(data, 0, data.size).also { mqDecoder = it }
+            var n = segment.passes
+            while (n > 0 && plane >= 1) {
+                val bp = plane - 1
+                when (passType) {
+                    0 -> sigPropPass(t1, raw, if (raw == null) mq() else null, cx, zc, bp)
+                    1 -> magRefPass(t1, raw, if (raw == null) mq() else null, cx, bp)
+                    else -> {
+                        val m = mq()
+                        cleanupPass(t1, m, cx, zc, bp)
+                        // The segmentation symbol 1010 after each cleanup pass (D.5): read, not checked,
+                        // as OpenJPEG reads it.
+                        if (segsym) repeat(4) { m.bit(cx, CTX_UNI) }
+                    }
+                }
+                if (reset && raw == null) resetContexts(cx)
+                n--
+                if (++passType == 3) { passType = 0; plane-- }
             }
-            passes--
-            passNo++
-            if (passType == 2) { passType = 0; bp-- } else passType++
         }
-        // T.800 E.1.1/E.1.2 apply the half step at each coefficient's last decoded
-        // plane: a block can stop partway through a plane. Reversible plane zero
-        // stays exact; irreversible magnitudes carry twice the value so the
-        // dequantizer can retain its fractional half step.
-        if (cod.reversible) {
-            for (i in t1.mag.indices) {
-                val last = t1.lastPlane[i]
-                if (t1.mag[i] != 0 && last > 0) t1.mag[i] = t1.mag[i] or (1 shl (last - 1))
-            }
-        } else {
-            for (i in t1.mag.indices) {
-                if (t1.mag[i] != 0) t1.mag[i] = (t1.mag[i] shl 1) or (1 shl t1.lastPlane[i])
-            }
+        // T.800 E.1.1/E.1.2 apply the half step at each coefficient's last decoded plane: a block
+        // can stop partway through a plane. As OpenJPEG does, the magnitude is first formed doubled
+        // with the half step in its low bits, where an ROI shift (H.1) moves a coefficient at or
+        // above 2^s back down. Reversible plane zero stays exact; irreversible magnitudes keep twice
+        // the value so the dequantizer can retain its fractional half step.
+        for (i in t1.mag.indices) {
+            val m = t1.mag[i]
+            if (m == 0) continue
+            var v = (m shl 1) or (1 shl t1.lastPlane[i])
+            if (roiShift in 1..30 && v >= 1 shl roiShift) v = v shr roiShift
+            t1.mag[i] = if (cod.reversible) v shr 1 else v
         }
 
         // Store signed magnitudes into the band's coefficient array.
@@ -878,9 +1059,10 @@ public object JpxDecoder {
 
     private fun T1.neighborSums(x: Int, y: Int): Triple<Int, Int, Int> {
         fun s(px: Int, py: Int) = if (px in 0 until w && py in 0 until h) sig[py * w + px] else 0
+        val below = seesBelow(y)
         val hh = s(x - 1, y) + s(x + 1, y)
-        val vv = s(x, y - 1) + s(x, y + 1)
-        val dd = s(x - 1, y - 1) + s(x + 1, y - 1) + s(x - 1, y + 1) + s(x + 1, y + 1)
+        val vv = s(x, y - 1) + (if (below) s(x, y + 1) else 0)
+        val dd = s(x - 1, y - 1) + s(x + 1, y - 1) + (if (below) s(x - 1, y + 1) + s(x + 1, y + 1) else 0)
         return Triple(min(hh, 2), min(vv, 2), min(dd, 3))
     }
 
@@ -892,7 +1074,7 @@ public object JpxDecoder {
             return if (sign[py * w + px] == 1) -1 else 1
         }
         val hc = (c(x - 1, y) + c(x + 1, y)).coerceIn(-1, 1)
-        val vc = (c(x, y - 1) + c(x, y + 1)).coerceIn(-1, 1)
+        val vc = (c(x, y - 1) + (if (seesBelow(y)) c(x, y + 1) else 0)).coerceIn(-1, 1)
         return when {
             hc == 1 && vc == 1 -> 13 to 0
             hc == 1 && vc == 0 -> 12 to 0
@@ -906,7 +1088,8 @@ public object JpxDecoder {
         }
     }
 
-    private fun sigPropPass(t1: T1, mq: MqDecoder, cx: IntArray, zc: IntArray, bp: Int) {
+    /** The significance propagation pass, MQ coded, or raw when [raw] is given: its bits then carry no context and the sign no XOR. */
+    private fun sigPropPass(t1: T1, raw: RawBits?, mq: MqDecoder?, cx: IntArray, zc: IntArray, bp: Int) {
         val w = t1.w; val h = t1.h
         var y0 = 0
         while (y0 < h) {
@@ -919,9 +1102,11 @@ public object JpxDecoder {
                     val ctx = zc[hh * 12 + vv * 4 + dd]
                     if (ctx == 0) continue
                     t1.visited[i] = 1
-                    if (mq.bit(cx, ctx) == 1) {
-                        val (sctx, xor) = t1.signContext(x, y)
-                        val sbit = mq.bit(cx, sctx) xor xor
+                    if ((raw?.bit() ?: mq!!.bit(cx, ctx)) == 1) {
+                        val sbit = if (raw != null) raw.bit() else {
+                            val (sctx, xor) = t1.signContext(x, y)
+                            mq!!.bit(cx, sctx) xor xor
+                        }
                         t1.sig[i] = 1
                         t1.sign[i] = sbit
                         t1.mag[i] = 1 shl bp
@@ -933,7 +1118,8 @@ public object JpxDecoder {
         }
     }
 
-    private fun magRefPass(t1: T1, mq: MqDecoder, cx: IntArray, bp: Int) {
+    /** The magnitude refinement pass, MQ coded, or raw when [raw] is given. */
+    private fun magRefPass(t1: T1, raw: RawBits?, mq: MqDecoder?, cx: IntArray, bp: Int) {
         val w = t1.w; val h = t1.h
         var y0 = 0
         while (y0 < h) {
@@ -943,14 +1129,16 @@ public object JpxDecoder {
                     // Refine only coefficients significant BEFORE this plane's SPP
                     // (the visited flag marks everything SPP coded this plane).
                     if (t1.sig[i] == 0 || t1.visited[i] == 1) continue
-                    val ctx = when {
-                        t1.refined[i] != 0 -> 16
-                        else -> {
-                            val (hh, vv, dd) = t1.neighborSums(x, y)
-                            if (hh + vv + dd > 0) 15 else 14
+                    val bit = if (raw != null) raw.bit() else {
+                        val ctx = when {
+                            t1.refined[i] != 0 -> 16
+                            else -> {
+                                val (hh, vv, dd) = t1.neighborSums(x, y)
+                                if (hh + vv + dd > 0) 15 else 14
+                            }
                         }
+                        mq!!.bit(cx, ctx)
                     }
-                    val bit = mq.bit(cx, ctx)
                     t1.refined[i] = 1
                     t1.lastPlane[i] = bp
                     if (bit == 1) t1.mag[i] = t1.mag[i] or (1 shl bp)
@@ -1048,7 +1236,7 @@ public object JpxDecoder {
                 val mb = band.guardBits + band.stepExp - 1
                 for (precinct in band.precincts) {
                     for (cb in precinct.blocks) {
-                        if (cb != null) decodeCodeBlock(cb, band, cod, mb)
+                        if (cb != null) decodeCodeBlock(cb, band, cod, mb, tc.roiShift)
                     }
                 }
             }
@@ -1131,6 +1319,12 @@ public object JpxDecoder {
 
     /** The highest magnitude bitplane a code-block may start at: doubled, its magnitude still fits an Int. */
     private const val MAX_MAGNITUDE_PLANE = 29
+
+    /**
+     * The passes of a segment without termination or bypass, as OpenJPEG sizes it: (37 - 1) * 3 + 1,
+     * every pass of the deepest band B.10.6 allows.
+     */
+    private const val MAX_SEGMENT_PASSES = 109
 
     /** More zero bitplanes than any sample holds: the header is damaged. */
     private const val MAX_ZERO_BITPLANES = 64

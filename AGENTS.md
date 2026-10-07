@@ -49,3 +49,10 @@ being true.
   A `cjpeg` stream wrapped in a strip reaches the other subsamplings (#8).
 - `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh
   clone, because `kotlin-js-store/` is ignored and yarn has no lockfile to work from.
+- `opj_compress -POC` writes only the packets its first change reaches and leaves
+  the rest of the tile out, so both decoders agree on a file that holds half the
+  image. `JpxFeatureOracleTest` builds POC files by reordering the packets of an
+  LRCP codestream instead, and holds OpenJPEG's reading of them to the original (#5).
+- OpenJPEG appends a tile's POC entries to the main header's, where T.800 A.6.6
+  has the tile's replace them, so a file with both cannot be checked against
+  `opj_decompress` (#5).
