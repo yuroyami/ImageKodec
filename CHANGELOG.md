@@ -34,6 +34,16 @@ reviewable in the diff.
 
 ### Changed
 
+- The CCITT decoder behind TIFF fax compression, `CcittFax` and JBIG2's MMR
+  regions holds each row as its changing elements, as libtiff and xpdf do,
+  instead of one int per pixel, and writes each row's runs straight into one
+  packed buffer instead of packing every pixel into a new array and copying
+  every row again. A peek reads a whole word, and a run length is one lookup
+  per code. A 5100 by 6600 Group 4 text page decodes in about 11 ms of thread
+  CPU time where it took about 75, to the same bytes as libtiff, and 36,000
+  valid, damaged and random streams decode to the same bytes or the same
+  error as before (#105).
+
 - `KiteAnimation.loopCount` and `ImageInfo.loopCount` are now `Long`, preserving
   the full APNG play field, including larger counts accepted for compatibility
   with deployed writers (#59). Pass `count.toLong()` when constructing metadata

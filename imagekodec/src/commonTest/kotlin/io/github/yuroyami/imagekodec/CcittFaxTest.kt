@@ -26,6 +26,21 @@ class CcittFaxTest {
     }
 
     @Test
+    fun theOutputHoldsEveryDecodedRowWhetherOrNotTheCountIsDeclared() {
+        // 25 bytes of V0 codes are 200 white rows. A row costs at least one bit, so the output is sized
+        // once from a declared count the input can hold, and grows from a guess when none is declared
+        // (#105). With 13 columns a set bit is white, and the 3 bits that pad a row to 2 bytes stay 0.
+        val data = ByteArray(25) { 0xFF.toByte() }
+        for (rows in listOf(0, 150, 200, 1000)) {
+            val decoded = if (rows == 0 || rows > 200) 200 else rows
+            val out = CcittFax.decode(data, k = -1, options = options(columns = 13, rows = rows))
+            assertContentEquals(ByteArray(decoded * 2) { if (it % 2 == 0) 0xFF.toByte() else 0xF8.toByte() }, out, "$rows rows")
+            val black = CcittFax.decode(data, k = -1, options = options(columns = 13, rows = rows).copy(blackIs1 = true))
+            assertContentEquals(ByteArray(decoded * 2), black, "$rows rows with BlackIs1")
+        }
+    }
+
+    @Test
     fun aColumnCountOutsideTheSupportedRangeIsRejected() {
         // -1 gave NegativeArraySizeException, and 0 made the row loop run out of memory on one byte.
         for (columns in intArrayOf(-1, 0, (1 shl 24) + 1)) {
