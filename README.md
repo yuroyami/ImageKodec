@@ -187,6 +187,23 @@ browser behavior. An APNG `fcTL` with `delay_num = 0` therefore gives a 100 ms f
 `KiteFrame.delayRawCentiseconds` is the exact figure a GIF stated. For APNG and WebP
 it is derived from the stated delay, because neither format stores centiseconds.
 
+### Keep 16-bit samples
+
+`decode` returns 8 bits a channel. For a depth map, a scientific or medical image
+or a graded photograph, `decode16` keeps every bit a 16-bit PNG or TIFF stores, in
+the channels the file has once a palette is looked up: gray, gray and alpha, RGB
+or RGBA.
+
+```kotlin
+val wide = ImageKodec.decode16(bytes)
+wide.channels                  // 1 for a gray depth map, which stays 2 bytes a pixel
+wide[x, y, 0]                  // 0..65535
+wide.toBitmap()                // the high byte of each sample: exactly what decode returns
+```
+
+Narrower samples replicate up, so an 8-bit value `v` becomes `v * 257`, and every
+other format decodes as `decode` does and widens the same way.
+
 ### Write an image out
 
 ```kotlin
@@ -378,10 +395,9 @@ web project that runs under Node should not use them.
 
 ## Limits
 
-- **ImageKodec keeps only the high byte of a 16-bit sample.** PNG and TIFF read
-  16-bit files, but the output buffer is 8 bits per channel. ImageKodec discards
-  the low byte rather than dithering or scaling it. `probe` still reports the
-  stored depth.
+- **`decode` keeps only the high byte of a 16-bit sample**, because `KiteBitmap`
+  is 8 bits a channel. `decode16` keeps the whole sample for PNG and TIFF; a JPEG
+  2000 file above 8 bits a component still comes through 8 bits there.
 - **ImageKodec writes PNG, JPEG, GIF and BMP only.** There is no encoder for WebP,
   TIFF or JPEG 2000.
 - **The PNG encoder writes 8-bit RGB or RGBA only**, with no interlace, no

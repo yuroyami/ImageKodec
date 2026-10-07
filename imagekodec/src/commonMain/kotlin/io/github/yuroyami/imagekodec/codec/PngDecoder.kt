@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec.codec
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
+import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.KiteFrame
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
@@ -17,7 +18,8 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  * `stbi__parse_png_file` with the spec as ground truth. Scope:
  *
  *  - all five color types: gray (0), RGB (2), palette (3), gray+alpha (4), RGBA (6)
- *  - all legal bit depths; 16-bit samples reduce to their high byte (stb's 8-bit
+ *  - all legal bit depths; [decode16] keeps 16-bit samples whole, and [decode]
+ *    reduces them to their high byte (stb's 8-bit
  *    behaviour), sub-byte gray scales by sample replication (1/2/4-bit → ×255/×85/×17)
  *  - all five row filters (None/Sub/Up/Average/Paeth)
  *  - `tRNS` transparency for types 0/2 (color-key) and 3 (per-entry alpha)
@@ -71,6 +73,28 @@ internal object PngDecoder {
     fun decode(data: ByteArray): KiteBitmap {
         val png = parse(data, wantAnimation = false)
         return KiteBitmap(png.width, png.height, renderSubImage(png, png.width, png.height, png.idat))
+    }
+
+    /**
+     * The default image at 16 bits a sample, in the channels the file stores once a
+     * palette is looked up: gray, gray and alpha, RGB or RGBA, with a tRNS color key
+     * adding an alpha channel. Narrower samples replicate up, as [decode] replicates
+     * them to 8 bits, so its narrowing to the high byte gives exactly [decode]'s pixels.
+     */
+    fun decode16(data: ByteArray): KiteBitmap16 {
+        val png = parse(data, wantAnimation = false)
+        val channels = when (png.colorType) {
+            0 -> if (png.trnsGray >= 0) 2 else 1
+            2 -> if (png.trnsR >= 0) 4 else 3
+            3 -> if (png.paletteAlpha != null) 4 else 3
+            4 -> 2
+            else -> 4
+        }
+        val samples = ShortArray(png.width * png.height * channels)
+        unpack(png, png.width, png.height, png.idat) { d, base, w, h, rowBytes, dst ->
+            expand16(png, d, base, w, h, rowBytes, samples, channels, dst)
+        }
+        return KiteBitmap16(png.width, png.height, channels, samples)
     }
 
     /**
@@ -437,6 +461,23 @@ internal object PngDecoder {
      * palette and interlace method; only the dimensions and the data differ.
      */
     private fun renderSubImage(png: Png, width: Int, height: Int, parts: List<ByteArray>): IntArray {
+        val argb = IntArray(width * height)
+        unpack(png, width, height, parts) { d, base, w, h, rowBytes, dst -> expand(png, d, base, w, h, rowBytes, argb, dst) }
+        return argb
+    }
+
+    /**
+     * Inflates and unfilters [parts], handing [region] each unfiltered region with the
+     * mapping from its coordinates to final pixel indices: the whole image once, or each
+     * Adam7 pass with its scatter.
+     */
+    private fun unpack(
+        png: Png,
+        width: Int,
+        height: Int,
+        parts: List<ByteArray>,
+        region: (d: ByteArray, base: Int, width: Int, height: Int, rowBytes: Int, dst: (x: Int, y: Int) -> Int) -> Unit,
+    ) {
         val compressed = concat(parts)
 
         // Exact size is knowable from IHDR: each row is one filter byte + ceil(bits/8).
@@ -466,12 +507,11 @@ internal object PngDecoder {
         // The filter's "previous pixel" step: whole bytes for depths >= 8, one byte
         // for packed sub-byte rows (spec: filters operate on bytes, not samples).
         val fUnit = maxOf(1, (png.channels * png.bitDepth) / 8)
-        val argb = IntArray(width * height)
 
         if (png.interlace == 0) {
             val rowBytes = rowBytesFor(width)
             unfilter(inflated, 0, height, rowBytes, fUnit)
-            expand(png, inflated, 0, width, height, rowBytes, argb) { x, y -> y * width + x }
+            region(inflated, 0, width, height, rowBytes) { x, y -> y * width + x }
         } else {
             // Adam7: each pass unfilters + expands independently, scattering its
             // pixels to (xStart + x*xStep, yStart + y*yStep) in the final image.
@@ -484,11 +524,10 @@ internal object PngDecoder {
                 unfilter(inflated, ofs, hp, rb, fUnit)
                 val x0 = PASS_X_START[p]; val xs = PASS_X_STEP[p]
                 val y0 = PASS_Y_START[p]; val ys = PASS_Y_STEP[p]
-                expand(png, inflated, ofs, wp, hp, rb, argb) { x, y -> (y0 + y * ys) * width + (x0 + x * xs) }
+                region(inflated, ofs, wp, hp, rb) { x, y -> (y0 + y * ys) * width + (x0 + x * xs) }
                 ofs += hp * (1 + rb)
             }
         }
-        return argb
     }
 
     // Adam7 pass geometry (PNG spec §8.2).
@@ -678,6 +717,81 @@ internal object PngDecoder {
                     val bb = scale(sample(rowStart, x * 4 + 2))
                     val aa = scale(sample(rowStart, x * 4 + 3))
                     argb[dst(x, y)] = (aa shl 24) or (rr shl 16) or (gg shl 8) or bb
+                }
+            }
+        }
+    }
+
+    /**
+     * [expand] at 16 bits a sample into [out], [channels] a pixel: narrower samples and
+     * palette entries replicate up (an 8-bit `v` becomes `v * 257`), and a color key
+     * gives an alpha of 0 or 65535.
+     */
+    private fun expand16(
+        png: Png,
+        d: ByteArray, base: Int, width: Int, height: Int, rowBytes: Int,
+        out: ShortArray,
+        channels: Int,
+        dst: (x: Int, y: Int) -> Int,
+    ) {
+        val stride = 1 + rowBytes
+        val bitDepth = png.bitDepth
+
+        fun sample(rowStart: Int, s: Int): Int = when (bitDepth) {
+            8 -> d[rowStart + s].toInt() and 0xFF
+            16 -> ((d[rowStart + s * 2].toInt() and 0xFF) shl 8) or (d[rowStart + s * 2 + 1].toInt() and 0xFF)
+            else -> {
+                val bitPos = s * bitDepth
+                val byte = d[rowStart + (bitPos ushr 3)].toInt() and 0xFF
+                val shift = 8 - bitDepth - (bitPos and 7)
+                (byte ushr shift) and ((1 shl bitDepth) - 1)
+            }
+        }
+
+        fun scale(v: Int): Int = when (bitDepth) {
+            1 -> v * 65535
+            2 -> v * 21845
+            4 -> v * 4369
+            8 -> v * 257
+            else -> v
+        }
+
+        for (y in 0 until height) {
+            val rowStart = base + y * stride + 1
+            for (x in 0 until width) {
+                val at = dst(x, y) * channels
+                when (png.colorType) {
+                    0 -> {
+                        val raw = sample(rowStart, x)
+                        out[at] = scale(raw).toShort()
+                        if (channels == 2) out[at + 1] = (if (raw == png.trnsGray) 0 else 65535).toShort()
+                    }
+                    2 -> {
+                        val rr = sample(rowStart, x * 3)
+                        val gg = sample(rowStart, x * 3 + 1)
+                        val bb = sample(rowStart, x * 3 + 2)
+                        out[at] = scale(rr).toShort()
+                        out[at + 1] = scale(gg).toShort()
+                        out[at + 2] = scale(bb).toShort()
+                        if (channels == 4) {
+                            out[at + 3] = (if (rr == png.trnsR && gg == png.trnsG && bb == png.trnsB) 0 else 65535).toShort()
+                        }
+                    }
+                    3 -> {
+                        val pal = png.palette!!
+                        val idx = sample(rowStart, x)
+                        if (idx >= pal.size) throw ImageDecodeException("PNG: palette index $idx out of ${pal.size} entries")
+                        val p = pal[idx]
+                        out[at] = (((p ushr 16) and 0xFF) * 257).toShort()
+                        out[at + 1] = (((p ushr 8) and 0xFF) * 257).toShort()
+                        out[at + 2] = ((p and 0xFF) * 257).toShort()
+                        if (channels == 4) out[at + 3] = ((png.paletteAlpha!![idx]) * 257).toShort()
+                    }
+                    4 -> {
+                        out[at] = scale(sample(rowStart, x * 2)).toShort()
+                        out[at + 1] = scale(sample(rowStart, x * 2 + 1)).toShort()
+                    }
+                    else -> for (c in 0 until 4) out[at + c] = scale(sample(rowStart, x * 4 + c)).toShort()
                 }
             }
         }

@@ -132,6 +132,56 @@ public object ImageKodec {
     }
 
     /**
+     * Decode page [page] of [data] at 16 bits a sample, for the files whose low byte
+     * matters: depth maps, scientific and medical images, heavily graded photographs.
+     * [decode] keeps 8 bits a channel; this keeps every bit a 16-bit PNG or TIFF stores,
+     * including a TIFF palette's 16-bit ColorMap. The channels are those the file
+     * stores once a palette is looked up (gray, gray and alpha, RGB or RGBA), so a gray
+     * depth map stays one sample a pixel. Narrower PNG and TIFF samples replicate up (an
+     * 8-bit `v` becomes `v * 257`, a 1-bit one 0 or 65535), and every other format
+     * decodes as [decode] does and widens the same way, as RGB, or RGBA when the file
+     * declares transparency. [KiteBitmap16.toBitmap] then gives exactly what [decode]
+     * returns. A JPEG 2000 file with components above 8 bits still comes through 8 bits.
+     *
+     * [page] counts from 0, as for [decodePage]. With [applyOrientation] the page's
+     * orientation tag is honoured, as [decode] does.
+     *
+     * @throws ImageDecodeException on malformed/truncated input or unknown format
+     * @throws UnsupportedImageException on formats or features recognised but not yet decodable
+     * @throws IllegalArgumentException if [page] is negative or the file has no such page
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun decode16(data: ByteArray, page: Int = 0, applyOrientation: Boolean = false): KiteBitmap16 {
+        require(page >= 0) { "page must not be negative, was $page" }
+        val format = detect(data)
+        if (format != ImageFormat.TIFF && format != null && page != 0) {
+            throw IllegalArgumentException("page $page asked of a one-page $format image")
+        }
+        val wide = when (format) {
+            ImageFormat.TIFF -> TiffDecoder.decode16(data, page)
+            ImageFormat.PNG -> PngDecoder.decode16(data)
+            // A BMP that holds a PNG keeps that PNG's precision.
+            ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { return decode16(it, 0, applyOrientation) }
+                ?: return widened(data, applyOrientation)
+            else -> return widened(data, applyOrientation)
+        }
+        if (!applyOrientation) return wide
+        val orientation = try {
+            if (format == ImageFormat.TIFF) ImageProbe.tiff(data, page).orientation else ImageProbe.probe(data).orientation
+        } catch (_: ImageDecodeException) {
+            Orientation.Normal
+        }
+        return wide.oriented(orientation)
+    }
+
+    /** [decode], widened to 16 bits a sample, with alpha when the file declares it. */
+    private fun widened(data: ByteArray, applyOrientation: Boolean): KiteBitmap16 {
+        val bitmap = decode(data, applyOrientation)
+        val alpha = probeOrNull(data)?.hasAlpha ?: bitmap.hasTransparency()
+        return KiteBitmap16.widened(bitmap, alpha)
+    }
+
+    /**
      * Decode [data] with each side divided by [reduction], rounded up: 1, 2, 4 or 8. Use it
      * for an image that will draw smaller than its pixels, such as a scan on a phone screen
      * or a thumbnail. Like [decode] by default, it does not apply EXIF orientation.

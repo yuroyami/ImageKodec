@@ -289,6 +289,11 @@ class FuzzTest {
         if (variant == 0) mustFailCleanly("$label decodeScaled") { ImageKodec.decodeScaled(bytes, 7, 5, applyOrientation = true) }
         mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes, applyOrientation = true) }
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
+        // The 16-bit paths read their own samples; the others widen what decode gives.
+        val format = ImageFormat.sniff(bytes)
+        if (format == ImageFormat.PNG || format == ImageFormat.TIFF) {
+            mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
+        }
         // A damaged chain of TIFF pages: the last page the probe counts must be reachable.
         val pages = ImageKodec.probeOrNull(bytes)?.pageCount ?: 1
         if (pages > 1) {

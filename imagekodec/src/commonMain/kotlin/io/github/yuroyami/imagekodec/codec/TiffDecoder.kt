@@ -2,6 +2,7 @@ package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteBitmap
+import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.internal.flate.InflateException
@@ -24,8 +25,8 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    optional associated or straight alpha via ExtraSamples), 3 (palette, 16-bit
  *    ColorMap entries), 6 (**YCbCr**, including chroma subsampling in both the
  *    chunky unit layout and separate planes)
- *  - bits per sample 1, 2, 4, 8 and 16 (16-bit narrows to its high byte, as
- *    everywhere else in ImageKodec), horizontal-differencing predictor (2) for
+ *  - bits per sample 1, 2, 4, 8 and 16 ([decode] narrows 16-bit to its high byte,
+ *    [decode16] keeps it whole), horizontal-differencing predictor (2) for
  *    both 8- and 16-bit samples
  *  - **both planar configurations**: chunky (1) and separate planes (2)
  *  - both FillOrder values, independent of sample byte order and compression
@@ -124,7 +125,18 @@ internal object TiffDecoder {
     }
 
     /** Decodes page [page], counting from 0. */
-    fun decode(data: ByteArray, page: Int = 0): KiteBitmap {
+    fun decode(data: ByteArray, page: Int = 0): KiteBitmap = read(data, page).argb()
+
+    /** Decodes page [page] at 16 bits a sample, in the channels it stores. */
+    fun decode16(data: ByteArray, page: Int = 0): KiteBitmap16 = read(data, page).wide()
+
+    /** A page whose samples are read and ready to convert, at 8 or at 16 bits a channel. */
+    private interface Raster {
+        fun argb(): KiteBitmap
+        fun wide(): KiteBitmap16
+    }
+
+    private fun read(data: ByteArray, page: Int): Raster {
         val r = reader(data)
         val le = r.le
         val chain = pages(data, limit = page + 1)
@@ -516,89 +528,160 @@ internal object TiffDecoder {
         }
         fun opacity(x: Int, y: Int): Int = if (alpha.sample >= 0) sample(x, y, alpha.sample) else sampleMax
 
-        // --- to ARGB ------------------------------------------------------------
-        val argb = IntArray(width * height)
-        when (pixels) {
-            0, 1 -> {
-                val invert = photometric == 0    // WhiteIsZero
-                for (y in 0 until height) for (x in 0 until width) {
-                    val opacity = opacity(x, y)
-                    var g = scale8(straight(sample(x, y, 0), opacity))
-                    if (invert) g = 255 - g
-                    if (alpha.associated && opacity == 0) g = 0
-                    val a = scale8(opacity)
-                    argb[y * width + x] = (a shl 24) or (g shl 16) or (g shl 8) or g
-                }
-            }
-            2 -> {
-                if (spp < 3) err("RGB with $spp samples")
-                val ranges = references?.rgbTables(bits)
-                for (y in 0 until height) for (x in 0 until width) {
-                    val opacity = opacity(x, y)
-                    val a = scale8(opacity)
-                    fun channel(c: Int): Int {
-                        if (alpha.associated && opacity == 0) return 0
-                        val value = straight(sample(x, y, c), opacity)
-                        return ranges?.get(c)?.get(value) ?: scale8(value)
+        return object : Raster {
+        override fun argb(): KiteBitmap {
+            val argb = IntArray(width * height)
+            when (pixels) {
+                0, 1 -> {
+                    val invert = photometric == 0    // WhiteIsZero
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val opacity = opacity(x, y)
+                        var g = scale8(straight(sample(x, y, 0), opacity))
+                        if (invert) g = 255 - g
+                        if (alpha.associated && opacity == 0) g = 0
+                        val a = scale8(opacity)
+                        argb[y * width + x] = (a shl 24) or (g shl 16) or (g shl 8) or g
                     }
-                    argb[y * width + x] = (a shl 24) or
-                        (channel(0) shl 16) or (channel(1) shl 8) or channel(2)
                 }
-            }
-            3 -> {
-                val mapEntry = entries[320] ?: err("palette image without ColorMap")
-                val map = values(mapEntry)
-                val n = 1 shl bits
-                if (map.size < 3 * n) err("ColorMap too small")
-                for (y in 0 until height) for (x in 0 until width) {
-                    val idx = sample(x, y, 0)
-                    if (idx >= n) err("palette index $idx out of $n entries")
-                    // ColorMap entries are 16-bit; take the high byte.
-                    val opacity = opacity(x, y)
-                    val rr = straight(map[idx].toInt(), opacity, 65535) ushr 8
-                    val gg = straight(map[n + idx].toInt(), opacity, 65535) ushr 8
-                    val bb = straight(map[2 * n + idx].toInt(), opacity, 65535) ushr 8
-                    argb[y * width + x] = (scale8(opacity) shl 24) or (rr shl 16) or (gg shl 8) or bb
-                }
-            }
-            6 -> {
-                val ranges = references?.ycbcrTables()
-                for (y in 0 until height) for (x in 0 until width) {
-                    val yy: Int
-                    val cb: Int
-                    val cr: Int
-                    if (ycbcrUnits) {
-                        // Chunky subsampled layout: each unit is subH×subV luma
-                        // samples followed by one Cb and one Cr for the whole unit.
-                        val unit = (y / subV) * unitsAcross + (x / subH)
-                        val base = unit * unitBytes
-                        val within = (y % subV) * subH + (x % subH)
-                        val plane = blocks[0]
-                        if (base + unitBytes > plane.size) err("YCbCr unit past the data")
-                        yy = plane[base + within].toInt() and 0xFF
-                        cb = plane[base + subH * subV].toInt() and 0xFF
-                        cr = plane[base + subH * subV + 1].toInt() and 0xFF
-                    } else if (planar == 2) {
-                        // Separate planes: chroma planes are stored at reduced size.
-                        yy = blocks[0][y * planeRowBytes + x].toInt() and 0xFF
-                        val cw = (width + subH - 1) / subH
-                        val ci = (y / subV) * cw + (x / subH)
-                        cb = blocks[1].getOrElse(ci) { 0 }.toInt() and 0xFF
-                        cr = blocks[2].getOrElse(ci) { 0 }.toInt() and 0xFF
-                    } else {
-                        yy = sample(x, y, 0)
-                        cb = sample(x, y, 1)
-                        cr = sample(x, y, 2)
+                2 -> {
+                    if (spp < 3) err("RGB with $spp samples")
+                    val ranges = references?.rgbTables(bits)
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val opacity = opacity(x, y)
+                        val a = scale8(opacity)
+                        fun channel(c: Int): Int {
+                            if (alpha.associated && opacity == 0) return 0
+                            val value = straight(sample(x, y, c), opacity)
+                            return ranges?.get(c)?.get(value) ?: scale8(value)
+                        }
+                        argb[y * width + x] = (a shl 24) or
+                            (channel(0) shl 16) or (channel(1) shl 8) or channel(2)
                     }
-                    argb[y * width + x] = if (references != null && ranges != null) {
-                        references.ycbcrToArgb(yy, cb, cr, ranges)
-                    } else ycbcrToArgb(yy, cb, cr)
                 }
+                3 -> {
+                    val mapEntry = entries[320] ?: err("palette image without ColorMap")
+                    val map = values(mapEntry)
+                    val n = 1 shl bits
+                    if (map.size < 3 * n) err("ColorMap too small")
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val idx = sample(x, y, 0)
+                        if (idx >= n) err("palette index $idx out of $n entries")
+                        // ColorMap entries are 16-bit; take the high byte.
+                        val opacity = opacity(x, y)
+                        val rr = straight(map[idx].toInt(), opacity, 65535) ushr 8
+                        val gg = straight(map[n + idx].toInt(), opacity, 65535) ushr 8
+                        val bb = straight(map[2 * n + idx].toInt(), opacity, 65535) ushr 8
+                        argb[y * width + x] = (scale8(opacity) shl 24) or (rr shl 16) or (gg shl 8) or bb
+                    }
+                }
+                6 -> {
+                    val ranges = references?.ycbcrTables()
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val yy: Int
+                        val cb: Int
+                        val cr: Int
+                        if (ycbcrUnits) {
+                            // Chunky subsampled layout: each unit is subH×subV luma
+                            // samples followed by one Cb and one Cr for the whole unit.
+                            val unit = (y / subV) * unitsAcross + (x / subH)
+                            val base = unit * unitBytes
+                            val within = (y % subV) * subH + (x % subH)
+                            val plane = blocks[0]
+                            if (base + unitBytes > plane.size) err("YCbCr unit past the data")
+                            yy = plane[base + within].toInt() and 0xFF
+                            cb = plane[base + subH * subV].toInt() and 0xFF
+                            cr = plane[base + subH * subV + 1].toInt() and 0xFF
+                        } else if (planar == 2) {
+                            // Separate planes: chroma planes are stored at reduced size.
+                            yy = blocks[0][y * planeRowBytes + x].toInt() and 0xFF
+                            val cw = (width + subH - 1) / subH
+                            val ci = (y / subV) * cw + (x / subH)
+                            cb = blocks[1].getOrElse(ci) { 0 }.toInt() and 0xFF
+                            cr = blocks[2].getOrElse(ci) { 0 }.toInt() and 0xFF
+                        } else {
+                            yy = sample(x, y, 0)
+                            cb = sample(x, y, 1)
+                            cr = sample(x, y, 2)
+                        }
+                        argb[y * width + x] = if (references != null && ranges != null) {
+                            references.ycbcrToArgb(yy, cb, cr, ranges)
+                        } else ycbcrToArgb(yy, cb, cr)
+                    }
+                }
+                else -> throw UnsupportedImageException("TIFF: photometric $pixels is not supported")
             }
-            else -> throw UnsupportedImageException("TIFF: photometric $pixels is not supported")
+
+            return KiteBitmap(width, height, argb)
         }
 
-        return KiteBitmap(width, height, argb)
+        override fun wide(): KiteBitmap16 {
+            // Narrower samples replicate up, as scale8 replicates them to 8 bits, so the
+            // high byte of each value is exactly what argb() gives.
+            fun scale16(v: Int): Int = when (bits) {
+                1 -> v * 65535
+                2 -> v * 21845
+                4 -> v * 4369
+                8 -> v * 257
+                else -> v
+            }
+            val withAlpha = alpha.sample >= 0
+            return when (pixels) {
+                0, 1 -> {
+                    val channels = if (withAlpha) 2 else 1
+                    val out = ShortArray(width * height * channels)
+                    val invert = photometric == 0    // WhiteIsZero
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val opacity = opacity(x, y)
+                        var g = scale16(straight(sample(x, y, 0), opacity))
+                        if (invert) g = 65535 - g
+                        if (alpha.associated && opacity == 0) g = 0
+                        val at = (y * width + x) * channels
+                        out[at] = g.toShort()
+                        if (withAlpha) out[at + 1] = scale16(opacity).toShort()
+                    }
+                    KiteBitmap16(width, height, channels, out)
+                }
+                2 -> {
+                    if (spp < 3) err("RGB with $spp samples")
+                    val ranges = references?.rgbTables16(bits)
+                    val channels = if (withAlpha) 4 else 3
+                    val out = ShortArray(width * height * channels)
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val opacity = opacity(x, y)
+                        val at = (y * width + x) * channels
+                        for (c in 0 until 3) {
+                            out[at + c] = if (alpha.associated && opacity == 0) 0 else {
+                                val value = straight(sample(x, y, c), opacity)
+                                (ranges?.get(c)?.get(value) ?: scale16(value)).toShort()
+                            }
+                        }
+                        if (withAlpha) out[at + 3] = scale16(opacity).toShort()
+                    }
+                    KiteBitmap16(width, height, channels, out)
+                }
+                3 -> {
+                    // The ColorMap holds 16-bit entries, all of which survive here.
+                    val mapEntry = entries[320] ?: err("palette image without ColorMap")
+                    val map = values(mapEntry)
+                    val n = 1 shl bits
+                    if (map.size < 3 * n) err("ColorMap too small")
+                    val channels = if (withAlpha) 4 else 3
+                    val out = ShortArray(width * height * channels)
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val idx = sample(x, y, 0)
+                        if (idx >= n) err("palette index $idx out of $n entries")
+                        val opacity = opacity(x, y)
+                        val at = (y * width + x) * channels
+                        for (c in 0 until 3) out[at + c] = straight(map[c * n + idx].toInt(), opacity, 65535).toShort()
+                        if (withAlpha) out[at + 3] = scale16(opacity).toShort()
+                    }
+                    KiteBitmap16(width, height, channels, out)
+                }
+                // YCbCr is 8-bit only, so its 8-bit conversion widens without loss.
+                else -> KiteBitmap16.widened(argb(), alpha = false)
+            }
+        }
+        }
     }
 
     /**

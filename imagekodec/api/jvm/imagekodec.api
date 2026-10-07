@@ -45,6 +45,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/ImageKodec;
 	public final fun decode ([BZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decode16 ([BIZ)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public static synthetic fun decode16$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public final fun decodeAnimation ([BZILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public final fun decodeDownscaledTo ([BIIZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
@@ -98,6 +100,19 @@ public final class io/github/yuroyami/imagekodec/KiteBitmap {
 	public final fun getHeight ()I
 	public final fun getWidth ()I
 	public final fun hasTransparency ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/KiteBitmap16 {
+	public fun <init> (III[S)V
+	public final fun get (III)I
+	public final fun getChannels ()I
+	public final fun getHasAlpha ()Z
+	public final fun getHeight ()I
+	public final fun getSamples ()[S
+	public final fun getWidth ()I
+	public final fun oriented (Lio/github/yuroyami/imagekodec/Orientation;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public final fun toBitmap ()Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public fun toString ()Ljava/lang/String;
 }
 

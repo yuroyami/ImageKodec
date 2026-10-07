@@ -68,6 +68,16 @@ internal class TiffReferenceBlackWhite private constructor(private val pairs: Lo
         return Array(3) { c -> IntArray(max + 1) { expanded(it, c, 255).roundedByte(16) } }
     }
 
+    /** [rgbTables] at 16 bits a channel, for every code of a [bits]-bit sample. */
+    fun rgbTables16(bits: Int): Array<IntArray>? {
+        val max = (1 shl bits) - 1
+        val default = (0..2).all { c ->
+            pairs[c * 4] == 0L && pairs[c * 4 + 2] == max.toLong() * pairs[c * 4 + 3]
+        }
+        if (default) return null
+        return Array(3) { c -> IntArray(max + 1) { expanded(it, c, 65535).rounded(16, 65535) } }
+    }
+
     fun ycbcrTables(): Array<Array<TiffFixed128>>? {
         val default = (0..2).all { c ->
             pairs[c * 4] == (if (c == 0) 0L else 128L) * pairs[c * 4 + 1] &&

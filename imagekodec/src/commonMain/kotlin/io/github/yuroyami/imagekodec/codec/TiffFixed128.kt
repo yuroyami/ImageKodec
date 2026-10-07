@@ -75,10 +75,13 @@ internal class TiffFixed128 private constructor(
             (resultHigh != 0uL || resultLow != 0uL) && negative)
     }
 
-    fun roundedByte(fractionBits: Int): Int {
+    fun roundedByte(fractionBits: Int): Int = rounded(fractionBits, 255)
+
+    /** Rounded to the nearest whole value and clamped to 0..[max]. */
+    fun rounded(fractionBits: Int, max: Int): Int {
         val rounded = this + of(1L shl (fractionBits - 1))
         if (rounded.negative) return 0
-        if (rounded.high != 0uL || rounded.low shr fractionBits > 255uL) return 255
+        if (rounded.high != 0uL || rounded.low shr fractionBits > max.toULong()) return max
         return (rounded.low shr fractionBits).toInt()
     }
 

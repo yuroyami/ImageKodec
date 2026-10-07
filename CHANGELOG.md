@@ -14,6 +14,15 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.decode16` and `KiteBitmap16` keep every bit of a 16-bit PNG or
+  TIFF, which `decode` narrows to the high byte, including a TIFF palette's
+  16-bit ColorMap. The samples come in the channels the file stores once a
+  palette is looked up, so a gray depth map stays one sample a pixel; narrower
+  samples replicate up, and every other format widens what `decode` gives,
+  each byte times 257. `KiteBitmap16.toBitmap` narrows back to exactly what
+  `decode` returns, and `oriented` applies an EXIF orientation. ImageMagick's
+  16-bit PNGs and TIFFs match ImageIO's 16-bit rasters sample for sample (#10).
+
 - TIFFs whose strips or tiles are JPEG decode. Compression 7, which Technical
   Note 2 defines and current writers use, splices the JPEGTables into each
   block, converts YCbCr as libtiff's RGB color mode has libjpeg do it, which is
