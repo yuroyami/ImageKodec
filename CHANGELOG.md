@@ -53,6 +53,13 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- The deflate encoder behind PNG and the zlib and gzip framers writes stored
+  blocks and splits its output into blocks, as zlib's `_tr_flush_block` does.
+  Each block takes whichever of stored, fixed or dynamic Huffman is smallest,
+  and neighbouring blocks join while one block costs less than two. A MiB of
+  random bytes now takes 85 bytes more than its size, 5 for each stored block,
+  where it took 751 more, and a photo's PNG comes out slightly smaller (#20).
+
 - `probe` and the decoders agree on PNG sizes and JPEG 2000 alpha. A PNG side of
   0 or past 2^31 - 1 throws `ImageDecodeException` on both sides, where `probe`
   used to report a zero or negative width, and a size past the decoder's limits

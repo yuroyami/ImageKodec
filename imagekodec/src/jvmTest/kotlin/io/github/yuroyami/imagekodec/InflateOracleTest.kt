@@ -8,6 +8,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * Oracle test for the table-accelerated inflate: everything java.util.zip's
@@ -141,6 +142,31 @@ class InflateOracleTest {
         val bomb = zlibCompress(ByteArray(8 * 1024 * 1024), level = 9)
         assertFailsWith<InflateException> {
             Zlib.decompress(bomb, maximumSize = 10_000)
+        }
+    }
+
+    /** Our encoder's stored, fixed and dynamic blocks, read back by the JDK's zlib (#20). */
+    @Test
+    fun ourBlocksDecodeInZlib() {
+        val random = kotlin.random.Random(20)
+        val text = "the quick brown fox jumps over the lazy dog ".repeat(3000).encodeToByteArray()
+        for (data in listOf(
+            random.nextBytes(1 shl 20),
+            random.nextBytes(70_000) + ByteArray(50_000) { (it / 1000).toByte() } + text + random.nextBytes(20_000),
+            ByteArray(0),
+        )) {
+            val packed = io.github.yuroyami.imagekodec.internal.flate.Deflate.encode(data)
+            val inflater = java.util.zip.Inflater(true)
+            inflater.setInput(packed)
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(65536)
+            while (!inflater.finished()) {
+                val n = inflater.inflate(buf)
+                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+                out.write(buf, 0, n)
+            }
+            assertTrue(inflater.finished(), "zlib did not reach the end of the stream")
+            kotlin.test.assertContentEquals(data, out.toByteArray())
         }
     }
 }

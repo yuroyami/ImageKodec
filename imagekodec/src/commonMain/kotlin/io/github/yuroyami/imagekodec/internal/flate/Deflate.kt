@@ -34,16 +34,15 @@ package io.github.yuroyami.imagekodec.internal.flate
  * from the KitePDF FlateDecode encoder and upgraded with a **dynamic-Huffman**
  * (BTYPE=10) path.
  *
- * Pipeline: greedy hash-chained LZ77 over a 32 KiB window → one final block,
- * emitted with whichever of **fixed** (BTYPE=01) or **dynamic** (BTYPE=10) Huffman
- * codes is smaller for this input. The dynamic code lengths are built with a faithful
- * port of zlib's length-limited Huffman (`trees.c` `build_tree` + `gen_bitlen`): a
- * min-heap Huffman tree, then the overflow-redistribution that caps lengths at 15
- * bits (7 for the code-length code) while preserving the Kraft equality.
- *
- * Stored (BTYPE=00) blocks and multi-block chunking are deferred (issue #20);
- * a single dynamic/fixed block encodes inputs of any size, and choosing the smaller of
- * the two is a strict improvement over the old fixed-only encoder.
+ * Pipeline: greedy hash-chained LZ77 over a 32 KiB window, then blocks of up to
+ * [BLOCK_SYMBOLS] symbols, each emitted as whichever of **stored** (BTYPE=00),
+ * **fixed** (BTYPE=01) or **dynamic** (BTYPE=10) is smallest for it, as zlib's
+ * `_tr_flush_block` chooses. A block of data that does not compress is stored, so the
+ * output never grows by more than a stored block's 5 bytes per 65535, and each dynamic
+ * block fits its codes to its own part of the input (#20). The dynamic code lengths are
+ * built with a faithful port of zlib's length-limited Huffman (`trees.c` `build_tree` +
+ * `gen_bitlen`): a min-heap Huffman tree, then the overflow-redistribution that caps
+ * lengths at 15 bits (7 for the code-length code) while preserving the Kraft equality.
  *
  * Output is bare DEFLATE; the gzip/zlib framers wrap it. It decodes byte-for-byte
  * through [Inflate] and through stock zlib.
@@ -64,50 +63,174 @@ internal class Deflater(private val data: ByteArray) {
     private var tokens = IntArray(256)
     private var tokenCount = 0
 
-    // Symbol frequencies gathered during LZ77.
-    private val llFreq = IntArray(286)   // literals 0..255, EOB 256, length codes 257..285
-    private val dFreq = IntArray(30)     // distance codes
+    /**
+     * A run of tokens with what a block of them costs: [first] until [last] encode the input from
+     * byte [start] until [end], with these symbol frequencies and extra bits.
+     */
+    private class Chunk(val first: Int, var last: Int, val start: Int, var end: Int) {
+        val llFreq = IntArray(286)   // literals 0..255, EOB 256, length codes 257..285
+        val dFreq = IntArray(30)     // distance codes
+        var extraBits = 0L
+
+        fun absorb(next: Chunk) {
+            last = next.last
+            end = next.end
+            for (i in llFreq.indices) llFreq[i] += next.llFreq[i]
+            for (i in dFreq.indices) dFreq[i] += next.dFreq[i]
+            extraBits += next.extraBits
+        }
+
+        fun copy(): Chunk = Chunk(first, last, start, end).also { c ->
+            llFreq.copyInto(c.llFreq)
+            dFreq.copyInto(c.dFreq)
+            c.extraBits = extraBits
+        }
+    }
+
+    /** A chunk's dynamic tables, built once to cost it and again to write it. */
+    private inner class Tables(chunk: Chunk) {
+        val llLen = codeLengths(chunk.llFreq, MAX_BITS)
+        val dLen = codeLengths(chunk.dFreq, MAX_BITS).let { if (it.any { l -> l > 0 }) it else IntArray(30).also { d -> d[0] = 1 } }
+        val hlit = maxIndex(llLen, minTop = END_OF_BLOCK) + 1   // >= 257
+        val hdist = maxIndex(dLen, minTop = 0) + 1              // >= 1
+        // Code-length code: RLE of (llLen[0..hlit) ++ dLen[0..hdist)).
+        val clSeq = buildCodeLengthSequence(llLen, hlit, dLen, hdist)
+        val clLen: IntArray
+        val numCl: Int
+        init {
+            val clFreq = IntArray(19)
+            for (i in clSeq.indices step 3) clFreq[clSeq[i]]++
+            clLen = codeLengths(clFreq, MAX_CL_BITS)
+            var n = 19
+            while (n > 4 && clLen[ORDER[n - 1]] == 0) n--
+            numCl = n
+        }
+        // Each type's whole size in bits, with its 3-bit header, so the stored type can compete.
+        val dynamicBits = 3 + dynamicHeaderBits(numCl, clSeq, clLen) + symbolBits(chunk, llLen, dLen) + chunk.extraBits
+        val fixedBits = 3 + symbolBits(chunk, FIXED_LITLEN_LEN, FIXED_DIST_LEN) + chunk.extraBits
+        val storedBits = storedBits(chunk.end - chunk.start, STORED_PADDING)
+        val best = minOf(dynamicBits, fixedBits, storedBits)
+        val stored = storedBits < dynamicBits && storedBits < fixedBits
+    }
 
     fun encode(): ByteArray {
         lz77()
-        llFreq[END_OF_BLOCK]++           // every block ends with one EOB
+        // Chunks of [BLOCK_SYMBOLS] symbols, as zlib flushes a block, then joined while one block
+        // of two costs less than the pair: never more blocks than the statistics pay for.
+        val blocks = ArrayList<Pair<Chunk, Tables>>()
+        var first = 0
+        var at = 0
+        var group: Chunk? = null
+        var groupTables: Tables? = null
+        do {
+            val chunk = chunk(first, minOf(tokenCount, first + BLOCK_SYMBOLS), at)
+            val tables = Tables(chunk)
+            val g = group
+            if (g == null) {
+                group = chunk
+                groupTables = tables
+            } else {
+                val joined = g.copy().also { it.absorb(chunk) }
+                val joinedTables = Tables(joined)
+                if (joinedTables.best <= groupTables!!.best + tables.best) {
+                    group = joined
+                    groupTables = joinedTables
+                } else {
+                    blocks.add(g to groupTables)
+                    group = chunk
+                    groupTables = tables
+                }
+            }
+            first = chunk.last
+            at = chunk.end
+        } while (first < tokenCount)
+        blocks.add(group!! to groupTables!!)
 
-        // Build dynamic tables.
-        val llLen = codeLengths(llFreq, MAX_BITS)
-        val dLenRaw = codeLengths(dFreq, MAX_BITS)
-        val dLen = if (dLenRaw.any { it > 0 }) dLenRaw else IntArray(30).also { it[0] = 1 }
-
-        val hlit = maxIndex(llLen, minTop = END_OF_BLOCK) + 1   // >= 257
-        val hdist = maxIndex(dLen, minTop = 0) + 1              // >= 1
-
-        // Code-length code: RLE of (llLen[0..hlit) ++ dLen[0..hdist)).
-        val clSeq = buildCodeLengthSequence(llLen, hlit, dLen, hdist)
-        val clFreq = IntArray(19)
-        for (i in clSeq.indices step 3) clFreq[clSeq[i]]++
-        val clLen = codeLengths(clFreq, MAX_CL_BITS)
-        var numCl = 19
-        while (numCl > 4 && clLen[ORDER[numCl - 1]] == 0) numCl--
-
-        // Pick the smaller of dynamic vs fixed (extra bits cancel, so compare the rest).
-        val dynamicBits = dynamicHeaderBits(numCl, clSeq, clLen) + symbolBits(llLen, dLen)
-        val fixedBits = fixedSymbolBits()
-        val useDynamic = dynamicBits < fixedBits
-
-        // BFINAL=1, then BTYPE (LSB-first).
-        writeBits(1, 1)
-        if (useDynamic) {
-            writeBits(0b10, 2)
-            writeDynamicHeader(hlit, hdist, numCl, clSeq, clLen)
-            emitData(canonicalCodes(llLen), llLen, canonicalCodes(dLen), dLen)
-        } else {
-            writeBits(0b01, 2)
-            emitData(FIXED_LITLEN_CODE, FIXED_LITLEN_LEN, FIXED_DIST_CODE, FIXED_DIST_LEN)
+        var i = 0
+        while (i < blocks.size) {
+            val (chunk, tables) = blocks[i]
+            if (tables.stored) {
+                // Neighbouring stored blocks join into stored blocks of up to 65535 bytes.
+                var j = i
+                while (j + 1 < blocks.size && blocks[j + 1].second.stored) j++
+                writeStored(chunk.start, blocks[j].first.end, final = j == blocks.size - 1)
+                i = j + 1
+                continue
+            }
+            val final = i == blocks.size - 1
+            writeBits(if (final) 1 else 0, 1)
+            if (tables.dynamicBits < tables.fixedBits) {
+                writeBits(0b10, 2)
+                writeDynamicHeader(tables.hlit, tables.hdist, tables.numCl, tables.clSeq, tables.clLen)
+                emitData(chunk.first, chunk.last, canonicalCodes(tables.llLen), tables.llLen, canonicalCodes(tables.dLen), tables.dLen)
+            } else {
+                writeBits(0b01, 2)
+                emitData(chunk.first, chunk.last, FIXED_LITLEN_CODE, FIXED_LITLEN_LEN, FIXED_DIST_CODE, FIXED_DIST_LEN)
+            }
+            i++
         }
         flushToByte()
         return out.toByteArray()
     }
 
-    /* ─── LZ77 (greedy, hash-chained): gathers tokens + frequencies ──────── */
+    /** The frequencies of tokens [first] until [last], which encode the input from byte [at] on. */
+    private fun chunk(first: Int, last: Int, at: Int): Chunk {
+        val c = Chunk(first, last, at, at)
+        var end = at
+        for (i in first until last) {
+            val t = tokens[i]
+            if (t and MATCH_FLAG == 0) {
+                c.llFreq[t]++
+                end++
+            } else {
+                val length = (t ushr 16) and 0x1FF
+                val lc = lengthCode(length)
+                val dc = distCode(t and 0xFFFF)
+                c.llFreq[END_OF_BLOCK + 1 + lc]++
+                c.dFreq[dc]++
+                c.extraBits += LENGTH_EXTRA[lc] + DIST_EXTRA[dc]
+                end += length
+            }
+        }
+        c.llFreq[END_OF_BLOCK]++           // every block ends with one EOB
+        c.end = end
+        return c
+    }
+
+    /**
+     * The bits [length] input bytes take as stored blocks: each block of up to 65535 bytes has its
+     * 3-bit header, padding to a byte boundary, LEN and NLEN (RFC 1951 3.2.4). The first block's
+     * padding is [padding] bits; the next ones start on a byte boundary and pad 5.
+     */
+    private fun storedBits(length: Int, padding: Int): Long {
+        var bits = 0L
+        var pad = padding
+        var left = length
+        do {
+            val take = minOf(left, MAX_STORED)
+            bits += 3 + pad + 32 + 8L * take
+            pad = 5
+            left -= take
+        } while (left > 0)
+        return bits
+    }
+
+    private fun writeStored(from: Int, to: Int, final: Boolean) {
+        var at = from
+        do {
+            val take = minOf(to - at, MAX_STORED)
+            val last = final && at + take == to
+            writeBits(if (last) 1 else 0, 1)
+            writeBits(0b00, 2)
+            flushToByte()
+            writeBits(take, 16)
+            writeBits(take.inv() and 0xFFFF, 16)
+            for (i in at until at + take) out.append(data[i])
+            at += take
+        } while (at < to)
+    }
+
+    /* ─── LZ77 (greedy, hash-chained): gathers the tokens ──────────────────── */
 
     private fun lz77() {
         val n = data.size
@@ -160,16 +283,9 @@ internal class Deflater(private val data: ByteArray) {
         }
     }
 
-    private fun addLiteral(v: Int) {
-        appendToken(v)
-        llFreq[v]++
-    }
+    private fun addLiteral(v: Int) = appendToken(v)
 
-    private fun addMatch(length: Int, distance: Int) {
-        appendToken(MATCH_FLAG or (length shl 16) or distance)
-        llFreq[END_OF_BLOCK + 1 + lengthCode(length)]++  // 257 + lc
-        dFreq[distCode(distance)]++
-    }
+    private fun addMatch(length: Int, distance: Int) = appendToken(MATCH_FLAG or (length shl 16) or distance)
 
     private fun appendToken(t: Int) {
         if (tokenCount == tokens.size) tokens = tokens.copyOf(tokens.size * 2)
@@ -178,8 +294,8 @@ internal class Deflater(private val data: ByteArray) {
 
     /* ─── Emit the token stream with a chosen pair of code tables ─────────── */
 
-    private fun emitData(llCode: IntArray, llLen: IntArray, dCode: IntArray, dLen: IntArray) {
-        for (i in 0 until tokenCount) {
+    private fun emitData(first: Int, last: Int, llCode: IntArray, llLen: IntArray, dCode: IntArray, dLen: IntArray) {
+        for (i in first until last) {
             val t = tokens[i]
             if (t and MATCH_FLAG == 0) {
                 writeCode(llCode[t], llLen[t])                              // literal
@@ -251,19 +367,12 @@ internal class Deflater(private val data: ByteArray) {
         return seq.toIntArray()
     }
 
-    /* ─── Size estimation (to choose dynamic vs fixed) ───────────────────── */
+    /* ─── Size estimation (to choose the block type) ─────────────────────── */
 
-    private fun symbolBits(llLen: IntArray, dLen: IntArray): Long {
+    private fun symbolBits(chunk: Chunk, llLen: IntArray, dLen: IntArray): Long {
         var bits = 0L
-        for (s in 0..285) bits += llFreq[s].toLong() * llLen[s]
-        for (d in 0..29) bits += dFreq[d].toLong() * dLen[d]
-        return bits
-    }
-
-    private fun fixedSymbolBits(): Long {
-        var bits = 0L
-        for (s in 0..285) bits += llFreq[s].toLong() * FIXED_LITLEN_LEN[s]
-        for (d in 0..29) bits += dFreq[d].toLong() * FIXED_DIST_LEN[d]
+        for (s in 0..285) bits += chunk.llFreq[s].toLong() * llLen[s]
+        for (d in 0..29) bits += chunk.dFreq[d].toLong() * dLen[d]
         return bits
     }
 
@@ -332,6 +441,15 @@ internal class Deflater(private val data: ByteArray) {
         private const val MAX_MATCH = 258
         private const val HASH_SIZE = 1 shl 15
         private const val MAX_CHAIN = 128
+
+        /** Symbols per block: zlib's lit_bufsize at its default memLevel of 8. */
+        private const val BLOCK_SYMBOLS = 1 shl 14
+
+        /** The most a stored block holds: LEN is 16 bits. */
+        private const val MAX_STORED = 65_535
+
+        /** A stored block's padding when costed: where it falls is not known until it is written. */
+        private const val STORED_PADDING = 5
 
         private const val END_OF_BLOCK = 256
         private const val MAX_BITS = 15        // max bits for lit/len + dist codes
