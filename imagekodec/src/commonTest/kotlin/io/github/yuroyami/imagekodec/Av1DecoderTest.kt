@@ -1,0 +1,259 @@
+package io.github.yuroyami.imagekodec
+
+import io.github.yuroyami.imagekodec.codec.avif.Av1Decoder
+import io.github.yuroyami.imagekodec.codec.avif.Av1Picture
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+
+/**
+ * One AV1 stream in low overhead format: its picture's size, bit depth, subsampling and plane
+ * count, and the FNV-1a hash of what dav1d decodes from it, every sample as two bytes, little
+ * endian, plane after plane.
+ */
+internal class Av1Fixture(
+    val name: String,
+    val width: Int,
+    val height: Int,
+    val bitDepth: Int,
+    val subX: Int,
+    val subY: Int,
+    val planes: Int,
+    val hash: Long,
+    hexData: String,
+) {
+    val data: ByteArray = hex(hexData)
+}
+
+/**
+ * Small still pictures for the AV1 decoder (#41), from libaom, SVT-AV1 and rav1e through
+ * ffmpeg, each made to exercise a coding tool, with dav1d's reading of each. `Av1OracleTest`
+ * covers larger pictures and many more encoder settings where ffmpeg is installed.
+ */
+internal object Av1Fixtures {
+    /** Lossless 4:2:0 from libaom. */
+    val lossless = Av1Fixture(
+        "lossless", 48, 32, 8, 1, 1, 3, 0xe333819d1c3680c5uL.toLong(),
+            "12000a0618152ffb601032fd02440000f3b2349d017c7c90e1ea9af230cf34c6002d8ff27ebe61574d9ec8726d8efe32733bb95c60dc7e9169129cb6" +
+            "cd4aab0eb18a4e097c2e1811ee897c789399fe48e6141d30794d2a3a1e5c4495150c10388593e7578b76c710dc395e20d1abc1fa35979ed692735c0c" +
+            "ab35870c4cfed18b87e24decdfee27b3599549b3270ab341b5e60bbf70a6766b6408d9b373c7a780b17787815444361c062cffc6d431f775c4085fb6" +
+            "d5dc42e88a418e96a05f0745afda9f5c856b4dba2f29777cee4a7262ebd1a2a1f5f3639cf420bfafd2fe8ae472bbd956c4502544c657e9f6325cb944" +
+            "dc49aaea17b939f55615e0091ddc912d67c5586ce5ded7ba6d0d7ef77847de4cd0105335d06c63e4e28198a14c9a0c82bd1474feb07c23fe7bbadc41" +
+            "2a9cad7d6cbea3d977357acd1dfbe458d66c445838e7a10a7fe039425db9655c50c5bea9387a46ee13c071cf584aee9d8131166922e89c69bae3b513" +
+            "6a687fcc2db4c94f2969f09e97b77315f94a07d8566317afcdea5f1f9f73e6474370",
+    )
+
+    /** Deblocking, CDEF and Wiener restoration at 4:2:0. */
+    val filters420 = Av1Fixture(
+        "f420", 96, 80, 8, 1, 1, 3, 0xfb1f338b7b6ac716uL.toLong(),
+            "12000a061819afcf6c0232e50312d0011330e146ce95a08b87a8b099089f3a52fd45e884d146f7bfb054fd99703e3c5e216be672199ed7613c9c63a6" +
+            "4fad549098e0946915d19faa9ab3c686a0e5e669aab43210a736095c30a79079ed05d72b6c0295363aba828575c462057f67877534c6c2f58db2a217" +
+            "b0a67401dcee24e43f0496af70567fc070458a22e53b3b27d28da514b434b042a01faff98b71860b43a68019754afa75e548fda79e4a1ba7dbb3d938" +
+            "bdc3ce2b718433bbf55558c3e9cdc13d88ad88c2e946ff75057b0296c9aab1d11de705df0bb1b6f129fefcf884ae0a65cfd7b13ef609d62d567fd661" +
+            "bdc8026f3efa2e87b6ac51580e8fcd20b86720ede115196ef58c8b98ea71f916a18edf660cbff0b2e8d451ea0dbda78409ae6d6ce8045cb6a5d80b67" +
+            "93215dd4bd1023a02c346dd2972aaf01bfe504833f288a2b7f0252518c1acb7b52622b4795e617ef14b02e1770435aa80b3e8591815641c8ff993aac" +
+            "9f9ea0136b5708b02528abda731214f4b43de4f10a95bc125b1bc7e12ab8503176d95ac2dde5e4976033c3fe726cd9efe16883b1cd778757829b3a58" +
+            "733e6354662fc3a75685bbb65e7c003917cd4332ba76d49a3b297c97eeb0bfb3d16c088bbb2b54bea01769bb1deb2f4b1d1a89adc17b3efd03d3a47d" +
+            "87c373e679919b1eb82156e891d433b8f6d8",
+    )
+
+    /** 10-bit 4:4:4 of an odd source size, with every filter. */
+    val filters444Bits10 = Av1Fixture(
+        "f444_10", 60, 36, 10, 0, 0, 3, 0xb500e83c91b68c80uL.toLong(),
+            "12000a0638157b8db84032fa0345e0000240b1257495c0db7821b29201a12e4992cb501e0487800ed04bddaff1b98aa21ec216c0f2afb299c307b6fd" +
+            "98da133c08df72a77b8ab6c206de3c17272f6936aca14e6d02c28fc9c7b6d1bf1d3dfed887886e229decf73d18d6ab0902ba3b7fc2ebe102a5ddd283" +
+            "7b2643b02662a2af620b163c1e99e62ff0086bdbf46fad28d2509ce6513cb34c1d401d91cf7867942fc485e0a711ea4a0eb50946872418172e11ea93" +
+            "1f95d819b23676dd414ef282c8d9e4be5c0a83b8557306971bedcef18fbe581dd262ddc3cbcd8783aa1b448651c733132980817eb10911e59ebaa405" +
+            "a5defb89ffc281d9f13ebe64e8b864a005e23d3ec9297f097c2cc7eeeda7167636e07427d16c66bfad23990e68a7fa4594f1dd5a6c97c9baf4370c91" +
+            "3073a7dfa39a8390e02397f13e52fb3a342e6cc6df857d2b20dc60ac78e453d485603af6243c0d5bbf097239e2df1597805dbf006ae5920831730c5e" +
+            "0af7166715222837035b160bd583db683387b5147c41a022b7f3a31fd071dd53922a2a8b708709b2b2b04b98fdb4495d1e4bba6e69e6d156df239a92" +
+            "3e951cc2f5ed4704ebdc6e9086b251e58f8d424f97b92961889f161000f27e3f98f2ccdccc1d96fac5e46492d3d8e238cadc5688e5e9d58367159b15" +
+            "f2e09e2e38b0db5690b4e843b074693b05205442386788fb8f7b32462c8339c6500f82279710fe",
+    )
+
+    /** 4:2:2. */
+    val yuv422 = Av1Fixture(
+        "s422", 96, 80, 8, 1, 0, 3, 0x07aee659989bff1buL.toLong(),
+            "12000a065819afcf6c08329007128004115181438f8100cc0322027d25139242976143ee450b56a3e4cdf8164bbda95b34ac2d761984c9da1dc14d11" +
+            "bdc0e782f7bdbdd6c7c035b3da8ef6acfc57be7d6a1aa02b00a51d0769b141ff776cd00d1d110cce4001634c2ec044838a612bbd48e6af0cd0690bf9" +
+            "097fe59fd62b81d72cf005fb89c6b82f9682d5ccc3f801cf085842144245890407bca1056f929b2e5d8374df21a43b72031bdba8d8dfb462a4afffa0" +
+            "026b3297df7d6aa4a422db6aaab9d6b26ebccbcddb8e047812351507141bd98f5b8894ebc72e4d657e8fac5fc686590025f978a6b957ce778c7afc17" +
+            "1fd116b440b91fdb6773befa574302db6fd8b7e3fdd3410db542b4778703b0a29a9fdbf23de4ed12e2743e8a052a2913d906bc4fa56c70dc4e4e722c" +
+            "956fa6fb965054a2d7d2b307b49fdcd2d3a3699df0bb797f40c191f3ee5131aeccf64cf5da054c209d9c2912192a606a73fec00182cc5b235340f177" +
+            "363318b1a02bdf0354b15087ea2e38214f8d56a4ee8f54563ae4b70b268e9eb705c9f72403228c136af40d045260d636d091b85bfd2b8a936176d26e" +
+            "77449866584362e41b3dda4aa767e5807fc0a3e2de1660bf6e2e9a578a79ab5b2e265b6973277ba19119561c207a56cccfa7f8a26bfc06b2e5a3c3f3" +
+            "6f19d69b8cc4bfc267d61090f23f5bf20c51518e27e73a203d45d95a0f92a1cc172ccbb55ed0810518ca5fee41ed7461cdf2eaaad631fb31e489f295" +
+            "373fc2eb4755db4c3725157cd8016a3297805b56e379e5c422b75ec784de61a663000c9747b4724ddec4edcc4bbc81babb729ba4e2ad058a988deb6d" +
+            "c53b4772529c6a2fd73455aaf798f92ecb749d93eccb3324027ae76ead854c3433c42d9a294eb901c1804e0e30d714d66987e5b6a7a3da5b59a423fc" +
+            "c366e6e1c3ddd4e565c0f49bb27dfc27d5a64b51b15fb356d720329a1ffe0d8da3f3950cd4e074e690ff59ea8e0160b9c4c42503529657873d97afbf" +
+            "de803d50d8f1b390bd9cbf586956d3c83b74cb9336c1da773991cdfc721e5294d6d28909b57b96326c8c4561d540e6c7a8b43ec124a3e39c42e38e62" +
+            "43387b10a097d23c02c7a5d70ef75d15e9f58818b99a1685158160ea42ccde2769cb972e68af88a0982732569f5958d2c6629d3db51a20dd3e6fd907" +
+            "1ea64108d4b0273e642c74663902a39324951099291f440136d0ae02d171ccee8d0bc5e4bd24c65fd97febd3561a6fb70088b671e713330becad3339" +
+            "cfdf6a2018ebb2d92021fd73915ccf1f44192489942701aaf0",
+    )
+
+    /** 12-bit monochrome. */
+    val mono12 = Av1Fixture(
+        "mono12", 96, 80, 12, 1, 1, 1, 0x6ed09a039e379e53uL.toLong(),
+            "12000a065819afcf6fa83284031280124051b100b6457e3b10af2a264d4c76ca82352fca2f1cfec642b941ca9f607d7e0307a6f07d0c42f31a0c0b09" +
+            "701c48e60378b53d81e599a4678ab78083f19402e9410690d90f104c09e7e4a3ab4b4f38cea060691b11b13269152b621e8d1eb15ccc7f884a9eb532" +
+            "dcf5c638948418ac96d097e9c6e3249c6300d90a4196bd352909333339106d0e7b1ce534dfc74ac1303c239230add0e0ef76cfcbff39c4af108af9d0" +
+            "2ec2ecfd152d707278bfff4fa5231b54eb78155fd639446334fc8164402bb2120d219e81a33e66ae18174f6226464798564b791fec88cfd931daddd4" +
+            "524faf0a55176927b9acb78eea6899d466735c35a887085faa6d63e116935edc7eabb8ee371f2f58b6c07696f60eff976229036f7f287dff1c3a6d0b" +
+            "50476cb9b1670f6f073d511be89faeca3c99da3002be6af67ca907348e845e1022eb05ed77da4f89edb11bac72484feeb3042dac6b9998b3eb81a88a" +
+            "920a04a89853c8d01ea8b5249f53fe0adc20f00384d59388452ec70e8c9ff3ddce176b2b267403a760",
+    )
+
+    /** Rav1e: switchable restoration in 64 and 32 sample units, and segmentation. */
+    val rav1e = Av1Fixture(
+        "rav1e", 64, 64, 10, 1, 1, 3, 0xc90670502c791270uL.toLong(),
+            "12000a0d000000f957ffc4215d0202021432fe071002d51d81f7e9dd7f501fe008100412020d0000000065d30f04104554f60a6a4d736a49cb12fe39" +
+            "0453b0b1395d5dce5479e51d029450b44bf1554d529dd225eccab3a12afef5313294d169168067a83861ee092c4dbd931e95421f1b85e5b8d5a2ebe1" +
+            "f269dd5a1d1712bd037747fcd9bf3c7103357c979eb84883ac347fc34a4df145dac1d7a0eb2d2a051ab91ed00687293c7dc4f70a0ed0ad27ec2f7cd6" +
+            "8ee31221a0c0653fa99ad1dcdc439e0dcefca8de9b66737b7b420684045a640177f057a4525ffefe8f57e25835dc8f946ef7543925451a1fd1a7727d" +
+            "71e50d08e5a1a753867b98f83313d281d79ac1f0af05c2e0b12ef70d6f8330ed67c9b7936022c4833dc3d8c6a083d4a84d6b20dab0a8fd1fad2c3f4d" +
+            "b0e0ebe69c995b92c8a154d80496a14f09132728f5db1d7c098bd804061964326e8188c1aeaa96cc03d44751e771caf1139f067df2909b5b8f2dd755" +
+            "602a9462db3f0b70d9a0e634f255cacbe478ebe71309d6b0211c6699926e53608a31075a867556edb827281fe3ec213aa06adad1484301f36c2ab717" +
+            "a159edbc300e2a3d5c5b3efe4074b3ea2efe7f1d721cb26fe2b56787bb0a94043e5bd91632426ab1e58d38f85d389294cc1f0dd4ede50c2be46f5b20" +
+            "836a1c08f9dbe1ad78774e7e9dd91a577183d537b88e46ca4e2c9188fb34e08d3b68a057b512454e45ee3a732a5a499a5455f3029e13200c9faf460e" +
+            "1e8c343ea42b0bb5399136482ce6296f9a944163d51ff3bbd9b2030ce8985119ebf3a6a05af14f683a33d137463bfa8ba081531bc30101d8f6d4f572" +
+            "585fe79ed59ee74362e95330a0ed65fb84470188379f298a51ac4a466cb8b34ef97c42932ac07c0f4b671b488d82736051de4abd05f25d1e5837d197" +
+            "bbac07692e58544d46267c05b424bd870310a30b7092819b97d6c876892239df3cdae95bcbeaf969d4bba8439428019e2e574d70b7b38a2da504f17a" +
+            "962d4eabb30d111868370b6b968f173557ba4ac52a4883b5661a5c65e1c7bf4b8749eed26cd8546cd716c75b7ca280164924e7bbb254a07e51f80a89" +
+            "673615ec12cb0f472c26bd487f7260dce3a012dc007f6cfa6f3d1cde78f31c136ed8a3bd6f8b724b6aecd4ea3a211bd6662187e7f43a574aa97d87c6" +
+            "1d6e1977ebbc376e88399f5c9da5e5742c2b314f0028a6200b861ceca89eff373318d60173f16fe1da171440b0cafcf71d3172586f36fc3319cf1cd4" +
+            "77e044766f59138bed8c0d508a4e36defd2dbd2002c5460666d70ee80249ab15e36c39b84e78bf4cfa24409ff504c3cbc4912fe1fe3c71ee65a98e81" +
+            "621f2772884c96dc9f8bc44b08975821cf349f7d5006d8950dd31cdb790a248a907b7a23dca0ee6d209d0345c80343c1f09c61d76bb0b2fa75657880" +
+            "a4c320a9efae083424d24a51a906b2fcea29c5e0c830",
+    )
+
+    /** SVT-AV1 superres, 85 samples coded and upscaled to 128. */
+    val superres = Av1Fixture(
+        "superres", 128, 64, 8, 1, 1, 3, 0xd9db858800f48423uL.toLong(),
+            "12000a0a000000032fffc6afb00432aa071002c91801040820503cfbc8d8c01b4254472857193de2de2b79a43e2043509ec026016dc155e6c3cce6ac" +
+            "40713c112c08931d013b52242c2f5e706b02068f869a25d8a58e318b952399df163e76d51ea470fa9af95275f15ca398a316539c30373ae6665cb29c" +
+            "0f31bf31eb30ceae59bd46ee289590abe25111ed00a1f070edb51d93e9955f1fbf4c0f446d2164f9f8d633c1ea5f9ee44ae102d96e4a4a6632efc8db" +
+            "dfb8ad16f8c2c5a9fc2d1e2b6c3b0a36aa576dc7904c4ce2c6cc1e6af56586548f57266fa1c572598591769afe3297479fa0513097d3db65df18c75b" +
+            "9760c8e91db2298f80abcd99c917c601a81b0b7d0f43da373555d274b5124f2eb97ddd7a3800fa3fb8a49a580884bf70f8a08a0ec5fa4451368acfaf" +
+            "ddbbd0d975fff4b49575b63a2ab5f1d00d2119c2d0036a5006b0e88d9bb08ae1d1a16df7c6710766899121bd1f36e284a2a18c645bdcfed98b568eba" +
+            "efc3c63698e3d97ece798d395e5f9373db6d2be275a0edbb0aee2cf778c406cf512d6e3f020adb65cee5d3cd159650015223e08707491a823e00b470" +
+            "e4890aba531e0f2326d1bc34463b40a1dc1d0b1d4e9c90530556ae7f1aa44585a736c05e3f764360a34bf2e4cf14ff7d93bf06807d80a0119ce33ea1" +
+            "bac9dd7821b850d4cc974ea32251a9704ba457882577451a76f0c20c975616cfa4b4479f7786596bc61c33274020b8ad049c96d272c205e2519aa9c1" +
+            "8461374e4e2fa474153dd1f048ef44b60170d01e97b5a413340fff39084e261d286b9b14e3d5bf9d55436db2d618af566097becdae70de8efc13092e" +
+            "74a5a3beb958cd1bbd2121adca22784f0d6b8e5242625067adb09e5586ed42fddee1074049406ea7fc47d4034c75b3e46093751c5f5ed2236588ea4f" +
+            "8d854a1a135a7efc8e973241b5212b2c344325f400284e413880b7ef538dd262d139d2e78450c9368e2511ea3c22688dda43a498ae541d0ed5fdf86d" +
+            "70fff07c3c0cb5f9c60e6ffae771f503130ff572007ad59cb593ac6703078fb44a3743ee448829565fe0ed981b02b8b6e02f81243691dc7118eed6a9" +
+            "32b56dfa8276ab9467af0ba1eabedb08b36aa4b8e50bd42e423705820c809c182736c4013c15aaa0950c44a3c7a1c5503dc1d063d997df12820e0429" +
+            "0244cb72ca0a4f75f35cc929d81f85fea504b8fb0a835848f913c4ea52b5e4ffadd16bea388e2d285a00d7e3e6edbd1e9351eb4ca79c3c700d6a4ad6" +
+            "75331c6268873342069b593d2114e3ee7d8dfb5ecfb5864753cec222db694b06bf8bfb0fc644e5f0ebb206cd66460ec81719f807342d8c",
+    )
+
+    /** 2 by 2 tiles. */
+    val tiles = Av1Fixture(
+        "tiles", 160, 80, 8, 1, 1, 3, 0xe1c74b4e62df851euL.toLong(),
+            "12000a06181da7e7b60132f7021a39002483080b35d02d00001e01d2815c66b758c0b69e4425892bdfe4a4064e13692e91d05ad3014033bdef0d020f" +
+            "f38d339ecdd7fc592084453b0f078db71cb83ebefe6d108d38c95aa156de5a63ad1ef4e1b6b41e5949d26ff2c6ecd4a65d20e4e3d8734cceac2e3e79" +
+            "9e28d1efb3cd18bbb5cc724fa4a9ee3476d2555cc30b97328f7aae09b529341aeaa49807662c7297a13caca3478806bd863bcc185f2bbc098e826c53" +
+            "ccb18c4c2fdf9e35f4c4f8a001167364c064e1fce3b5d36d3785827b382a7d772068afec77d1ab23a7c5a1f1fa4d7a3533a82788ced47dba19860dc0" +
+            "63c409277ae37651eb7d9f141f4439fff8b011a6199eec1643f0be6db2a9e936696d7947374a743fe61ea5791e0a73c3a7a20c10d7103ad04b337693" +
+            "d77997959662aff3fa6a407151800a00c81e63e33c13cfa48572423200b2d69d0381fef96c03749c80a1179b6a54eb76cd5bde3f5703bc34b4ad3803" +
+            "11e57cd6ea51bfd64dcd53c9717eb98bb0352d7813bfd4689a60d880",
+    )
+
+    /** 128x128 superblocks. */
+    val sb128 = Av1Fixture(
+        "sb128", 136, 72, 8, 1, 1, 3, 0x7c6fdcd788e1ec39uL.toLong(),
+            "12000a06181da1e3f60132a802164003926242caf402f64f0d9edef38099b2123ae2eb07583c49c126459900068f3a6ef63c21d0325097b363a94d39" +
+            "e44df4333e3159f95c5d2353ba1c5a4510a704955f78902e2b3fca58f1fa5b5bf9ed9ef753c0c7bab9bdd1b93605066b844dab0cec86988a0191a35c" +
+            "ff96c807b7fabfe6ec2404c4fadb828526f1a635845f16d24c553171656bbae0e0fd8dc55b9d7730e17ec48150ead4f3679d4c07c48fcbc5e2064d63" +
+            "178264d9f96e1703921078fe78f8a0fd1c6b484cc7df9f23a7b72f9ee746bc3010cdf797c219e6e154c6ee849e4cd83106df257f045f827d746fb281" +
+            "2081e95ff947f2fdf8b91df127cd142afa0cb06f4816410aefc3172e3bb7f2014d3b3accdb2dca4344f973f40501f3ed9ee90ba3dfb8c572b06d3dd0" +
+            "f9a1deb40700798a92",
+    )
+
+    /** Film grain scaled from luma (libaom test vector 15). */
+    val grainFromLuma = Av1Fixture(
+        "grain_csfl", 64, 64, 8, 1, 1, 3, 0xb4554fbbca066c61uL.toLong(),
+            "12000a0618157ffdb0183289031b40133d41451a6a16b615e200c1e8571766d807486b39e7b74b88282687b81816ea57e8071a73a8283687b7f806ea" +
+            "67e8071a749480d70303e241aa754862f74987d688443da4a537a7672d9fb30329f42640cbf4dcb71ea282da62de5cdc3b8d3e29606372d2d8d63a85" +
+            "8201bc76a15e74186b3bff69498ef3b036e9d611ab2790b5c52a01f1b2432f3c38b0f8acf2d96af2b3e59eb0b603945dfca6dd332c3a5943fbccf973" +
+            "2e0f7e1d08cb651c481bd798cf09307226ba4b4f3a4d64f67aecdf0e760f593746eb5ebe41e8001a26541d453c0fb226d33b310354054922bc0e6e75" +
+            "d3178ff15170be849e73e5297803d3977d48a0c89c4719092665edc3aa6199e139bd246f871665767e9ada778065beede05dab9c7f6effde62c4b7da" +
+            "f0df6511776bc8854f5fa584b37c3dbf5b2dcda1a2bcd09f6883f85103e795b56a82255d61661257c1a395395d503a964fc08a9b36e9cd5f6b17dbcc" +
+            "e082a32ac3face4164b42d2d7a08d91f072528be9c79c79195b19dcfc77730027b77b73cc10a47a72bad69eb6d18",
+    )
+
+    /** 10-bit film grain without overlap, clipped to studio range (libaom test vector 1). */
+    val grainClipped = Av1Fixture(
+        "grain_clip", 72, 40, 10, 1, 1, 3, 0xf8c9db72a629f4eeuL.toLong(),
+            "12000a06181963cedc0c32b50215a01020c2228a7402d857f08000cc410c814d018541c4421c0294830cc38c8405847d44f58595c20400051007160f" +
+            "1a16a21a6821aa2a342440007180e141098141a1b181e9c225c2a6c3a02011a020200d3915601374a02013e02020172598a016a1e9e0201460202018" +
+            "67d9e018234723df0025cb803640d8e0753a1fe0259db2766586407a2e3706a713a3e51e9f5d5844bc14d30d837cdb5c537d1914a5819c1cf4fb6615" +
+            "4cb577abdf7a1b6f01749f485902a3a5224f15888b860519cbb1e76d766265c4cc57cc08405735f3a7b2bd964accd5d200a9c7aa4d3656740095eb55" +
+            "9a2ab454fd073290f455f4db916379c918e083223ad59c228a277ec3628c3a32e52037e2ed8778d2144c47276838091bc07f470d3c77377299d9f066" +
+            "e5120592af51eb64777ef6b508f948c68f56514caa20",
+    )
+
+    /** Intra block copy in screen content. */
+    val intraBlockCopy = Av1Fixture(
+        "ibc", 256, 128, 8, 1, 1, 3, 0x69ab21acef5a8f59uL.toLong(),
+            "12000a06181dbfffb60132a8064c5002b45df1651a8d530e1f3662c30e53450e414fa44ffff9c45c8e52b19924e14ef24433907831913a12ee99a19f" +
+            "61d66e150d57a305e828be5c1d3f61fbc150fbd23cb0a2970c925f1e80d8a9c15175e3d0084a2950fcffd94d10b1920d8816620e0cd33084c68b4cb6" +
+            "c83f29ef59949e0327a3835ca0bca2df339c3d8aa79460005088a6acbf2e09d11dd5983798119c18a8e9525eb8fd589f6a7142219fad9d4594ac2a39" +
+            "721076346ca9861c7c1580d60d3f730f75a6d7353806b621bf5baf62f2d5331b896deaa3f852a3699cf114ed9c9518cab1ecb56563cd33f119078abf" +
+            "a702e891f97deb28e263789e5e99cf7614d9ac0100450d8ecb05eca3c6e341f5f40245f5098362d33ab34bd0bd1daf00b074ff2896c84033d0952797" +
+            "44051bebf569e4bde600d5b64a0b967f7869219d73e3000e57b13a1f9d299f6b7d7e62ef7d6e1d9f55755c41767a9231555016af5fb6508a0c2c5ca2" +
+            "ac9e713666e2c862d3c6f856f8629e9c68b1803ceeed84aec97fef63d4e94d99897a013344a01a328e225c6df1773decfac3da4aa237b81a60dcd275" +
+            "debd989a420c1c07e313bd5b483d5d27c576b63d4cb444bfc7218b4c6b3c2a9019a29dc398779e30f16e75048d91507b9b745870b10c1e6e3aaf92d3" +
+            "866ef97eb40d928eec1fbf2dc1bfb2c4dcb9a93a2185e884cdd0b21c0c7aa43fbc8998b8df317503638a05892565e087c668c31de47d89c33ef831a2" +
+            "2aaa1e87b3659a47ce56eded709f04e32baf11598e8ff546ef31571b669f9035fde7fb2c6d850d44bd3f2f4843c6c89d8a1fce5f8d8d303db462391e" +
+            "64c6f7701611ee75029a0b7669198e8c55b0eaa13c680f0c2ea95392151122f25e1a23d73df81ca7b0f4b9ee81815096d5c452c96ca9924339607d1e" +
+            "a9d8b6dafc7c453836761c8516e9ecf83d75e0137682efcea1680c2da07fd952d67ac927b14677185d6017b0caec4ef6723db3ae591b31874284baac" +
+            "4b05e298f6a2f511636e57a8d6f3902284633f934da4cc72d9ea8f0dd953686d244ac255a9e0529535be2077f153932a875093ca9fdc8ecf07b3c6d0" +
+            "1655414dc0d3d303998a02a7b1bf381aa789d465bf56e415c2ca7246dba4e62f6665e492751cf1b4c0",
+    )
+
+    val all: List<Av1Fixture> = listOf(
+        lossless, filters420, filters444Bits10, yuv422, mono12, rav1e, superres, tiles, sb128, grainFromLuma, grainClipped, intraBlockCopy,
+    )
+}
+
+class Av1DecoderTest {
+
+    private fun fnv(picture: Av1Picture): Long {
+        var h = -0x340d631b7bdddcdbL
+        for (p in picture.planes.indices) {
+            val w = if (p == 0) picture.width else (picture.width + picture.subX) shr picture.subX
+            val rows = if (p == 0) picture.height else (picture.height + picture.subY) shr picture.subY
+            for (y in 0 until rows) for (x in 0 until w) {
+                val v = picture.planes[p][y * picture.strides[p] + x]
+                h = (h xor (v and 255).toLong()) * 0x100000001b3L
+                h = (h xor (v ushr 8).toLong()) * 0x100000001b3L
+            }
+        }
+        return h
+    }
+
+    @Test
+    fun everyFixtureDecodesToDav1dsSamples() {
+        for (f in Av1Fixtures.all) {
+            val picture = Av1Decoder().decode(f.data)
+            assertEquals(f.width to f.height, picture.width to picture.height, f.name)
+            assertEquals(f.bitDepth, picture.bitDepth, f.name)
+            assertEquals(f.subX to f.subY, picture.subX to picture.subY, f.name)
+            assertEquals(f.planes, picture.planes.size, f.name)
+            assertEquals(f.hash, fnv(picture), "${f.name} differs from dav1d")
+        }
+    }
+
+    @Test
+    fun aStreamCutShortIsRefused() {
+        for (f in Av1Fixtures.all) {
+            for (keep in listOf(1, 2, f.data.size / 3, f.data.size - 1)) {
+                assertFailsWith<ImageDecodeException>("${f.name} cut to $keep bytes") {
+                    Av1Decoder().decode(f.data.copyOf(keep))
+                }
+            }
+        }
+    }
+}

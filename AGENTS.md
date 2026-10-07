@@ -9,9 +9,9 @@ Format support and known limits: the Limits section of [README.md](README.md).
 Things that already cost someone time. One line each. Delete a line when it stops
 being true.
 
-- The OpenJPEG, libtiff, libwebp, libjpeg and jbig2enc suites skip themselves when their
-  binary is missing, and a skipped test reports as a pass, so read the skip count
-  and not only the green run. CI sets `IMAGEKODEC_REQUIRE_ORACLES=1` to fail
+- The OpenJPEG, libtiff, libwebp, libjpeg, jbig2enc and ffmpeg suites skip themselves
+  when their binary is missing, and a skipped test reports as a pass, so read the skip
+  count and not only the green run. CI sets `IMAGEKODEC_REQUIRE_ORACLES=1` to fail
   instead; set it locally to check the same (#14).
 - Ubuntu's ImageMagick is version 6, which has no `magick` command, only
   `convert`. `Tools.find("magick")` falls back to it; before it did, the TIFF
@@ -56,3 +56,8 @@ being true.
 - OpenJPEG appends a tile's POC entries to the main header's, where T.800 A.6.6
   has the tile's replace them, so a file with both cannot be checked against
   `opj_decompress` (#5).
+- ffmpeg's `-aom-params` reaches only libaom's control options, so superres, which
+  is part of its encoder configuration, cannot be asked for there. SVT-AV1 writes it
+  (`superres-mode=1`), but declines it on some pictures, and libaom turns on intra
+  block copy only for screen content of 256 by 128 or more. `Av1OracleTest` reads each
+  stream's headers and fails when the tool it is there for is off (#41).
