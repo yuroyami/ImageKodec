@@ -476,11 +476,11 @@ internal object TiffDecoder {
 
     private fun clamp8(v: Int): Int = if (v < 0) 0 else if (v > 255) 255 else v
 
-    /** CCITT strip → packed 1-bpp rows (TIFF polarity: 0 = white ⇒ blackIs1=false). */
+    /** CCITT run colors become TIFF samples; PhotometricInterpretation is applied later. */
     private fun ccittStrip(comp: ByteArray, k: Int, width: Int, rows: Int, byteAligned: Boolean): ByteArray {
         val opts = CcittOptions(
             columns = width, rows = rows, endOfBlock = false,
-            blackIs1 = false, encodedByteAlign = byteAligned, endOfLine = false,
+            blackIs1 = true, encodedByteAlign = byteAligned, endOfLine = false,
         )
         return CcittFax.decode(comp, k, opts)
     }
