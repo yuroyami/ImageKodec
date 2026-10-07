@@ -36,6 +36,8 @@ consulted for subsequent corrections, so the provenance remains accurate.
 
 TIFF FillOrder normalization was checked against libtiff's [tif_read.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_read.c) and [tif_write.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_write.c), under its [permissive Sam Leffler / Silicon Graphics license](https://github.com/libsdl-org/libtiff/blob/master/LICENSE.md). The reversal table is derived, and no source is vendored. `TiffFillOrderOracleTest` checks libtiff-written strips and tiles across compression, sample depth, byte order, prediction and planar layout.
 
+TIFF alpha follows TIFF 6.0 section 18 and the straight-ARGB bitmap contract. The semantic review also consulted libtiff's [tif_getimage.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_getimage.c), under the same permissive license, and ImageMagick's [tiff.c](https://github.com/ImageMagick/ImageMagick/blob/main/coders/tiff.c), under the [permissive ImageMagick license](https://github.com/ImageMagick/ImageMagick/blob/main/LICENSE); no source is vendored. Native-depth unassociation is checked against ImageMagick's TIFF reader and ImageIO-written alpha fixtures (`TiffAlphaOracleTest`).
+
 ## Adapted code from the Kite libraries
 
 | Implementation | Origin and format reference | Code license |

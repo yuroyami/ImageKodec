@@ -334,7 +334,7 @@ internal object ImageProbe {
         var height = 0
         var bits = 1
         var spp = 1
-        var extraSamples = 0
+        var extraSamples: LongArray? = null
         var orientation = Orientation.Normal
         // TIFF defaults, used when the tag is absent. Photometric has none, so -1
         // stands for "the file does not say". That is a malformed-file question
@@ -395,7 +395,16 @@ internal object ImageProbe {
                 277 -> spp = scalar()
                 292 -> t4Options = single() ?: t4Options
                 317 -> predictor = single() ?: predictor
-                338 -> extraSamples = if (n >= 1) 1 else 0
+                338 -> {
+                    if (type != 3 || n !in 0..15) {
+                        throw ImageDecodeException("TIFF: ExtraSamples requires up to 15 SHORT values")
+                    }
+                    val base = if (n <= 2) at + 8 else u32(at + 8)
+                    if (base < 0 || base > data.size - n * 2) {
+                        throw ImageDecodeException("TIFF: truncated ExtraSamples values")
+                    }
+                    extraSamples = LongArray(n) { u16(base + it * 2).toLong() }
+                }
                 339 -> {
                     if (type != 3 || n !in 1..16) {
                         throw ImageDecodeException("TIFF: SampleFormat requires SHORT values for 1 to 16 samples")
@@ -409,7 +418,7 @@ internal object ImageProbe {
             }
         }
 
-        val alpha = extraSamples > 0 || spp == 2 || spp == 4
+        val alpha = TiffAlpha(spp, photometric, extraSamples).sample >= 0
         if (sampleFormats != null && sampleFormats.size != spp) {
             throw ImageDecodeException("TIFF: SampleFormat requires $spp values, got ${sampleFormats.size}")
         }

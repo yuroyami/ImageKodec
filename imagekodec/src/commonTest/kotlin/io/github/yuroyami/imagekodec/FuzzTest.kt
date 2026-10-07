@@ -86,6 +86,9 @@ class FuzzTest {
         "tiff-ccitt-g3" to faxTiff(group3EolStream(true), 3, width = 7, t4Options = 4),
         "tiff-sample-format" to TiffExtendedTest().sampleFormatTiff(intArrayOf(1, 1, 1), samples = 3),
         "tiff-fill-order" to withFillOrder(packedFillTiff(4, 8), 2),
+        "tiff-associated-rgb" to alphaTiff(bits = 16),
+        "tiff-associated-gray" to alphaTiff(photo = 0),
+        "tiff-associated-palette" to alphaTiff(photo = 3),
     )
 
     /** Two frames: the default image doubles as frame 0, then a 2 by 2 frame that disposes to background. */

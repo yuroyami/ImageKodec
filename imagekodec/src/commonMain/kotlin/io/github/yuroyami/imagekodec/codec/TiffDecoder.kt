@@ -18,7 +18,7 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    T4Options bit0=0 (3), G4 (4), the absorbed [CcittFax] codec, TIFF-LZW
  *    with EarlyChange (5), Deflate (8 / 32946), PackBits (32773)
  *  - photometric 0/1 (bilevel + gray, either polarity, optional alpha), 2 (RGB,
- *    optional alpha via ExtraSamples: treated as straight), 3 (palette, 16-bit
+ *    optional associated or straight alpha via ExtraSamples), 3 (palette, 16-bit
  *    ColorMap entries), 6 (**YCbCr**, including chroma subsampling in both the
  *    chunky unit layout and separate planes)
  *  - bits per sample 1, 2, 4, 8 and 16 (16-bit narrows to its high byte, as
@@ -168,7 +168,12 @@ internal object TiffDecoder {
         if (bits != 1 && bits != 2 && bits != 4 && bits != 8 && bits != 16) {
             throw UnsupportedImageException("TIFF: $bits bits per sample is not supported (1, 2, 4, 8 or 16)")
         }
-        if (bits == 1 && spp != 1 && photometric != 6) err("1-bit with $spp samples")
+        val extraSamples = entries[338]?.let {
+            if (it.type != 3) err("ExtraSamples (338) requires SHORT values")
+            if (it.count > 15) err("ExtraSamples count ${it.count} exceeds samples per pixel")
+            values(it)
+        }
+        val alpha = TiffAlpha(spp, photometric, extraSamples)
 
         // TIFF 6.0 section 19 treats undefined samples like absent SampleFormat:
         // unsigned integers. Signed and floating samples need another sample path.
@@ -249,6 +254,10 @@ internal object TiffDecoder {
             }
             val len = minOf(counts[index], (data.size - ofs).toLong()).toInt()
             val comp = normalizeFillOrder(data.copyOfRange(ofs, ofs + len), fillOrder)
+            fun fax(k: Int, byteAligned: Boolean, endOfLine: Boolean = false): ByteArray {
+                if (bits != 1 || spp != 1) err("CCITT requires one bilevel sample")
+                return ccittStrip(comp, k, columns, rows, byteAligned, endOfLine)
+            }
             val decoded = when (compression) {
                 5 -> tiffLzw(comp, expect)
                 8, 32946 -> try {
@@ -257,13 +266,13 @@ internal object TiffDecoder {
                     throw ImageDecodeException("TIFF: strip inflate failed: ${e.message}", e)
                 }
                 32773 -> packBits(comp, expect)
-                2 -> ccittStrip(comp, k = 0, columns, rows, byteAligned = true)
+                2 -> fax(k = 0, byteAligned = true)
                 3 -> {
                     if (t4Options and 1L != 0L) throw UnsupportedImageException("TIFF: G3 2D (T4Options bit 0) is not supported")
                     // T4Options fill zeros align the end of EOL, not the row cursor.
-                    ccittStrip(comp, k = 0, columns, rows, byteAligned = false, endOfLine = true)
+                    fax(k = 0, byteAligned = false, endOfLine = true)
                 }
-                4 -> ccittStrip(comp, k = -1, columns, rows, byteAligned = false)
+                4 -> fax(k = -1, byteAligned = false)
                 else -> throw UnsupportedImageException("TIFF: compression $compression is not supported")
             }
             if (decoded.size != expect) err("block $index decoded ${decoded.size} bytes, expected $expect")
@@ -378,27 +387,38 @@ internal object TiffDecoder {
             else -> v ushr 8                     // 16-bit narrows to its high byte
         }
 
+        val sampleMax = (1 shl bits) - 1
+        fun straight(value: Int, opacity: Int, max: Int = sampleMax): Int {
+            if (!alpha.associated) return value
+            // TIFF 6.0 section 18 defines zero color for zero associated alpha.
+            if (opacity == 0) return 0
+            return minOf(max.toLong(), (value.toLong() * sampleMax + opacity / 2) / opacity).toInt()
+        }
+        fun opacity(x: Int, y: Int): Int = if (alpha.sample >= 0) sample(x, y, alpha.sample) else sampleMax
+
         // --- to ARGB ------------------------------------------------------------
         val argb = IntArray(width * height)
         when (photometric) {
             0, 1 -> {
                 val invert = photometric == 0    // WhiteIsZero
                 for (y in 0 until height) for (x in 0 until width) {
-                    var g = scale8(sample(x, y, 0))
+                    val opacity = opacity(x, y)
+                    var g = scale8(straight(sample(x, y, 0), opacity))
                     if (invert) g = 255 - g
-                    val a = if (spp >= 2) scale8(sample(x, y, 1)) else 0xFF
+                    if (alpha.associated && opacity == 0) g = 0
+                    val a = scale8(opacity)
                     argb[y * width + x] = (a shl 24) or (g shl 16) or (g shl 8) or g
                 }
             }
             2 -> {
                 if (spp < 3) err("RGB with $spp samples")
-                val hasAlpha = spp >= 4
                 for (y in 0 until height) for (x in 0 until width) {
-                    val a = if (hasAlpha) scale8(sample(x, y, 3)) else 0xFF
+                    val opacity = opacity(x, y)
+                    val a = scale8(opacity)
                     argb[y * width + x] = (a shl 24) or
-                        (scale8(sample(x, y, 0)) shl 16) or
-                        (scale8(sample(x, y, 1)) shl 8) or
-                        scale8(sample(x, y, 2))
+                        (scale8(straight(sample(x, y, 0), opacity)) shl 16) or
+                        (scale8(straight(sample(x, y, 1), opacity)) shl 8) or
+                        scale8(straight(sample(x, y, 2), opacity))
                 }
             }
             3 -> {
@@ -410,10 +430,11 @@ internal object TiffDecoder {
                     val idx = sample(x, y, 0)
                     if (idx >= n) err("palette index $idx out of $n entries")
                     // ColorMap entries are 16-bit; take the high byte.
-                    val rr = (map[idx] shr 8).toInt() and 0xFF
-                    val gg = (map[n + idx] shr 8).toInt() and 0xFF
-                    val bb = (map[2 * n + idx] shr 8).toInt() and 0xFF
-                    argb[y * width + x] = (0xFF shl 24) or (rr shl 16) or (gg shl 8) or bb
+                    val opacity = opacity(x, y)
+                    val rr = straight(map[idx].toInt(), opacity, 65535) ushr 8
+                    val gg = straight(map[n + idx].toInt(), opacity, 65535) ushr 8
+                    val bb = straight(map[2 * n + idx].toInt(), opacity, 65535) ushr 8
+                    argb[y * width + x] = (scale8(opacity) shl 24) or (rr shl 16) or (gg shl 8) or bb
                 }
             }
             6 -> {
