@@ -53,6 +53,15 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- The JPEG suite covers every feature the README lists with a test that runs on
+  every target: restart intervals in baseline and progressive libjpeg-turbo
+  files, a one-component file, CMYK, YCCK, 4:1:1, 4:4:0 and 4x2 sampling, each
+  bit-identical to stb_image. Every committed stb vector regenerates from
+  `tools/stb_dump.c`. ImageIO checks restart intervals from 1 to 100 in 4:2:0,
+  4:2:2 and 4:4:4, baseline and progressive, in place of a test that only ran on
+  macOS and passed without asserting elsewhere (#72). The libtiff oracle no
+  longer holds 4:4 YCbCr tiles to a libtiff bug fixed in 4.7.2 (#104).
+
 - A progressive JPEG's AC refinement no longer walks the coefficients of a block
   that holds none: each block keeps the index of its last nonzero coefficient,
   as ffmpeg does. A refinement scan whose bit positions skip a bit is refused, as

@@ -2,7 +2,6 @@ package io.github.yuroyami.imagekodec
 
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
-import java.io.File
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageTypeSpecifier
@@ -34,12 +33,16 @@ class JpegImageIoTest {
         return img
     }
 
-    /** [lumaSampling] sets the luma's horizontal and vertical factors; ImageIO's own default is 2x2, 4:2:0. */
+    /**
+     * [lumaSampling] sets the luma's horizontal and vertical factors; ImageIO's own default is 2x2,
+     * 4:2:0. [restartInterval] above 0 writes a DRI marker, a restart every that many MCUs.
+     */
     private fun encodeJpeg(
         img: BufferedImage,
         quality: Float,
         progressive: Boolean = false,
         lumaSampling: Pair<Int, Int>? = null,
+        restartInterval: Int = 0,
     ): ByteArray {
         val writer = ImageIO.getImageWritersByFormatName("jpeg").next()
         val param = writer.defaultWriteParam.apply {
@@ -47,13 +50,20 @@ class JpegImageIoTest {
             compressionQuality = quality
             if (progressive) progressiveMode = ImageWriteParam.MODE_DEFAULT
         }
-        val metadata = lumaSampling?.let { (h, v) ->
+        val metadata = if (lumaSampling == null && restartInterval == 0) null else {
             val format = "javax_imageio_jpeg_image_1.0"
             writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(img), param).apply {
                 val tree = getAsTree(format) as IIOMetadataNode
-                val luma = tree.getElementsByTagName("componentSpec").item(0) as IIOMetadataNode
-                luma.setAttribute("HsamplingFactor", "$h")
-                luma.setAttribute("VsamplingFactor", "$v")
+                lumaSampling?.let { (h, v) ->
+                    val luma = tree.getElementsByTagName("componentSpec").item(0) as IIOMetadataNode
+                    luma.setAttribute("HsamplingFactor", "$h")
+                    luma.setAttribute("VsamplingFactor", "$v")
+                }
+                if (restartInterval > 0) {
+                    val sequence = tree.getElementsByTagName("markerSequence").item(0) as IIOMetadataNode
+                    val dri = IIOMetadataNode("dri").apply { setAttribute("interval", "$restartInterval") }
+                    sequence.insertBefore(dri, sequence.firstChild)
+                }
                 setFromTree(format, tree)
             }
         }
@@ -180,25 +190,23 @@ class JpegImageIoTest {
         }
     }
 
+    /**
+     * Restart intervals from 1 to more than the image holds, in 4:2:0, 4:2:2 and 4:4:4, baseline
+     * and progressive. ImageIO writes the DRI marker and the RSTn markers, so the file proves
+     * something only if it holds them, which the test checks first. This replaces a test that
+     * read a file only macOS ships and passed without asserting anywhere else (#72).
+     */
     @Test
-    fun realWorldRestartMarkerFile() {
-        // macOS ships a large baseline JPEG with DRI/RSTn restart markers. Skip
-        // silently on machines that don't have it: commonTest still covers the
-        // codec; this adds a real-camera-pipeline file with restarts.
-        val f = File("/System/Library/CoreServices/DefaultBackground.jpg")
-        if (!f.exists()) return
-        val bytes = f.readBytes()
-        // confirm it really has a DRI marker, else the test proves nothing
-        var i = 2
-        var hasDri = false
-        while (i < bytes.size - 4) {
-            if ((bytes[i].toInt() and 0xFF) != 0xFF) break
-            val m = bytes[i + 1].toInt() and 0xFF
-            if (m == 0xDD) { hasDri = true; break }
-            if (m == 0xDA) break
-            i += 2 + (((bytes[i + 2].toInt() and 0xFF) shl 8) or (bytes[i + 3].toInt() and 0xFF))
+    fun restartIntervalsAgree() {
+        val img = photoish(77, 53)
+        for (sampling in listOf(2 to 2, 2 to 1, 1 to 1)) for (progressive in listOf(false, true)) {
+            for (interval in listOf(1, 2, 7, 100)) {
+                val name = "luma ${sampling.first}x${sampling.second}, progressive $progressive, restart every $interval"
+                val jpeg = encodeJpeg(img, 0.85f, progressive = progressive, lumaSampling = sampling, restartInterval = interval)
+                val restarts = (0 until jpeg.size - 1).count { jpeg[it] == 0xFF.toByte() && (jpeg[it + 1].toInt() and 0xFF) in 0xD0..0xD7 }
+                assertTrue(restarts > 0 || interval == 100, "$name: no restart marker in the file")
+                assertCloseToImageIo(jpeg, name)
+            }
         }
-        if (!hasDri) return
-        assertCloseToImageIo(bytes, "DefaultBackground.jpg (restart intervals)")
     }
 }

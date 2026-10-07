@@ -160,9 +160,10 @@ class JpegDecoderTest {
         w = 9, h = 7, name = "j_420tiny",
     )
 
-    // 1-component non-interleaved scan
+    // The pixels of j_444 again, from a file whose three components carry them. A true
+    // one-component file is in JpegStbVectors.
     @Test
-    fun grayscaleSingleComponent() = check(
+    fun grayVectorInThreeComponents() = check(
         jpegHex = JpegVectors.jgray,
         expectedHex = "0002010504021004061803081e030826030a31030e38041040020d4703105204145a031660031868021a73021e7902208304228a04259505299c042ba3042daa032fb50333bc0436c20235c90338d4033cdc023ce2023eea0140f50242fb0244000b0106" +
             "0b040f0c05170c081e0a09270b0a2f0b0d380b10400b11490c14530d185a0c1a620b1c690a1e730b227b0b24820c268b0c29930c2c9c0c2fa20a30ab0a33b40b36bc0b39c20b39cb0b3cd50c40dc0c40e40b42eb0a44f50b46fd0b480017020617050f18" +
