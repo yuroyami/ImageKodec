@@ -47,6 +47,14 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- A four-component JPEG without an Adobe marker decodes as CMYK, and one whose
+  Adobe transform is neither 0 nor 2 as YCCK, the color spaces libjpeg picks.
+  Both used to go through YCbCr with the black component dropped, so an
+  unmarked CMYK file lost everything its K carried. The samples follow Adobe's
+  inverted convention, as browsers and ImageMagick read every CMYK JPEG. The
+  tests use libjpeg-written CMYK, YCCK and unmarked files from
+  `tools/cmyk_jpeg.c` (#65).
+
 - 4:2:2 JPEGs weight the nearer chroma sample by three at the right edge of each
   row, as libjpeg does. stb_image swaps the last two weights there, which put a
   wrong pixel next to the edge, up to 88 levels off on a sharp border. The

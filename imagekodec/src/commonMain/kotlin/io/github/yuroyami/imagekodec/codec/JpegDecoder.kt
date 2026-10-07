@@ -22,7 +22,8 @@ import kotlin.math.sqrt
  *    and friends: using stb's JFIF-centered triangle-filter upsampling for the
  *    2x cases and nearest-neighbor for the generic ones
  *  - grayscale (1 comp), YCbCr (3), component-id "RGB" (3, no transform),
- *    CMYK and YCCK via the Adobe APP14 transform flag (4)
+ *    CMYK and YCCK chosen from the Adobe APP14 transform flag as libjpeg
+ *    chooses them (4), where stb reads an unmarked file as YCbCr and drops K
  *  - stb's fixed-point AAN-style IDCT and reduced-precision YCbCr→RGB, so
  *    output is bit-identical to stb_image on the same file, except where stb's
  *    horizontal 2x upsampling swaps the weights next to the right edge: there
@@ -1280,8 +1281,12 @@ internal object JpegDecoder {
                 )
                 j.imgN == 4 -> {
                     val kA = couArr[3]!!
+                    // libjpeg's default_decompress_parms: four components are CMYK under Adobe
+                    // transform 0 or with no Adobe marker, and YCCK under any other transform.
+                    // The samples are Adobe's inverted CMYK, as browsers and ImageMagick read
+                    // every CMYK JPEG (#65).
                     when (j.app14ColorTransform) {
-                        0 -> {   // CMYK: blinn multiply against K
+                        0, -1 -> {   // CMYK: blinn multiply against K
                             val cA = couArr[0]!!; val mA = couArr[1]!!; val yA = couArr[2]!!
                             for (i in 0 until outX) {
                                 val kk = kA[couOfs[3] + i].toInt() and 0xFF
@@ -1291,7 +1296,7 @@ internal object JpegDecoder {
                                 argb[outOfs + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
                             }
                         }
-                        2 -> {   // YCCK: YCbCr, then invert + blinn against K
+                        else -> {   // YCCK: YCbCr, then invert + blinn against K
                             ycbcrToRgbRow(argb, outOfs, couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], outX)
                             for (i in 0 until outX) {
                                 val kk = kA[couOfs[3] + i].toInt() and 0xFF
@@ -1302,10 +1307,6 @@ internal object JpegDecoder {
                                 argb[outOfs + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
                             }
                         }
-                        else -> ycbcrToRgbRow(   // YCbCr + ignored 4th channel
-                            argb, outOfs,
-                            couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], outX,
-                        )
                     }
                 }
                 else -> {   // grayscale

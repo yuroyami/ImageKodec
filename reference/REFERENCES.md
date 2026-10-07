@@ -21,6 +21,8 @@ must retain its applicable copyright and license notice, and identify alteration
 
 JPEG table lifetime follows [libjpeg-turbo `jdinput.c`](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/src/jdinput.c), under its [IJG/BSD-compatible license](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/LICENSE.md). Each component keeps its table from the first scan; no source is vendored.
 
+The JPEG decoder departs from stb_image where libjpeg-turbo, under the same license, reads a file differently: the right-edge weight of 4:2:2 upsampling follows `h2v1_fancy_upsample` in [`jdsample.c`](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/src/jdsample.c), and the color space of a four-component file follows `default_decompress_parms` in [`jdapimin.c`](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/src/jdapimin.c). No source is vendored. `tools/stb_dump.c` regenerates the stb vectors and `tools/cmyk_jpeg.c` writes the four-component fixtures with libjpeg.
+
 ### Specification implementations and later corrections
 
 Some codecs here were implemented from their published specification and then
