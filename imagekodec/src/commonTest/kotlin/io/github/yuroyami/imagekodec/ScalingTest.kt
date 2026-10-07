@@ -145,7 +145,7 @@ class ScalingTest {
         assertEquals(2, anim.width)
         assertEquals(2, anim.height)
         assertEquals(2, anim.frames.size)
-        assertEquals(3, anim.loopCount)
+        assertEquals(3L, anim.loopCount)
         assertEquals(100, anim.frames[0].delayMillis)
         assertEquals(25, anim.frames[1].delayRawCentiseconds)
         assertEquals(0xFFFF0000.toInt(), anim.frames[0].bitmap[0, 0])

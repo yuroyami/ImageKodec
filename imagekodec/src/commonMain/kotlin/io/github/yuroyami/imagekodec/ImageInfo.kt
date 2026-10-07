@@ -77,7 +77,8 @@ public enum class Orientation(public val exifValue: Int) {
  *   what the container says, not a pixel scan: an RGBA PNG whose pixels are all
  *   opaque still reports true. Use [KiteBitmap.hasTransparency] for the truth.
  * @property frameCount number of animation frames; 1 for stills
- * @property loopCount animation loop count, NETSCAPE/APNG semantics (0 = forever); 1 for stills
+ * @property loopCount total animation plays, normalized across formats: 0 = forever,
+ *   1 for stills. Long preserves the full unsigned APNG play field.
  * @property orientation the EXIF orientation, [Orientation.Normal] when absent
  * @property isDecodable whether this build's [ImageKodec.decode] can actually
  *   produce pixels for this file. False means the format or a specific feature
@@ -92,7 +93,7 @@ public class ImageInfo(
     public val bitDepth: Int,
     public val hasAlpha: Boolean,
     public val frameCount: Int,
-    public val loopCount: Int,
+    public val loopCount: Long,
     public val orientation: Orientation,
     public val isDecodable: Boolean,
     public val unsupportedReason: String? = null,

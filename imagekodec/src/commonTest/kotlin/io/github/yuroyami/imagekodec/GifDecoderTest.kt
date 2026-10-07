@@ -48,7 +48,7 @@ class GifDecoderTest {
         val anim = ImageKodec.decodeAnimation(hex(STATIC_3X2))
         assertFalse(anim.isAnimated)
         assertEquals(1, anim.frames.size)
-        assertEquals(1, anim.loopCount)
+        assertEquals(1L, anim.loopCount)
     }
 
     @Test
@@ -75,7 +75,7 @@ class GifDecoderTest {
         val anim = ImageKodec.decodeAnimation(hex(ANIM_KEEP_2F))
         assertTrue(anim.isAnimated)
         assertEquals(2, anim.frames.size)
-        assertEquals(3, anim.loopCount)
+        assertEquals(4L, anim.loopCount)
 
         assertContentEquals(IntArray(4) { red }, anim.frames[0].bitmap.argb)
         assertContentEquals(IntArray(4) { blue }, anim.frames[1].bitmap.argb)
@@ -91,7 +91,7 @@ class GifDecoderTest {
     @Test
     fun disposeToBackgroundClearsOnlyThatRect() {
         val anim = ImageKodec.decodeAnimation(hex(ANIM_DISPOSE_BG))
-        assertEquals(0, anim.loopCount)   // NETSCAPE 0 = forever
+        assertEquals(0L, anim.loopCount)   // NETSCAPE 0 = forever
         // f1: full red, disposal=2. Presented as-is.
         assertContentEquals(IntArray(4) { red }, anim.frames[0].bitmap.argb)
         // Before f2, f1's rect (everything) clears to transparent; f2 = blue at (1,1).

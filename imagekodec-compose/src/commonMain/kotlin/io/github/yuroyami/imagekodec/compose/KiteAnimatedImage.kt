@@ -78,7 +78,7 @@ public fun KiteAnimatedImage(
                 withFrameNanos { now ->
                     val elapsedMillis = (now - startNanos) / 1_000_000
                     val loopsDone = elapsedMillis / loopMillis
-                    if (animation.loopCount != 0 && loopsDone >= animation.loopCount) {
+                    if (animation.loopCount != 0L && loopsDone >= animation.loopCount) {
                         frameIndex = frames.lastIndex   // finite loop ended: hold last frame
                         finished = true
                     } else {

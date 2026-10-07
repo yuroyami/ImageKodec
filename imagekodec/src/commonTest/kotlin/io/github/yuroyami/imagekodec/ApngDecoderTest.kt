@@ -129,7 +129,7 @@ class ApngDecoderTest {
         assertEquals(1, anim.frames.size)
         assertEquals(3, anim.width)
         assertEquals(2, anim.height)
-        assertEquals(1, anim.loopCount)
+        assertEquals(1L, anim.loopCount)
         assertTrue(!anim.isAnimated)
     }
 
@@ -144,7 +144,7 @@ class ApngDecoderTest {
         )
         val anim = ImageKodec.decodeAnimation(bytes)
         assertEquals(2, anim.frames.size)
-        assertEquals(3, anim.loopCount)
+        assertEquals(3L, anim.loopCount)
         assertEquals(red, anim.frames[0].bitmap[0, 0])
         assertEquals(green, anim.frames[1].bitmap[0, 0])
     }

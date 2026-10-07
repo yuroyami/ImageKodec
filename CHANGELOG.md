@@ -14,6 +14,13 @@ reviewable in the diff.
 
 ### Changed
 
+- `KiteAnimation.loopCount` and `ImageInfo.loopCount` are now `Long`, preserving
+  the full APNG play field, including larger counts accepted for compatibility
+  with deployed writers (#59). Pass `count.toLong()` when constructing metadata
+  from an `Int` variable, and compare the count with `0L` when checking unlimited
+  playback. Zero means unlimited playback; positive counts mean
+  total plays for GIF, APNG and WebP. Negative animation counts are refused.
+
 - Bitmap and animation constructors, `cropped`, `scaled` and bitmap indexing
   declare `IllegalArgumentException` through `@Throws`. Their Swift and
   Objective-C signatures expose an error, so invalid geometry can be caught
@@ -34,6 +41,11 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+
+- GIF converts finite NETSCAPE/ANIMEXTS repetitions to total plays in decode and
+  probe, and reverses that conversion when encoding. One play omits the loop
+  extension; unrepresentable counts are refused. Buffering and unknown
+  application sub-blocks cannot change the play count (#58, part of #82).
 
 - JVM library artifacts target Java 11, restrict JDK API use to that release,
   and declare the minimum in Gradle publication metadata. CI tests the core

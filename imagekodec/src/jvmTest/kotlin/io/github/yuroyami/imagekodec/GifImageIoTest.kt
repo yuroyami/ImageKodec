@@ -102,7 +102,7 @@ class GifImageIoTest {
 
         val anim = ImageKodec.decodeAnimation(bytes.toByteArray())
         assertEquals(3, anim.frames.size)
-        assertEquals(0, anim.loopCount)   // NETSCAPE 0 = forever
+        assertEquals(0L, anim.loopCount)   // NETSCAPE 0 = forever
         for ((i, frame) in frames.withIndex()) {
             val decoded = anim.frames[i]
             assertEquals(200, decoded.delayMillis, "frame $i delay")

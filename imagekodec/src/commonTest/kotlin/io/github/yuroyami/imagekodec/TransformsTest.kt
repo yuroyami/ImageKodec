@@ -182,7 +182,7 @@ class TransformsTest {
 
         assertEquals(2, out.width)
         assertEquals(4, out.height)
-        assertEquals(0, out.loopCount)
+        assertEquals(0L, out.loopCount)
         assertEquals(3, out.frames.size)
         out.frames.forEachIndexed { i, f ->
             assertEquals(40 + i, f.delayMillis, "frame $i delay")

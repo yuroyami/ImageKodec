@@ -45,7 +45,7 @@ class KiteImageDecoderTest {
         val success = assertIs<SuccessResult>(result)
         val image = assertIs<KiteAnimationImage>(success.image)
         assertEquals(2, image.animation.frames.size)
-        assertEquals(3, image.animation.loopCount)
+        assertEquals(4L, image.animation.loopCount)
         assertEquals(2, image.width)
         assertEquals(2, image.height)
         // KiteAnimationImage is stateless (playback state lives in the

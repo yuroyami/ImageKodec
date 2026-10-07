@@ -141,7 +141,7 @@ internal object PngDecoder {
         val trnsB: Int,
         val idat: List<ByteArray>,
         val frames: List<Frame>,
-        val loopCount: Int,
+        val loopCount: Long,
     )
 
     // --- container parse --------------------------------------------------------
@@ -215,7 +215,7 @@ internal object PngDecoder {
         var sawEnd = false
 
         // APNG state. `pending` is the fcTL whose data chunks haven't arrived yet.
-        var loopCount = 1
+        var loopCount = 1L
         var declaredFrames = -1
         val frames = ArrayList<Frame>()
         var pending: PendingFrame? = null
@@ -269,8 +269,8 @@ internal object PngDecoder {
                     verifyCrc(r, "acTL", raw)
                     val a = ByteReader(raw)
                     val n = a.u32be()
-                    // num_plays uses the same 0-means-forever convention as GIF.
-                    loopCount = a.u32be().toInt()
+                    // Keep the complete field used by deployed APNG writers.
+                    loopCount = a.u32be()
                     if (n <= 0 || n > MAX_TOTAL_PIXELS) throw ImageDecodeException("PNG: acTL frame count $n")
                     declaredFrames = n.toInt()
                 }

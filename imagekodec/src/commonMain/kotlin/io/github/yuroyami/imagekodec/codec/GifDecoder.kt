@@ -72,7 +72,7 @@ internal object GifDecoder {
         // --- block loop ---------------------------------------------------------
         val canvas = IntArray(width * height)        // starts fully transparent
         val frames = ArrayList<KiteFrame>()
-        var loopCount = 1                            // no NETSCAPE extension = play once
+        var loopCount = 1L                           // no NETSCAPE extension = play once
 
         // Pending graphic-control state; applies to the next image only.
         var disposal = 0
@@ -182,17 +182,7 @@ internal object GifDecoder {
                             if (r.u8() != 0) throw ImageDecodeException("GIF: graphic control not terminated")
                         }
                         0xFF -> {   // application extension
-                            val size = r.u8()
-                            val app = r.bytes(size).decodeToString()
-                            if (size == 11 && (app == "NETSCAPE2.0" || app == "ANIMEXTS1.0")) {
-                                // One data sub-block: 0x01 + u16 loop count (0 = forever).
-                                val sub = readSubBlocks(r)
-                                if (sub.size >= 3 && sub[0].toInt() == 1) {
-                                    loopCount = (sub[1].toInt() and 0xFF) or ((sub[2].toInt() and 0xFF) shl 8)
-                                }
-                            } else {
-                                skipSubBlocks(r)
-                            }
+                            GifLooping.readApplication(r)?.let { loopCount = it }
                         }
                         else -> skipSubBlocks(r)   // comment (0xFE), plain text (0x01), unknown
                     }

@@ -22,8 +22,8 @@ public final class io/github/yuroyami/imagekodec/ImageFormat$Companion {
 }
 
 public final class io/github/yuroyami/imagekodec/ImageInfo {
-	public fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIILio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;)V
-	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIILio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;)V
+	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getBitDepth ()I
 	public final fun getDisplayHeight ()I
 	public final fun getDisplayWidth ()I
@@ -31,7 +31,7 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 	public final fun getFrameCount ()I
 	public final fun getHasAlpha ()Z
 	public final fun getHeight ()I
-	public final fun getLoopCount ()I
+	public final fun getLoopCount ()J
 	public final fun getOrientation ()Lio/github/yuroyami/imagekodec/Orientation;
 	public final fun getUnsupportedReason ()Ljava/lang/String;
 	public final fun getWidth ()I
@@ -61,11 +61,11 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 }
 
 public final class io/github/yuroyami/imagekodec/KiteAnimation {
-	public fun <init> (IILjava/util/List;I)V
+	public fun <init> (IILjava/util/List;J)V
 	public final fun getDurationMillis ()I
 	public final fun getFrames ()Ljava/util/List;
 	public final fun getHeight ()I
-	public final fun getLoopCount ()I
+	public final fun getLoopCount ()J
 	public final fun getWidth ()I
 	public final fun isAnimated ()Z
 }

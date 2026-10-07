@@ -172,7 +172,8 @@ public object ImageKodec {
      * which is exactly what [decodeAnimation] produces.
      *
      * @throws IllegalArgumentException if the canvas is larger than 65535 on a side, which a GIF
-     *   cannot store, or if the frames are not all canvas-sized
+     *   cannot store, if the frames are not all canvas-sized, or if the total play
+     *   count is outside GIF's 0..65536 range (0 means forever)
      */
     @Throws(IllegalArgumentException::class)
     public fun encodeGif(animation: KiteAnimation, dither: Boolean = true): ByteArray =

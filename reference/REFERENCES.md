@@ -68,6 +68,8 @@ publication text is licensed as software.
 - PNG chunk/filter semantics: W3C PNG and RFC 2083.
 - GIF structure, disposal and loop extension: GIF89a and the NETSCAPE2.0 extension.
 
+Animation play counts follow the [Skia repetition contract](https://github.com/google/skia/blob/main/include/codec/SkCodec.h), which excludes the initial play for GIF. Skia is under its [BSD-3-Clause license](https://github.com/google/skia/blob/main/LICENSE); its installed codec independently checks GIF metadata in `AnimationLoopSceneTest`. APNG preserves the full unsigned play field for compatibility with [Pillow's PNG reader/writer](https://github.com/python-pillow/Pillow/blob/main/src/PIL/PngImagePlugin.py), under its [MIT-CMU license](https://github.com/python-pillow/Pillow/blob/main/LICENSE), while documenting the narrower PNG Third Edition integer rule. No reference source is vendored. The complete Pillow fixture from issue #59 and wire-field boundary variants are checked in `AnimationLoopCountTest`.
+
 ## Refresh
 
 ```sh

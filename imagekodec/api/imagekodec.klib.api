@@ -80,7 +80,7 @@ final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuro
 }
 
 final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imagekodec/ImageInfo|null[0]
-    constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Int, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Int;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?){}[0]
+    constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Long, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Long;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?){}[0]
 
     final val bitDepth // io.github.yuroyami.imagekodec/ImageInfo.bitDepth|{}bitDepth[0]
         final fun <get-bitDepth>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
@@ -101,7 +101,7 @@ final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imag
     final val isDecodable // io.github.yuroyami.imagekodec/ImageInfo.isDecodable|{}isDecodable[0]
         final fun <get-isDecodable>(): kotlin/Boolean // io.github.yuroyami.imagekodec/ImageInfo.isDecodable.<get-isDecodable>|<get-isDecodable>(){}[0]
     final val loopCount // io.github.yuroyami.imagekodec/ImageInfo.loopCount|{}loopCount[0]
-        final fun <get-loopCount>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.loopCount.<get-loopCount>|<get-loopCount>(){}[0]
+        final fun <get-loopCount>(): kotlin/Long // io.github.yuroyami.imagekodec/ImageInfo.loopCount.<get-loopCount>|<get-loopCount>(){}[0]
     final val orientation // io.github.yuroyami.imagekodec/ImageInfo.orientation|{}orientation[0]
         final fun <get-orientation>(): io.github.yuroyami.imagekodec/Orientation // io.github.yuroyami.imagekodec/ImageInfo.orientation.<get-orientation>|<get-orientation>(){}[0]
     final val unsupportedReason // io.github.yuroyami.imagekodec/ImageInfo.unsupportedReason|{}unsupportedReason[0]
@@ -113,7 +113,7 @@ final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imag
 }
 
 final class io.github.yuroyami.imagekodec/KiteAnimation { // io.github.yuroyami.imagekodec/KiteAnimation|null[0]
-    constructor <init>(kotlin/Int, kotlin/Int, kotlin.collections/List<io.github.yuroyami.imagekodec/KiteFrame>, kotlin/Int) // io.github.yuroyami.imagekodec/KiteAnimation.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.collections.List<io.github.yuroyami.imagekodec.KiteFrame>;kotlin.Int){}[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin.collections/List<io.github.yuroyami.imagekodec/KiteFrame>, kotlin/Long) // io.github.yuroyami.imagekodec/KiteAnimation.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.collections.List<io.github.yuroyami.imagekodec.KiteFrame>;kotlin.Long){}[0]
 
     final val durationMillis // io.github.yuroyami.imagekodec/KiteAnimation.durationMillis|{}durationMillis[0]
         final fun <get-durationMillis>(): kotlin/Int // io.github.yuroyami.imagekodec/KiteAnimation.durationMillis.<get-durationMillis>|<get-durationMillis>(){}[0]
@@ -124,7 +124,7 @@ final class io.github.yuroyami.imagekodec/KiteAnimation { // io.github.yuroyami.
     final val isAnimated // io.github.yuroyami.imagekodec/KiteAnimation.isAnimated|{}isAnimated[0]
         final fun <get-isAnimated>(): kotlin/Boolean // io.github.yuroyami.imagekodec/KiteAnimation.isAnimated.<get-isAnimated>|<get-isAnimated>(){}[0]
     final val loopCount // io.github.yuroyami.imagekodec/KiteAnimation.loopCount|{}loopCount[0]
-        final fun <get-loopCount>(): kotlin/Int // io.github.yuroyami.imagekodec/KiteAnimation.loopCount.<get-loopCount>|<get-loopCount>(){}[0]
+        final fun <get-loopCount>(): kotlin/Long // io.github.yuroyami.imagekodec/KiteAnimation.loopCount.<get-loopCount>|<get-loopCount>(){}[0]
     final val width // io.github.yuroyami.imagekodec/KiteAnimation.width|{}width[0]
         final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/KiteAnimation.width.<get-width>|<get-width>(){}[0]
 }

@@ -157,9 +157,16 @@ with disposal, blending and frame offsets already applied. Playback is therefore
 ```kotlin
 val anim = ImageKodec.decodeAnimation(bytes)
 anim.frames.size
-anim.loopCount        // 0 means forever, in each format's own semantics
+anim.loopCount        // Long total plays: 0 means forever, 1 means once
 anim.durationMillis
 ```
+
+`KiteAnimation.loopCount` and `ImageInfo.loopCount` use `Long`. GIF's stored repeat
+count is normalized to total plays; encoding one play omits the loop extension.
+The GIF writer accepts total counts in 0..65536 and refuses larger counts rather
+than changing them. APNG preserves its full four-byte play field, including
+counts above the PNG Third Edition integer limit as a compatibility extension
+for deployed writers such as Pillow.
 
 GIF, APNG and WebP delays of 10 ms and under are reported as 100 ms, which matches
 browser behavior. An APNG `fcTL` with `delay_num = 0` therefore gives a 100 ms frame.

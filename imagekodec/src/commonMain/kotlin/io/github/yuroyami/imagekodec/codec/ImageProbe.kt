@@ -59,7 +59,7 @@ internal object ImageProbe {
         var colorType = 0
         var hasTrns = false
         var frames = 1
-        var loops = 1
+        var loops = 1L
         var apple = false
         var sawIhdr = false
 
@@ -84,8 +84,8 @@ internal object ImageProbe {
                     if (n < 8) throw ImageDecodeException("PNG: acTL length $n")
                     val a = ByteReader(r.bytes(n))
                     frames = a.u32be().toInt()
-                    // APNG num_plays uses the same 0-means-forever rule as GIF.
-                    loops = a.u32be().toInt()
+                    // Preserve the complete APNG play field, including compatibility counts.
+                    loops = a.u32be()
                 }
                 // Pixel data begins: everything we care about is legally before it.
                 "IDAT", "fdAT", "IEND" -> break@walk
@@ -183,7 +183,7 @@ internal object ImageProbe {
         if (packed and 0x80 != 0) r.skip(3 shl ((packed and 0x07) + 1))
 
         var frames = 0
-        var loops = 1
+        var loops = 1L
         var transparency = false
 
         walk@ while (r.remaining > 0) {
@@ -207,20 +207,7 @@ internal object ImageProbe {
                         }
                         skipSubBlocks(r)
                     } else if (label == 0xFF) {              // application
-                        val size = r.u8()
-                        val name = if (size in 1..r.remaining) r.bytes(size).decodeToString() else ""
-                        if (name.startsWith("NETSCAPE") || name.startsWith("ANIMEXTS")) {
-                            // sub-block: 1-byte id (1) + u16le loop count
-                            val n = r.u8()
-                            if (n >= 3) {
-                                r.skip(1)
-                                loops = r.u16le()
-                                r.skip(n - 3)
-                            } else {
-                                r.skip(n)
-                            }
-                        }
-                        skipSubBlocks(r)
+                        GifLooping.readApplication(r)?.let { loops = it }
                     } else {
                         skipSubBlocks(r)
                     }
@@ -626,7 +613,7 @@ internal object ImageProbe {
         var height = 0
         var alpha = false
         var frames = 1
-        var loops = 1
+        var loops = 1L
         var animated = false
         var sawAny = false
         var sawImage = false
@@ -658,7 +645,7 @@ internal object ImageProbe {
                 }
                 "ANIM" -> {
                     if (body + 6 > data.size) break
-                    loops = u16le(body + 4)
+                    loops = u16le(body + 4).toLong()
                     frames = 0
                 }
                 "ANMF" -> {
@@ -716,7 +703,7 @@ internal object ImageProbe {
             bitDepth = 8,
             hasAlpha = alpha,
             frameCount = if (animated) maxOf(1, frames) else 1,
-            loopCount = if (animated) loops else 1,
+            loopCount = if (animated) loops else 1L,
             orientation = Orientation.Normal,
             isDecodable = reason == null,
             unsupportedReason = reason,

@@ -26,16 +26,21 @@ public class KiteFrame(
  * all gets `1` (play once), which is what its absence has always meant in
  * practice.
  *
- * @throws IllegalArgumentException if [frames] is empty
+ * [loopCount] is a [Long] so APNG's full four-byte play field is preserved,
+ * including counts above the PNG Third Edition integer limit accepted for
+ * compatibility with deployed APNG writers.
+ *
+ * @throws IllegalArgumentException if [frames] is empty or [loopCount] is negative
  */
 public class KiteAnimation @Throws(IllegalArgumentException::class) public constructor(
     public val width: Int,
     public val height: Int,
     public val frames: List<KiteFrame>,
-    public val loopCount: Int,
+    public val loopCount: Long,
 ) {
     init {
         require(frames.isNotEmpty()) { "an animation needs at least one frame" }
+        require(loopCount >= 0) { "an animation play count must not be negative" }
     }
 
     public val isAnimated: Boolean get() = frames.size > 1

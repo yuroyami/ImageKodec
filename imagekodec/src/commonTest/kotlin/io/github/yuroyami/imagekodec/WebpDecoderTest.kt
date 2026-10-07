@@ -59,7 +59,7 @@ class WebpDecoderTest {
         assertEquals(8, anim.width)
         assertEquals(8, anim.height)
         assertEquals(3, anim.frameCount)
-        assertEquals(0, anim.loopCount)
+        assertEquals(0L, anim.loopCount)
         assertTrue(anim.isAnimated)
 
         val alpha = ImageKodec.probe(hex(LOSSLESS_ALPHA))
@@ -202,7 +202,7 @@ class WebpDecoderTest {
         assertEquals(3, anim.frames.size)
         assertEquals(8, anim.width)
         assertEquals(8, anim.height)
-        assertEquals(0, anim.loopCount)
+        assertEquals(0L, anim.loopCount)
         assertTrue(anim.isAnimated)
 
         for (i in 0 until 3) {

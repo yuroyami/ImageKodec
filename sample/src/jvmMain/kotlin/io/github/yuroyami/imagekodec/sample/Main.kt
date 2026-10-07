@@ -83,7 +83,7 @@ private fun caption(bytes: ByteArray): String {
         if (info.hasAlpha) append("  alpha")
         if (info.isAnimated) {
             append("  ${info.frameCount} frames")
-            append(if (info.loopCount == 0) ", looping" else ", x${info.loopCount}")
+            append(if (info.loopCount == 0L) ", looping" else ", x${info.loopCount}")
         }
     }
 }

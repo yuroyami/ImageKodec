@@ -156,7 +156,7 @@ class GifBmpEncoderTest {
         val back = ImageKodec.decodeAnimation(out)
 
         assertEquals(3, back.frames.size)
-        assertEquals(0, back.loopCount, "0 = loop forever")
+        assertEquals(0L, back.loopCount, "0 = loop forever")
         assertEquals(3, back.width)
         assertEquals(2, back.height)
         assertEquals(10, back.frames[0].delayRawCentiseconds)
@@ -175,7 +175,7 @@ class GifBmpEncoderTest {
         val out = ImageKodec.encodeGif(KiteAnimation(5, 5, frames, loopCount = 2))
         val info = ImageKodec.probe(out)
         assertEquals(4, info.frameCount)
-        assertEquals(2, info.loopCount)
+        assertEquals(2L, info.loopCount)
         assertTrue(info.isAnimated)
     }
 

@@ -50,7 +50,7 @@ class ThrowsContractTest {
         }
         val bitmapConstructor = KiteBitmap::class.java.getConstructor(int, int, IntArray::class.java)
         assertTrue(ex in bitmapConstructor.exceptionTypes, "KiteBitmap constructor should declare IllegalArgumentException")
-        val animationConstructor = KiteAnimation::class.java.getConstructor(int, int, List::class.java, int)
+        val animationConstructor = KiteAnimation::class.java.getConstructor(int, int, List::class.java, java.lang.Long.TYPE)
         assertTrue(ex in animationConstructor.exceptionTypes, "KiteAnimation constructor should declare IllegalArgumentException")
     }
 }

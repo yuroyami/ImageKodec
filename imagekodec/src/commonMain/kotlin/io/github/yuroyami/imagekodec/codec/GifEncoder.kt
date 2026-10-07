@@ -55,11 +55,12 @@ internal object GifEncoder {
     private fun write(
         frames: List<KiteBitmap>,
         delaysCs: IntArray,
-        loopCount: Int,
+        loopCount: Long,
         animated: Boolean,
         dither: Boolean,
     ): ByteArray {
         require(frames.isNotEmpty()) { "GIF needs at least one frame" }
+        require(loopCount in 0L..65_536L) { "GIF total play count must be in 0..65536" }
         val width = frames[0].width
         val height = frames[0].height
         require(width <= MAX_SIDE && height <= MAX_SIDE) {
@@ -90,11 +91,11 @@ internal object GifEncoder {
         }
 
         // --- NETSCAPE2.0 looping ------------------------------------------------
-        if (animated) {
+        if (loopCount != 1L) {
             out.append(0x21.toByte()); out.append(0xFF.toByte()); out.append(11)
             out.append("NETSCAPE2.0".encodeToByteArray())
             out.append(3); out.append(1)
-            out.u16(loopCount.coerceIn(0, 0xFFFF))
+            out.u16(if (loopCount == 0L) 0 else (loopCount - 1).toInt())
             out.append(0)
         }
 

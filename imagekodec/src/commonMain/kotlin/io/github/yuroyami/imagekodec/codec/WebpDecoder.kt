@@ -103,7 +103,7 @@ internal object WebpDecoder {
             cancellationCheck?.invoke()
         }
 
-        return KiteAnimation(w, h, out, file.loopCount)
+        return KiteAnimation(w, h, out, file.loopCount.toLong())
     }
 
     // --- container --------------------------------------------------------------
