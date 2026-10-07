@@ -182,6 +182,10 @@ internal object TiffDecoder {
             throw UnsupportedImageException("TIFF: SampleFormat $it is not supported (unsigned integer samples only)")
         }
 
+        val references = if (photometric == 2 || photometric == 6) entries[532]?.let {
+            TiffReferenceBlackWhite.read(data, le, it.type, it.count, it.valueOfs)
+        } else null
+
         // Chroma subsampling only exists for YCbCr; everything else is 1:1.
         val subSampling = if (photometric == 6) {
             optionalValues(530, "YCbCrSubSampling", 3, 2) ?: longArrayOf(2, 2)
@@ -412,13 +416,17 @@ internal object TiffDecoder {
             }
             2 -> {
                 if (spp < 3) err("RGB with $spp samples")
+                val ranges = references?.rgbTables(bits)
                 for (y in 0 until height) for (x in 0 until width) {
                     val opacity = opacity(x, y)
                     val a = scale8(opacity)
+                    fun channel(c: Int): Int {
+                        if (alpha.associated && opacity == 0) return 0
+                        val value = straight(sample(x, y, c), opacity)
+                        return ranges?.get(c)?.get(value) ?: scale8(value)
+                    }
                     argb[y * width + x] = (a shl 24) or
-                        (scale8(straight(sample(x, y, 0), opacity)) shl 16) or
-                        (scale8(straight(sample(x, y, 1), opacity)) shl 8) or
-                        scale8(straight(sample(x, y, 2), opacity))
+                        (channel(0) shl 16) or (channel(1) shl 8) or channel(2)
                 }
             }
             3 -> {
@@ -438,7 +446,7 @@ internal object TiffDecoder {
                 }
             }
             6 -> {
-                val refs = entries[532]?.let { values(it) }
+                val ranges = references?.ycbcrTables()
                 for (y in 0 until height) for (x in 0 until width) {
                     val yy: Int
                     val cb: Int
@@ -466,7 +474,9 @@ internal object TiffDecoder {
                         cb = sample(x, y, 1)
                         cr = sample(x, y, 2)
                     }
-                    argb[y * width + x] = ycbcrToArgb(yy, cb, cr, refs)
+                    argb[y * width + x] = if (references != null && ranges != null) {
+                        references.ycbcrToArgb(yy, cb, cr, ranges)
+                    } else ycbcrToArgb(yy, cb, cr)
                 }
             }
             else -> throw UnsupportedImageException("TIFF: photometric $photometric is not supported")
@@ -501,28 +511,16 @@ internal object TiffDecoder {
     }
 
     /**
-     * YCbCr → RGB with the CCIR 601-1 coefficients TIFF specifies, in fixed point
-     * so every target agrees. [refs] is the ReferenceBlackWhite tag: six values
-     * giving the black and white points of each channel. Its default (0/255 for
-     * luma, 128/255 for chroma) is the full-range case, which is what almost every
-     * writer emits, so that path stays a plain integer transform.
+     * YCbCr → RGB with the exact CCIR 601-1 fractions TIFF specifies, in integers
+     * so every target agrees. The absent-tag full-range case avoids building
+     * reference tables; declared ranges use [TiffReferenceBlackWhite].
      */
-    private fun ycbcrToArgb(y: Int, cb: Int, cr: Int, refs: LongArray?): Int {
-        var luma = y
-        var chromaB = cb - 128
-        var chromaR = cr - 128
-        if (refs != null && refs.size >= 6) {
-            val yBlack = refs[0].toInt(); val yWhite = refs[1].toInt()
-            val cbBlack = refs[2].toInt(); val cbWhite = refs[3].toInt()
-            val crBlack = refs[4].toInt(); val crWhite = refs[5].toInt()
-            if (yWhite != yBlack) luma = (y - yBlack) * 255 / (yWhite - yBlack)
-            if (cbWhite != cbBlack) chromaB = (cb - cbBlack) * 255 / (cbWhite - cbBlack) - 128
-            if (crWhite != crBlack) chromaR = (cr - crBlack) * 255 / (crWhite - crBlack) - 128
-        }
-        val fixed = (luma shl 16) + (1 shl 15)
-        val r = (fixed + 91881 * chromaR) shr 16
-        val g = (fixed - 22554 * chromaB - 46802 * chromaR) shr 16
-        val b = (fixed + 116130 * chromaB) shr 16
+    private fun ycbcrToArgb(y: Int, cb: Int, cr: Int): Int {
+        val chromaB = cb - 128
+        val chromaR = cr - 128
+        val r = (y * 500 + 701 * chromaR + 250) / 500
+        val g = (y * 293500 - 101004 * chromaB - 209599 * chromaR + 146750) / 293500
+        val b = (y * 250 + 443 * chromaB + 125) / 250
         return (0xFF shl 24) or (clamp8(r) shl 16) or (clamp8(g) shl 8) or clamp8(b)
     }
 

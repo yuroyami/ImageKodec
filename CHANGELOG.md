@@ -64,6 +64,9 @@ reviewable in the diff.
   including fax, LZW, PackBits and Deflate streams (#47).
 - TIFF reads ExtraSamples descriptors and converts associated RGB, gray and
   palette colors to straight alpha at native sample precision (#46).
+- TIFF reads unsigned RATIONAL ReferenceBlackWhite values for RGB and YCbCr,
+  expands chroma with its 127-code range, and retains fractional headroom through
+  integer color conversion; malformed ranges raise named decode errors (#48).
 - GIF accepts a missing trailer after a complete frame at a block boundary,
   preserving animation pixels, delays and loop count (#80).
 - Codec origins and licenses are recorded, and the original zlib notices are

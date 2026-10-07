@@ -89,6 +89,10 @@ class FuzzTest {
         "tiff-associated-rgb" to alphaTiff(bits = 16),
         "tiff-associated-gray" to alphaTiff(photo = 0),
         "tiff-associated-palette" to alphaTiff(photo = 3),
+        "tiff-reference-ycbcr" to withReferences(referenceTiff(),
+            longArrayOf(1,2,511,2,257,2,511,2,257,2,511,2)),
+        "tiff-reference-rgb" to withReferences(referenceTiff(ycbcr = false),
+            longArrayOf(255,1,0,1,0,1,255,1,0,1,255,1)),
     )
 
     /** Two frames: the default image doubles as frame 0, then a 2 by 2 frame that disposes to background. */

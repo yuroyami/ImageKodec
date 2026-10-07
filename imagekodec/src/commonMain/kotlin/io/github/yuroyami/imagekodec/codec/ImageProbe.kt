@@ -344,6 +344,9 @@ internal object ImageProbe {
         var predictor = 1
         var t4Options = 0
         var sampleFormats: IntArray? = null
+        var referenceOffset = -1
+        var referenceType = 0
+        var referenceCount = 0L
 
         for (i in 0 until count) {
             val at = ifd + 2 + i * 12
@@ -415,10 +418,18 @@ internal object ImageProbe {
                     }
                     sampleFormats = IntArray(n) { u16(base + it * 2) }
                 }
+                532 -> {
+                    referenceOffset = at + 8
+                    referenceType = type
+                    referenceCount = n.toLong()
+                }
             }
         }
 
         val alpha = TiffAlpha(spp, photometric, extraSamples).sample >= 0
+        if (referenceOffset >= 0 && (photometric == 2 || photometric == 6)) {
+            TiffReferenceBlackWhite.read(data, le, referenceType, referenceCount, referenceOffset)
+        }
         if (sampleFormats != null && sampleFormats.size != spp) {
             throw ImageDecodeException("TIFF: SampleFormat requires $spp values, got ${sampleFormats.size}")
         }

@@ -38,6 +38,8 @@ TIFF FillOrder normalization was checked against libtiff's [tif_read.c](https://
 
 TIFF alpha follows TIFF 6.0 section 18 and the straight-ARGB bitmap contract. The semantic review also consulted libtiff's [tif_getimage.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_getimage.c), under the same permissive license, and ImageMagick's [tiff.c](https://github.com/ImageMagick/ImageMagick/blob/main/coders/tiff.c), under the [permissive ImageMagick license](https://github.com/ImageMagick/ImageMagick/blob/main/LICENSE); no source is vendored. Native-depth unassociation is checked against ImageMagick's TIFF reader and ImageIO-written alpha fixtures (`TiffAlphaOracleTest`).
 
+TIFF ReferenceBlackWhite follows TIFF 6.0 sections 20/21. The review consulted libtiff's [tif_color.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_color.c) under the same permissive Sam Leffler / Silicon Graphics license; no source is vendored. Unsigned RATIONAL expansion uses bounded 128-bit integers with 16 fractional bits and exact CCIR 601-1 matrix fractions. `TiffReferenceOracleTest` checks libtiff and ImageIO channel codes, and independently checks wide arithmetic and full-domain range expansion against JVM BigInteger and exact rational color conversion.
+
 ## Adapted code from the Kite libraries
 
 | Implementation | Origin and format reference | Code license |
