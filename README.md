@@ -225,6 +225,24 @@ All these geometry helpers also work on a whole `KiteAnimation`, preserving
 frame delays and the play count. `cropped` throws `IllegalArgumentException`
 when the rectangle extends outside the image. It does not clamp the rectangle.
 
+### Read a JPEG's stored samples
+
+Some callers know better than the decoder what a JPEG's samples mean. A PDF's
+CMYK images are the usual case: the PDF says whether the samples are inverted
+and whether they hold YCCK. `decodeJpegComponents` stops before the color
+conversion and returns every component as the file stores it:
+
+```kotlin
+val c = ImageKodec.decodeJpegComponents(bytes, reduction = 2)
+c.componentCount   // 1, 3 or 4
+c.adobeTransform   // 0, 1 or 2 from the Adobe marker, -1 without one
+c[x, y, 3]         // the K sample of a CMYK pixel, 0..255
+```
+
+It runs the same decode and upsampling as `decodeReduced`, at about the same
+cost, and the decoder's own color conversion of these samples gives exactly the
+pixels `decodeReduced` returns.
+
 ### Show an image in Compose
 
 `imagekodec-compose` provides a `KiteImage` composable. It reads the input and

@@ -14,6 +14,12 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.decodeJpegComponents` and `JpegComponents` return a JPEG's samples
+  after the inverse DCT and the upsampling, before any color conversion: every
+  component in the frame header's order, and the Adobe transform flag. It takes
+  the same reductions as `decodeReduced` and costs about as much, so a CMYK or
+  YCCK image takes one decode where KitePDF needed four (#103).
+
 - Animation-wide `flippedHorizontal`, `flippedVertical`, `transposed` and
   `transversed` helpers, matching the bitmap geometry API and preserving every
   frame's timing and the play count (#15).

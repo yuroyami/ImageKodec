@@ -46,6 +46,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeAnimation ([BZLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
+	public final fun decodeJpegComponents ([BI)Lio/github/yuroyami/imagekodec/JpegComponents;
+	public static synthetic fun decodeJpegComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpegComponents;
 	public final fun decodeReduced ([BI)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun detect ([B)Lio/github/yuroyami/imagekodec/ImageFormat;
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
@@ -58,6 +60,17 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun probe ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probeOrNull ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
+}
+
+public final class io/github/yuroyami/imagekodec/JpegComponents {
+	public fun <init> (III[BI)V
+	public final fun get (III)I
+	public final fun getAdobeTransform ()I
+	public final fun getComponentCount ()I
+	public final fun getHeight ()I
+	public final fun getSamples ()[B
+	public final fun getWidth ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/yuroyami/imagekodec/KiteAnimation {

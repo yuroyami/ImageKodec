@@ -105,6 +105,29 @@ public object ImageKodec {
         }
     }
 
+    /**
+     * Decode the JPEG in [data] to its stored samples: every component after the inverse DCT and
+     * the upsampling, before any color conversion. Use it when the caller, not the decoder, knows
+     * what the samples mean, such as the CMYK or YCCK ink of a PDF image. [JpegComponents] says
+     * how the samples are laid out.
+     *
+     * [reduction] works as in [decodeReduced]: 1, 2, 4 or 8, each side divided by it and rounded
+     * up, inside the inverse DCT. The decode and the upsampling are those of [decodeReduced], so
+     * its color conversion of these samples gives its pixels exactly, and a file it refuses is
+     * refused here with the same exception. It costs about one [decodeReduced].
+     *
+     * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
+     * @throws ImageDecodeException on malformed or truncated input, or input that is not a JPEG
+     * @throws UnsupportedImageException on a JPEG feature this decoder does not implement
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun decodeJpegComponents(data: ByteArray, reduction: Int = 1): JpegComponents {
+        require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
+            "reduction must be 1, 2, 4 or 8, was $reduction"
+        }
+        return JpegDecoder.decodeComponents(data, scale = reduction.countTrailingZeroBits()).components
+    }
+
     private fun decodeRaw(data: ByteArray): KiteBitmap = when (detect(data)) {
         ImageFormat.PNG -> PngDecoder.decode(data)
         ImageFormat.BMP -> BmpDecoder.decode(data)

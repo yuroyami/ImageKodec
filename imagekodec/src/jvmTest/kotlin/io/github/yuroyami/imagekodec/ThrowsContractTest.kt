@@ -29,6 +29,7 @@ class ThrowsContractTest {
         declares(ImageKodec::class.java, "probe", ex, bytes)
         declares(ImageKodec::class.java, "decode", ex, bytes, boolean)
         declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
+        declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
         declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, Function0::class.java)
         declares(CcittFax::class.java, "decode", ex, bytes, int, CcittOptions::class.java)
     }
@@ -37,11 +38,13 @@ class ThrowsContractTest {
     fun theEntryPointsThatRefuseAnArgumentDeclareIllegalArgumentException() {
         val ex = IllegalArgumentException::class.java
         declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
+        declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteBitmap::class.java, boolean)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteAnimation::class.java, boolean)
         declares(ImageKodec::class.java, "encodeJpeg", ex, KiteBitmap::class.java, int)
         declares(JpxDecoder::class.java, "decode", ex, bytes, int)
         declares(KiteBitmap::class.java, "get", ex, int, int)
+        declares(JpegComponents::class.java, "get", ex, int, int, int)
         val scaling = Class.forName("io.github.yuroyami.imagekodec.ScalingKt")
         val transforms = Class.forName("io.github.yuroyami.imagekodec.TransformsKt")
         for (receiver in listOf(KiteBitmap::class.java, KiteAnimation::class.java)) {
@@ -51,6 +54,8 @@ class ThrowsContractTest {
         }
         val bitmapConstructor = KiteBitmap::class.java.getConstructor(int, int, IntArray::class.java)
         assertTrue(ex in bitmapConstructor.exceptionTypes, "KiteBitmap constructor should declare IllegalArgumentException")
+        val componentsConstructor = JpegComponents::class.java.getConstructor(int, int, int, bytes, int)
+        assertTrue(ex in componentsConstructor.exceptionTypes, "JpegComponents constructor should declare IllegalArgumentException")
         val animationConstructor = KiteAnimation::class.java.getConstructor(int, int, List::class.java, java.lang.Long.TYPE)
         assertTrue(ex in animationConstructor.exceptionTypes, "KiteAnimation constructor should declare IllegalArgumentException")
     }

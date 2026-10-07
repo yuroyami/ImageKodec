@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.JpegComponents
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
@@ -1361,12 +1362,84 @@ internal object JpegDecoder {
 
     // -------------------------------------------------------------------------
 
+    /** How [decode] turns a pixel's samples into RGB, chosen from the frame header and its markers. */
+    internal enum class ColorModel { GRAY, YCBCR, RGB, CMYK, YCCK }
+
     /**
      * Decodes [input]. With [scale] above 0, each side comes out reduced by 2^scale, rounded
      * up, as libjpeg's scaled decode gives it: the IDCT itself shrinks, so the full-size image
      * never exists. [scale] is 0 to 3.
      */
     fun decode(input: ByteArray, scale: Int = 0): KiteBitmap {
+        val j = decodeFrame(input, scale)
+        val model = colorModel(j)
+        val outX = outSize(j.imgX, scale)
+        val argb = IntArray(outX * outSize(j.imgY, scale))
+        forEachRow(j) { row, arrays, offsets -> convertRow(model, argb, row * outX, arrays, offsets, outX) }
+        return KiteBitmap(outX, outSize(j.imgY, scale), argb)
+    }
+
+    /** What [decodeComponents] returns: the samples, and the color model [decode] would apply to them. */
+    internal class Components(val components: JpegComponents, val model: ColorModel)
+
+    /**
+     * The samples of [input] after the IDCT and the upsampling that [decode] runs, before its
+     * color conversion: every component of the frame, in the frame header's order, interleaved.
+     */
+    fun decodeComponents(input: ByteArray, scale: Int = 0): Components {
+        val j = decodeFrame(input, scale)
+        val n = j.imgN
+        val outX = outSize(j.imgX, scale)
+        // At most 2^28 pixels of 4 samples: the frame header's limit keeps this an Int.
+        val samples = ByteArray(outX * outSize(j.imgY, scale) * n)
+        forEachRow(j) { row, arrays, offsets ->
+            var at = row * outX * n
+            when (n) {
+                1 -> arrays[0]!!.copyInto(samples, at, offsets[0], offsets[0] + outX)
+                3 -> {
+                    val a0 = arrays[0]!!; val a1 = arrays[1]!!; val a2 = arrays[2]!!
+                    val o0 = offsets[0]; val o1 = offsets[1]; val o2 = offsets[2]
+                    for (i in 0 until outX) {
+                        samples[at] = a0[o0 + i]; samples[at + 1] = a1[o1 + i]; samples[at + 2] = a2[o2 + i]
+                        at += 3
+                    }
+                }
+                else -> {
+                    val a0 = arrays[0]!!; val a1 = arrays[1]!!; val a2 = arrays[2]!!; val a3 = arrays[3]!!
+                    val o0 = offsets[0]; val o1 = offsets[1]; val o2 = offsets[2]; val o3 = offsets[3]
+                    for (i in 0 until outX) {
+                        samples[at] = a0[o0 + i]; samples[at + 1] = a1[o1 + i]
+                        samples[at + 2] = a2[o2 + i]; samples[at + 3] = a3[o3 + i]
+                        at += 4
+                    }
+                }
+            }
+        }
+        return Components(JpegComponents(outX, outSize(j.imgY, scale), n, samples, j.app14ColorTransform), colorModel(j))
+    }
+
+    /** [components] through the color conversion of [model], row by row as [decode] converts its rows. */
+    internal fun toBitmap(components: JpegComponents, model: ColorModel): KiteBitmap {
+        val w = components.width
+        val n = components.componentCount
+        val rows = Array(n) { ByteArray(w) }
+        val arrays = arrayOfNulls<ByteArray>(4)
+        for (k in 0 until n) arrays[k] = rows[k]
+        val offsets = IntArray(4)
+        val argb = IntArray(w * components.height)
+        for (row in 0 until components.height) {
+            for (i in 0 until w) for (k in 0 until n) rows[k][i] = components.samples[(row * w + i) * n + k]
+            convertRow(model, argb, row * w, arrays, offsets, w)
+        }
+        return KiteBitmap(w, components.height, argb)
+    }
+
+    /** A side of [size] pixels reduced by 2^[scale], rounded up. */
+    private fun outSize(size: Int, scale: Int): Int = (size + (1 shl scale) - 1) shr scale
+
+    // stbi__decode_jpeg_header and stbi__decode_jpeg_image: every scan entropy-decoded and through
+    // the IDCT, each component's plane at its own reduction.
+    private fun decodeFrame(input: ByteArray, scale: Int): State {
         require(scale in 0..3) { "scale must be 0 to 3, was $scale" }
         val j = State(input)
         j.scale = scale
@@ -1426,14 +1499,28 @@ internal object JpegDecoder {
         if (!sawScan) err("no SOS scan before EOI")
         if (j.progressive) finishProgressive(j)
 
-        // resample + color convert (tail of stbi__load_jpeg_image, n == 4 w/ opaque alpha)
-        val decodeN = if (j.imgN < 3) 1 else j.imgN
-        val isRgb = j.imgN == 3 && (j.rgb == 3 || (j.app14ColorTransform == 0 && !j.jfif))
+        return j
+    }
 
-        // The output size: the image reduced by 2^scale, rounded up.
-        val outX = (j.imgX + (1 shl scale) - 1) shr scale
-        val outY = (j.imgY + (1 shl scale) - 1) shr scale
-        val res = Array(decodeN) { k ->
+    private fun colorModel(j: State): ColorModel = when (j.imgN) {
+        1 -> ColorModel.GRAY
+        3 -> if (j.rgb == 3 || (j.app14ColorTransform == 0 && !j.jfif)) ColorModel.RGB else ColorModel.YCBCR
+        // libjpeg's default_decompress_parms: four components are CMYK under Adobe transform 0 or
+        // with no Adobe marker, and YCCK under any other transform. The samples are Adobe's
+        // inverted CMYK, as browsers and ImageMagick read every CMYK JPEG (#65).
+        else -> if (j.app14ColorTransform == 0 || j.app14ColorTransform == -1) ColorModel.CMYK else ColorModel.YCCK
+    }
+
+    /**
+     * Upsamples each component of the decoded frame [j] to the output size, one row at a time
+     * (the resampling tail of stbi__load_jpeg_image), and hands [emit] each row: component k's
+     * samples start at offsets[k] in arrays[k].
+     */
+    private inline fun forEachRow(j: State, emit: (row: Int, arrays: Array<ByteArray?>, offsets: IntArray) -> Unit) {
+        val scale = j.scale
+        val outX = outSize(j.imgX, scale)
+        val outY = outSize(j.imgY, scale)
+        val res = Array(j.imgN) { k ->
             val comp = j.comp[k]
             comp.linebuf = ByteArray(outX + 3)
             // The upsampling left after the component's own reduction: none for chroma that
@@ -1445,72 +1532,67 @@ internal object JpegDecoder {
                 stride = comp.ws, rows = comp.ys, filtered = hs <= 2 && vs <= 2,
             )
         }
-
-        val argb = IntArray(outX * outY)
-        val couArr = arrayOfNulls<ByteArray>(4)
-        val couOfs = IntArray(4)
-
+        val arrays = arrayOfNulls<ByteArray>(4)
+        val offsets = IntArray(4)
         for (row in 0 until outY) {
-            val outOfs = row * outX
-            for (k in 0 until decodeN) {
+            for (k in res.indices) {
                 resampleRow(res[k])
-                couArr[k] = res[k].outArr
-                couOfs[k] = res[k].outOfs
+                arrays[k] = res[k].outArr
+                offsets[k] = res[k].outOfs
             }
-            when {
-                j.imgN == 3 && isRgb -> {
-                    val yA = couArr[0]!!; val cbA = couArr[1]!!; val crA = couArr[2]!!
-                    for (i in 0 until outX) {
-                        argb[outOfs + i] = (0xFF shl 24) or
-                            ((yA[couOfs[0] + i].toInt() and 0xFF) shl 16) or
-                            ((cbA[couOfs[1] + i].toInt() and 0xFF) shl 8) or
-                            (crA[couOfs[2] + i].toInt() and 0xFF)
-                    }
+            emit(row, arrays, offsets)
+        }
+    }
+
+    /**
+     * One row of [count] pixels in the color [model], from each component's samples at couOfs[k]
+     * in couArr[k], into [argb] at [outOfs] (the color conversion of stbi__load_jpeg_image, with
+     * opaque alpha).
+     */
+    private fun convertRow(model: ColorModel, argb: IntArray, outOfs: Int, couArr: Array<ByteArray?>, couOfs: IntArray, count: Int) {
+        when (model) {
+            ColorModel.RGB -> {
+                val rA = couArr[0]!!; val gA = couArr[1]!!; val bA = couArr[2]!!
+                for (i in 0 until count) {
+                    argb[outOfs + i] = (0xFF shl 24) or
+                        ((rA[couOfs[0] + i].toInt() and 0xFF) shl 16) or
+                        ((gA[couOfs[1] + i].toInt() and 0xFF) shl 8) or
+                        (bA[couOfs[2] + i].toInt() and 0xFF)
                 }
-                j.imgN == 3 -> ycbcrToRgbRow(
-                    argb, outOfs,
-                    couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], outX,
-                )
-                j.imgN == 4 -> {
-                    val kA = couArr[3]!!
-                    // libjpeg's default_decompress_parms: four components are CMYK under Adobe
-                    // transform 0 or with no Adobe marker, and YCCK under any other transform.
-                    // The samples are Adobe's inverted CMYK, as browsers and ImageMagick read
-                    // every CMYK JPEG (#65).
-                    when (j.app14ColorTransform) {
-                        0, -1 -> {   // CMYK: blinn multiply against K
-                            val cA = couArr[0]!!; val mA = couArr[1]!!; val yA = couArr[2]!!
-                            for (i in 0 until outX) {
-                                val kk = kA[couOfs[3] + i].toInt() and 0xFF
-                                val r = blinn(cA[couOfs[0] + i].toInt() and 0xFF, kk)
-                                val g = blinn(mA[couOfs[1] + i].toInt() and 0xFF, kk)
-                                val b = blinn(yA[couOfs[2] + i].toInt() and 0xFF, kk)
-                                argb[outOfs + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-                            }
-                        }
-                        else -> {   // YCCK: YCbCr, then invert + blinn against K
-                            ycbcrToRgbRow(argb, outOfs, couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], outX)
-                            for (i in 0 until outX) {
-                                val kk = kA[couOfs[3] + i].toInt() and 0xFF
-                                val p = argb[outOfs + i]
-                                val r = blinn(255 - ((p shr 16) and 0xFF), kk)
-                                val g = blinn(255 - ((p shr 8) and 0xFF), kk)
-                                val b = blinn(255 - (p and 0xFF), kk)
-                                argb[outOfs + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-                            }
-                        }
-                    }
+            }
+            ColorModel.YCBCR -> ycbcrToRgbRow(
+                argb, outOfs,
+                couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], count,
+            )
+            ColorModel.CMYK -> {   // blinn multiply against K
+                val cA = couArr[0]!!; val mA = couArr[1]!!; val yA = couArr[2]!!; val kA = couArr[3]!!
+                for (i in 0 until count) {
+                    val kk = kA[couOfs[3] + i].toInt() and 0xFF
+                    val r = blinn(cA[couOfs[0] + i].toInt() and 0xFF, kk)
+                    val g = blinn(mA[couOfs[1] + i].toInt() and 0xFF, kk)
+                    val b = blinn(yA[couOfs[2] + i].toInt() and 0xFF, kk)
+                    argb[outOfs + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
                 }
-                else -> {   // grayscale
-                    val yA = couArr[0]!!
-                    for (i in 0 until outX) {
-                        val g = yA[couOfs[0] + i].toInt() and 0xFF
-                        argb[outOfs + i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
-                    }
+            }
+            ColorModel.YCCK -> {   // YCbCr, then invert + blinn against K
+                val kA = couArr[3]!!
+                ycbcrToRgbRow(argb, outOfs, couArr[0]!!, couOfs[0], couArr[1]!!, couOfs[1], couArr[2]!!, couOfs[2], count)
+                for (i in 0 until count) {
+                    val kk = kA[couOfs[3] + i].toInt() and 0xFF
+                    val p = argb[outOfs + i]
+                    val r = blinn(255 - ((p shr 16) and 0xFF), kk)
+                    val g = blinn(255 - ((p shr 8) and 0xFF), kk)
+                    val b = blinn(255 - (p and 0xFF), kk)
+                    argb[outOfs + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                }
+            }
+            ColorModel.GRAY -> {
+                val yA = couArr[0]!!
+                for (i in 0 until count) {
+                    val g = yA[couOfs[0] + i].toInt() and 0xFF
+                    argb[outOfs + i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
                 }
             }
         }
-
-        return KiteBitmap(outX, outY, argb)
     }
 }
