@@ -42,6 +42,11 @@ reviewable in the diff.
 
 ### Fixed
 
+- The Coil factory checks every WebP frame codec beyond its initial peek, so
+  mixed animations with later lossy frames fall through to the platform decoder.
+  Large lossless animations remain supported; chunk lengths, padding and
+  truncation are checked before claiming the stream (#75).
+
 - The Coil decoder honors FILL, requests with one defined dimension and
   maxBitmapSize for stills and every animation frame. The core's new
   `downscaledTo` operations retain the exact output geometry chosen by Coil

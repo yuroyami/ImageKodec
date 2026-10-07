@@ -78,6 +78,8 @@ Coil error-image precedence and request sizing were checked against [Coil 3.5.0 
 
 Coil decoder geometry uses the public [Coil 3.5.0 DecodeUtils](https://github.com/coil-kt/coil/blob/3.5.0/coil-core/src/commonMain/kotlin/coil3/decode/DecodeUtils.kt) sizing operations and the independent-side flooring used by its [Skia bitmap conversion](https://github.com/coil-kt/coil/blob/3.5.0/coil-core/src/nonAndroidMain/kotlin/coil3/util/utils.nonAndroid.kt), under Apache-2.0. `KiteImageDecoderSizingTest` compares real stock ImageLoader outputs with the binding for FIT/FILL, one-axis requests, non-integral ratios, original size and maximum bitmap size; animated frames are checked against the same stock geometry. No reference source is vendored.
 
+Coil WebP claiming follows the [WebP RIFF container specification](https://developers.google.com/speed/webp/docs/riff_container). `KiteImageFactoryClaimTest` uses a cwebp/webpmux-written mixed animation and checks stock-decoder fallback beyond the initial peek; libwebp tools (BSD-3-Clause) independently confirm its frame codecs. Synthetic chunk fixtures check bounds, padding, fragmented reads and source preservation. No reference source is vendored.
+
 ## Refresh
 
 ```sh

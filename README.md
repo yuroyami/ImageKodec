@@ -269,11 +269,12 @@ KiteAsyncImage(
 Pass the loader to `KiteAsyncImage`. Without it, the composable uses Coil's singleton
 loader, which does not have `KiteImageDecoder`.
 
-`KiteImageDecoder.Factory` claims a file by calling `probe` on a 64 KiB peek and
-checking `isDecodable`. It therefore takes what these codecs handle and leaves
-the rest to Coil's platform decoders. The factory claims TIFF and JP2 even when
-the probe fails. A TIFF's IFD is often further into the file than 64 KiB, and no
-platform decoder handles either format.
+`KiteImageDecoder.Factory` probes the first 64 KiB for supported features.
+For WebP, it walks the complete RIFF and frame chunk headers, skipping payloads
+without a second whole-file byte array. It accepts lossless frames and declines
+the file if any frame uses lossy VP8, so Coil can choose its platform decoder.
+The factory claims TIFF and JP2 even when the probe fails. A TIFF's IFD is often
+further into the file than 64 KiB, and no platform decoder handles either format.
 
 `KiteAnimationImage` holds no playback state of its own, because the frame
 position lives in the composable. The default animation cache limit is 64 MiB,

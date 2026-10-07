@@ -29,11 +29,11 @@ import okio.use
  *     .build()
  * ```
  *
- * The factory decides by asking `ImageKodec.probe` whether this build can decode
- * the bytes, so it claims exactly what the codecs handle (PNG and APNG, JPEG,
- * GIF, BMP, lossless and animated WebP, TIFF, JP2) and declines the rest (SVG,
- * CgBI PNGs, lossy WebP, lossless/arithmetic JPEGs). Coil's platform decoders
- * keep everything it turns down, so nothing regresses versus a stock setup.
+ * The factory uses `ImageKodec.probe` and a complete WebP chunk-header walk to
+ * decide whether this build can decode the bytes. It claims PNG and APNG, JPEG,
+ * GIF, BMP, lossless WebP (including animations), TIFF and JP2. Unsupported
+ * formats such as SVG, CgBI PNGs, lossy WebP and lossless/arithmetic JPEGs fall
+ * through to Coil's platform decoders.
  *
  * Static results honor the request's size, FIT/FILL scale, single defined side
  * and maximum bitmap size (box-filter downscale, never up), and memory-cache
@@ -105,12 +105,12 @@ public class KiteImageDecoder(
             peek.request(PEEK_BYTES)
             val header = peek.buffer.readByteArray(minOf(PEEK_BYTES, peek.buffer.size))
 
-            // One question, asked once: can this build decode these bytes? The
-            // probe reads headers only, and it already knows every rule each
-            // decoder applies, so there is no second copy of "is this PNG a CgBI"
-            // to drift out of sync here.
             val info = ImageKodec.probeOrNull(header)
             val claimed = when {
+                // A lossless first frame does not prove that later frames use
+                // a supported codec; an initial peek may miss all image chunks.
+                ImageFormat.sniff(header) == ImageFormat.WEBP ->
+                    result.source.source().peek().use { it.hasOnlyLosslessWebpImages() }
                 info != null -> info.isDecodable
                 // A probe can legitimately fail on a truncated peek: TIFF in
                 // particular often puts its IFD at the *end* of the file. Those
@@ -128,10 +128,9 @@ public class KiteImageDecoder(
 
         public companion object {
             /**
-             * How much of the source to peek before deciding. Generous enough for
-             * a JPEG's EXIF/XMP blobs to sit in front of the frame header, and for
-             * a small TIFF's directory, while staying far short of "read the file
-             * to decide whether to read the file".
+             * Initial probe window, covering ordinary JPEG metadata and small
+             * TIFF directories. WebP's chunk-header walk continues beyond this
+             * window to check every frame's codec.
              */
             private const val PEEK_BYTES = 64L * 1024
 
