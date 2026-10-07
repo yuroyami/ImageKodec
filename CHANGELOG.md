@@ -47,6 +47,11 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- JPEG 2000 reversible code-blocks that stop partway through a bitplane apply
+  reconstruction bias at each coefficient's last decoded plane. Rate-limited
+  5/3 streams match OpenJPEG exactly, including reduced output; fully decoded
+  coefficients retain their exact integer value (#98).
+
 - JPEG 2000 irreversible 9/7 reconstruction applies the single-sample odd-origin
   division in the fixed-point domain, correcting large errors in small tiles
   and reduced decodes while preserving reversible output (#97).

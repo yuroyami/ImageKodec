@@ -103,6 +103,7 @@ class FuzzTest {
             longArrayOf(255,1,0,1,0,1,255,1,0,1,255,1)),
         "tiff-ccitt-mixed" to faxTiff(CcittMixedTest().stream(fill = 3), 3, height = 6, t4Options = 5),
         "jp2-small-irreversible" to Jp2SingletonTest().encoded("corner"),
+        "jp2-partial-reversible" to Jp2ReconstructionTest().encoded(),
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(

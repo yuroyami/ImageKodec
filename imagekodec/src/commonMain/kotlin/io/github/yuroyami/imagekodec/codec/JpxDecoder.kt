@@ -839,16 +839,14 @@ public object JpxDecoder {
             passNo++
             if (passType == 2) { passType = 0; bp-- } else passType++
         }
-        // Reconstruction bias for the lowest decoded plane (E.1.1's r = 0.5).
-        // Reversible full decodes must stay exact-integer; the irreversible
-        // path stores DOUBLED magnitudes carrying the half step, and the
-        // dequantizer divides the scale by two.
-        val lowest = bp + 1
+        // T.800 E.1.1/E.1.2 apply the half step at each coefficient's last decoded
+        // plane: a block can stop partway through a plane. Reversible plane zero
+        // stays exact; irreversible magnitudes carry twice the value so the
+        // dequantizer can retain its fractional half step.
         if (cod.reversible) {
-            if (lowest > 0) {
-                for (i in t1.mag.indices) {
-                    if (t1.mag[i] != 0) t1.mag[i] = t1.mag[i] or (1 shl (lowest - 1))
-                }
+            for (i in t1.mag.indices) {
+                val last = t1.lastPlane[i]
+                if (t1.mag[i] != 0 && last > 0) t1.mag[i] = t1.mag[i] or (1 shl (last - 1))
             }
         } else {
             for (i in t1.mag.indices) {

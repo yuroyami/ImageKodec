@@ -148,6 +148,40 @@ class JpxOracleTest {
     }
 
     @Test
+    fun rateLimitedReversibleLayersMatchOpenjpegExactly() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        for (gray in listOf(true, false)) {
+            val src = ppm(gray = gray)
+            for (rate in listOf(2, 4, 8, 16, 32, 64)) {
+                val jp2 = encode(src, "-r", "$rate")
+                val (kite, ref) = both(jp2)
+                compare("rate-$rate gray=$gray", kite, ref, tolerance = 0)
+                for (levels in 1..3) {
+                    val (reduced, reducedRef) = bothReduced(jp2, levels)
+                    compare("rate-$rate gray=$gray reduced-$levels", reduced, reducedRef, tolerance = 0)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun partialBitplaneVectorsMatchOpenjpegExactly() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        for (size in listOf(16, 32, 64)) {
+            val jp2 = File.createTempFile("kite-partial", ".j2k").apply {
+                deleteOnExit()
+                writeBytes(Jp2ReconstructionTest().encoded(size))
+            }
+            val (kite, ref) = both(jp2)
+            compare("partial-$size", kite, ref, tolerance = 0)
+            for (levels in 1..3) {
+                val (reduced, reducedRef) = bothReduced(jp2, levels)
+                compare("partial-$size reduced-$levels", reduced, reducedRef, tolerance = 0)
+            }
+        }
+    }
+
+    @Test
     fun lossy_97_stays_close_to_openjpeg() {
         assumeTrue("OpenJPEG tools not found, skipping.", tools())
         val jp2 = encode(ppm(), "-I", "-r", "10")
