@@ -53,6 +53,14 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- `probe` and the decoders agree on PNG sizes and JPEG 2000 alpha. A PNG side of
+  0 or past 2^31 - 1 throws `ImageDecodeException` on both sides, where `probe`
+  used to report a zero or negative width, and a size past the decoder's limits
+  or input budget makes `probe` name the refusal the decode throws. A JPEG 2000
+  component beyond the colours that no `cdef` box describes is opacity on both
+  sides, as OpenJPEG writes and Pillow reads RGBA and gray-and-alpha
+  codestreams. `ProbeTest` checks its agreements on every format now (#82).
+
 - A JP2 file's palette (`pclr` with `cmap`), channel definitions (`cdef`, with
   their associations and premultiplied opacity) and colour specification
   (`colr`) now apply, as T.800 Annex I orders them. sYCC, e-sYCC, CMYK, CMY and

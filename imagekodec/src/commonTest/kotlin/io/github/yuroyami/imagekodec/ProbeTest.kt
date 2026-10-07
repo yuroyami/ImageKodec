@@ -52,6 +52,7 @@ class ProbeTest {
     private val GIF_ANIM_2F = "47494638396102000200910000ff000000ff000000ffffff0021ff0b4e45545343415045322e30030103000021f90404050000002c0000000002000200000204044110050021f90404000000002c000000000200020000020414455105003b"
     private val GIF_TRANSPARENT = "47494638396102000200910000ff000000ff000000ffffff0021f90401000001002c000000000200020000020404c37005003b"
 
+    /** A vector of every format probe reads, alpha and animation included, so each agreement test covers them all (#82). */
     private fun allVectors(): List<Pair<String, ByteArray>> = listOf(
         "gray8 png" to hex(GRAY8_4X4),
         "rgba8 png" to hex(RGBA8_2X2),
@@ -59,8 +60,21 @@ class ProbeTest {
         "palette png" to hex(PAL8_TRNS_4X2),
         "static gif" to hex(GIF_STATIC_3X2),
         "animated gif" to hex(GIF_ANIM_2F),
+        "transparent gif" to hex(GIF_TRANSPARENT),
         "jpeg" to ImageKodec.encodeJpeg(sampleBitmap(9, 5), quality = 80),
         "png roundtrip" to ImageKodec.encodePng(sampleBitmap(7, 3)),
+        "bmp" to ImageKodec.encodeBmp(sampleBitmap(5, 4)),
+        "bmp with alpha" to ImageKodec.encodeBmp(KiteBitmap(3, 2, IntArray(6) { argb(it * 40, 10, 20, 30) })),
+        "tiff" to tiffBlock(1, ByteArray(32) { (it * 9).toByte() }),
+        "webp lossless" to constantWebp(6, 4, argb(0xFF, 10, 200, 30)),
+        "webp with alpha" to constantExtendedWebp(6, 4, listOf(argb(0x40, 10, 200, 30)), animated = false),
+        "animated webp" to constantExtendedWebp(6, 4, listOf(argb(0xFF, 1, 2, 3), argb(0xFF, 4, 5, 6)), animated = true),
+        "jp2" to hex(JP2),
+        "jp2 palette" to Jp2ColorFixtures.palette,
+        "jp2 opacity" to Jp2ColorFixtures.straight,
+        "j2k rgba" to Jp2AlphaFixtures.rgbaCodestream,
+        "j2k gray and alpha" to Jp2AlphaFixtures.grayAlphaCodestream,
+        "jp2 rgba" to Jp2AlphaFixtures.rgbaJp2,
     )
 
     private fun sampleBitmap(w: Int, h: Int) = KiteBitmap(w, h, IntArray(w * h) { i ->
@@ -94,6 +108,47 @@ class ProbeTest {
                 assertEquals(anim.loopCount, info.loopCount, "$name loop count")
             }
         }
+    }
+
+    @Test
+    fun anImageWithoutDeclaredAlphaDecodesOpaque() {
+        // The decoder never invents transparency the header does not declare.
+        for ((name, bytes) in allVectors()) {
+            if (!ImageKodec.probe(bytes).hasAlpha) assertFalse(ImageKodec.decode(bytes).hasTransparency(), "$name")
+        }
+    }
+
+    @Test
+    fun jpeg2000AlphaFollowsOneRuleOnBothSides() {
+        // An unlabelled component beyond the colours is opacity, in a bare codestream or a JP2 file,
+        // as OpenJPEG writes and Pillow reads it (#82). The probe and the decoder agree on each file.
+        for ((name, bytes) in allVectors().filter { ImageKodec.detect(it.second) == ImageFormat.JP2 }) {
+            val decoded = io.github.yuroyami.imagekodec.codec.JpxDecoder.decodeForFacade(bytes, 1)
+            assertEquals(decoded.alpha != null, ImageKodec.probe(bytes).hasAlpha, name)
+        }
+        for (bytes in listOf(Jp2AlphaFixtures.rgbaCodestream, Jp2AlphaFixtures.grayAlphaCodestream, Jp2AlphaFixtures.rgbaJp2)) {
+            val bitmap = ImageKodec.decode(bytes)
+            for (y in 0 until 16) for (x in 0 until 24) {
+                assertEquals(if (x < 12) 0 else 255, bitmap[x, y] ushr 24, "opacity at ($x, $y)")
+            }
+        }
+    }
+
+    @Test
+    fun pngDimensionsOutsideTheFormatAreRefusedOnBothSides() {
+        // IHDR holds unsigned 32-bit sides, but the format allows 1 to 2^31 - 1, and the probe used
+        // to hand back a negative width (#82).
+        for ((w, h) in listOf(-1 to 1, Int.MIN_VALUE to 1, 0 to 5, 5 to 0)) {
+            val png = PNG_SIGNATURE + pngHeader(w, h, 8, 0) + pngChunk("IDAT", ByteArray(0)) + pngChunk("IEND", ByteArray(0))
+            assertFailsWith<ImageDecodeException>("${w}x$h") { ImageKodec.probe(png) }
+            assertFailsWith<ImageDecodeException>("${w}x$h") { ImageKodec.decode(png) }
+        }
+        // Past this decoder's limits, but a size PNG allows: probe names the refusal the decode throws.
+        val wide = PNG_SIGNATURE + pngHeader(1 shl 25, 1, 8, 0) + pngChunk("IDAT", ByteArray(0)) + pngChunk("IEND", ByteArray(0))
+        val info = ImageKodec.probe(wide)
+        assertFalse(info.isDecodable)
+        val e = assertFailsWith<ImageDecodeException> { ImageKodec.decode(wide) }
+        assertEquals(info.unsupportedReason, e.message)
     }
 
     @Test

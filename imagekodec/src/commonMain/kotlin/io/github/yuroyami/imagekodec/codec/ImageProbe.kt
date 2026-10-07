@@ -55,6 +55,7 @@ internal object ImageProbe {
         var loops = 1L
         var apple = false
         var sawIhdr = false
+        var limit: String? = null
 
         walk@ while (r.remaining >= 8) {
             val len = r.u32be()
@@ -66,8 +67,12 @@ internal object ImageProbe {
                 "IHDR" -> {
                     if (n != 13) throw ImageDecodeException("PNG: IHDR length $n")
                     val h = ByteReader(r.bytes(13))
-                    width = h.u32be().toInt()
-                    height = h.u32be().toInt()
+                    val w = h.u32be()
+                    val hh = h.u32be()
+                    PngDecoder.checkDimensions(w, hh)
+                    limit = PngDecoder.sizeLimit(w, hh)
+                    width = w.toInt()
+                    height = hh.toInt()
                     depth = h.u8()
                     colorType = h.u8()
                     sawIhdr = true
@@ -90,6 +95,14 @@ internal object ImageProbe {
 
         if (!sawIhdr) throw ImageDecodeException("PNG: no IHDR")
         if (frames < 1) frames = 1
+        val channels = when (colorType) { 0, 3 -> 1; 2 -> 3; 4 -> 2; 6 -> 4; else -> 0 }
+        val reason = when {
+            apple -> "Apple CgBI PNG (Xcode-crushed, raw deflate + swapped channels)"
+            limit != null -> limit
+            // A colour type or depth the decoder refuses as damaged leaves nothing to weigh here.
+            channels > 0 && depth in 1..16 -> PngDecoder.budgetRefusal(width, height, depth * channels, data.size)
+            else -> null
+        }
 
         return ImageInfo(
             format = ImageFormat.PNG,
@@ -100,10 +113,8 @@ internal object ImageProbe {
             frameCount = frames,
             loopCount = loops,
             orientation = Orientation.Normal,
-            isDecodable = !apple,
-            unsupportedReason = if (apple) {
-                "Apple CgBI PNG (Xcode-crushed, raw deflate + swapped channels)"
-            } else null,
+            isDecodable = reason == null,
+            unsupportedReason = reason,
         )
     }
 

@@ -39,6 +39,24 @@ internal object PngDecoder {
 
     private const val MAX_DIMENSION = 1 shl 24       // 16M px per side
     private const val MAX_PIXELS = 1L shl 28         // 268M px ≈ 1 GiB of ARGB; bomb guard
+
+    // The IHDR size checks, shared with the probe so the two agree on what a header allows (#82).
+
+    /** The PNG specification allows 1 to 2^31 - 1 a side: anything else is a broken header. */
+    internal fun checkDimensions(width: Long, height: Long) {
+        if (width !in 1..Int.MAX_VALUE.toLong() || height !in 1..Int.MAX_VALUE.toLong()) {
+            throw ImageDecodeException("PNG: bad dimensions ${width}x$height")
+        }
+    }
+
+    /** Why a size the format allows is past this decoder's absolute limits, or null. */
+    internal fun sizeLimit(width: Long, height: Long): String? =
+        if (width > MAX_DIMENSION || height > MAX_DIMENSION || width * height > MAX_PIXELS) "PNG: ${width}x$height exceeds safety limits" else null
+
+    /** Why [width] by [height] pixels of [bitsPerPixel] cannot come from [inputBytes] bytes, or null. */
+    internal fun budgetRefusal(width: Int, height: Int, bitsPerPixel: Int, inputBytes: Int): String? =
+        if (Budget.fits(width, height, inputBytes, bitsPerPixel)) null
+        else "PNG: ${width}x$height cannot come from $inputBytes bytes at $bitsPerPixel bits per pixel"
     private const val MAX_TOTAL_PIXELS = 1L shl 28   // most frames an acTL may claim
 
     // APNG dispose_op / blend_op wire values (APNG spec).
@@ -178,10 +196,8 @@ internal object PngDecoder {
         if (h.u8() != 0) throw ImageDecodeException("PNG: unknown filter method")
         val interlace = h.u8()
 
-        if (widthL <= 0 || heightL <= 0) throw ImageDecodeException("PNG: bad dimensions ${widthL}x$heightL")
-        if (widthL > MAX_DIMENSION || heightL > MAX_DIMENSION || widthL * heightL > MAX_PIXELS) {
-            throw ImageDecodeException("PNG: ${widthL}x$heightL exceeds safety limits")
-        }
+        checkDimensions(widthL, heightL)
+        sizeLimit(widthL, heightL)?.let { throw ImageDecodeException(it) }
         val width = widthL.toInt()
         val height = heightL.toInt()
         if (interlace != 0 && interlace != 1) {
@@ -201,9 +217,7 @@ internal object PngDecoder {
             throw ImageDecodeException("PNG: bit depth $bitDepth is illegal for color type $colorType")
         }
 
-        if (!Budget.fits(width, height, data.size, bitDepth * channels)) {
-            throw ImageDecodeException("PNG: ${width}x$height cannot come from ${data.size} bytes at ${bitDepth * channels} bits per pixel")
-        }
+        budgetRefusal(width, height, bitDepth * channels, data.size)?.let { throw ImageDecodeException(it) }
 
         // --- remaining chunks ---------------------------------------------------
         var palette: IntArray? = null            // 0xFFRRGGBB entries

@@ -226,6 +226,9 @@ internal object Jp2Color {
         val colors = arrayOfNulls<Channel>(space.channels)
         if (definitions == null) {
             for (k in 0 until minOf(space.channels, channels.size)) colors[k] = channels[k]
+            // One channel beyond the colours, with nothing to say what it is: opacity, as OpenJPEG's
+            // writers and Pillow read a gray-and-alpha or RGBA codestream, which has no boxes (#82).
+            if (channels.size == space.channels + 1) alpha = channels.last()
         } else {
             val described = BooleanArray(channels.size)
             for (d in definitions) {
