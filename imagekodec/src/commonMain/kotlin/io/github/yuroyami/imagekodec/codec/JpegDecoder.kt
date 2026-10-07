@@ -24,7 +24,9 @@ import kotlin.math.sqrt
  *  - grayscale (1 comp), YCbCr (3), component-id "RGB" (3, no transform),
  *    CMYK and YCCK via the Adobe APP14 transform flag (4)
  *  - stb's fixed-point AAN-style IDCT and reduced-precision YCbCr→RGB, so
- *    output is bit-identical to stb_image on the same file
+ *    output is bit-identical to stb_image on the same file, except where stb's
+ *    horizontal 2x upsampling swaps the weights next to the right edge: there
+ *    this decoder weights the near sample, as libjpeg does
  *
  *  - progressive (SOF2): spectral selection + successive approximation, EOB
  *    runs, DC/AC refinement scans, deferred dequantize+IDCT at EOI
@@ -1076,7 +1078,7 @@ internal object JpegDecoder {
                 }
                 r.outArr = out; r.outOfs = 0
             }
-            r.hs == 2 && r.vs == 1 -> {   // stbi__resample_row_h_2
+            r.hs == 2 && r.vs == 1 -> {   // stbi__resample_row_h_2, with its last pair corrected
                 if (w == 1) {
                     out[0] = inp[nearOfs]; out[1] = inp[nearOfs]
                 } else {
@@ -1090,7 +1092,10 @@ internal object JpegDecoder {
                         out[i * 2 + 1] = div4(n + pix(i + 1)).toByte()
                         i++
                     }
-                    out[i * 2] = div4(pix(w - 2) * 3 + pix(w - 1) + 2).toByte()
+                    // Output 2(w-1) is the left half of input w-1, so w-1 is its near sample. stb weights
+                    // w-2 by three here; libjpeg-turbo's h2v1_fancy_upsample weights w-1, as every
+                    // other output of the row does (#69).
+                    out[i * 2] = div4(pix(w - 1) * 3 + pix(w - 2) + 2).toByte()
                     out[i * 2 + 1] = inp[nearOfs + w - 1]
                 }
                 r.outArr = out; r.outOfs = 0

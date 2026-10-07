@@ -62,7 +62,7 @@ Every codec's tests compare its output against an independent implementation:
 | Codec | Reference used as the oracle |
 |---|---|
 | PNG, BMP, GIF, JPEG encode | ImageIO reads our output back |
-| JPEG decode | `stb_image`, bit-identical, through committed vectors that a clang-compiled `stb_image` produced |
+| JPEG decode | `stb_image`, bit-identical, through committed vectors that `tools/stb_dump.c` produced. Its header gives the commands, including the one-line correction of stb's 4:2:2 right-edge weight (#69) |
 | JPEG 2000 | OpenJPEG (`opj_compress` and `opj_decompress`) |
 | WebP lossless | libwebp (`cwebp` and `dwebp`), bit-identical |
 | TIFF | libtiff (`tiffcp`, `tiff2rgba`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |

@@ -47,6 +47,12 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- 4:2:2 JPEGs weight the nearer chroma sample by three at the right edge of each
+  row, as libjpeg does. stb_image swaps the last two weights there, which put a
+  wrong pixel next to the edge, up to 88 levels off on a sharp border. The
+  decoder stays bit-identical to stb elsewhere, and `tools/stb_dump.c` now
+  commits the program and the commands behind the stb vectors (#69).
+
 - Signed JPEG 2000 components map their full centered range into unsigned display
   samples before clipping. Gray, RGB, mixed-sign components and opacity retain
   their negative samples, for both wavelet filters and component transforms;

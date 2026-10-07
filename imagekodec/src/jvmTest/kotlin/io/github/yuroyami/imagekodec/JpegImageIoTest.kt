@@ -5,7 +5,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
+import javax.imageio.ImageTypeSpecifier
 import javax.imageio.ImageWriteParam
+import javax.imageio.metadata.IIOMetadataNode
 import javax.imageio.stream.MemoryCacheImageOutputStream
 import kotlin.math.abs
 import kotlin.test.Test
@@ -32,17 +34,33 @@ class JpegImageIoTest {
         return img
     }
 
-    private fun encodeJpeg(img: BufferedImage, quality: Float, progressive: Boolean = false): ByteArray {
+    /** [lumaSampling] sets the luma's horizontal and vertical factors; ImageIO's own default is 2x2, 4:2:0. */
+    private fun encodeJpeg(
+        img: BufferedImage,
+        quality: Float,
+        progressive: Boolean = false,
+        lumaSampling: Pair<Int, Int>? = null,
+    ): ByteArray {
         val writer = ImageIO.getImageWritersByFormatName("jpeg").next()
         val param = writer.defaultWriteParam.apply {
             compressionMode = ImageWriteParam.MODE_EXPLICIT
             compressionQuality = quality
             if (progressive) progressiveMode = ImageWriteParam.MODE_DEFAULT
         }
+        val metadata = lumaSampling?.let { (h, v) ->
+            val format = "javax_imageio_jpeg_image_1.0"
+            writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(img), param).apply {
+                val tree = getAsTree(format) as IIOMetadataNode
+                val luma = tree.getElementsByTagName("componentSpec").item(0) as IIOMetadataNode
+                luma.setAttribute("HsamplingFactor", "$h")
+                luma.setAttribute("VsamplingFactor", "$v")
+                setFromTree(format, tree)
+            }
+        }
         val out = ByteArrayOutputStream()
         MemoryCacheImageOutputStream(out).use { stream ->
             writer.output = stream
-            writer.write(null, IIOImage(img, null, null), param)
+            writer.write(null, IIOImage(img, null, metadata), param)
         }
         writer.dispose()
         return out.toByteArray()
@@ -109,6 +127,38 @@ class JpegImageIoTest {
     fun oddSizesAgree() {
         for ((w, h) in listOf(1 to 1, 3 to 3, 15 to 17, 33 to 9)) {
             assertCloseToImageIo(encodeJpeg(photoish(w, h), 0.85f), "${w}x$h")
+        }
+    }
+
+    @Test
+    fun horizontalSubsamplingAgrees() {
+        for ((w, h) in listOf(64 to 48, 33 to 9, 2 to 2, 1 to 5)) {
+            assertCloseToImageIo(encodeJpeg(photoish(w, h), 0.85f, lumaSampling = 2 to 1), "4:2:2 ${w}x$h")
+        }
+    }
+
+    /**
+     * A sharp red border on gray, in 4:2:2, at an even and an odd width. The pixel next to
+     * the edge takes the chroma of the nearer sample, the red one: stb weights the farther
+     * gray one and was 88 levels off here (#69).
+     */
+    @Test
+    fun horizontalSubsamplingKeepsTheRightEdge() {
+        for (w in listOf(66, 65)) {
+            val img = BufferedImage(w, 8, BufferedImage.TYPE_INT_RGB)
+            for (y in 0 until 8) for (x in 0 until w) img.setRGB(x, y, if (x >= 64) 0xFF0000 else 0x808080)
+            val jpeg = encodeJpeg(img, 1f, lumaSampling = 2 to 1)
+            assertCloseToImageIo(jpeg, "4:2:2 edge, width $w", maxDiff = 6, maxMean = 1.0)
+            val reference = ImageIO.read(jpeg.inputStream())!!
+            val ours = ImageKodec.decode(jpeg)
+            for (y in 0 until 8) for (x in 62 until w) {
+                val e = reference.getRGB(x, y)
+                val a = ours[x, y]
+                for (shift in intArrayOf(16, 8, 0)) {
+                    val d = abs(((e shr shift) and 0xFF) - ((a shr shift) and 0xFF))
+                    assertTrue(d <= 3, "width $w at ($x, $y): ${"%08x".format(a)} against ${"%08x".format(e)}")
+                }
+            }
         }
     }
 

@@ -379,7 +379,7 @@ expectations:
 
 | Codec | Checked against | Tolerance |
 | --- | --- | --- |
-| JPEG decode | stb_image, through committed vectors that a clang-compiled stb_image produced | bit-identical |
+| JPEG decode | stb_image, through committed vectors that `tools/stb_dump.c` produced; stb's 4:2:2 right-edge weight is corrected to libjpeg's, and ImageIO checks that edge | bit-identical |
 | PNG, GIF, BMP encode | `javax.imageio` reads the output back | exact |
 | JPEG encode | `javax.imageio` reads the output back | lossy: per-pixel/mean-error and PSNR thresholds |
 | JPEG reduced decode | libjpeg-turbo `djpeg -scale` | pixel comparisons with a stated tolerance |
