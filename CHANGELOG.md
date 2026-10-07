@@ -48,6 +48,11 @@ reviewable in the diff.
 
 ### Fixed
 
+- JPEG 2000 probe reads main and tile-part coding/quantization declarations with
+  the decoder's shared bounded readers. It checks later tile-parts while
+  skipping packet payloads, reports matching field refusals and stays inside
+  the codestream box. All eight legal guard-bit counts remain supported (#4).
+
 - JPEG 2000 probe and decode share the input-relative pixel budget and its
   2^28-pixel absolute ceiling. The probe names the same size refusal as decode;
   the separate 64-megapixel constants are removed (#2).

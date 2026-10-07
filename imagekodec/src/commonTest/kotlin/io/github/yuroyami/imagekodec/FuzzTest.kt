@@ -79,6 +79,7 @@ class FuzzTest {
         "tiff-ycbcr-tiled" to TiffExtendedTest().tiledYcbcr(2, 2),
         "tiff-predictor-tiled" to predictorTiff(),
         "jp2" to hex(JP2),
+        "jp2-tile-cod" to Jp2HeaderProbeTest().tileOverrideSeed(),
         // Seeds for the paths a mutation cannot reach from the ones above: each needs several chunks or
         // fields to agree, so a random edit of a plain file stops at the first check.
         "apng" to apngSeed(),

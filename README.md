@@ -340,14 +340,15 @@ web project that runs under Node should not use them.
   no streaming or partial-decode API. `decodeReduced` shrinks a JPEG or a
   JPEG 2000 image inside the decoder, and `scaled` works after a full-size decode.
 - **JPEG 2000 refusals name their cause.** Unsupported RGN, POC, PPM/PPT and
-  non-baseline code-block styles throw `UnsupportedImageException`. Malformed
+  non-baseline code-block styles throw `UnsupportedImageException`; files with
+  more than 1000 layers are also refused. Malformed
   headers name the marker, field and byte position. The public nullable
   `JpxDecoder.decode` overloads still return null on failure; `probe` names
-  unsupported features in the main header.
-- **`probe` covers features, not corruption.** JPEG 2000 is the loosest of the
-  seven formats. Its check stops at the first tile-part and does not range-check
-  the COD and QCD parameters. A per-tile coding-style override, or an
-  out-of-range decomposition count, is therefore only found at decode.
+  unsupported features in main and tile-part headers.
+- **`probe` covers declared features, not pixel integrity.** JPEG 2000 checks
+  main and tile-part headers with the decoder's coding and quantization readers,
+  skipping packet bytes by their declared lengths. A corrupt packet payload can
+  still probe decodable and fail during decoding.
 - **Output limits use a shared ceiling.** All image decoders cap output at
   2^28 pixels (about 1 GiB of ARGB).
   WebP, fax-compressed TIFF, `CcittFax` and `Jbig2Decoder` use that absolute

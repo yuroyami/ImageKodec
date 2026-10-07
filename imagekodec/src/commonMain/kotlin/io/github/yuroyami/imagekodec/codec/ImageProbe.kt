@@ -17,15 +17,14 @@ import io.github.yuroyami.imagekodec.internal.ByteReader
  *  - JPEG: marker walk to the first SOF, plus the APP1 EXIF orientation
  *  - GIF: logical screen descriptor, then the block walk counting image
  *    descriptors: sub-block payloads are skipped, never LZW-decoded
- *  - BMP/TIFF/JP2/WebP: fixed header fields (and, for animated WebP, the ANMF
- *    chunk count)
+ *  - JPEG 2000: main and tile-part marker headers, with packet bytes skipped
+ *  - BMP/TIFF/WebP: fixed header fields (and, for animated WebP, the ANMF count)
  *
  * [ImageInfo.isDecodable] mirrors the decoders' feature refusals, so a Coil-style
  * "should I claim this file?" question is one call rather than a hand-rolled
  * header sniff per format. It answers about features, not about integrity: a
- * truncated or corrupt file that declares only supported features still probes as
- * decodable and then fails, and for JPEG 2000 the check covers the main header
- * but not per-tile overrides.
+ * truncated or corrupt file whose headers declare supported features can still
+ * probe as decodable and then fail during decoding.
  */
 internal object ImageProbe {
 
@@ -460,42 +459,33 @@ internal object ImageProbe {
 
     // --- JPEG 2000 --------------------------------------------------------------
 
+    private class Jp2Span(val start: Int, val end: Int)
+
     private fun jp2(data: ByteArray): ImageInfo {
-        // Locate the codestream: raw J2K starts with SOC (FF 4F); a JP2 container
-        // wraps it in a "jp2c" box.
-        var at = when {
-            data.size >= 2 && (data[0].toInt() and 0xFF) == 0xFF && (data[1].toInt() and 0xFF) == 0x4F -> 0
-            else -> jp2cOffset(data) ?: throw ImageDecodeException("JP2: no contiguous codestream box")
+        val stream = when {
+            data.size >= 2 && (data[0].toInt() and 0xFF) == 0xFF && (data[1].toInt() and 0xFF) == 0x4F -> Jp2Span(0, data.size)
+            else -> jp2cSpan(data) ?: throw ImageDecodeException("JP2: no contiguous codestream box")
         }
-
-        fun u16(p: Int): Int {
-            if (p + 2 > data.size) throw ImageDecodeException("JP2: truncated codestream")
-            return ((data[p].toInt() and 0xFF) shl 8) or (data[p + 1].toInt() and 0xFF)
-        }
-        fun u32(p: Int): Long = (u16(p).toLong() shl 16) or u16(p + 2).toLong()
-
-        if (u16(at) != 0xFF4F) throw ImageDecodeException("JP2: codestream does not start with SOC")
-        at += 2
-        if (u16(at) != 0xFF51) throw ImageDecodeException("JP2: SIZ must follow SOC")
-
-        // SIZ: Lsiz(2) Rsiz(2) Xsiz(4) Ysiz(4) XOsiz(4) YOsiz(4) XTsiz(4) YTsiz(4)
-        //      XTOsiz(4) YTOsiz(4) Csiz(2) then per-component Ssiz/XRsiz/YRsiz.
-        val siz = at + 2
-        val xsiz = u32(siz + 4)
-        val ysiz = u32(siz + 8)
-        val xo = u32(siz + 12)
-        val yo = u32(siz + 16)
-        Jp2TileGrid(xsiz, ysiz, xo, yo, u32(siz + 20), u32(siz + 24), u32(siz + 28), u32(siz + 32))
-        val comps = u16(siz + 36)
-        val ssiz = if (siz + 38 < data.size) (data[siz + 38].toInt() and 0x7F) + 1 else 8
-
-        val w = (xsiz - xo)
-        val h = (ysiz - yo)
-        if (w <= 0 || h <= 0 || w > Int.MAX_VALUE || h > Int.MAX_VALUE) {
-            throw ImageDecodeException("JP2: bad image size ${w}x$h")
-        }
-
-        val reason = jp2Unsupported(data, siz, comps, w.toInt(), h.toInt())
+        val r = Jp2Headers.Reader(data, stream.start, stream.end, stream.start)
+        if (r.u16() != 0xFF4F) r.fail("does not start with SOC")
+        if (r.u16() != 0xFF51) r.fail("SIZ must follow SOC")
+        r.context = "SIZ"
+        val siz = r.pos
+        val len = r.u16()
+        if (len < 2) r.fail("invalid segment length $len")
+        val sizEnd = siz.toLong() + len
+        if (sizEnd > stream.end) r.fail("header cut off (segment length $len)")
+        r.end = sizEnd.toInt()
+        r.u16()
+        val xsiz = r.u32long(); val ysiz = r.u32long()
+        val xo = r.u32long(); val yo = r.u32long()
+        val grid = Jp2TileGrid(xsiz, ysiz, xo, yo, r.u32long(), r.u32long(), r.u32long(), r.u32long())
+        val comps = r.u16()
+        val ssiz = if (comps > 0 && r.pos < r.end) (r.u8() and 0x7F) + 1 else 8
+        val w = xsiz - xo
+        val h = ysiz - yo
+        if (w <= 0 || h <= 0 || w > Int.MAX_VALUE || h > Int.MAX_VALUE) r.fail("bad image size ${w}x$h")
+        val reason = jp2Unsupported(data, stream, siz, r.end, grid.count, comps, w.toInt(), h.toInt())
         return ImageInfo(
             format = ImageFormat.JP2,
             width = w.toInt(),
@@ -510,88 +500,110 @@ internal object ImageProbe {
         )
     }
 
-    /**
-     * Walk the JPEG 2000 main header for the features [JpxDecoder] declines, so
-     * `probe` can name one instead of the decode failing later.
-     *
-     * [siz] is the offset of the SIZ segment's length field. The walk covers
-     * marker segments only and stops at the first tile-part (SOT), so a per-tile
-     * coding-style override or a PPT segment inside a tile-part header is not
-     * seen here and still surfaces as a decode failure. Nor are the COD and QCD
-     * parameter ranges checked beyond the code-block style.
-     */
-    private fun jp2Unsupported(data: ByteArray, siz: Int, comps: Int, w: Int, h: Int): String? {
+    /** Header parameters share the decoder's readers; packet bytes are skipped by Psot. */
+    private fun jp2Unsupported(
+        data: ByteArray, stream: Jp2Span, siz: Int, sizEnd: Int, tiles: Int, comps: Int, w: Int, h: Int,
+    ): String? {
         if (comps !in 1..16) return "JPEG 2000 with $comps components (1 to 16 are decodable)"
         Jp2Limits.sizeRefusal(w, h, data.size)?.let { return it }
-        // Per-component Ssiz/XRsiz/YRsiz triples follow Csiz.
         for (c in 0 until comps) {
             val at = siz + 38 + c * 3
-            if (at + 3 > data.size) break
+            if (at > sizEnd - 3) break
             val bits = (data[at].toInt() and 0x7F) + 1
             if (bits > 16) return "JPEG 2000 with $bits-bit samples (16-bit maximum)"
-            val dx = data[at + 1].toInt() and 0xFF
-            val dy = data[at + 2].toInt() and 0xFF
-            if (dx == 0 || dy == 0) return "JPEG 2000 with a zero component subsampling factor"
-        }
-
-        fun u16(p: Int): Int? =
-            if (p < 0 || p + 2 > data.size) null
-            else ((data[p].toInt() and 0xFF) shl 8) or (data[p + 1].toInt() and 0xFF)
-
-        fun u8(p: Int): Int? = if (p < 0 || p >= data.size) null else data[p].toInt() and 0xFF
-
-        fun codeBlockStyle(at: Int): String? {
-            val style = u8(at) ?: return null
-            return if (style == 0) null else "JPEG 2000 code-block style 0x${style.toString(16)}"
-        }
-
-        var p = siz + (u16(siz) ?: return null)                    // past the SIZ segment
-        while (true) {
-            val marker = u16(p) ?: return null
-            if (marker < 0xFF00) return null                       // lost sync; leave it to the decode
-            when (marker) {
-                0xFF90, 0xFF93, 0xFFD9 -> return null              // SOT / SOD / EOC: main header over
-                0xFF5E -> return "JPEG 2000 region of interest (RGN)"
-                0xFF5F -> return "JPEG 2000 progression order change (POC)"
-                0xFF60, 0xFF61 -> return "JPEG 2000 packed packet headers (PPM/PPT)"
-                // COD: marker(2) Lcod(2) Scod SGcod(4) then SPcod decomposition,
-                // code-block width, height, style.
-                0xFF52 -> codeBlockStyle(p + 12)?.let { return it }
-                // COC: the same style byte, past a Ccoc that widens with Csiz.
-                0xFF53 -> codeBlockStyle(p + 8 + if (comps < 257) 1 else 2)?.let { return it }
+            if ((data[at + 1].toInt() and 0xFF) == 0 || (data[at + 2].toInt() and 0xFF) == 0) {
+                return "JPEG 2000 with a zero component subsampling factor"
             }
-            if (marker in 0xFF30..0xFF3F) {                        // standalone, no segment
-                p += 2
-                continue
-            }
-            val len = u16(p + 2) ?: return null
-            if (len < 2) return null
-            p += 2 + len
         }
+        val r = Jp2Headers.Reader(data, sizEnd, stream.end, stream.start)
+        var mainCod: Jp2Headers.Coding? = null
+        val tileCod = HashMap<Int, Jp2Headers.Coding>()
+        var inTile = -1
+        var tileEnd = stream.end.toLong()
+        try {
+            while (r.pos <= stream.end - 2) {
+                val markerAt = r.pos
+                val marker = r.u16()
+                if (marker == 0xFFD9) return null
+                if (marker == 0xFF93) {
+                    if (inTile < 0 || r.pos > tileEnd) return null
+                    r.pos = minOf(tileEnd, stream.end.toLong()).toInt()
+                    inTile = -1
+                    continue
+                }
+                if (marker in 0xFF30..0xFF3F) continue
+                if (marker < 0xFF00) return null
+                r.context = Jp2Headers.markerName(marker)
+                val len = r.u16()
+                if (len < 2) return null
+                val segmentEnd = r.pos.toLong() + len - 2
+                if (segmentEnd > stream.end || (inTile >= 0 && segmentEnd > tileEnd)) return null
+                r.end = segmentEnd.toInt()
+                Jp2Headers.unsupportedMarker(marker)?.let { r.unsupported(it) }
+                when (marker) {
+                    0xFF52 -> {
+                        val cod = Jp2Headers.readCod(r)
+                        if (inTile >= 0) tileCod[inTile] = cod else mainCod = cod
+                    }
+                    0xFF53 -> {
+                        Jp2Headers.component(r, comps)
+                        val base = (if (inTile >= 0) tileCod[inTile] else null) ?: mainCod ?: return null
+                        Jp2Headers.readCoc(r, base)
+                    }
+                    0xFF5C -> Jp2Headers.readQuant(r, r.end)
+                    0xFF5D -> {
+                        Jp2Headers.component(r, comps)
+                        Jp2Headers.readQuant(r, r.end)
+                    }
+                    0xFF90 -> {
+                        if (inTile >= 0 || len != 10) return null
+                        val tile = r.u16()
+                        if (tile >= tiles) return null
+                        val psot = r.u32long()
+                        r.u8(); r.u8()
+                        inTile = tile
+                        tileEnd = if (psot == 0L) stream.end.toLong() else markerAt.toLong() + psot
+                        if (tileEnd < r.end.toLong() + 2) return null
+                    }
+                }
+                r.pos = r.end
+                r.end = stream.end
+                r.context = "codestream"
+            }
+        } catch (e: io.github.yuroyami.imagekodec.UnsupportedImageException) {
+            return e.message
+        } catch (e: Jp2ParameterException) {
+            return e.message
+        } catch (_: ImageDecodeException) {
+            // Incomplete headers reveal no further feature declarations; integrity
+            // is the decoder's contract, not an implied pixel decode in the probe.
+        }
+        return null
     }
 
-    /** Walk JP2 boxes for the "jp2c" contiguous codestream; returns its payload offset. */
-    private fun jp2cOffset(data: ByteArray): Int? {
+    /** The codestream box bounds a marker reader even when another box follows it. */
+    private fun jp2cSpan(data: ByteArray): Jp2Span? {
         var p = 0
-        while (p + 8 <= data.size) {
-            var len = ((data[p].toInt() and 0xFF).toLong() shl 24) or
-                ((data[p + 1].toInt() and 0xFF).toLong() shl 16) or
-                ((data[p + 2].toInt() and 0xFF).toLong() shl 8) or
-                (data[p + 3].toInt() and 0xFF).toLong()
+        while (p <= data.size - 8) {
+            var len = ((data[p].toLong() and 0xFF) shl 24) or ((data[p + 1].toLong() and 0xFF) shl 16) or
+                ((data[p + 2].toLong() and 0xFF) shl 8) or (data[p + 3].toLong() and 0xFF)
             val type = data.copyOfRange(p + 4, p + 8).decodeToString()
             var header = 8
-            if (len == 1L) {                                   // 64-bit extended length
-                if (p + 16 > data.size) return null
+            if (len == 1L) {
+                if (p > data.size - 16) return null
                 var xl = 0L
                 for (i in 0 until 8) xl = (xl shl 8) or (data[p + 8 + i].toLong() and 0xFF)
                 len = xl
                 header = 16
             } else if (len == 0L) {
-                len = (data.size - p).toLong()                 // "to end of file"
+                len = (data.size - p).toLong()
             }
-            if (type == "jp2c") return p + header
-            // A box that claims to run past the file ends the walk; its length need not fit an Int.
-            if (len < header || len > data.size - p) return null
+            if (len < header) return null
+            if (type == "jp2c") {
+                val available = minOf(len, (data.size - p).toLong()).toInt()
+                return Jp2Span(p + header, p + available)
+            }
+            if (len > data.size - p) return null
             p += len.toInt()
         }
         return null

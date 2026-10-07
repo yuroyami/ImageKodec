@@ -1,7 +1,9 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
-import io.github.yuroyami.imagekodec.UnsupportedImageException
+import io.github.yuroyami.imagekodec.codec.Jp2Headers.Reader as R
+import io.github.yuroyami.imagekodec.codec.Jp2Headers.Coding as Cod
+import io.github.yuroyami.imagekodec.codec.Jp2Headers.Quant
 import kotlin.math.max
 import kotlin.math.min
 
@@ -20,7 +22,7 @@ import kotlin.math.min
  * Not handled, each of which makes [decode] return null: RGN regions of
  * interest, POC progression changes, PPM/PPT packed headers, and non-baseline
  * code-block styles (bypass, reset, termall, vsc, segsym). `ImageKodec.probe`
- * names the ones that sit in the main header, so a caller can find out without
+ * names them in main and tile-part headers, so a caller can find out without
  * attempting a decode.
  */
 public object JpxDecoder {
@@ -134,27 +136,6 @@ public object JpxDecoder {
 
     // ---- codestream headers --------------------------------------------------
 
-    private class R(val d: ByteArray, var pos: Int) {
-        var end: Int = d.size
-        var context: String = "codestream"
-
-        fun fail(detail: String): Nothing =
-            throw ImageDecodeException("JPEG 2000: $context $detail at byte $pos")
-
-        fun unsupported(detail: String): Nothing =
-            throw UnsupportedImageException("JPEG 2000 $detail in $context at byte $pos")
-
-        // A read past the end must throw here: on WebAssembly an index out of bounds is a trap
-        // that no catch sees, so a cut header would stop the whole program.
-        private fun need(n: Int) {
-            if (pos < 0 || pos > end - n) fail("header cut off (need $n bytes, segment ends at $end)")
-        }
-        fun u8(): Int { need(1); return d[pos++].toInt() and 0xFF }
-        fun u16(): Int { need(2); val v = ((d[pos].toInt() and 0xFF) shl 8) or (d[pos + 1].toInt() and 0xFF); pos += 2; return v }
-        fun u32i(): Int { need(4); val v = u32(d, pos); pos += 4; return v.toInt() }
-        fun u32long(): Long { need(4); val v = u32(d, pos); pos += 4; return v }
-    }
-
     private class Siz(
         val xsiz: Int, val ysiz: Int, val xosiz: Int, val yosiz: Int,
         val xtsiz: Int, val ytsiz: Int, val xtosiz: Int, val ytosiz: Int,
@@ -170,19 +151,6 @@ public object JpxDecoder {
         val tilesW: Int get() = grid.width
         val tilesH: Int get() = grid.height
     }
-
-    /** Coding style for one component (COD/COC). */
-    private class Cod(
-        val progression: Int, val layers: Int, val mct: Int,
-        val decompositions: Int, val cbW: Int, val cbH: Int, val cbStyle: Int,
-        val reversible: Boolean,
-        /** Per-resolution precinct exponents (PPx, PPy); size decompositions+1. */
-        val ppx: IntArray, val ppy: IntArray,
-        val sop: Boolean, val eph: Boolean,
-    )
-
-    /** Quantization for one component (QCD/QCC). */
-    private class Quant(val style: Int, val guardBits: Int, val exps: IntArray, val mants: IntArray)
 
     // ---- geometry helpers -----------------------------------------------------
 
@@ -363,15 +331,7 @@ public object JpxDecoder {
             if (marker in 0xFF30..0xFF3F) continue
             if (marker < 0xFF00) r.fail("invalid marker 0x${marker.toString(16)}")
 
-            r.context = when (marker) {
-                0xFF51 -> "SIZ"
-                0xFF52 -> "COD"
-                0xFF53 -> "COC"
-                0xFF5C -> "QCD"
-                0xFF5D -> "QCC"
-                0xFF90 -> "SOT"
-                else -> "marker 0x${marker.toString(16)}"
-            }
+            r.context = Jp2Headers.markerName(marker)
             val len = r.u16()
             if (len < 2) r.fail("invalid segment length $len")
             val segmentEnd = r.pos.toLong() + len - 2
@@ -380,6 +340,7 @@ public object JpxDecoder {
             // OpenJPEG bounds each marker reader by its payload length. A short
             // header must not read plausible fields from the following marker.
             r.end = segmentEnd.toInt()
+            Jp2Headers.unsupportedMarker(marker)?.let { r.unsupported(it) }
             when (marker) {
                 0xFF51 -> {
                     r.u16()
@@ -403,26 +364,24 @@ public object JpxDecoder {
                     siz = Siz(xsiz, ysiz, xo, yo, xt, yt, xto, yto, nc, prec, signed, dx, dy)
                 }
                 0xFF52 -> {
-                    val cod = readCod(r)
+                    val cod = Jp2Headers.readCod(r)
                     if (inTile >= 0) tileCod[inTile] = cod else mainCod = cod
                 }
                 0xFF53 -> {
                     val nComps = siz?.comps ?: r.fail("before SIZ")
-                    val c = if (nComps < 257) r.u8() else r.u16()
-                    if (c >= nComps) r.fail("component index $c outside $nComps components")
+                    val c = Jp2Headers.component(r, nComps)
                     val base = (if (inTile >= 0) tileCod[inTile] else null) ?: mainCod ?: r.fail("before COD")
-                    val coc = readCoc(r, base)
+                    val coc = Jp2Headers.readCoc(r, base)
                     if (inTile >= 0) tileCoc.getOrPut(inTile) { HashMap() }[c] = coc else mainCoc[c] = coc
                 }
                 0xFF5C -> {
-                    val q = readQuant(r, r.end)
+                    val q = Jp2Headers.readQuant(r, r.end)
                     if (inTile >= 0) tileQcd[inTile] = q else mainQcd = q
                 }
                 0xFF5D -> {
                     val nComps = siz?.comps ?: r.fail("before SIZ")
-                    val c = if (nComps < 257) r.u8() else r.u16()
-                    if (c >= nComps) r.fail("component index $c outside $nComps components")
-                    val q = readQuant(r, r.end)
+                    val c = Jp2Headers.component(r, nComps)
+                    val q = Jp2Headers.readQuant(r, r.end)
                     if (inTile >= 0) tileQcc.getOrPut(inTile) { HashMap() }[c] = q else mainQcc[c] = q
                 }
                 0xFF90 -> {
@@ -437,9 +396,6 @@ public object JpxDecoder {
                     tileEnd = if (psot == 0L) cs.size.toLong() else markerAt.toLong() + psot
                     if (tileEnd < r.end.toLong() + 2) r.fail("tile-part length $psot leaves no SOD header")
                 }
-                0xFF5E -> r.unsupported("region of interest (RGN)")
-                0xFF5F -> r.unsupported("progression order change (POC)")
-                0xFF60, 0xFF61 -> r.unsupported("packed packet headers (PPM/PPT)")
             }
             r.pos = r.end
             r.end = cs.size
@@ -532,77 +488,6 @@ public object JpxDecoder {
             return out
         }
         return Result(w, h, colorSpace, average(pixelBytes, n), alpha?.let { average(it, 1) })
-    }
-
-    private fun readCod(r: R): Cod {
-        val scod = r.u8()
-        val prog = r.u8()
-        val layers = r.u16()
-        val mct = r.u8()
-        val decomp = r.u8()
-        if (decomp > 32) r.fail("decomposition levels $decomp exceed 32")
-        if (layers == 0) r.fail("invalid layers $layers")
-        if (layers > 1000) r.unsupported("with $layers layers (1000-layer maximum)")
-        val cbW = (r.u8() and 0x0F) + 2
-        val cbH = (r.u8() and 0x0F) + 2
-        val cbStyle = r.u8()
-        val transform = r.u8()
-        if (cbW + cbH > 12) r.fail("code-block exponents $cbW+$cbH exceed 12")
-        val ppx = IntArray(decomp + 1) { 15 }
-        val ppy = IntArray(decomp + 1) { 15 }
-        if (scod and 1 != 0) {
-            for (i in 0..decomp) {
-                val p = r.u8()
-                ppx[i] = p and 0x0F
-                ppy[i] = (p shr 4) and 0x0F
-            }
-        }
-        if (cbStyle != 0) r.unsupported("code-block style 0x${cbStyle.toString(16)}")
-        return Cod(
-            prog, layers, mct, decomp, cbW, cbH, cbStyle, reversible = transform == 1,
-            ppx = ppx, ppy = ppy, sop = scod and 2 != 0, eph = scod and 4 != 0,
-        )
-    }
-
-    private fun readCoc(r: R, base: Cod): Cod {
-        val scoc = r.u8()
-        val decomp = r.u8()
-        if (decomp > 32) r.fail("decomposition levels $decomp exceed 32")
-        val cbW = (r.u8() and 0x0F) + 2
-        val cbH = (r.u8() and 0x0F) + 2
-        val cbStyle = r.u8()
-        val transform = r.u8()
-        if (cbW + cbH > 12) r.fail("code-block exponents $cbW+$cbH exceed 12")
-        if (cbStyle != 0) r.unsupported("code-block style 0x${cbStyle.toString(16)}")
-        val ppx = IntArray(decomp + 1) { 15 }
-        val ppy = IntArray(decomp + 1) { 15 }
-        if (scoc and 1 != 0) {
-            for (i in 0..decomp) {
-                val p = r.u8()
-                ppx[i] = p and 0x0F
-                ppy[i] = (p shr 4) and 0x0F
-            }
-        }
-        return Cod(
-            base.progression, base.layers, base.mct, decomp, cbW, cbH, cbStyle,
-            reversible = transform == 1, ppx = ppx, ppy = ppy, sop = base.sop, eph = base.eph,
-        )
-    }
-
-    private fun readQuant(r: R, end: Int): Quant {
-        val sq = r.u8()
-        val style = sq and 0x1F
-        val guard = (sq shr 5) and 7
-        val exps = ArrayList<Int>()
-        val mants = ArrayList<Int>()
-        when (style) {
-            0 -> while (r.pos < end) { val v = r.u8(); exps.add(v shr 3); mants.add(0) }
-            1 -> { val v = r.u16(); exps.add(v shr 11); mants.add(v and 0x7FF) } // scalar derived
-            2 -> while (r.pos < end) { val v = r.u16(); exps.add(v shr 11); mants.add(v and 0x7FF) }
-            else -> r.fail("invalid quantization style $style")
-        }
-        if (exps.isEmpty()) r.fail("empty quantization table")
-        return Quant(style, guard, exps.toIntArray(), mants.toIntArray())
     }
 
     // ---- tile decode -----------------------------------------------------------

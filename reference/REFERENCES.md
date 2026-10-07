@@ -82,6 +82,8 @@ Coil WebP claiming follows the [WebP RIFF container specification](https://devel
 
 JPEG 2000 diagnostic and marker-boundary validation was checked against [OpenJPEG’s j2k.c](https://github.com/uclouvain/openjpeg/blob/master/src/lib/openjp2/j2k.c), under its [BSD-2-Clause license](https://github.com/uclouvain/openjpeg/blob/master/LICENSE). `Jp2DiagnosticsTest` checks distinct marker/field failures, typed unsupported features and nullable API compatibility; the existing partial-packet and OpenJPEG pixel comparisons remain covered. No reference source is vendored.
 
+JPEG 2000 probe and decode share the COD/COC and QCD/QCC parameter readers. `Jp2HeaderProbeTest` checks both header scopes, later tile-parts, packet skipping and codestream-box bounds. OpenJPEG's marker validation and table shapes informed the range checks; `JpxOracleTest` compares all eight legal guard-bit encodings against OpenJPEG, with exact reversible pixels. No reference source is vendored.
+
 ## Refresh
 
 ```sh

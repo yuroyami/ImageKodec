@@ -287,4 +287,15 @@ class JpxOracleTest {
         val (kite, ref) = both(jp2)
         compare("ffmpeg-fixture", kite, ref, tolerance = 4)
     }
+
+    @Test
+    fun all_guard_bit_counts_match_openjpeg_exactly() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        for (guard in 0..7) {
+            val jp2 = encode(ppm(gray = true), "-GuardBits", "$guard")
+            val (kite, ref) = both(jp2)
+            compare("guard-$guard", kite, ref, tolerance = 0)
+        }
+    }
+
 }
