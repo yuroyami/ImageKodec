@@ -20,6 +20,15 @@ reviewable in the diff.
   which for an APNG whose default image sits outside the animation is not what
   `decode` returns. The result keeps the file's delays and loop count (#74).
 
+- `ImageRequest.Builder.maxFrames` asks `KiteImageDecoder` for at most that
+  many frames of an animation, and `maxFrames(1)` gives the first frame as a
+  still. The count is part of the memory cache key, so a still never answers a
+  request for the animation, and `ImageRequest.maxFrames` and
+  `Options.maxFrames` read it back. `KiteAsyncImage(animate = false)` asks for
+  one frame, where it decoded and downscaled every frame and then showed the
+  first; turning `animate` on requests the rest while that frame stays up, and
+  turning it off once every frame is there makes no new request (#106).
+
 - Lossy WebP decodes: VP8 key frames, their `ALPH` opacity (raw or VP8L
   compressed, with any of the three prediction filters), and animation frames
   that are lossy or mix both codecs. The VP8 decoder is a port of libwebp

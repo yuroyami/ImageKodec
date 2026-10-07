@@ -325,6 +325,13 @@ Coil's memory cache holds an animation when its decoded frames fit under that
 limit. Larger ones re-decode from the disk cache instead of evicting everything
 else.
 
+`ImageRequest.Builder.maxFrames(n)` decodes at most `n` frames of an animation,
+and `maxFrames(1)` returns its first frame as a still. The count is part of the
+memory cache key, so a still never answers a request for the animation.
+`KiteAsyncImage(animate = false)` asks for one frame this way, so a grid of
+paused thumbnails decodes one frame of each; turning `animate` on requests the
+rest while that frame stays up.
+
 `KiteAsyncImage` uses its layout constraints as the target size, or original
 pixels for `ContentScale.None`. Fit/Inside request FIT; the other drawing scales
 request FILL. Explicit request size and scale take precedence. The decoder uses

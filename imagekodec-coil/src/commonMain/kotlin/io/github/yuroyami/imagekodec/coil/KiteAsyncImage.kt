@@ -55,7 +55,11 @@ import io.github.yuroyami.imagekodec.compose.KiteAnimatedImage
  *
  * [model] may be anything Coil accepts as data, or a prebuilt [ImageRequest]
  * (with size and scale inferred from [contentScale] when not explicitly set).
- * [animate] pins animated results to their first frame when false. [placeholder]
+ * [animate] pins animated results to their first frame when false, and then the
+ * request asks for that frame alone through [maxFrames] unless [model] sets its
+ * own, so a grid of paused thumbnails decodes one frame of each. Turning it on
+ * requests every frame while the pinned one stays up; turning it off once every
+ * frame is there pins the first without another request. [placeholder]
  * shows while the request is in flight. On failure, [error] overrides the
  * request's error image; when absent, that image is displayed. [onSuccess] /
  * [onError] fire once per completed request.
@@ -86,25 +90,31 @@ public fun KiteAsyncImage(
     // the in-flight request; every branch below must keep it in the chain.
     val chainedModifier = modifier.then(sizeResolver)
 
-    val request = remember(model, context, sizeResolver, contentScale) {
-        if (model is ImageRequest && model.defined.sizeResolver != null && model.defined.scale != null) {
-            return@remember model
-        }
+    // Both outlive a request that only changes how many frames it decodes, so the
+    // pinned frame stays up while the rest decode.
+    var result by remember(model, context, sizeResolver, contentScale, imageLoader) { mutableStateOf<ImageResult?>(null) }
+    var hasEveryFrame by remember(model, context, sizeResolver, contentScale, imageLoader) { mutableStateOf(false) }
+    val firstFrameOnly = !animate && !hasEveryFrame
+
+    val request = remember(model, context, sizeResolver, contentScale, firstFrameOnly) {
+        val setSize = model !is ImageRequest || model.defined.sizeResolver == null
+        val setScale = model !is ImageRequest || model.defined.scale == null
+        val setFrames = firstFrameOnly && (model !is ImageRequest || model.maxFrames == Int.MAX_VALUE)
+        if (model is ImageRequest && !setSize && !setScale && !setFrames) return@remember model
         val builder = if (model is ImageRequest) model.newBuilder() else ImageRequest.Builder(context).data(model)
-        if (model !is ImageRequest || model.defined.sizeResolver == null) {
-            builder.size(if (contentScale == ContentScale.None) SizeResolver.ORIGINAL else sizeResolver)
-        }
-        if (model !is ImageRequest || model.defined.scale == null) {
+        if (setSize) builder.size(if (contentScale == ContentScale.None) SizeResolver.ORIGINAL else sizeResolver)
+        if (setScale) {
             builder.scale(if (contentScale == ContentScale.Fit || contentScale == ContentScale.Inside) Scale.FIT else Scale.FILL)
         }
+        if (setFrames) builder.maxFrames(1)
         builder.build()
     }
 
-    var result by remember(request, imageLoader) { mutableStateOf<ImageResult?>(null) }
-
     LaunchedEffect(request, imageLoader) {
         val r = imageLoader.execute(request)
-        result = r
+        // A failure to decode the rest takes nothing away from the frame already showing.
+        if (r is SuccessResult || result !is SuccessResult) result = r
+        if (r is SuccessResult && r.request.maxFrames == Int.MAX_VALUE) hasEveryFrame = true
         when (r) {
             is SuccessResult -> currentOnSuccess?.invoke(r)
             is ErrorResult -> currentOnError?.invoke(r)

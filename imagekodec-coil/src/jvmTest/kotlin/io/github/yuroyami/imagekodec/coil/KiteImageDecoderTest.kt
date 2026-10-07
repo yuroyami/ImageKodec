@@ -10,8 +10,11 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
+import coil3.decode.DataSource
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -75,6 +78,37 @@ class KiteImageDecoderTest {
         val image = assertIs<KiteAnimationImage>(second.image)
         assertEquals(coil3.decode.DataSource.MEMORY_CACHE, second.dataSource)
         assertEquals(2, image.animation.frames.size)
+    }
+
+    @Test
+    fun maxFramesDecodesThatManyAndKeepsItsOwnCacheEntry() {
+        val loader = loader()
+        fun request(maxFrames: Int?) = ImageRequest.Builder(context)
+            .data(hex(ANIM_KEEP_2F))
+            .memoryCacheKey("juju")
+            .apply { if (maxFrames != null) maxFrames(maxFrames) }
+            .build()
+
+        // One frame of an animation is a still: the first frame, red.
+        val paused = assertIs<SuccessResult>(runBlocking { loader.execute(request(1)) })
+        assertEquals(1, paused.request.maxFrames)
+        val still = assertIs<BitmapImage>(paused.image)
+        assertEquals(0xFFFF0000.toInt(), still.bitmap.getColor(0, 0))
+
+        // The full request must not get that still from the memory cache.
+        val playing = assertIs<SuccessResult>(runBlocking { loader.execute(request(null)) })
+        assertNotEquals(DataSource.MEMORY_CACHE, playing.dataSource)
+        assertEquals(2, assertIs<KiteAnimationImage>(playing.image).animation.frames.size)
+
+        // Each keeps its own entry.
+        val pausedAgain = assertIs<SuccessResult>(runBlocking { loader.execute(request(1)) })
+        assertEquals(DataSource.MEMORY_CACHE, pausedAgain.dataSource)
+        assertIs<BitmapImage>(pausedAgain.image)
+        val playingAgain = assertIs<SuccessResult>(runBlocking { loader.execute(request(Int.MAX_VALUE)) })
+        assertEquals(DataSource.MEMORY_CACHE, playingAgain.dataSource)
+        assertIs<KiteAnimationImage>(playingAgain.image)
+
+        assertFailsWith<IllegalArgumentException> { ImageRequest.Builder(context).maxFrames(0) }
     }
 
     @Test

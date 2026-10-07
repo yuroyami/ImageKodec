@@ -34,3 +34,9 @@ public final class io/github/yuroyami/imagekodec/coil/KiteImageDecoder$Factory :
 public final class io/github/yuroyami/imagekodec/coil/KiteImageDecoder$Factory$Companion {
 }
 
+public final class io/github/yuroyami/imagekodec/coil/MaxFramesKt {
+	public static final fun getMaxFrames (Lcoil3/request/ImageRequest;)I
+	public static final fun getMaxFrames (Lcoil3/request/Options;)I
+	public static final fun maxFrames (Lcoil3/request/ImageRequest$Builder;I)Lcoil3/request/ImageRequest$Builder;
+}
+

@@ -44,7 +44,8 @@ import okio.use
  * is where animated memory goes: and are marked shareable (memory-cacheable)
  * when their pixel bytes fit under [Factory.maxCacheableAnimationBytes].
  * A cancelled request (fast scroll) aborts a multi-frame decode at the next
- * frame boundary instead of finishing the whole file.
+ * frame boundary instead of finishing the whole file, and a request with
+ * [maxFrames] decodes only that many frames.
  */
 public class KiteImageDecoder(
     private val source: ImageSource,
@@ -67,7 +68,10 @@ public class KiteImageDecoder(
             val sampled = width < info.displayWidth || height < info.displayHeight
             return DecodeResult(image = bitmap.toCoilImage(shareable = true), isSampled = sampled)
         }
-        val animation = ImageKodec.decodeAnimation(bytes, applyOrientation = true) { ctx.ensureActive() }
+        // A request for fewer frames, such as a paused thumbnail's, decodes no more than those.
+        val animation = ImageKodec.decodeAnimation(bytes, applyOrientation = true, maxFrames = options.maxFrames) {
+            ctx.ensureActive()
+        }
         val (width, height) = targetSize(animation.width, animation.height)
         val sampled = width < animation.width || height < animation.height
 
