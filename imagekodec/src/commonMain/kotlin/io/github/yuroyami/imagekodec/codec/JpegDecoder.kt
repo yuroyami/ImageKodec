@@ -166,6 +166,12 @@ internal object JpegDecoder {
         // progressive only: raw coefficients, IDCT'd at EOI
         var coeff: ShortArray? = null
         var coeffW = 0
+        // progressive only: per block, the zigzag index past which every coefficient is still zero
+        // (ffmpeg's last_nnz), so an AC refinement walks only what a block holds
+        var lastNonzero: ByteArray? = null
+        // progressive only: per coefficient, the Al of the last scan that coded it, -1 before any
+        // (libjpeg's coef_bits)
+        val approximation = IntArray(64) { -1 }
     }
 
     private class State(val input: ByteArray) {
@@ -205,6 +211,8 @@ internal object JpegDecoder {
         var succHigh = 0
         var succLow = 0
         var eobRun = 0
+        // The scan breaks its band's progression, so its data is passed over (#67).
+        var skipScan = false
 
         // header reads: truncation is a decode error
         fun u8(): Int {
@@ -396,8 +404,9 @@ internal object JpegDecoder {
     }
 
     // stbi__jpeg_decode_block_prog_ac
-    private fun decodeBlockProgAc(j: State, data: ShortArray, dataOfs: Int, hac: Huffman, fac: ShortArray) {
+    private fun decodeBlockProgAc(j: State, data: ShortArray, dataOfs: Int, hac: Huffman, fac: ShortArray, last: ByteArray) {
         if (j.specStart == 0) err("can't merge dc and ac")
+        val block = dataOfs shr 6
 
         if (j.succHigh == 0) {
             // first AC scan for this spectral band
@@ -407,6 +416,7 @@ internal object JpegDecoder {
                 return
             }
             var k = j.specStart
+            var top = last[block].toInt()
             do {
                 if (j.codeBits < 16) growBuffer(j)
                 val c = (j.codeBuffer ushr (32 - FAST_BITS)) and ((1 shl FAST_BITS) - 1)
@@ -417,6 +427,7 @@ internal object JpegDecoder {
                     if (s > j.codeBits) err("bad huffman code")
                     j.codeBuffer = j.codeBuffer shl s
                     j.codeBits -= s
+                    if (k > top) top = minOf(k, 63)
                     val zig = DEZIGZAG[k++]
                     data[dataOfs + zig] = ((r shr 8) * (1 shl shift)).toShort()
                 } else {
@@ -434,18 +445,21 @@ internal object JpegDecoder {
                         k += 16
                     } else {
                         k += run
+                        if (k > top) top = minOf(k, 63)
                         val zig = DEZIGZAG[k++]
                         data[dataOfs + zig] = (extendReceive(j, s) * (1 shl shift)).toShort()
                     }
                 }
             } while (k <= j.specEnd)
+            last[block] = top.toByte()
         } else {
             // AC refinement
             val bit = (1 shl j.succLow).toShort()
 
             if (j.eobRun != 0) {
                 j.eobRun--
-                for (k in j.specStart..j.specEnd) {
+                // Only a nonzero coefficient takes a correction bit, and none lies past last[block].
+                for (k in j.specStart..minOf(j.specEnd, last[block].toInt())) {
                     val p = dataOfs + DEZIGZAG[k]
                     if (data[p].toInt() != 0 && getBit(j) && (data[p].toInt() and bit.toInt()) == 0) {
                         data[p] = if (data[p] > 0) {
@@ -488,6 +502,7 @@ internal object JpegDecoder {
                         } else {
                             if (r == 0) {
                                 data[p] = s.toShort()
+                                if (k - 1 > last[block]) last[block] = (k - 1).toByte()
                                 break
                             }
                             r--
@@ -1051,6 +1066,7 @@ internal object JpegDecoder {
                 // w2/h2 are multiples of 8; one 64-short block per 8x8 tile
                 comp.coeffW = comp.w2 / 8
                 comp.coeff = ShortArray(comp.w2 * comp.h2)
+                comp.lastNonzero = ByteArray(comp.coeffW * (comp.h2 / 8))
             }
         }
     }
@@ -1081,10 +1097,30 @@ internal object JpegDecoder {
         val aa = j.u8()
         j.succHigh = aa shr 4
         j.succLow = aa and 15
+        j.skipScan = false
         if (j.progressive) {
             if (j.specStart > 63 || j.specEnd > 63 || j.specStart > j.specEnd ||
                 j.succHigh > 13 || j.succLow > 13
             ) err("bad SOS")
+            // T.81, Annex G: a refinement scan lowers the bit position by exactly one. libjpeg's
+            // start_pass_phuff_decoder refuses anything else as a bad progression.
+            if (j.succHigh != 0 && j.succLow != j.succHigh - 1) {
+                err("bad progression: a refinement from bit ${j.succHigh} to bit ${j.succLow}")
+            }
+            // It must also refine from the bit position the band's last scan stopped at. libjpeg
+            // only warns when it does not (JWRN_BOGUS_PROGRESSION) and applies the scan, but each
+            // such scan walks the band again, so 500 of them over one band cost 500 passes (#67).
+            // A refinement that breaks the progression is skipped instead, which leaves every
+            // coefficient at most 13 refinements and no conforming file changed.
+            for (i in 0 until j.scanN) {
+                val record = j.comp[j.order[i]].approximation
+                for (k in j.specStart..j.specEnd) {
+                    if (j.succHigh != 0 && record[k] != j.succHigh) j.skipScan = true
+                }
+            }
+            if (!j.skipScan) {
+                for (i in 0 until j.scanN) j.comp[j.order[i]].approximation.fill(j.succLow, j.specStart, j.specEnd + 1)
+            }
         } else {
             if (j.specStart != 0) err("bad SOS")
             if (j.succHigh != 0 || j.succLow != 0) err("bad SOS")
@@ -1179,7 +1215,7 @@ internal object JpegDecoder {
                         if (j.specStart == 0) {
                             decodeBlockProgDc(j, coeff, ofs, j.huffDc[comp.hd], n)
                         } else {
-                            decodeBlockProgAc(j, coeff, ofs, j.huffAc[comp.ha], j.fastAc[comp.ha])
+                            decodeBlockProgAc(j, coeff, ofs, j.huffAc[comp.ha], j.fastAc[comp.ha], comp.lastNonzero!!)
                         }
                     }
                     if (--j.todo <= 0) {
@@ -1239,6 +1275,13 @@ internal object JpegDecoder {
                 }
             }
         }
+    }
+
+    /** Passes over the entropy-coded data of a skipped scan, its restart markers included, to the marker after it. */
+    private fun skipScanData(j: State) {
+        var m = skipJunkAtEnd(j)
+        while (isRestart(m)) m = skipJunkAtEnd(j)
+        j.marker = m
     }
 
     // stbi__skip_jpeg_junk_at_end
@@ -1505,7 +1548,7 @@ internal object JpegDecoder {
                 m == 0xDA -> {   // SOS
                     if (++scans > MAX_SCANS) err("more than $MAX_SCANS scans")
                     processScanHeader(j)
-                    parseEntropyCodedData(j)
+                    if (j.skipScan) skipScanData(j) else parseEntropyCodedData(j)
                     sawScan = true
                     if (j.marker == MARKER_NONE) j.marker = skipJunkAtEnd(j)
                     m = getMarker(j)

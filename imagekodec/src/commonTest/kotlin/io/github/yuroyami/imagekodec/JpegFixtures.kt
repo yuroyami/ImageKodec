@@ -48,3 +48,38 @@ internal fun restartIntervalJpeg(): ByteArray {
         jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 0, 63, 0)) +
         entropy + byteArrayOf(0xFF.toByte(), 0xD9.toByte())
 }
+
+/**
+ * A progressive gray JPEG, [side] by [side], whose AC scans hold nothing but end-of-band runs:
+ * one AC Huffman table with a single one-bit code for EOB14, and each scan nine EOB14 symbols
+ * of 32767 blocks each, enough for 262144 blocks. [scans] lists each scan's Ah and Al over the
+ * band 1 to 63. Every coefficient stays zero, so the image is flat gray whatever the scans do.
+ */
+internal fun eobRunJpeg(side: Int, scans: List<Pair<Int, Int>>): ByteArray {
+    val quantization = jpegSegment(0xDB, byteArrayOf(0) + ByteArray(64) { 1 })
+    val frame = jpegSegment(
+        0xC2,
+        byteArrayOf(8, (side ushr 8).toByte(), side.toByte(), (side ushr 8).toByte(), side.toByte(), 1, 1, 0x11, 0),
+    )
+    val table = jpegSegment(0xC4, byteArrayOf(0x10, 1) + ByteArray(15) + byteArrayOf(0xE0.toByte()))
+    // Nine times: code 0, then fourteen one bits of run length. Padded with ones, 0xFF stuffed.
+    val bits = StringBuilder()
+    repeat(9) { bits.append('0').append("1".repeat(14)) }
+    while (bits.length % 8 != 0) bits.append('1')
+    val data = ArrayList<Byte>()
+    for (i in bits.indices step 8) {
+        val b = bits.substring(i, i + 8).toInt(2)
+        data.add(b.toByte())
+        if (b == 0xFF) data.add(0)
+    }
+    val out = ArrayList<Byte>()
+    fun add(b: ByteArray) = b.forEach { out.add(it) }
+    add(byteArrayOf(0xFF.toByte(), 0xD8.toByte()))
+    add(quantization); add(frame); add(table)
+    for ((ah, al) in scans) {
+        add(jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 1, 63, ((ah shl 4) or al).toByte())))
+        add(data.toByteArray())
+    }
+    add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
+    return out.toByteArray()
+}

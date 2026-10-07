@@ -53,6 +53,14 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- A progressive JPEG's AC refinement no longer walks the coefficients of a block
+  that holds none: each block keeps the index of its last nonzero coefficient,
+  as ffmpeg does. A refinement scan whose bit positions skip a bit is refused, as
+  libjpeg refuses it, and one that does not continue its band's progression is
+  passed over instead of applied, so no coefficient takes more than 13
+  refinements. A 17 KB file of 512 such scans took 8 s and now takes about as
+  long as one scan; conforming files decode exactly as before (#67).
+
 - A JPEG frame with 2 or more than 4 components, or with sampling factors that
   do not divide the largest one, throws `UnsupportedImageException` naming the
   feature, as the 12-bit, lossless, arithmetic and hierarchical refusals do,

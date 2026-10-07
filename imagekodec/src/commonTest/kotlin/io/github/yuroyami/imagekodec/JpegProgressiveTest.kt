@@ -2,6 +2,8 @@ package io.github.yuroyami.imagekodec
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * Progressive JPEG vectors: encoded by ImageIO's progressive writer (SOF2,
@@ -115,4 +117,22 @@ class JpegProgressiveTest {
             "ff99edfd8ef8fe8494f7c19af7bea5fab7b4fdaec4fca1d3fc94e1fa85ecf878f5f9708fefb095f0ada1f2a6aff39cc0f48fcff482dcf273e6f167f1f15f8ce7a493e9a29eeb9baced91bdee85cced78daeb67e5ea5ceeea53",
         w = 9, h = 7, name = "p_tiny",
     )
+
+    @Test
+    fun aRefinementThatSkipsABitIsABadProgression() {
+        // T.81 lowers the bit position by one per refinement; libjpeg refuses anything else too.
+        val e = assertFailsWith<ImageDecodeException> { ImageKodec.decode(eobRunJpeg(side = 64, scans = listOf(0 to 13, 13 to 11))) }
+        assertTrue("bad progression" in e.message.orEmpty(), e.message)
+    }
+
+    @Test
+    fun aRefinementThatBreaksItsBandsProgressionIsPassedOver() {
+        // A refinement from bit 1 with no scan before it, and one from bit 5 after a first scan
+        // that stopped at bit 3: each is skipped, and the rest of the file still decodes (#67).
+        for (scans in listOf(List(3) { 1 to 0 }, listOf(0 to 3, 5 to 4, 3 to 2))) {
+            val bitmap = ImageKodec.decode(eobRunJpeg(side = 64, scans = scans))
+            assertEquals(64, bitmap.width)
+            for (p in bitmap.argb) assertEquals(gray(128), p, "$scans")
+        }
+    }
 }
