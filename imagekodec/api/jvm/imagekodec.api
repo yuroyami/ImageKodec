@@ -19,6 +19,7 @@ public class io/github/yuroyami/imagekodec/ImageDecodeException : java/lang/Exce
 }
 
 public final class io/github/yuroyami/imagekodec/ImageFormat : java/lang/Enum {
+	public static final field AVIF Lio/github/yuroyami/imagekodec/ImageFormat;
 	public static final field BMP Lio/github/yuroyami/imagekodec/ImageFormat;
 	public static final field Companion Lio/github/yuroyami/imagekodec/ImageFormat$Companion;
 	public static final field GIF Lio/github/yuroyami/imagekodec/ImageFormat;

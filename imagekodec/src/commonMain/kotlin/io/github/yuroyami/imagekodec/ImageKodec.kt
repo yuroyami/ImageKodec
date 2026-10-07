@@ -12,6 +12,7 @@ import io.github.yuroyami.imagekodec.codec.PngDecoder
 import io.github.yuroyami.imagekodec.codec.PngEncoder
 import io.github.yuroyami.imagekodec.codec.TiffDecoder
 import io.github.yuroyami.imagekodec.codec.WebpDecoder
+import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
 
 /**
  * The ImageKodec facade. Everything is pure computation on byte arrays: no I/O,
@@ -163,6 +164,7 @@ public object ImageKodec {
             ImageFormat.TIFF -> TiffDecoder.decode16(data, page)
             ImageFormat.PNG -> PngDecoder.decode16(data)
             ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data)
+            ImageFormat.AVIF -> AvifDecoder.decode16(data)
             // A BMP that holds a PNG keeps that PNG's precision.
             ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { return decode16(it, 0, applyOrientation) }
                 ?: return widened(data, applyOrientation)
@@ -323,6 +325,7 @@ public object ImageKodec {
         ImageFormat.JP2 -> jp2ToBitmap(data)
         ImageFormat.WEBP -> WebpDecoder.decode(data)
         ImageFormat.TIFF -> TiffDecoder.decode(data)
+        ImageFormat.AVIF -> AvifDecoder.decode(data)
         null -> throw ImageDecodeException(
             "unrecognised image format (${data.size} bytes${
                 if (data.size >= 4) {

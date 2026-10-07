@@ -17,7 +17,7 @@ jobs:
   # The JVM, JS, wasm and Linux/Windows native targets. This is the job that
   # runs the full test suite: the codecs are pure computation, so a pass here
   # covers the decoders everywhere. The stb_image oracle needs no tool (its
-  # vectors are committed); the OpenJPEG, libwebp, libtiff, libjpeg, jbig2enc and ffmpeg suites
+  # vectors are committed); the OpenJPEG, libwebp, libtiff, libjpeg, jbig2enc, ffmpeg, libavif and libheif suites
   # skip themselves when their binary is missing on a contributor's machine, and
   # IMAGEKODEC_REQUIRE_ORACLES turns that skip into a failure here.
   linux:
@@ -43,12 +43,13 @@ jobs:
       - name: Install codec oracles
         run: |
           sudo apt-get update
-          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg
+          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples
           missing=0
-          for t in cwebp dwebp tiffcp opj_compress opj_decompress djpeg tiff2rgba jbig2 jbig2dec ffmpeg; do
+          for t in cwebp dwebp tiffcp opj_compress opj_decompress djpeg tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert cc; do
             command -v "$t" >/dev/null || { echo "::error::oracle tool $t not on PATH"; missing=1; }
           done
           command -v magick >/dev/null || command -v convert >/dev/null || { echo "::error::ImageMagick not on PATH"; missing=1; }
+          [ -f /usr/include/avif/avif.h ] || { echo "::error::libavif headers missing"; missing=1; }
           exit $missing
 
       - uses: gradle/actions/setup-gradle@v4

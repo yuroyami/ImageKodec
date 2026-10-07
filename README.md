@@ -1,7 +1,7 @@
 # ImageKodec
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
-BMP, TIFF, JPEG 2000 and WebP from a `ByteArray`, with the same code on every
+BMP, TIFF, JPEG 2000, WebP and AVIF from a `ByteArray`, with the same code on every
 target.
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/imagekodec)](https://central.sonatype.com/artifact/io.github.yuroyami/imagekodec)
@@ -143,6 +143,7 @@ at a lower resolution than brightness.
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
 | TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
 | JPEG 2000 | JP2 container and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN) |
+| AVIF | still images and the first frame of image sequences: every AV1 intra coding tool with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
 
 A TIFF can hold any number of pages. `decode` returns the first,
 `probe(bytes).pageCount` says how many there are, and `decodePage` and
@@ -159,8 +160,17 @@ frames, so `frameCount` stays 1 and `decodeAnimation` returns the first page.
 Lossy WebP decodes to the pixels libwebp's `dwebp` writes: its VP8 decoder is a
 port of libwebp's, and the chroma is upsampled as dwebp's default output does.
 
+AVIF decodes with an AV1 decoder written from the AV1 specification, whose planes
+match dav1d's sample for sample, film grain included. YUV converts to RGB with the
+matrix and range the `colr` box or the AV1 sequence header gives, chroma upsampled
+bilinearly, as libavif's own float path does; the result matches it to within one
+level, and mostly exactly. Rotation and mirroring are reported as
+`ImageInfo.orientation`, as EXIF orientation is for a JPEG, and `applyOrientation`
+applies them; the clean aperture always crops. An image sequence decodes its first
+frame for now, and `frameCount` says how many there are.
+
 `ImageFormat.sniff` (and `ImageKodec.detect`) recognize PNG, JPEG, GIF, BMP, WEBP,
-TIFF and JP2. Sniffing is deliberately wider than decoding, which is why `probe`
+TIFF, JP2 and AVIF. Sniffing is deliberately wider than decoding, which is why `probe`
 is worth calling.
 
 `Jbig2Decoder` and `CcittFax` are public as well. Neither format carries magic
@@ -203,7 +213,8 @@ it is derived from the stated delay, because neither format stores centiseconds.
 `decode` returns 8 bits a channel. For a depth map, a scientific or medical image
 or a graded photograph, `decode16` keeps every bit a 16-bit PNG or TIFF stores,
 and every bit of a JPEG 2000 component up to 16 bits deep, in the channels the file
-has once a palette is looked up: gray, gray and alpha, RGB or RGBA.
+has once a palette is looked up: gray, gray and alpha, RGB or RGBA. A 10- or 12-bit
+AVIF converts to RGB at 16 bits.
 
 ```kotlin
 val wide = ImageKodec.decode16(bytes)
@@ -409,7 +420,8 @@ web project that runs under Node should not use them.
 
 - **`decode` keeps only the high byte of a 16-bit sample**, because `KiteBitmap`
   is 8 bits a channel. `decode16` keeps the whole sample for PNG, TIFF and JPEG
-  2000; other formats come through it at 8 bits, widened.
+  2000, and converts AVIF at 16 bits; other formats come through it at 8 bits,
+  widened.
 - **ImageKodec writes PNG, JPEG, GIF and BMP only.** There is no encoder for WebP,
   TIFF or JPEG 2000.
 - **The PNG encoder writes 8-bit RGB or RGBA only**, with no interlace, no
@@ -426,6 +438,12 @@ web project that runs under Node should not use them.
   headers name the marker, field and byte position. The public nullable
   `JpxDecoder.decode` overloads still return null on failure; `probe` names
   unsupported features in main and tile-part headers.
+- **An animated AVIF shows its first frame.** Frames after the first need AV1 inter
+  prediction, which is not written yet, so `decodeAnimation` returns the first frame
+  of an image sequence and `probe` reports its real `frameCount`. AV1 matrices that
+  are not linear, BT.2020 and chromaticity-derived constant luminance, SMPTE ST 2085
+  and ICtCp, throw `UnsupportedImageException`, as libavif refuses them. An ICC
+  profile or a transfer function is reported, not applied.
 - **JPEG 2000 colour comes from the JP2 header, without a colour engine.** The
   palette, channel definitions and colour specification apply as T.800 Annex I
   orders them. sRGB, greyscale, bi-level, sYCC, e-sYCC, CMYK and CMY convert to

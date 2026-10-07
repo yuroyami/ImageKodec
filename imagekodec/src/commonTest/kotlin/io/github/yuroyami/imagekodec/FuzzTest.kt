@@ -147,6 +147,8 @@ class FuzzTest {
         "jp2-roi" to Jp2FeatureFixtures.roi,
         "jp2-poc-ppt" to Jp2FeatureFixtures.pocPpt,
         "jp2-ppm" to Jp2FeatureFixtures.ppm,
+        // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
+        *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
@@ -298,7 +300,7 @@ class FuzzTest {
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
         // The 16-bit paths read their own samples; the others widen what decode gives.
         val format = ImageFormat.sniff(bytes)
-        if (format == ImageFormat.PNG || format == ImageFormat.TIFF) {
+        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF) {
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
         }
         // A damaged chain of TIFF pages: the last page the probe counts must be reachable.

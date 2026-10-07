@@ -9,10 +9,10 @@ Format support and known limits: the Limits section of [README.md](README.md).
 Things that already cost someone time. One line each. Delete a line when it stops
 being true.
 
-- The OpenJPEG, libtiff, libwebp, libjpeg, jbig2enc and ffmpeg suites skip themselves
-  when their binary is missing, and a skipped test reports as a pass, so read the skip
-  count and not only the green run. CI sets `IMAGEKODEC_REQUIRE_ORACLES=1` to fail
-  instead; set it locally to check the same (#14).
+- The OpenJPEG, libtiff, libwebp, libjpeg, jbig2enc, ffmpeg, libavif and libheif suites
+  skip themselves when their binary is missing, and a skipped test reports as a pass,
+  so read the skip count and not only the green run. CI sets
+  `IMAGEKODEC_REQUIRE_ORACLES=1` to fail instead; set it locally to check the same (#14).
 - Ubuntu's ImageMagick is version 6, which has no `magick` command, only
   `convert`. `Tools.find("magick")` falls back to it; before it did, the TIFF
   oracle suite skipped on every Ubuntu machine, CI included (#14).
@@ -61,3 +61,11 @@ being true.
   (`superres-mode=1`), but declines it on some pictures, and libaom turns on intra
   block copy only for screen content of 256 by 128 or more. `Av1OracleTest` reads each
   stream's headers and fails when the tool it is there for is off (#41).
+- avifdec converts through libyuv's fixed point whenever libyuv has the matrix, and has
+  no switch to stop it, so it differs from an exact conversion by two or three levels.
+  `tools/avif_rgb.c` sets libavif's `avoidLibYUV`, and `AvifOracleTest` builds it (#41).
+- libavif rounds the colour of a premultiplied 4:4:4 image to 8 bits before it divides
+  by alpha, so a nearly transparent pixel comes out far from an exact reading. Compare
+  premultiplied colour multiplied by its alpha (#41).
+- avifdec leaves the clean aperture, rotation and mirror to its caller; libheif's
+  heif-convert applies all three, so geometry is checked against it (#41).

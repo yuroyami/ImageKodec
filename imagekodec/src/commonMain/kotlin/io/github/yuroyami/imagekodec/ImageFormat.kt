@@ -1,5 +1,7 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer
+
 /**
  * Image container formats ImageKodec can *identify* from magic bytes. Sniffing
  * intentionally recognises more formats than [ImageKodec.decode] currently
@@ -14,13 +16,18 @@ public enum class ImageFormat {
     WEBP,
     TIFF,
     JP2,
+
+    /** AV1 Image File Format: an ISO base media file whose `ftyp` names the `avif` or `avis` brand. */
+    AVIF,
     ;
 
     public companion object {
         /**
          * Identify the format from the first bytes of [data], or null if no known
-         * magic matches. Needs at most 12 bytes; shorter input is never an error,
-         * just an unidentified one.
+         * magic matches. Needs at most 12 bytes, except for an ISO base media file
+         * whose AVIF brand is listed among its compatible brands rather than as its
+         * major brand, which needs its whole `ftyp` box; shorter input is never an
+         * error, just an unidentified one.
          */
         public fun sniff(data: ByteArray): ImageFormat? {
             fun at(i: Int): Int = if (i < data.size) data[i].toInt() and 0xFF else -1
@@ -51,6 +58,10 @@ public enum class ImageFormat {
                 at(0) == 0x00 && at(1) == 0x00 && at(2) == 0x00 && at(3) == 0x0C &&
                     at(4) == 'j'.code && at(5) == 'P'.code && at(6) == ' '.code && at(7) == ' '.code -> JP2
                 at(0) == 0xFF && at(1) == 0x4F -> JP2
+
+                // An 'ftyp' box naming the avif or avis brand, as libavif checks.
+                at(4) == 'f'.code && at(5) == 't'.code && at(6) == 'y'.code && at(7) == 'p'.code &&
+                    AvifContainer.isAvif(data) -> AVIF
 
                 // "BM" last; two ASCII letters is the weakest magic of the set.
                 at(0) == 'B'.code && at(1) == 'M'.code -> BMP

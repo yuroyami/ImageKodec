@@ -14,6 +14,21 @@ reviewable in the diff.
 
 ### Added
 
+- AVIF decodes on every target, through `decode`, `decode16`, `probe` and the
+  sized and reduced decodes. A pure-Kotlin AV1 decoder follows the decoding process
+  of the AV1 specification for every intra coding tool, with the loop filter, CDEF,
+  superres, loop restoration and film grain synthesis, at 8, 10 and 12 bits in
+  4:0:0, 4:2:0, 4:2:2 and 4:4:4; its planes match dav1d's sample for sample. The
+  container reads the primary item, falling back through an `altr` group to an item
+  it can show; item data in `mdat` or `idat`, in any number of extents; `grid`,
+  sample transform (`sato`) and overlay (`iovl`) derived images, and a tone-mapped
+  image's base image; an alpha auxiliary image, straight or premultiplied; and the
+  first frame of an image sequence. YUV converts to RGB with the `colr` box's or the
+  sequence header's matrix and range, as libavif's float path does, within one level
+  and mostly exactly. The clean aperture crops; rotation and mirroring are reported
+  as `ImageInfo.orientation` and applied with `applyOrientation`. The ICC profile
+  and the code points are reported in `ImageInfo.colorProfile` (#41).
+
 - `ImageKodec.decode16` keeps every bit of a JPEG 2000 component up to 16 bits
   deep, replicated up to 16 bits, through the palette, channel definitions, sYCC
   and e-sYCC, CMYK and CMY, and straight or premultiplied opacity, in the channels
@@ -135,6 +150,10 @@ reviewable in the diff.
   frame's timing and the play count (#15).
 
 ### Changed
+
+- `ImageFormat` has a new entry, `AVIF`, which `sniff` and `detect` return for an
+  ISO base media file whose `ftyp` names the `avif` or `avis` brand. A `when` over
+  `ImageFormat` that lists every entry needs a branch for it (#41).
 
 - `ImageInfo`'s constructor takes `pageCount` and `colorProfile` last,
   defaulting to 1 and null. Code compiled against the old constructor must be
