@@ -105,6 +105,10 @@ class FuzzTest {
         "jp2-small-irreversible" to Jp2SingletonTest().encoded("corner"),
         "jp2-partial-reversible" to Jp2ReconstructionTest().encoded(),
         "jp2-derived-quantization" to Jp2DerivedQuantTest().encoded(),
+        "jp2-signed-gray" to Jp2SignedTest().gray(8),
+        "jp2-signed-rgb" to Jp2SignedTest().rgb(mct = true, signedMask = 5),
+        "jp2-signed-opacity" to Jp2SignedTest().grayAlpha(),
+        "jp2-signed-irreversible" to Jp2SignedTest().irreversible("rgb-ict", 5),
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(

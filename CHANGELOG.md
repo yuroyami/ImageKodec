@@ -47,6 +47,11 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- Signed JPEG 2000 components map their full centered range into unsigned display
+  samples before clipping. Gray, RGB, mixed-sign components and opacity retain
+  their negative samples, for both wavelet filters and component transforms;
+  unsigned components keep their existing DC restoration (#100).
+
 - JPEG 2000 scalar-derived quantization follows the band's resolution order.
   LL and the coarsest details keep the base exponent; finer details decrease
   it successively. QCD/QCC in both main and tile headers reconstruct the same

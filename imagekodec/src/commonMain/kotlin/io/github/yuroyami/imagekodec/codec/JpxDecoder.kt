@@ -1072,12 +1072,15 @@ public object JpxDecoder {
         }
     }
 
-    /** DC level shift + clamp over one tile-component's rect, after any MCT. */
+    /** Convert raw tile-component samples to the unsigned display range, after any MCT. */
     private fun finalizeTileComp(
         s: Siz, tc: TileComp, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int, drop: Int,
     ) {
         val prec = s.prec[tc.comp]
-        val shiftVal = if (s.signed[tc.comp]) 0 else 1 shl (prec - 1)
+        // T.800 G.1 restores only unsigned DC shifts, but Result exposes unsigned
+        // display channels. Signed components need the same midpoint translation
+        // of their centered range before clipping, as in OpenJPEG's output conversion.
+        val displayOffset = 1 shl (prec - 1)
         val maxV = (1 shl prec) - 1
         val rect = tc.resolutions[tc.cod.decompositions - drop]
         for (y in rect.y0 until rect.y1) for (x in rect.x0 until rect.x1) {
@@ -1085,7 +1088,7 @@ public object JpxDecoder {
             val ppy = y - py0
             if (ppx !in 0 until pw || ppy !in 0 until ph) continue
             val i = ppy * pw + ppx
-            var v = plane[i] + shiftVal
+            var v = plane[i] + displayOffset
             if (v < 0) v = 0
             if (v > maxV) v = maxV
             plane[i] = v
