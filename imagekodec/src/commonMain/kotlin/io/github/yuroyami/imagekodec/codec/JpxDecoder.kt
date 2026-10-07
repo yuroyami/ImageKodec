@@ -6,6 +6,7 @@ import io.github.yuroyami.imagekodec.codec.Jp2Headers.Coding as Cod
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Quant
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToLong
 
 /**
  * A pure-Kotlin JPEG 2000 decoder (ITU-T T.800), taking either JP2 container
@@ -275,7 +276,7 @@ public object JpxDecoder {
         /** False for a band of a level that a reduced decode drops: it keeps no coefficients. */
         keep: Boolean,
     ) {
-        val coeffs = if (keep) IntArray(max(0, (x1 - x0)) * max(0, (y1 - y0))) else IntArray(0)
+        var coeffs = if (keep) IntArray(max(0, (x1 - x0)) * max(0, (y1 - y0))) else IntArray(0)
     }
 
     private class Resolution(
@@ -587,17 +588,15 @@ public object JpxDecoder {
         // Tier-2: walk packets in progression order, filling code-block data.
         readPackets(body, comps, tileCod)
 
-        // Tier-1 + dequant + IDWT per component; write RAW signed samples.
-        for (tc in comps) {
-            decodeTileComp(s, tc, out.data[tc.comp], out.w[tc.comp], out.h[tc.comp], out.x0[tc.comp], out.y0[tc.comp], out.r)
-        }
+        // Tier-1 + dequant + IDWT per component, tile-local and before any shift.
+        val samples = comps.map { decodeTileComp(s, it, out.r) }
 
-        // Multiple-component transform on the tile area, then shift + clamp.
-        if (tileCod.mct == 1 && s.comps >= 3) {
-            applyInverseMct(comps, tileCod.reversible, out)
-        }
-        for (tc in comps) {
-            finalizeTileComp(s, tc, out.data[tc.comp], out.w[tc.comp], out.h[tc.comp], out.x0[tc.comp], out.y0[tc.comp], out.r)
+        // Multiple-component transform on the tile area, then round, shift and clamp into the planes.
+        val rounded = arrayOfNulls<IntArray>(comps.size)
+        if (tileCod.mct == 1 && s.comps >= 3) applyInverseMct(samples, tileCod.reversible, rounded)
+        for ((i, tc) in comps.withIndex()) {
+            val c = tc.comp
+            finalizeTileComp(s, tc, rounded[i] ?: samples[i].rounded(), samples[i], out.data[c], out.w[c], out.h[c], out.x0[c], out.y0[c])
         }
     }
 
@@ -829,6 +828,9 @@ public object JpxDecoder {
         }
 
         var bp = mb - 1 - cb.zeroBitplanes
+        // A magnitude of bp + 1 bits, doubled for the irreversible half step, must fit an Int. No
+        // sample of 16 bits or fewer needs more, so a block that claims more is damaged.
+        if (bp > MAX_MAGNITUDE_PLANE) throw ImageDecodeException("JPEG 2000: a code-block with ${bp + 1} magnitude bitplanes")
         var passNo = 0
         var passType = 2 // start with cleanup
         var passes = cb.passes
@@ -1010,9 +1012,25 @@ public object JpxDecoder {
 
     // ---- component reconstruction ----------------------------------------------
 
-    private fun decodeTileComp(
-        s: Siz, tc: TileComp, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int, drop: Int,
-    ) {
+    /**
+     * One tile-component reconstructed at the kept resolution, before the MCT and the display
+     * shift: [ints] holds the 5/3 integers, [fixed] the 9/7 samples in fixed point with [FRACT]
+     * fractional bits. Exactly one of the two is set.
+     */
+    private class TileSamples(val x0: Int, val y0: Int, val x1: Int, val y1: Int, var ints: IntArray?, var fixed: LongArray?) {
+        val w get() = x1 - x0
+        val h get() = y1 - y0
+
+        /** The samples rounded to integers: the 9/7 fraction is rounded once, here, half up. */
+        fun rounded(): IntArray = ints ?: fixed!!.let { f ->
+            IntArray(f.size) { ((f[it] + (1L shl (FRACT - 1))) shr FRACT).toInt() }
+        }
+
+        /** The samples in fixed point, the 5/3 integers shifted up. */
+        fun fixedPoint(): LongArray = fixed ?: ints!!.let { v -> LongArray(v.size) { v[it].toLong() shl FRACT } }
+    }
+
+    private fun decodeTileComp(s: Siz, tc: TileComp, drop: Int): TileSamples {
         val cod = tc.cod
         // The resolution that this decode stops at: the full one, or [drop] levels below it.
         val top = cod.decompositions - drop
@@ -1020,61 +1038,58 @@ public object JpxDecoder {
         for (res in tc.resolutions) {
             if (res.r > top) break
             for (band in res.bands) {
-                val gain = when (band.orient) { 0 -> 0; 3 -> 2; else -> 1 }
-                val prec = s.prec[tc.comp]
                 val mb = band.guardBits + band.stepExp - 1
                 for (precinct in band.precincts) {
                     for (cb in precinct.blocks) {
                         if (cb != null) decodeCodeBlock(cb, band, cod, mb)
                     }
                 }
-                // Dequantization for the irreversible path (reversible has unit step).
-                if (!cod.reversible) {
-                    val rb = prec + gain
-                    // E.1.1: step size = 2^(Rb - eps_b) * (1 + mu_b / 2^11).
-                    // Magnitudes arrive doubled (carrying the half-step bias),
-                    // hence the /2 folded into the scale.
-                    val delta = (1.0 + band.stepMant / 2048.0) * pow2((rb - band.stepExp).toDouble()) / 2.0
-                    // Store scaled values as fixed-point via Float bits in the Int array:
-                    // keep it simple and materialize into a FloatArray at DWT time via
-                    // the same integer array scaled by 2^13.
-                    val scale = delta * (1 shl FRACT)
-                    for (i in band.coeffs.indices) {
-                        band.coeffs[i] = (band.coeffs[i] * scale).toInt()
-                    }
-                }
             }
         }
-
-        // Inverse DWT: successively synthesize resolutions.
-        var current = SubbandGrid(
-            tc.resolutions[0].bands[0].x0, tc.resolutions[0].bands[0].y0,
-            tc.resolutions[0].bands[0].x1, tc.resolutions[0].bands[0].y1,
-            tc.resolutions[0].bands[0].coeffs,
-        )
+        val ll = tc.resolutions[0].bands[0]
+        if (cod.reversible) {
+            // Inverse DWT: successively synthesize resolutions.
+            var current = SubbandGrid(ll.x0, ll.y0, ll.x1, ll.y1, ll.coeffs)
+            for (rr in 1..top) current = synthesize(current, tc.resolutions[rr])
+            return TileSamples(current.x0, current.y0, current.x1, current.y1, current.data, null)
+        }
+        // The 9/7 path keeps every coefficient and sample in fixed point, wide enough for any
+        // 16-bit image, through the synthesis and the ICT, and rounds once at the end, as
+        // OpenJPEG keeps real values through dwt.c and mct.c and rounds in tcd.c (#101).
+        val prec = s.prec[tc.comp]
+        var current = FixedGrid(ll.x0, ll.y0, ll.x1, ll.y1, dequantize(ll, prec))
         for (rr in 1..top) {
             val res = tc.resolutions[rr]
-            current = synthesize(current, res, cod.reversible)
+            current = synthesizeFixed(current, res, res.bands.map { dequantize(it, prec) })
         }
-
-        // Store RAW signed samples: the DC shift and clamp happen after the
-        // inverse MCT (clamping chroma differences here would corrupt colour).
-        val x0 = current.x0; val y0 = current.y0
-        val cw = current.x1 - current.x0
-        for (y in current.y0 until current.y1) {
-            for (x in current.x0 until current.x1) {
-                var v = current.data[(y - y0) * cw + (x - x0)]
-                if (!cod.reversible) v = v shr FRACT
-                val ppx = x - px0
-                val ppy = y - py0
-                if (ppx in 0 until pw && ppy in 0 until ph) plane[ppy * pw + ppx] = v
-            }
-        }
+        return TileSamples(current.x0, current.y0, current.x1, current.y1, null, current.data)
     }
 
-    /** Convert raw tile-component samples to the unsigned display range, after any MCT. */
+    /**
+     * [band]'s coefficients times their step size (E.1.1: 2^(Rb - eps_b) * (1 + mu_b / 2^11)), in
+     * fixed point. The magnitudes arrive doubled, carrying the half-step bias, hence the /2 folded
+     * into the scale. The band's integers are released: the synthesis reads only these.
+     */
+    private fun dequantize(band: Band, prec: Int): LongArray {
+        val gain = when (band.orient) { 0 -> 0; 3 -> 2; else -> 1 }
+        val rb = prec + gain
+        val delta = (1.0 + band.stepMant / 2048.0) * pow2((rb - band.stepExp).toDouble()) / 2.0
+        val scale = delta * (1L shl FRACT)
+        val out = LongArray(band.coeffs.size)
+        for (i in out.indices) {
+            val c = band.coeffs[i]
+            if (c == 0) continue
+            val v = (c * scale).roundToLong()
+            if (v > MAX_FIXED || v < -MAX_FIXED) throw ImageDecodeException("JPEG 2000: a coefficient beyond the range of the 9/7 transform")
+            out[i] = v
+        }
+        band.coeffs = IntArray(0)
+        return out
+    }
+
+    /** [samples], after any MCT, shifted to the unsigned display range and clipped into the component's [plane]. */
     private fun finalizeTileComp(
-        s: Siz, tc: TileComp, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int, drop: Int,
+        s: Siz, tc: TileComp, samples: IntArray, rect: TileSamples, plane: IntArray, pw: Int, ph: Int, px0: Int, py0: Int,
     ) {
         val prec = s.prec[tc.comp]
         // T.800 G.1 restores only unsigned DC shifts, but Result exposes unsigned
@@ -1082,20 +1097,33 @@ public object JpxDecoder {
         // of their centered range before clipping, as in OpenJPEG's output conversion.
         val displayOffset = 1 shl (prec - 1)
         val maxV = (1 shl prec) - 1
-        val rect = tc.resolutions[tc.cod.decompositions - drop]
+        val w = rect.w
         for (y in rect.y0 until rect.y1) for (x in rect.x0 until rect.x1) {
             val ppx = x - px0
             val ppy = y - py0
             if (ppx !in 0 until pw || ppy !in 0 until ph) continue
-            val i = ppy * pw + ppx
-            var v = plane[i] + displayOffset
+            var v = samples[(y - rect.y0) * w + (x - rect.x0)] + displayOffset
             if (v < 0) v = 0
             if (v > maxV) v = maxV
-            plane[i] = v
+            plane[ppy * pw + ppx] = v
         }
     }
 
     private const val FRACT = 13
+
+    /**
+     * The largest 9/7 value kept between synthesis levels, in fixed point. One level grows a value
+     * at most 141 times, and its largest product, a neighbour sum of up to 57 times this bound
+     * against a lifting factor under 2^17, must stay inside a Long: 2^40 leaves room, and a
+     * 16-bit image needs about 2^34.
+     */
+    private const val MAX_FIXED = 1L shl 40
+
+    /** The 9/7 samples clipped to this before the ICT, far outside any display range: its products stay inside a Long. */
+    private const val MAX_SAMPLE = 1L shl 34
+
+    /** The highest magnitude bitplane a code-block may start at: doubled, its magnitude still fits an Int. */
+    private const val MAX_MAGNITUDE_PLANE = 29
 
     /** More zero bitplanes than any sample holds: the header is damaged. */
     private const val MAX_ZERO_BITPLANES = 64
@@ -1110,8 +1138,50 @@ public object JpxDecoder {
 
     private class SubbandGrid(val x0: Int, val y0: Int, val x1: Int, val y1: Int, val data: IntArray)
 
-    /** One 2D synthesis level: LL = [ll] + res.bands (HL/LH/HH) -> next LL. */
-    private fun synthesize(ll: SubbandGrid, res: Resolution, reversible: Boolean): SubbandGrid {
+    private class FixedGrid(val x0: Int, val y0: Int, val x1: Int, val y1: Int, val data: LongArray)
+
+    /** [synthesize] for the 9/7 filter, on fixed-point values; [bands] holds res.bands dequantized. */
+    private fun synthesizeFixed(ll: FixedGrid, res: Resolution, bands: List<LongArray>): FixedGrid {
+        val x0 = res.x0; val y0 = res.y0; val x1 = res.x1; val y1 = res.y1
+        val w = x1 - x0; val h = y1 - y0
+        if (w <= 0 || h <= 0) return FixedGrid(x0, y0, x1, y1, LongArray(0))
+        val a = LongArray(w * h)
+
+        fun scatter(bx0: Int, by0: Int, bx1: Int, by1: Int, data: LongArray, xo: Int, yo: Int) {
+            val bw = bx1 - bx0
+            for (v in by0 until by1) for (u in bx0 until bx1) {
+                val gx = 2 * u + xo
+                val gy = 2 * v + yo
+                if (gx in x0 until x1 && gy in y0 until y1) {
+                    a[(gy - y0) * w + (gx - x0)] = data[(v - by0) * bw + (u - bx0)]
+                }
+            }
+        }
+        scatter(ll.x0, ll.y0, ll.x1, ll.y1, ll.data, 0, 0)
+        for ((i, band) in res.bands.withIndex()) {
+            scatter(band.x0, band.y0, band.x1, band.y1, bands[i], band.orient and 1, (band.orient shr 1) and 1)
+        }
+
+        val row = LongArray(w)
+        for (y in 0 until h) {
+            for (x in 0 until w) row[x] = a[y * w + x]
+            liftFixed(row, x0, x0 + w)
+            for (x in 0 until w) a[y * w + x] = row[x]
+        }
+        val col = LongArray(h)
+        for (x in 0 until w) {
+            for (y in 0 until h) col[y] = a[y * w + x]
+            liftFixed(col, y0, y0 + h)
+            for (y in 0 until h) a[y * w + x] = col[y]
+        }
+        for (v in a) {
+            if (v > MAX_FIXED || v < -MAX_FIXED) throw ImageDecodeException("JPEG 2000: wavelet samples beyond the range of the 9/7 transform")
+        }
+        return FixedGrid(x0, y0, x1, y1, a)
+    }
+
+    /** One 2D 5/3 synthesis level: LL = [ll] + res.bands (HL/LH/HH) -> next LL. */
+    private fun synthesize(ll: SubbandGrid, res: Resolution): SubbandGrid {
         val x0 = res.x0; val y0 = res.y0; val x1 = res.x1; val y1 = res.y1
         val w = x1 - x0; val h = y1 - y0
         if (w <= 0 || h <= 0) return SubbandGrid(x0, y0, x1, y1, IntArray(0))
@@ -1139,13 +1209,13 @@ public object JpxDecoder {
         val row = IntArray(w)
         for (y in 0 until h) {
             for (x in 0 until w) row[x] = a[y * w + x]
-            lift1d(row, x0, x0 + w, reversible)
+            lift1d(row, x0, x0 + w)
             for (x in 0 until w) a[y * w + x] = row[x]
         }
         val col = IntArray(h)
         for (x in 0 until w) {
             for (y in 0 until h) col[y] = a[y * w + x]
-            lift1d(col, y0, y0 + h, reversible)
+            lift1d(col, y0, y0 + h)
             for (y in 0 until h) a[y * w + x] = col[y]
         }
         return SubbandGrid(x0, y0, x1, y1, a)
@@ -1156,7 +1226,7 @@ public object JpxDecoder {
      * X[k] holds global index i0+k. Interleaved layout: even global indices
      * are low-pass, odd are high-pass.
      */
-    private fun lift1d(x: IntArray, i0: Int, i1: Int, reversible: Boolean) {
+    private fun lift1d(x: IntArray, i0: Int, i1: Int) {
         val n = i1 - i0
         if (n <= 0) return
         if (n == 1) {
@@ -1176,42 +1246,59 @@ public object JpxDecoder {
         }
         fun set(i: Int, v: Int) { if (i in i0 until i1) x[i - i0] = v }
 
-        if (reversible) {
-            // 5/3: even then odd (T.800 F.3.8.2.1).
-            var i = if (i0 % 2 == 0) i0 else i0 + 1
-            while (i < i1) {
-                set(i, get(i) - ((get(i - 1) + get(i + 1) + 2) shr 2))
-                i += 2
-            }
-            i = if (i0 % 2 == 0) i0 + 1 else i0
-            while (i < i1) {
-                set(i, get(i) + ((get(i - 1) + get(i + 1)) shr 1))
-                i += 2
-            }
-        } else {
-            // 9/7 on FRACT fixed-point values.
-            fun stepScale(parity: Int, factorNum: Long) {
-                var i = if (i0 % 2 == parity) i0 else i0 + 1
-                while (i < i1) {
-                    set(i, ((get(i).toLong() * factorNum) shr FIX_SHIFT).toInt())
-                    i += 2
-                }
-            }
-            fun stepLift(parity: Int, coefNum: Long) {
-                var i = if (i0 % 2 == parity) i0 else i0 + 1
-                while (i < i1) {
-                    val nsum = get(i - 1).toLong() + get(i + 1).toLong()
-                    set(i, (get(i).toLong() + ((nsum * coefNum) shr FIX_SHIFT)).toInt())
-                    i += 2
-                }
-            }
-            stepScale(0, K_FIX)         // even *= K
-            stepScale(1, INV_K_FIX)     // odd  *= 1/K
-            stepLift(0, NEG_DELTA_FIX)  // even -= delta * (odd neighbours)
-            stepLift(1, NEG_GAMMA_FIX)
-            stepLift(0, NEG_BETA_FIX)
-            stepLift(1, NEG_ALPHA_FIX)
+        // 5/3: even then odd (T.800 F.3.8.2.1).
+        var i = if (i0 % 2 == 0) i0 else i0 + 1
+        while (i < i1) {
+            set(i, get(i) - ((get(i - 1) + get(i + 1) + 2) shr 2))
+            i += 2
         }
+        i = if (i0 % 2 == 0) i0 + 1 else i0
+        while (i < i1) {
+            set(i, get(i) + ((get(i - 1) + get(i + 1)) shr 1))
+            i += 2
+        }
+    }
+
+    /** [lift1d] for the 9/7 filter, on fixed-point values (T.800 F.3.8.2.2). */
+    private fun liftFixed(x: LongArray, i0: Int, i1: Int) {
+        val n = i1 - i0
+        if (n <= 0) return
+        if (n == 1) {
+            // T.800 F.3.6 defines the singleton rule before selecting either
+            // filter: an odd high-pass sample halves, including fixed-point 9/7.
+            if (i0 % 2 != 0) x[0] = x[0] shr 1
+            return
+        }
+        fun get(i: Int): Long {
+            // Symmetric extension around the boundaries.
+            var k = i
+            val last = i1 - 1
+            while (k < i0 || k > last) {
+                k = if (k < i0) 2 * i0 - k else 2 * last - k
+            }
+            return x[k - i0]
+        }
+        fun set(i: Int, v: Long) { if (i in i0 until i1) x[i - i0] = v }
+        fun stepScale(parity: Int, factorNum: Long) {
+            var i = if (i0 % 2 == parity) i0 else i0 + 1
+            while (i < i1) {
+                set(i, (get(i) * factorNum) shr FIX_SHIFT)
+                i += 2
+            }
+        }
+        fun stepLift(parity: Int, coefNum: Long) {
+            var i = if (i0 % 2 == parity) i0 else i0 + 1
+            while (i < i1) {
+                set(i, get(i) + (((get(i - 1) + get(i + 1)) * coefNum) shr FIX_SHIFT))
+                i += 2
+            }
+        }
+        stepScale(0, K_FIX)         // even *= K
+        stepScale(1, INV_K_FIX)     // odd  *= 1/K
+        stepLift(0, NEG_DELTA_FIX)  // even -= delta * (odd neighbours)
+        stepLift(1, NEG_GAMMA_FIX)
+        stepLift(0, NEG_BETA_FIX)
+        stepLift(1, NEG_ALPHA_FIX)
     }
 
     private const val FIX_SHIFT = 16
@@ -1224,37 +1311,49 @@ public object JpxDecoder {
 
     // ---- inverse MCT + assembly ---------------------------------------------------
 
-    private fun applyInverseMct(comps: List<TileComp>, reversible: Boolean, out: Planes) {
-        // The three colour components must share geometry for the MCT.
-        val planes = out.data; val planeW = out.w; val planeH = out.h
-        if (planeW[0] != planeW[1] || planeW[0] != planeW[2] || planeH[0] != planeH[1] || planeH[0] != planeH[2]) return
-        val c0 = comps[0]
-        val rect = c0.resolutions[c0.cod.decompositions - out.r]
-        val px0 = out.x0[0]; val py0 = out.y0[0]
-        val w = planeW[0]
-        for (ty in rect.y0 until rect.y1) {
-            for (tx in rect.x0 until rect.x1) {
-                val x = tx - px0; val y = ty - py0
-                if (x !in 0 until w || y !in 0 until planeH[0]) continue
-                val i = y * w + x
-                // Planes hold raw signed samples here; finalizeTileComp shifts
-                // and clamps afterwards.
-                val y0v = planes[0][i]
-                val u = planes[1][i]
-                val v = planes[2][i]
-                if (reversible) { // RCT (G.2)
-                    val g = y0v - ((u + v) shr 2)
-                    planes[0][i] = v + g
-                    planes[1][i] = g
-                    planes[2][i] = u + g
-                } else { // ICT (G.3)
-                    planes[0][i] = (y0v + 1.402 * v).toInt()
-                    planes[1][i] = (y0v - 0.34413 * u - 0.71414 * v).toInt()
-                    planes[2][i] = (y0v + 1.772 * u).toInt()
-                }
+    /**
+     * The inverse multiple-component transform of the first three tile-components into [rounded],
+     * when they share a geometry: the RCT on integers (G.2), or the ICT on the 9/7 fixed-point
+     * samples (G.3), rounded once after it.
+     */
+    private fun applyInverseMct(samples: List<TileSamples>, reversible: Boolean, rounded: Array<IntArray?>) {
+        val (a, b, c) = samples
+        if (a.w != b.w || a.w != c.w || a.h != b.h || a.h != c.h) return
+        val n = a.w * a.h
+        if (reversible) { // RCT (G.2)
+            val y = a.rounded(); val u = b.rounded(); val v = c.rounded()
+            val r = IntArray(n); val g = IntArray(n); val bl = IntArray(n)
+            for (i in 0 until n) {
+                val gv = y[i] - ((u[i] + v[i]) shr 2)
+                r[i] = v[i] + gv
+                g[i] = gv
+                bl[i] = u[i] + gv
             }
+            rounded[0] = r; rounded[1] = g; rounded[2] = bl
+            return
         }
+        // ICT (G.3), with its factors in 1/65536ths: each output carries FRACT + 16 fractional
+        // bits until the one rounding. Samples are first clipped to MAX_SAMPLE, far outside any
+        // display range, so the products stay inside a Long.
+        val y = a.fixedPoint(); val u = b.fixedPoint(); val v = c.fixedPoint()
+        val half = 1L shl (FRACT + 15)
+        val r = IntArray(n); val g = IntArray(n); val bl = IntArray(n)
+        for (i in 0 until n) {
+            val yv = y[i].coerceIn(-MAX_SAMPLE, MAX_SAMPLE) shl 16
+            val uv = u[i].coerceIn(-MAX_SAMPLE, MAX_SAMPLE)
+            val vv = v[i].coerceIn(-MAX_SAMPLE, MAX_SAMPLE)
+            r[i] = ((yv + ICT_RV * vv + half) shr (FRACT + 16)).toInt()
+            g[i] = ((yv - ICT_GU * uv - ICT_GV * vv + half) shr (FRACT + 16)).toInt()
+            bl[i] = ((yv + ICT_BU * uv + half) shr (FRACT + 16)).toInt()
+        }
+        rounded[0] = r; rounded[1] = g; rounded[2] = bl
     }
+
+    // T.800 G.3's ICT factors, in 1/65536ths.
+    private val ICT_RV = (1.402 * 65536).roundToLong()
+    private val ICT_GU = (0.34413 * 65536).roundToLong()
+    private val ICT_GV = (0.71414 * 65536).roundToLong()
+    private val ICT_BU = (1.772 * 65536).roundToLong()
 
     private fun assemble(
         s: Siz, jp2: Jp2Info, mct: Boolean,

@@ -77,8 +77,10 @@ class JpxOracleTest {
         }
         val magic = token()
         val comps = if (magic == "P6") 3 else 1
-        val w = token().toInt(); val h = token().toInt(); token() // maxval
+        val w = token().toInt(); val h = token().toInt(); val maxval = token().toInt()
         p++ // single whitespace after maxval
+        // A 16-bit sample is two bytes, high first: keep its top byte, the 8 bits the decoder returns.
+        if (maxval > 255) return Pnm(w, h, comps, ByteArray(w * h * comps) { d[p + 2 * it] })
         return Pnm(w, h, comps, d.copyOfRange(p, p + w * h * comps))
     }
 
@@ -112,7 +114,15 @@ class JpxOracleTest {
         return kite to readPnm(out)
     }
 
-    private fun compare(tag: String, kite: JpxDecoder.Result, ref: Pnm, tolerance: Int) {
+    /**
+     * The 9/7 allowance: a level here and there, where OpenJPEG's float arithmetic and our fixed
+     * point round a sample to different sides. Rounding once instead of truncating took the mean
+     * from 1.03 to under 0.02 (#101), so the mean limit catches a bias the per-sample one cannot.
+     */
+    private val irreversible = 1
+    private val irreversibleMean = 0.05
+
+    private fun compare(tag: String, kite: JpxDecoder.Result, ref: Pnm, tolerance: Int, maxMean: Double = if (tolerance == 0) 0.0 else irreversibleMean) {
         assertEquals(ref.w, kite.width, "$tag width")
         assertEquals(ref.h, kite.height, "$tag height")
         val comps = if (kite.colorSpace == "DeviceRGB") 3 else 1
@@ -129,6 +139,7 @@ class JpxOracleTest {
         val mean = sum.toDouble() / kite.pixelBytes.size
         println("[T-44] $tag: maxDiff=$maxDiff meanDiff=${(mean * 1000).toInt() / 1000.0}")
         assertTrue(maxDiff <= tolerance, "$tag max per-pixel diff $maxDiff must be <= $tolerance")
+        assertTrue(mean <= maxMean, "$tag mean diff $mean must be <= $maxMean")
     }
 
     @Test
@@ -186,8 +197,7 @@ class JpxOracleTest {
         assumeTrue("OpenJPEG tools not found, skipping.", tools())
         val jp2 = encode(ppm(), "-I", "-r", "10")
         val (kite, ref) = both(jp2)
-        // The fixed-point 9/7 path tolerates small rounding differences.
-        compare("lossy-97", kite, ref, tolerance = 4)
+        compare("lossy-97", kite, ref, tolerance = irreversible)
     }
 
     @Test
@@ -229,7 +239,7 @@ class JpxOracleTest {
         val cases = listOf(
             Triple("lossless-rgb", encode(ppm()), 0),
             Triple("lossless-gray", encode(ppm(gray = true)), 0),
-            Triple("lossy-97", encode(ppm(), "-I", "-r", "10"), 4),
+            Triple("lossy-97", encode(ppm(), "-I", "-r", "10"), irreversible),
             Triple("rpcl-layers", encode(ppm(), "-p", "RPCL", "-r", "20,10,1"), 0),
             Triple("tiled", encode(ppm(), "-t", "64,64"), 0),
             Triple("precincts", encode(ppm(), "-c", "[32,32]", "-SOP", "-EPH"), 0),
@@ -319,7 +329,7 @@ class JpxOracleTest {
             writeBytes(hex(JP2))
         }
         val (kite, ref) = both(jp2)
-        compare("ffmpeg-fixture", kite, ref, tolerance = 4)
+        compare("ffmpeg-fixture", kite, ref, tolerance = irreversible)
     }
 
     @Test
@@ -332,4 +342,48 @@ class JpxOracleTest {
         }
     }
 
+
+    /** A [w] by [h] binary PNM of 16-bit samples, [comps] per pixel from [sample]. */
+    private fun pnm16(w: Int, h: Int, comps: Int, sample: (x: Int, y: Int, c: Int) -> Int): File {
+        val header = "${if (comps == 3) "P6" else "P5"}\n$w $h\n65535\n".encodeToByteArray()
+        val body = ByteArray(w * h * comps * 2)
+        for (y in 0 until h) for (x in 0 until w) for (c in 0 until comps) {
+            val v = sample(x, y, c)
+            val o = ((y * w + x) * comps + c) * 2
+            body[o] = (v shr 8).toByte()
+            body[o + 1] = v.toByte()
+        }
+        return File.createTempFile("kite-jpx-16", if (comps == 3) ".ppm" else ".pgm").apply {
+            deleteOnExit()
+            writeBytes(header + body)
+        }
+    }
+
+    /**
+     * Full-scale 16-bit content through the 9/7 path, against `opj_decompress` at full size and
+     * at every reduction, compared on the top byte of each sample. A full-scale coefficient used
+     * to overflow the fixed-point lifting, and half of a checkerboard's samples came out wrong (#101).
+     */
+    @Test
+    fun fullScale16BitIrreversibleMatchesOpenjpeg() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        val cases = listOf(
+            "16-bit checkerboard" to pnm16(64, 48, 1) { x, y, _ -> if ((x + y) % 2 == 1) 65535 else 0 },
+            "16-bit sparse" to pnm16(64, 48, 1) { x, y, _ -> if (x % 7 == 3 && y % 5 == 2) 65535 else 0 },
+            "16-bit RGB checkerboard" to pnm16(64, 48, 3) { x, y, c -> if (((x + y) % 2 == 1) != (c == 1)) 65535 else 0 },
+            "16-bit ramp" to pnm16(97, 61, 1) { x, y, _ -> (x * 677 + y * 331) % 65536 },
+        )
+        for ((tag, src) in cases) {
+            for (extra in listOf(arrayOf("-I"), arrayOf("-I", "-t", "32,32"))) {
+                val jp2 = encode(src, *extra)
+                val name = "$tag ${extra.joinToString(" ")}"
+                val (kite, ref) = both(jp2)
+                compare(name, kite, ref, tolerance = irreversible)
+                for (levels in 1..3) {
+                    val (reduced, reducedRef) = bothReduced(jp2, levels)
+                    compare("$name reduced by ${1 shl levels}", reduced, reducedRef, tolerance = irreversible)
+                }
+            }
+        }
+    }
 }

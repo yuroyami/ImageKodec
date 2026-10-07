@@ -404,7 +404,7 @@ expectations:
 | JPEG encode | `javax.imageio` reads the output back | lossy: per-pixel/mean-error and PSNR thresholds |
 | JPEG reduced decode | libjpeg-turbo `djpeg -scale` | pixel comparisons with a stated tolerance |
 | WebP lossless | libwebp `cwebp` and `dwebp` | pixel-exact |
-| JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 4/255 for irreversible 9/7 |
+| JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 1/255 and a mean of 0.05 for irreversible 9/7, 16-bit included |
 | TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1 |
 | JBIG2 | jbig2enc's streams: generic regions against the source page, symbol mode against jbig2dec | exact |
 

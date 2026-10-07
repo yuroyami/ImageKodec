@@ -53,6 +53,15 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- Irreversible (9/7) JPEG 2000 keeps its coefficients and samples in wide fixed
+  point through the wavelet synthesis and the ICT, and rounds once at the end,
+  as OpenJPEG keeps real values until its output conversion. Full-scale 16-bit
+  content used to overflow the lifting, so half of a checkerboard's samples came
+  out wrong, and every 9/7 image was truncated half a level dark. Against
+  `opj_decompress` the mean difference falls from 1.03 to under 0.02 levels and
+  the worst from 4 to 1, at full size and reduced. Values a damaged stream
+  pushes past the representable range are refused instead of wrapping (#101).
+
 - The JPEG suite covers every feature the README lists with a test that runs on
   every target: restart intervals in baseline and progressive libjpeg-turbo
   files, a one-component file, CMYK, YCCK, 4:1:1, 4:4:0 and 4x2 sampling, each
