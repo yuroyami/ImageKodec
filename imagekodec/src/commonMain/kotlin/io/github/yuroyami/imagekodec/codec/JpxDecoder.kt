@@ -538,7 +538,7 @@ public object JpxDecoder {
                         bx1 = ceilDiv(cx1 - (1 shl (l2 - 1)) * xo, 1 shl l2)
                         by1 = ceilDiv(cy1 - (1 shl (l2 - 1)) * yo, 1 shl l2)
                     }
-                    val (se, sm) = stepFor(q, qIndex, lev, cod)
+                    val (se, sm) = stepFor(q, qIndex, rr)
                     // Precincts of this band: derived from the resolution grid.
                     val precincts = ArrayList<Precinct>(max(0, numPw * numPh))
                     val shift = if (rr == 0) 0 else 1
@@ -601,9 +601,12 @@ public object JpxDecoder {
         }
     }
 
-    private fun stepFor(q: Quant, qIndex: Int, lev: Int, cod: Cod): Pair<Int, Int> = when (q.style) {
+    private fun stepFor(q: Quant, qIndex: Int, resolution: Int): Pair<Int, Int> = when (q.style) {
         0 -> Pair(q.exps.getOrElse(qIndex) { q.exps.lastOrNull() ?: 8 }, 0)
-        1 -> Pair((q.exps[0] - lev).coerceAtLeast(0), q.mants[0]) // scalar derived from LL
+        // T.800 E-5: LL and the coarsest details keep epsilon0; each finer
+        // detail resolution lowers it by one. Remaining synthesis levels run
+        // in the opposite direction and cannot be used for this derivation.
+        1 -> Pair((q.exps[0] - maxOf(0, resolution - 1)).coerceAtLeast(0), q.mants[0])
         else -> Pair(
             q.exps.getOrElse(qIndex) { q.exps.lastOrNull() ?: 8 },
             q.mants.getOrElse(qIndex) { q.mants.lastOrNull() ?: 0 },

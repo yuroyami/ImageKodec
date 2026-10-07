@@ -47,6 +47,11 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- JPEG 2000 scalar-derived quantization follows the band's resolution order.
+  LL and the coarsest details keep the base exponent; finer details decrease
+  it successively. QCD/QCC in both main and tile headers reconstruct the same
+  pixels as their equivalent explicit step tables (#99).
+
 - JPEG 2000 reversible code-blocks that stop partway through a bitplane apply
   reconstruction bias at each coefficient's last decoded plane. Rate-limited
   5/3 streams match OpenJPEG exactly, including reduced output; fully decoded
