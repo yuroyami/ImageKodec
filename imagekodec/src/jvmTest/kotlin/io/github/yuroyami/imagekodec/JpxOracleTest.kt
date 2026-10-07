@@ -386,4 +386,56 @@ class JpxOracleTest {
             }
         }
     }
+
+    /**
+     * Every progression order on files with more than one precinct per resolution: the 97 by 61
+     * card from #56, the same in 40 by 40 tiles whose grid and image start off the origin, and a
+     * planar raw stream with its chroma subsampled 2x2. The first two must match OpenJPEG exactly;
+     * the subsampled one must give back its source, which OpenJPEG cannot write as one PNM.
+     */
+    @Test
+    fun everyProgressionOrderMatchesOpenjpeg() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        val card = File.createTempFile("kite-jpx-card", ".ppm").apply {
+            deleteOnExit()
+            val samples = ByteArray(97 * 61 * 3)
+            for (y in 0 until 61) for (x in 0 until 97) {
+                val o = (y * 97 + x) * 3
+                samples[o] = (x * 255 / 96).toByte()
+                samples[o + 1] = (y * 255 / 60).toByte()
+                samples[o + 2] = (if ((x / 16 + y / 16) % 2 == 0) 230 else 25).toByte()
+            }
+            writeBytes("P6\n97 61\n255\n".encodeToByteArray() + samples)
+        }
+        val w = 160
+        val h = 112
+        fun source(x: Int, y: Int, c: Int) = if (c == 0) (x * 3 + y * 5) % 256 else ((x / 2 * 7) xor (y / 2 * 11) xor (c * 40)) % 256
+        val raw = File.createTempFile("kite-jpx-sub", ".raw").apply {
+            deleteOnExit()
+            val planes = ByteArray(w * h + 2 * (w / 2) * (h / 2))
+            var o = 0
+            for (y in 0 until h) for (x in 0 until w) planes[o++] = source(x, y, 0).toByte()
+            for (c in 1..2) for (y in 0 until h / 2) for (x in 0 until w / 2) planes[o++] = source(2 * x, 2 * y, c).toByte()
+            writeBytes(planes)
+        }
+        for (order in listOf("LRCP", "RLCP", "RPCL", "PCRL", "CPRL")) {
+            val precincts = encode(card, "-n", "4", "-b", "8,8", "-c", "[16,16],[16,16],[16,16],[16,16]", "-p", order)
+            val tiled = encode(card, "-n", "3", "-c", "[16,16],[16,16],[16,16]", "-t", "40,40", "-T", "3,5", "-d", "3,5", "-p", order)
+            // An image that starts off the origin takes its rounded-up size when reduced, where
+            // OpenJPEG takes its grid's, so the offset tiles compare at full size only.
+            for ((tag, jp2) in listOf("$order precincts" to precincts, "$order tiled" to tiled)) {
+                val (kite, ref) = both(jp2)
+                compare(tag, kite, ref, tolerance = 0)
+            }
+            for (levels in 1..2) {
+                val (reduced, reducedRef) = bothReduced(precincts, levels)
+                compare("$order precincts reduced by ${1 shl levels}", reduced, reducedRef, tolerance = 0)
+            }
+            val sub = encode(raw, "-F", "$w,$h,3,8,u@1x1:2x2:2x2", "-n", "3", "-c", "[32,32],[32,32],[32,32]", "-p", order)
+            val kite = assertNotNull(JpxDecoder.decode(sub.readBytes()), "$order subsampled")
+            for (y in 0 until h) for (x in 0 until w) for (c in 0 until 3) {
+                assertEquals(source(x, y, c), kite.pixelBytes[(y * w + x) * 3 + c].toInt() and 0xFF, "$order subsampled at ($x, $y), component $c")
+            }
+        }
+    }
 }

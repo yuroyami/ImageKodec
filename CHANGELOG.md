@@ -53,6 +53,13 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- JPEG 2000's RPCL, PCRL and CPRL progressions visit each precinct where
+  T.800 B.12.1.3 to B.12.1.5 reach it on the reference grid, instead of pairing
+  precincts by their ordinal across resolutions and components. A file with more
+  than one precinct per resolution, or with subsampled chroma, used to decode
+  into scrambled pixels in those orders. All five orders now match OpenJPEG
+  exactly, tiled, offset, reduced and subsampled (#56).
+
 - Irreversible (9/7) JPEG 2000 keeps its coefficients and samples in wide fixed
   point through the wavelet synthesis and the ICT, and rounds once at the end,
   as OpenJPEG keeps real values until its output conversion. Full-scale 16-bit

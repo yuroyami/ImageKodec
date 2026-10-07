@@ -586,7 +586,7 @@ public object JpxDecoder {
         }
 
         // Tier-2: walk packets in progression order, filling code-block data.
-        readPackets(body, comps, tileCod)
+        readPackets(body, comps, tileCod, s, tx0, ty0)
 
         // Tier-1 + dequant + IDWT per component, tile-local and before any shift.
         val samples = comps.map { decodeTileComp(s, it, out.r) }
@@ -614,7 +614,7 @@ public object JpxDecoder {
 
     // ---- tier-2 packet reading ---------------------------------------------------
 
-    private fun readPackets(body: ByteArray, comps: List<TileComp>, cod: Cod) {
+    private fun readPackets(body: ByteArray, comps: List<TileComp>, cod: Cod, s: Siz, tx0: Int, ty0: Int) {
         val bio = PacketReader(body, cod.sop, cod.eph)
         val maxRes = comps.maxOf { it.resolutions.size }
         val layers = cod.layers
@@ -626,6 +626,24 @@ public object JpxDecoder {
             bio.readPacket(res, p, l)
         }
 
+        // The three spatial orders visit each precinct where T.800 B.12.1.3 to B.12.1.5 reach it on
+        // the reference grid, which depends on the component's subsampling and the resolution, not
+        // on the precinct's ordinal: ordinal k of two resolutions or two components sit apart (#56).
+        fun visits(order: Int): List<Visit> {
+            val out = ArrayList<Visit>()
+            for ((c, tc) in comps.withIndex()) for (rr in tc.resolutions.indices) {
+                precinctVisits(tc, rr, s.dx[tc.comp], s.dy[tc.comp], tx0, ty0, c, out)
+            }
+            out.sortWith(
+                when (order) {
+                    2 -> compareBy<Visit>({ it.r }, { it.y }, { it.x }, { it.c })   // RPCL
+                    3 -> compareBy({ it.y }, { it.x }, { it.c }, { it.r })          // PCRL
+                    else -> compareBy({ it.c }, { it.y }, { it.x }, { it.r })       // CPRL
+                },
+            )
+            return out
+        }
+
         when (cod.progression) {
             0 -> for (l in 0 until layers) for (rr in 0 until maxRes) for (c in comps.indices) {
                 val res = comps[c].resolutions.getOrNull(rr) ?: continue
@@ -635,19 +653,33 @@ public object JpxDecoder {
                 val res = comps[c].resolutions.getOrNull(rr) ?: continue
                 for (p in 0 until res.numPw * res.numPh) packet(l, rr, c, p)
             }
-            2 -> for (rr in 0 until maxRes) {
-                val maxP = comps.maxOf { it.resolutions.getOrNull(rr)?.let { rz -> rz.numPw * rz.numPh } ?: 0 }
-                for (p in 0 until maxP) for (c in comps.indices) for (l in 0 until layers) packet(l, rr, c, p)
-            }
-            3 -> { // PCRL
-                val maxP = comps.maxOf { c -> c.resolutions.maxOfOrNull { it.numPw * it.numPh } ?: 0 }
-                for (p in 0 until maxP) for (c in comps.indices) for (rr in 0 until maxRes) for (l in 0 until layers) packet(l, rr, c, p)
-            }
-            4 -> { // CPRL
-                val maxP = comps.maxOf { c -> c.resolutions.maxOfOrNull { it.numPw * it.numPh } ?: 0 }
-                for (c in comps.indices) for (p in 0 until maxP) for (rr in 0 until maxRes) for (l in 0 until layers) packet(l, rr, c, p)
-            }
+            2, 3, 4 -> for (v in visits(cod.progression)) for (l in 0 until layers) packet(l, v.r, v.c, v.p)
             else -> {}
+        }
+    }
+
+    /** Precinct [p] of resolution [r] of component [c], which the spatial orders reach at ([x], [y]) on the reference grid. */
+    private class Visit(val c: Int, val r: Int, val p: Int, val y: Long, val x: Long)
+
+    /**
+     * Adds to [out] where B.12.1.3 reaches each precinct of resolution [rr] of [tc]: the reference-grid
+     * point x = XRsiz * 2^(PPx + N_L - r) * k (B-21) that falls in it, or the tile's own corner for a
+     * first precinct that starts before the tile, as its second condition allows. On the
+     * resolution's grid the precinct starts at (floor(trx0 / 2^PPx) + i) * 2^PPx, so the point is that
+     * start scaled by the component's subsampling and the levels below the resolution.
+     */
+    private fun precinctVisits(tc: TileComp, rr: Int, dx: Int, dy: Int, tx0: Int, ty0: Int, c: Int, out: MutableList<Visit>) {
+        val res = tc.resolutions[rr]
+        if (res.x1 <= res.x0 || res.y1 <= res.y0) return
+        val lev = tc.cod.decompositions - rr
+        val ppx = tc.cod.ppx[rr]
+        val ppy = tc.cod.ppy[rr]
+        for (j in 0 until res.numPh) {
+            val y = maxOf(ty0.toLong(), (((res.y0 shr ppy) + j).toLong() shl ppy) * dy shl lev)
+            for (i in 0 until res.numPw) {
+                val x = maxOf(tx0.toLong(), (((res.x0 shr ppx) + i).toLong() shl ppx) * dx shl lev)
+                out.add(Visit(c, rr, j * res.numPw + i, y, x))
+            }
         }
     }
 
