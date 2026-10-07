@@ -137,10 +137,6 @@ internal object TiffDecoder {
         if (width > MAX_DIMENSION || height > MAX_DIMENSION || width.toLong() * height > MAX_PIXELS) {
             err("${width}x$height exceeds safety limits")
         }
-        if (!Budget.fits(width, height, data.size)) {
-            err("${width}x$height cannot come from ${data.size} bytes")
-        }
-
         val compression = single(259, 1).toInt()
         val photometric = single(262).toInt()
         val spp = single(277, 1).toInt()
@@ -159,6 +155,9 @@ internal object TiffDecoder {
                 values(it)
             }
         val t4Options = if (compression == 3) optionalValues(292, "T4Options", 4, 1)?.first() ?: 0L else 0L
+        if (compression == 3 && t4Options and 1L != 0L) {
+            throw UnsupportedImageException("TIFF: G3 2D (T4Options bit 0) is not supported")
+        }
         val fillOrder = optionalValues(266, "FillOrder", 3, 1)?.first()?.toInt() ?: 1
         if (fillOrder != 1 && fillOrder != 2) err("unknown FillOrder $fillOrder")
 
@@ -168,6 +167,12 @@ internal object TiffDecoder {
         if (bits != 1 && bits != 2 && bits != 4 && bits != 8 && bits != 16) {
             throw UnsupportedImageException("TIFF: $bits bits per sample is not supported (1, 2, 4, 8 or 16)")
         }
+        // A T.6 reference row can be represented by one bit, regardless of its
+        // width. Other compression paths expand stored bytes, including packing.
+        if (compression !in 2..4 && !Budget.fits(width, height, data.size, bits * spp)) {
+            err("${width}x$height cannot come from ${data.size} bytes at ${bits * spp} bits per pixel")
+        }
+        if (compression in 2..4 && (bits != 1 || spp != 1)) err("CCITT requires one bilevel sample")
         val extraSamples = entries[338]?.let {
             if (it.type != 3) err("ExtraSamples (338) requires SHORT values")
             if (it.count > 15) err("ExtraSamples count ${it.count} exceeds samples per pixel")
@@ -245,6 +250,19 @@ internal object TiffDecoder {
             ?: if (compression == 1) LongArray(offsets.size) { Long.MAX_VALUE } else err("missing block byte counts")
         if (offsets.size != counts.size) err("block offset/count mismatch")
 
+        // Reject missing/out-of-range blocks before reserving the sample plane.
+        val rowsPerStrip = if (tiled) 0 else single(278, 0xFFFFFFFFL).coerceAtMost(planeRows.toLong()).toInt()
+        if (!tiled && rowsPerStrip <= 0) err("rows per strip is zero")
+        val blocksPerPlane = if (tiled) {
+            ((width + tileWidth - 1) / tileWidth).toLong() * ((height + tileLength - 1) / tileLength)
+        } else ((planeRows + rowsPerStrip - 1) / rowsPerStrip).toLong()
+        val requiredBlocks = blocksPerPlane * planes
+        if (requiredBlocks > offsets.size) err("need $requiredBlocks blocks, only ${offsets.size} declared")
+        for (index in 0 until requiredBlocks.toInt()) {
+            if (offsets[index] < 0 || offsets[index] >= data.size) err("block $index offset out of range")
+            if (compression != 1 && counts[index] == 0L) err("block $index is empty")
+        }
+
         /** Decompress block [index], which is expected to hold [expect] bytes. */
         fun block(index: Int, expect: Int, rows: Int, columns: Int): ByteArray {
             if (index >= offsets.size) err("block $index beyond the ${offsets.size} declared")
@@ -272,7 +290,6 @@ internal object TiffDecoder {
                 32773 -> packBits(comp, expect)
                 2 -> fax(k = 0, byteAligned = true)
                 3 -> {
-                    if (t4Options and 1L != 0L) throw UnsupportedImageException("TIFF: G3 2D (T4Options bit 0) is not supported")
                     // T4Options fill zeros align the end of EOL, not the row cursor.
                     fax(k = 0, byteAligned = false, endOfLine = true)
                 }
@@ -345,9 +362,6 @@ internal object TiffDecoder {
                 blocks.add(plane)
             }
         } else {
-            // Clamp before narrowing: the default 2^32 - 1 is -1 as an Int.
-            val rowsPerStrip = single(278, 0xFFFFFFFFL).coerceAtMost(planeRows.toLong()).toInt()
-            if (rowsPerStrip <= 0) err("rows per strip is zero")
             val stripsPerPlane = (planeRows + rowsPerStrip - 1) / rowsPerStrip
             for (p in 0 until planes) {
                 val plane = ByteArray(planeRowBytes * planeRows)

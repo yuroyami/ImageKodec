@@ -111,10 +111,10 @@ class WebpDecoderTest {
     }
 
     @Test
-    fun framesAreCountedAgainstTheInputSize() {
+    fun framesAreCountedAgainstTheAbsoluteOutputSize() {
         // The first ANMF chunk of the ANIMATION vector starts at byte 44 and takes 64 bytes:
-        // an 8 by 8 lossless frame at (0, 0). Twenty of them on a 1024 by 1024 canvas hold
-        // 80 MiB of pixels and cost 64 bytes of input each.
+        // an 8 by 8 lossless frame at (0, 0). Twenty 4096 by 4096 composites exceed
+        // the absolute output limit even though every rectangle fits the canvas.
         fun u16le(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
         fun u24le(v: Int) = u16le(v) + byteArrayOf(((v shr 16) and 0xFF).toByte())
         fun u32le(v: Int) = u16le(v) + u16le(v shr 16)
@@ -122,12 +122,12 @@ class WebpDecoderTest {
 
         val frame = hex(ANIMATION).copyOfRange(44, 44 + 64)
         var body = "WEBP".encodeToByteArray() +
-            chunk("VP8X", byteArrayOf(0x02, 0, 0, 0) + u24le(1023) + u24le(1023)) +
+            chunk("VP8X", byteArrayOf(0x02, 0, 0, 0) + u24le(4095) + u24le(4095)) +
             chunk("ANIM", u32le(0) + u16le(0))
         repeat(20) { body += frame }
         val bytes = "RIFF".encodeToByteArray() + u32le(body.size) + body
         val e = assertFailsWith<ImageDecodeException> { ImageKodec.decodeAnimation(bytes) }
-        assertTrue(e.message!!.contains("cannot come from"), "message should name the problem: ${e.message}")
+        assertTrue(e.message!!.contains("output safety limit"), "message should name the problem: ${e.message}")
     }
 
     @Test

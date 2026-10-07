@@ -76,7 +76,7 @@ internal object PngDecoder {
             )
         }
 
-        if (!Budget.framesFit(png.width, png.height, png.frames.size, data.size)) {
+        if (!Budget.framesFit(png.width, png.height, png.frames.size, data.size, png.bitDepth * png.channels)) {
             throw ImageDecodeException(
                 "APNG: ${png.frames.size} frames of ${png.width}x${png.height} cannot come from ${data.size} bytes",
             )
@@ -182,11 +182,6 @@ internal object PngDecoder {
         if (widthL > MAX_DIMENSION || heightL > MAX_DIMENSION || widthL * heightL > MAX_PIXELS) {
             throw ImageDecodeException("PNG: ${widthL}x$heightL exceeds safety limits")
         }
-        if (!Budget.fits(widthL.toInt(), heightL.toInt(), data.size)) {
-            throw ImageDecodeException(
-                "PNG: ${widthL}x$heightL cannot come from ${data.size} bytes",
-            )
-        }
         val width = widthL.toInt()
         val height = heightL.toInt()
         if (interlace != 0 && interlace != 1) {
@@ -204,6 +199,10 @@ internal object PngDecoder {
         }
         if (bitDepth !in legalDepths) {
             throw ImageDecodeException("PNG: bit depth $bitDepth is illegal for color type $colorType")
+        }
+
+        if (!Budget.fits(width, height, data.size, bitDepth * channels)) {
+            throw ImageDecodeException("PNG: ${width}x$height cannot come from ${data.size} bytes at ${bitDepth * channels} bits per pixel")
         }
 
         // --- remaining chunks ---------------------------------------------------

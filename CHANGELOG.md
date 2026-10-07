@@ -42,6 +42,11 @@ reviewable in the diff.
 
 ### Fixed
 
+- Flat lossless WebP and fax-compressed TIFF pages use the absolute output
+  ceiling; packed PNG/TIFF expansion bounds account for bits per pixel (#83).
+  WebP checks frame/header geometry before canvas allocation, and nonconstant
+  entropy groups retain a bound derived from their encoded operations.
+
 - GIF converts finite NETSCAPE/ANIMEXTS repetitions to total plays in decode and
   probe, and reverses that conversion when encoding. One play omits the loop
   extension; unrepresentable counts are refused. Buffering and unknown

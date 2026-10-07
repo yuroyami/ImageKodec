@@ -338,15 +338,18 @@ web project that runs under Node should not use them.
   seven formats. Its check stops at the first tile-part and does not range-check
   the COD and QCD parameters. A per-tile coding-style override, or an
   out-of-range decomposition count, is therefore only found at decode.
-- **Decompression-bomb guards can reject legitimate files.** A decompression bomb
-  is a small file that expands into a very large image. PNG, JPEG, GIF, BMP, TIFF
-  and WebP cap output at 2^28 pixels and at 4096 decoded pixels per input byte. A
-  very large, very well compressed image can hit that second limit. An animation
-  keeps one full canvas per frame, so its frames together must fit the same
-  limits. JPEG 2000 has a lower ceiling of 2^26 pixels. It applies the same
-  input-relative limit when it decodes, but `probe` checks only the ceiling.
-  `CcittFax` and `Jbig2Decoder` apply only the 2^28-pixel ceiling. A blank
-  scanned page needs far fewer bytes than the input-relative limit allows for.
+- **Output limits depend on the format.** PNG, JPEG, GIF, BMP, TIFF and WebP
+  cap output at 2^28 pixels (about 1 GiB of ARGB); JPEG 2000 caps it at 2^26.
+  WebP, fax-compressed TIFF, `CcittFax` and `Jbig2Decoder` use that absolute
+  ceiling without an input-size ratio: constant VP8L pixels and fax reference
+  rows can take no entropy bits or one bit per row. WebP animation frames
+  together must fit the same ceiling. Other paths retain a loose input-relative
+  bound of 4096 pixels per input byte, scaled by eight divided by the stored
+  bits per pixel for PNG/TIFF pixels smaller than a byte. Those guards can still refuse unusually
+  compressed files; PNG/GIF animations also count their full composited canvases
+  against the input-relative limit. JPEG 2000 applies its input-relative limit
+  at decode, while `probe` checks only its pixel ceiling. The ceiling bounds
+  output size; it does not guarantee that a device has enough free memory.
 - `probe` reads EXIF orientation from JPEG and TIFF files and reports it.
   `decode` only applies it when you pass `applyOrientation = true`. The Compose
   binding applies it for you.

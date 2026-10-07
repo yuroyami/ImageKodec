@@ -44,6 +44,8 @@ CCITT Group 4 reference-run caching was reviewed against libtiff's [tif_fax3.c](
 
 The JBIG2 multi-instance refusal fixture uses an independently encoded integer prefix from jbig2enc's [Apache-2.0 arithmetic encoder](https://github.com/agl/jbig2enc/blob/d0dfca46216c98f11312a9c9f15615ed490cd7b3/src/jbig2arith.cc): initialize, encode IADH=1, IADW=1, IAAI=2, finalize. Its four-byte output is checked in `Jbig2UnsupportedTest`; unsupported content is refused before consuming the aggregate body. No encoder source is vendored.
 
+Expansion-budget policy was checked against libwebp's [vp8l_dec.c](https://github.com/webmproject/libwebp/blob/main/src/dec/vp8l_dec.c), under its BSD-3-Clause license, and libtiff's [allocation-limit API](https://libtiff.gitlab.io/libtiff/functions/TIFFOpenOptions.html), under its permissive Sam Leffler / Silicon Graphics license. VP8L singleton groups and CCITT reference rows have no useful input-size ratio; packed PNG/TIFF bounds account for stored bits per pixel. No reference source is vendored. `ExpansionBudgetOracleTest` checks libwebp-written flat images, libtiff-written blank pages and independently readable hand-built streams.
+
 ## Adapted code from the Kite libraries
 
 | Implementation | Origin and format reference | Code license |

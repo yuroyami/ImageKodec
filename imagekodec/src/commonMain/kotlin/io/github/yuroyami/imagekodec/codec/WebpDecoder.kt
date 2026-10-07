@@ -55,11 +55,12 @@ internal object WebpDecoder {
 
         val w = file.canvasWidth
         val h = file.canvasHeight
-        if (!Budget.framesFit(w, h, file.frames.size, data.size)) {
-            err("${file.frames.size} frames of ${w}x$h cannot come from ${data.size} bytes")
+        if (!Budget.framesFitAbsolute(w, h, file.frames.size)) {
+            err("${file.frames.size} frames of ${w}x$h exceed the output safety limit")
         }
 
-        val canvas = IntArray(w * h)                     // starts fully transparent
+        // A corrupt first entropy stream must fail before the canvas allocation.
+        var canvas = IntArray(0)
         val out = ArrayList<KiteFrame>(file.frames.size)
 
         for (frame in file.frames) {
@@ -74,6 +75,7 @@ internal object WebpDecoder {
             if (frame.width != pixels.width || frame.height != pixels.height) {
                 err("frame declares ${frame.width}x${frame.height} but decodes ${pixels.width}x${pixels.height}")
             }
+            if (canvas.isEmpty()) canvas = IntArray(w * h)
             for (y in 0 until frame.height) {
                 var s = y * frame.width
                 var d = (frame.y + y) * w + frame.x
@@ -217,10 +219,21 @@ internal object WebpDecoder {
         if (canvasWidth.toLong() * canvasHeight > MAX_PIXELS) {
             err("${canvasWidth}x$canvasHeight exceeds safety limits")
         }
-        if (!Budget.fits(canvasWidth, canvasHeight, data.size)) {
-            err("canvas ${canvasWidth}x$canvasHeight cannot come from ${data.size} bytes")
-        }
         if (frames.isEmpty()) err("no image chunk")
+        // Check every rectangle and codec header before an animation reserves a
+        // full canvas. Sparse frames have no useful input-to-canvas size ratio.
+        for (frame in frames) {
+            if (frame.x.toLong() + frame.width > canvasWidth ||
+                frame.y.toLong() + frame.height > canvasHeight
+            ) err("frame rectangle leaves the ${canvasWidth}x$canvasHeight canvas")
+            if (!frame.lossless) throw UnsupportedImageException(LOSSY_MESSAGE)
+            if (frame.lossless) {
+                val dimensions = stillDimensions(data, frame.payloadAt, frame.payloadLength, true)
+                if (dimensions.first != frame.width || dimensions.second != frame.height) {
+                    err("frame dimensions do not match the VP8L header")
+                }
+            }
+        }
 
         return File(canvasWidth, canvasHeight, animated && frames.size >= 1, loopCount, frames)
     }
@@ -249,7 +262,9 @@ internal object WebpDecoder {
     private fun stillDimensions(data: ByteArray, body: Int, len: Int, lossless: Boolean): Pair<Int, Int> {
         if (lossless) {
             if (len < 5) err("VP8L chunk too short")
+            if (data[body].toInt() and 255 != 0x2f) err("bad VP8L signature")
             val bits = u32(data, body + 1)
+            if (bits shr 29 != 0L) err("unknown VP8L version")
             return Pair(((bits and 0x3FFF).toInt()) + 1, (((bits shr 14) and 0x3FFF).toInt()) + 1)
         }
         if (len < 10) err("VP8 chunk too short")

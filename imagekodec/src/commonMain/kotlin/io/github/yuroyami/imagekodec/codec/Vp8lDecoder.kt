@@ -1,7 +1,6 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
-import io.github.yuroyami.imagekodec.internal.Budget
 
 /**
  * VP8L, the lossless half of WebP.
@@ -92,9 +91,6 @@ internal object Vp8lDecoder {
         if (br.read(3) != 0) err("unknown version")
         if (width > MAX_DIMENSION || height > MAX_DIMENSION) err("${width}x$height too large")
         if (width.toLong() * height > MAX_PIXELS) err("${width}x$height exceeds safety limits")
-        if (!Budget.fits(width, height, length)) {
-            err("${width}x$height cannot come from a $length-byte chunk")
-        }
         return Pixels(width, height, decodeImage(br, width, height, isTopLevel = true))
     }
 
@@ -227,6 +223,22 @@ internal object Vp8lDecoder {
             )
         }
 
+        // A nonzero-bit operation emits at most 4096 pixels (VP8L section
+        // 4.2.2). Singleton literals/cache entries and short singleton copies
+        // have no such ratio, so only apply this bound when every group reads.
+        val allOperationsReadBits = groups.none { group ->
+            val code = group.green.single
+            when {
+                code < 0 -> false
+                code < NUM_LITERAL_CODES -> group.red.single >= 0 && group.blue.single >= 0 && group.alpha.single >= 0
+                code < NUM_LITERAL_CODES + NUM_LENGTH_CODES ->
+                    code - NUM_LITERAL_CODES < 4 && group.distance.single in 0..3
+                else -> true
+            }
+        }
+        if (allOperationsReadBits && width.toLong() * height > br.remainingBits() * 4096) {
+            err("insufficient entropy for ${width}x$height pixels")
+        }
         val out = IntArray(width * height)
         val cache = if (cacheBits > 0) IntArray(1 shl cacheBits) else null
         var at = 0
@@ -377,7 +389,7 @@ internal object Vp8lDecoder {
     private class Huffman private constructor(
         private val counts: IntArray,
         private val symbols: IntArray,
-        private val single: Int,
+        val single: Int,
     ) {
         constructor(lengths: IntArray) : this(
             counts = IntArray(MAX_ALLOWED_CODE_LENGTH + 1).also { c ->
@@ -625,6 +637,8 @@ internal object Vp8lDecoder {
         private var pos = offset
         private var buf = 0L
         private var bits = 0
+
+        fun remainingBits(): Long = (end - pos).toLong() * 8 + bits
 
         fun read(n: Int): Int {
             if (n == 0) return 0
