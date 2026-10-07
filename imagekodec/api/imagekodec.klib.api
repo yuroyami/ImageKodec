@@ -79,11 +79,36 @@ final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuro
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec.codec/CcittOptions.toString|toString(){}[0]
 }
 
+final class io.github.yuroyami.imagekodec/ColorProfile { // io.github.yuroyami.imagekodec/ColorProfile|null[0]
+    constructor <init>(kotlin/ByteArray? = ..., kotlin/String? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/IntArray? = ..., kotlin/IntArray? = ...) // io.github.yuroyami.imagekodec/ColorProfile.<init>|<init>(kotlin.ByteArray?;kotlin.String?;kotlin.Int?;kotlin.Int?;kotlin.IntArray?;kotlin.IntArray?){}[0]
+
+    final val chromaticities // io.github.yuroyami.imagekodec/ColorProfile.chromaticities|{}chromaticities[0]
+        final fun <get-chromaticities>(): kotlin/IntArray? // io.github.yuroyami.imagekodec/ColorProfile.chromaticities.<get-chromaticities>|<get-chromaticities>(){}[0]
+    final val cicp // io.github.yuroyami.imagekodec/ColorProfile.cicp|{}cicp[0]
+        final fun <get-cicp>(): kotlin/IntArray? // io.github.yuroyami.imagekodec/ColorProfile.cicp.<get-cicp>|<get-cicp>(){}[0]
+    final val gamma // io.github.yuroyami.imagekodec/ColorProfile.gamma|{}gamma[0]
+        final fun <get-gamma>(): kotlin/Int? // io.github.yuroyami.imagekodec/ColorProfile.gamma.<get-gamma>|<get-gamma>(){}[0]
+    final val icc // io.github.yuroyami.imagekodec/ColorProfile.icc|{}icc[0]
+        final fun <get-icc>(): kotlin/ByteArray? // io.github.yuroyami.imagekodec/ColorProfile.icc.<get-icc>|<get-icc>(){}[0]
+    final val iccColorSpace // io.github.yuroyami.imagekodec/ColorProfile.iccColorSpace|{}iccColorSpace[0]
+        final fun <get-iccColorSpace>(): kotlin/String? // io.github.yuroyami.imagekodec/ColorProfile.iccColorSpace.<get-iccColorSpace>|<get-iccColorSpace>(){}[0]
+    final val iccDescription // io.github.yuroyami.imagekodec/ColorProfile.iccDescription|{}iccDescription[0]
+        final fun <get-iccDescription>(): kotlin/String? // io.github.yuroyami.imagekodec/ColorProfile.iccDescription.<get-iccDescription>|<get-iccDescription>(){}[0]
+    final val iccName // io.github.yuroyami.imagekodec/ColorProfile.iccName|{}iccName[0]
+        final fun <get-iccName>(): kotlin/String? // io.github.yuroyami.imagekodec/ColorProfile.iccName.<get-iccName>|<get-iccName>(){}[0]
+    final val srgbIntent // io.github.yuroyami.imagekodec/ColorProfile.srgbIntent|{}srgbIntent[0]
+        final fun <get-srgbIntent>(): kotlin/Int? // io.github.yuroyami.imagekodec/ColorProfile.srgbIntent.<get-srgbIntent>|<get-srgbIntent>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/ColorProfile.toString|toString(){}[0]
+}
+
 final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imagekodec/ImageInfo|null[0]
-    constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Long, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Long;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?;kotlin.Int){}[0]
+    constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Long, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/ColorProfile? = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Long;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?;kotlin.Int;io.github.yuroyami.imagekodec.ColorProfile?){}[0]
 
     final val bitDepth // io.github.yuroyami.imagekodec/ImageInfo.bitDepth|{}bitDepth[0]
         final fun <get-bitDepth>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
+    final val colorProfile // io.github.yuroyami.imagekodec/ImageInfo.colorProfile|{}colorProfile[0]
+        final fun <get-colorProfile>(): io.github.yuroyami.imagekodec/ColorProfile? // io.github.yuroyami.imagekodec/ImageInfo.colorProfile.<get-colorProfile>|<get-colorProfile>(){}[0]
     final val displayHeight // io.github.yuroyami.imagekodec/ImageInfo.displayHeight|{}displayHeight[0]
         final fun <get-displayHeight>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.displayHeight.<get-displayHeight>|<get-displayHeight>(){}[0]
     final val displayWidth // io.github.yuroyami.imagekodec/ImageInfo.displayWidth|{}displayWidth[0]

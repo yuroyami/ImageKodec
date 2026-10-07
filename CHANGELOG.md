@@ -14,6 +14,16 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageInfo.colorProfile` reports what a file declares about its color space,
+  as `probe` reads it from the header area: the embedded ICC profile byte for
+  byte (PNG `iCCP`, JPEG `APP2` segments joined in sequence order, TIFF tag
+  34675 per page, WebP `ICCP`, JPEG 2000 `colr`, a BMP V5 header's profile and
+  GIF's `ICCRGBG1012` extension), PNG's `sRGB`, `gAMA`, `cHRM` and `cICP`, and
+  the profile's color space and description. A damaged color chunk is ignored,
+  and decoded samples do not change; converting them is #108. The JDK's sRGB
+  and PhotoYCC profiles embedded by ImageMagick come back byte for byte from
+  every format it writes them to (#16).
+
 - `ImageKodec.decode16` and `KiteBitmap16` keep every bit of a 16-bit PNG or
   TIFF, which `decode` narrows to the high byte, including a TIFF palette's
   16-bit ColorMap. The samples come in the channels the file stores once a
@@ -105,8 +115,9 @@ reviewable in the diff.
 
 ### Changed
 
-- `ImageInfo`'s constructor takes `pageCount` last, defaulting to 1. Code
-  compiled against the old constructor must be compiled again (#7).
+- `ImageInfo`'s constructor takes `pageCount` and `colorProfile` last,
+  defaulting to 1 and null. Code compiled against the old constructor must be
+  compiled again (#7, #16).
 
 - `decodeAnimation` takes `maxFrames` before `cancellationCheck`. A call that
   passes the check as a trailing lambda or by name compiles unchanged; one that

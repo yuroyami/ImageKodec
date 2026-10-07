@@ -106,6 +106,17 @@ then truncated or corrupt. A decode can therefore still fail after a clean probe
 One case is different: WebP data that ends before its first image chunk probes as
 not decodable. Until that chunk, nothing says which codec the image uses.
 
+`colorProfile` reports what the file declares about its color space: the embedded
+ICC profile in any format, byte for byte, and PNG's `sRGB`, `gAMA`, `cHRM` and
+`cICP` chunks. It is null when the file declares nothing, which for nearly every
+image means sRGB. ImageKodec does not convert samples to sRGB, so a color pipeline
+of your own can use the profile.
+
+```kotlin
+info.colorProfile?.iccDescription    // "Display P3", "Adobe RGB (1998)", ...
+info.colorProfile?.icc               // the profile's bytes
+```
+
 ### Decode a still
 
 ```kotlin

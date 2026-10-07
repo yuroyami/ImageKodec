@@ -1,3 +1,18 @@
+public final class io/github/yuroyami/imagekodec/ColorProfile {
+	public fun <init> ()V
+	public fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[I)V
+	public synthetic fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getChromaticities ()[I
+	public final fun getCicp ()[I
+	public final fun getGamma ()Ljava/lang/Integer;
+	public final fun getIcc ()[B
+	public final fun getIccColorSpace ()Ljava/lang/String;
+	public final fun getIccDescription ()Ljava/lang/String;
+	public final fun getIccName ()Ljava/lang/String;
+	public final fun getSrgbIntent ()Ljava/lang/Integer;
+	public fun toString ()Ljava/lang/String;
+}
+
 public class io/github/yuroyami/imagekodec/ImageDecodeException : java/lang/Exception {
 	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -22,9 +37,10 @@ public final class io/github/yuroyami/imagekodec/ImageFormat$Companion {
 }
 
 public final class io/github/yuroyami/imagekodec/ImageInfo {
-	public fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;I)V
-	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;ILio/github/yuroyami/imagekodec/ColorProfile;)V
+	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;ILio/github/yuroyami/imagekodec/ColorProfile;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getBitDepth ()I
+	public final fun getColorProfile ()Lio/github/yuroyami/imagekodec/ColorProfile;
 	public final fun getDisplayHeight ()I
 	public final fun getDisplayWidth ()I
 	public final fun getFormat ()Lio/github/yuroyami/imagekodec/ImageFormat;

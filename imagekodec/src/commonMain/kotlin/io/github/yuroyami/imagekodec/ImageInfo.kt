@@ -89,6 +89,10 @@ public enum class Orientation(public val exifValue: Int) {
  * @property pageCount number of pages: every image file directory in a TIFF's
  *   main chain, and 1 for every other format. The other fields describe the page
  *   that was probed, the first unless [ImageKodec.probePage] asked for another.
+ * @property colorProfile what the file declares about its color space (an embedded
+ *   ICC profile, and PNG's sRGB, gamma, chromaticity and cICP chunks), or null
+ *   when it declares nothing. It is reported, not applied: decoded samples are the
+ *   file's own.
  */
 public class ImageInfo(
     public val format: ImageFormat,
@@ -102,6 +106,7 @@ public class ImageInfo(
     public val isDecodable: Boolean,
     public val unsupportedReason: String? = null,
     public val pageCount: Int = 1,
+    public val colorProfile: ColorProfile? = null,
 ) {
     /** True when [frameCount] > 1. */
     public val isAnimated: Boolean get() = frameCount > 1

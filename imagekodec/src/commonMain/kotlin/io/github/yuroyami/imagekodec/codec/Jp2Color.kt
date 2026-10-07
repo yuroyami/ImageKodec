@@ -11,7 +11,7 @@ import io.github.yuroyami.imagekodec.UnsupportedImageException
 internal object Jp2Color {
 
     /** A colour specification box (I.5.3.3): [enumerated] for method 1, else the ICC profile's data colour space. */
-    class ColorSpec(val method: Int, val enumerated: Int, val iccSpace: String?)
+    class ColorSpec(val method: Int, val enumerated: Int, val iccSpace: String?, val icc: ByteArray? = null)
 
     /**
      * A palette box (I.5.3.4): [values] holds each column's entries, already shifted to the unsigned range,
@@ -106,7 +106,11 @@ internal object Jp2Color {
         return when (method) {
             1 -> if (to - from >= 7) ColorSpec(1, u32(d, from + 3).toInt(), null) else null
             // ICC: a profile's header holds its data colour space at offset 16.
-            2, 3 -> ColorSpec(method, -1, if (to - from >= 3 + 20) d.copyOfRange(from + 3 + 16, from + 3 + 20).decodeToString() else "")
+            2, 3 -> ColorSpec(
+                method, -1,
+                if (to - from >= 3 + 20) d.copyOfRange(from + 3 + 16, from + 3 + 20).decodeToString() else "",
+                d.copyOfRange(from + 3, to),
+            )
             else -> ColorSpec(method, -1, null)
         }
     }

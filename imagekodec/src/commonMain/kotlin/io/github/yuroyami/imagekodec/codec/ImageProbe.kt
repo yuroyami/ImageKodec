@@ -56,6 +56,7 @@ internal object ImageProbe {
         var apple = false
         var sawIhdr = false
         var limit: String? = null
+        val color = ColorChunks.Png()
 
         walk@ while (r.remaining >= 8) {
             val len = r.u32be()
@@ -87,6 +88,10 @@ internal object ImageProbe {
                 }
                 // Pixel data begins: everything we care about is legally before it.
                 "IDAT", "fdAT", "IEND" -> break@walk
+                "iCCP", "sRGB", "gAMA", "cHRM", "cICP" -> {
+                    if (n > r.remaining) break@walk
+                    color.take(type, r.bytes(n))
+                }
                 else -> r.skip(minOf(n, r.remaining))
             }
             if (r.remaining < 4) break@walk
@@ -115,6 +120,7 @@ internal object ImageProbe {
             orientation = Orientation.Normal,
             isDecodable = reason == null,
             unsupportedReason = reason,
+            colorProfile = color.profile(),
         )
     }
 
@@ -163,6 +169,7 @@ internal object ImageProbe {
                 orientation = Exif.orientationFromJpeg(data) ?: Orientation.Normal,
                 isDecodable = why == null,
                 unsupportedReason = why,
+                colorProfile = ColorChunks.profile(ColorChunks.jpegIcc(data)),
             )
         }
     }
@@ -170,6 +177,7 @@ internal object ImageProbe {
     // --- GIF --------------------------------------------------------------------
 
     private fun gif(data: ByteArray): ImageInfo {
+        var icc: ByteArray? = null
         val r = ByteReader(data, pos = 6)
         val width = r.u16le()
         val height = r.u16le()
@@ -202,7 +210,7 @@ internal object ImageProbe {
                         }
                         skipSubBlocks(r)
                     } else if (label == 0xFF) {              // application
-                        GifLooping.readApplication(r)?.let { loops = it }
+                        GifLooping.readApplication(r) { if (icc == null) icc = it }?.let { loops = it }
                     } else {
                         skipSubBlocks(r)
                     }
@@ -225,6 +233,7 @@ internal object ImageProbe {
             // UnsupportedImageException, so there is nothing for a header read to
             // rule out. A malformed or bomb-sized file still fails at decode.
             isDecodable = true,
+            colorProfile = ColorChunks.profile(icc),
         )
     }
 
@@ -279,6 +288,7 @@ internal object ImageProbe {
                 orientation = inner.orientation,
                 isDecodable = inner.isDecodable,
                 unsupportedReason = inner.unsupportedReason,
+                colorProfile = inner.colorProfile,
             )
         }
 
@@ -303,6 +313,7 @@ internal object ImageProbe {
                 bpp !in intArrayOf(1, 2, 4, 8, 16, 24, 32) -> "BMP with $bpp bpp"
                 else -> null
             },
+            colorProfile = ColorChunks.profile(ColorChunks.bmpIcc(data)),
         )
     }
 
@@ -350,6 +361,7 @@ internal object ImageProbe {
         var referenceOffset = -1
         var referenceType = 0
         var referenceCount = 0L
+        var icc: ByteArray? = null
 
         for (i in 0 until count) {
             val at = ifd + 2 + i * 12
@@ -429,6 +441,11 @@ internal object ImageProbe {
                     referenceType = type
                     referenceCount = n.toLong()
                 }
+                34675 -> if (type == 7 || type == 1) {
+                    // InterColorProfile: the ICC profile, inline when it fits four bytes.
+                    val base = if (n <= 4) at + 8 else try { u32(at + 8) } catch (_: ImageDecodeException) { -1 }
+                    if (n > 0 && base >= 0 && base <= data.size - n) icc = data.copyOfRange(base, base + n)
+                }
             }
         }
 
@@ -461,6 +478,7 @@ internal object ImageProbe {
             isDecodable = reason == null,
             unsupportedReason = reason,
             pageCount = chain.size,
+            colorProfile = ColorChunks.profile(icc),
         )
     }
 
@@ -540,6 +558,8 @@ internal object ImageProbe {
             orientation = Orientation.Normal,
             isDecodable = reason == null,
             unsupportedReason = reason,
+            // The first colour specification is the one a reader uses (I.5.3.3).
+            colorProfile = ColorChunks.profile(boxes.colors.firstOrNull()?.icc),
         )
     }
 
@@ -637,6 +657,7 @@ internal object ImageProbe {
         var animated = false
         var sawAny = false
         var sawImage = false
+        var icc: ByteArray? = null
 
         fun u16le(at: Int) = (data[at].toInt() and 0xFF) or ((data[at + 1].toInt() and 0xFF) shl 8)
         fun u24le(at: Int) = u16le(at) or ((data[at + 2].toInt() and 0xFF) shl 16)
@@ -675,6 +696,7 @@ internal object ImageProbe {
                     if (webpFrameIsLossy(data, body + 16, end) != null) sawImage = true
                 }
                 "ALPH" -> alpha = true
+                "ICCP" -> if (icc == null && !cutOff) icc = data.copyOfRange(body, body + size.toInt())
                 "VP8 " -> {
                     // Uncompressed data chunk of a key frame: 3-byte frame tag,
                     // 3-byte start code 9D 01 2A, then 14-bit width and height.
@@ -718,6 +740,7 @@ internal object ImageProbe {
             orientation = Orientation.Normal,
             isDecodable = reason == null,
             unsupportedReason = reason,
+            colorProfile = ColorChunks.profile(icc),
         )
     }
 
