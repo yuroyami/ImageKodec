@@ -15,6 +15,28 @@ import kotlin.test.assertTrue
 
 class TiffFaxOracleTest {
     @Test
+    fun libtiffGroup3EolsWithAndWithoutFillAgree() {
+        assumeTrue("fax TIFF tools not installed", Tools.hasAll("tiffcp", "tiff2rgba"))
+        for (codec in listOf("g3:1d", "g3:1d:fill")) {
+            for (width in listOf(1, 7, 13, 97, 3001)) for (photometric in listOf(0, 1)) {
+                val input = File.createTempFile("imagekodec-g3-source", ".tif").apply {
+                    deleteOnExit(); writeBytes(withPhotometric(encodedFax("CCITT RLE", width), photometric))
+                }
+                val output = File.createTempFile("imagekodec-g3", ".tif").apply { deleteOnExit() }
+                val log = File.createTempFile("imagekodec-g3", ".log").apply { deleteOnExit() }
+                val process = ProcessBuilder(Tools.require("tiffcp").path, "-c", codec,
+                    "-r", "3", input.path, output.path).redirectErrorStream(true).redirectOutput(log).start()
+                val finished = process.waitFor(30, TimeUnit.SECONDS)
+                if (!finished) process.destroyForcibly()
+                assertTrue(finished, "$codec: libtiff timed out")
+                assertEquals(0, process.exitValue(), "$codec: ${log.readText()}")
+                // The same one-column ImageIO run-array fault affects T.4.
+                compareFax(output.readBytes(), "$codec/$width/$photometric", readOriginal = width != 1)
+            }
+        }
+    }
+
+    @Test
     fun imageIoEncodedModifiedHuffmanAndGroup4AgreeWithLibtiff() {
         assumeTrue("tiff2rgba not installed", Tools.hasAll("tiff2rgba"))
         for (compression in listOf("CCITT RLE", "CCITT T.6")) {

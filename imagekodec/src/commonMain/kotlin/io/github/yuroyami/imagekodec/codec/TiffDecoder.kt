@@ -228,12 +228,10 @@ internal object TiffDecoder {
             }
             val len = minOf(counts[index], (data.size - ofs).toLong()).toInt()
             val comp = data.copyOfRange(ofs, ofs + len)
-            return when (compression) {
+            val decoded = when (compression) {
                 5 -> tiffLzw(comp, expect)
                 8, 32946 -> try {
-                    val decoded = Zlib.decompress(comp, expect.toLong())
-                    if (decoded.size != expect) err("block $index inflate ended after ${decoded.size} of $expect bytes")
-                    decoded
+                    Zlib.decompress(comp, expect.toLong())
                 } catch (e: InflateException) {
                     throw ImageDecodeException("TIFF: strip inflate failed: ${e.message}", e)
                 }
@@ -241,11 +239,14 @@ internal object TiffDecoder {
                 2 -> ccittStrip(comp, k = 0, columns, rows, byteAligned = true)
                 3 -> {
                     if (t4Options and 1L != 0L) throw UnsupportedImageException("TIFF: G3 2D (T4Options bit 0) is not supported")
-                    ccittStrip(comp, k = 0, columns, rows, byteAligned = (t4Options and 4L) != 0L)
+                    // T4Options fill zeros align the end of EOL, not the row cursor.
+                    ccittStrip(comp, k = 0, columns, rows, byteAligned = false, endOfLine = true)
                 }
                 4 -> ccittStrip(comp, k = -1, columns, rows, byteAligned = false)
                 else -> throw UnsupportedImageException("TIFF: compression $compression is not supported")
             }
+            if (decoded.size != expect) err("block $index decoded ${decoded.size} bytes, expected $expect")
+            return decoded
         }
 
         // TIFF 6.0 sections 14/15: prediction starts anew at each tile row,
@@ -477,10 +478,12 @@ internal object TiffDecoder {
     private fun clamp8(v: Int): Int = if (v < 0) 0 else if (v > 255) 255 else v
 
     /** CCITT run colors become TIFF samples; PhotometricInterpretation is applied later. */
-    private fun ccittStrip(comp: ByteArray, k: Int, width: Int, rows: Int, byteAligned: Boolean): ByteArray {
+    private fun ccittStrip(
+        comp: ByteArray, k: Int, width: Int, rows: Int, byteAligned: Boolean, endOfLine: Boolean = false,
+    ): ByteArray {
         val opts = CcittOptions(
             columns = width, rows = rows, endOfBlock = false,
-            blackIs1 = true, encodedByteAlign = byteAligned, endOfLine = false,
+            blackIs1 = true, encodedByteAlign = byteAligned, endOfLine = endOfLine,
         )
         return CcittFax.decode(comp, k, opts)
     }

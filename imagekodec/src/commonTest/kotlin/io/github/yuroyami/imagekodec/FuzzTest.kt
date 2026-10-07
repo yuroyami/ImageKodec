@@ -83,6 +83,7 @@ class FuzzTest {
         "jpeg-progressive" to hex(JPEG_PROGRESSIVE),
         "jpeg-restart" to restartIntervalJpeg(),
         "tiff-ccitt-g4" to faxTiff(faxBits("001000111010".repeat(4) + "11111111"), 4),
+        "tiff-ccitt-g3" to faxTiff(group3EolStream(true), 3, width = 7, t4Options = 4),
     )
 
     /** Two frames: the default image doubles as frame 0, then a 2 by 2 frame that disposes to background. */

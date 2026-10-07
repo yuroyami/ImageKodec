@@ -56,6 +56,8 @@ reviewable in the diff.
   keeping tile boundaries correct for 8/16-bit and separate-plane images (#93).
 - TIFF applies the photometric tag once to CCITT run colors, fixing inverted
   black and white in Modified Huffman and Group 4 images (#91).
+- Group 3 fax recognizes EOL and fill bits without consuming EOL-free runs;
+  malformed rows and incomplete TIFF fax strips raise decode errors (#92).
 - GIF accepts a missing trailer after a complete frame at a block boundary,
   preserving animation pixels, delays and loop count (#80).
 - Codec origins and licenses are recorded, and the original zlib notices are

@@ -26,7 +26,8 @@ public object CcittFax {
      * falls back to 1D, matching the KitePDF behavior this came from.
      *
      * @throws ImageDecodeException if [CcittOptions.columns] is outside 1 to 2^24, if
-     *   [CcittOptions.rows] is negative, or if the decoded image would pass 2^28 pixels
+     *   [CcittOptions.rows] is negative, the decoded image would pass 2^28 pixels,
+     *   or a 1D row is invalid or incomplete
      */
     @Throws(ImageDecodeException::class)
     public fun decode(input: ByteArray, k: Int, options: CcittOptions): ByteArray {
@@ -54,9 +55,13 @@ internal class BitReader(private val bytes: ByteArray) {
     private var bytePos = 0
     private var bitPos = 0   // 0..7, 0 = MSB
 
-    val bitsConsumed: Int get() = bytePos * 8 + bitPos
+    val bitsConsumed: Long get() = bytePos.toLong() * 8 + bitPos
 
     fun atEnd(): Boolean = bytePos >= bytes.size
+
+    fun hasBits(n: Int): Boolean = n <= (bytes.size.toLong() - bytePos) * 8 - bitPos
+
+    fun onlyBytePadding(): Boolean = bitPos > 0 && bytePos == bytes.lastIndex && peekBits(8 - bitPos) == 0
 
     /** Reposition the reader to a previously-recorded (bytePos, bitPos) pair. */
     fun seek(newBytePos: Int, newBitPos: Int) {
@@ -125,7 +130,7 @@ internal class HuffmanTable private constructor(
     fun decode(reader: BitReader): Int {
         val peek = reader.peekBits(maxLength)
         val len = lenTable[peek]
-        if (len == 0) return -1
+        if (len == 0 || !reader.hasBits(len)) return -1
         reader.skipBits(len)
         return valTable[peek]
     }
@@ -476,9 +481,9 @@ private fun peekAndTry(reader: BitReader, table: HuffmanTable): Int? {
     // SaveState object: this runs many times per scanline on CCITT images.
     val savedBits = reader.bitsConsumed
     val v = table.decode(reader)
-    if (v < 0) {
+    if (v < 0 && v != CcittFaxTables.VALUE_EOL) {
         val delta = reader.bitsConsumed - savedBits
-        if (delta > 0) reader.rewindBits(delta)
+        if (delta > 0) reader.rewindBits(delta.toInt())
         return null
     }
     return v
@@ -662,49 +667,50 @@ internal fun decodeGroup3OneD(reader: BitReader, opts: CcittOptions): ByteArray 
 
     while (true) {
         if (opts.rows > 0 && rowIndex >= opts.rows) break
-        if (reader.atEnd()) break
+        if (reader.atEnd() || (opts.rows == 0 && reader.onlyBytePadding())) break
         if (opts.encodedByteAlign) reader.alignToByte()
-        // Optionally consume a leading EOL.
-        if (opts.endOfLine) {
-            // Skip to next EOL marker (11 zero bits then a 1).
-            consumeOptionalEol(reader)
-        }
+        if (reader.atEnd()) break
+        // An EOL starts with at least eleven zeros; no run code has that prefix.
+        // Accept recognizable T.4 framing even without an EndOfLine hint.
+        if (opts.endOfLine || reader.peekBits(12) <= 1) consumeOptionalEol(reader)
         checkRoomForRow(rowIndex, cols)
         val coding = IntArray(cols)
         var pos = 0
-        var color = 0  // 0 = white
+        var color = 0
         while (pos < cols) {
             val run = decodeRun(reader, color == 0)
-            if (run == Int.MIN_VALUE) break  // EOL (end of line)
-            if (run < 0) {
-                if (pos == 0 && rowIndex >= rows.size) return packAll(rows, bytesPerRow)
-                break
+            if (run == Int.MIN_VALUE && pos == 0 && opts.rows == 0 && opts.endOfBlock) {
+                return packAll(rows, bytesPerRow)
             }
-            val end = minOf(cols, pos + run)
+            if (run < 0) throw ImageDecodeException("CCITT: row $rowIndex ends after $pos of $cols pixels")
+            if (run > cols - pos) throw ImageDecodeException("CCITT: row $rowIndex run exceeds $cols pixels")
+            val end = pos + run
             fillRange(coding, pos, end, color)
             pos = end
             color = 1 - color
         }
-        if (pos == 0 && reader.atEnd()) break
         rows += packRow(coding, cols, bytesPerRow, opts.blackIs1)
         rowIndex++
+    }
+    if (opts.rows > 0 && rowIndex != opts.rows) {
+        throw ImageDecodeException("CCITT: decoded $rowIndex of ${opts.rows} rows")
     }
     return packAll(rows, bytesPerRow)
 }
 
-private fun consumeOptionalEol(reader: BitReader) {
-    // Find an EOL (12-bit code 0000_0000_0001) within the next ~64 bits.
-    var seenZeros = 0
+private fun consumeOptionalEol(reader: BitReader): Boolean {
     var probed = 0
     while (probed < 64 && !reader.atEnd()) {
-        val b = reader.readBit()
+        val bit = reader.readBit()
         probed++
-        if (b == 0) seenZeros++
-        else {
-            if (seenZeros >= 11) return  // consumed EOL
-            seenZeros = 0
+        if (bit != 0) {
+            if (probed >= 12) return true
+            reader.rewindBits(probed)
+            return false
         }
     }
+    reader.rewindBits(probed)
+    return false
 }
 
 /* ─── Output packing ──────────────────────────────────────────────────────── */
@@ -739,8 +745,8 @@ internal fun BitReader.rewindBits(n: Int) {
     rewindTo(target)
 }
 
-internal fun BitReader.rewindTo(targetBits: Int) {
-    val bp = targetBits / 8
-    val bb = targetBits % 8
+internal fun BitReader.rewindTo(targetBits: Long) {
+    val bp = (targetBits / 8).toInt()
+    val bb = (targetBits % 8).toInt()
     seek(bp, bb)
 }
