@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 
 
@@ -19,7 +20,7 @@ import io.github.yuroyami.imagekodec.internal.Budget
  * Huffman, with symbol refinement), pattern dictionary (6.7), halftone
  * regions (6.6), the standard Huffman tables B.1-B.15 and custom code table
  * segments (7.4.13). NOT handled: Huffman symbol dicts with refinement, and
- * multi-instance aggregate coding, which emit blank symbols. Values here
+ * multi-instance aggregate coding, which cause decode to return null. Values here
  * follow the T.88 reference tables.
  */
 public object Jbig2Decoder {
@@ -646,7 +647,7 @@ public object Jbig2Decoder {
             for (ref in s.refs) symbolsBySegment[ref]?.let { input.addAll(it) }
 
             if (huff == 1) {
-                if (refAgg == 1) return emptyList() // Huffman + refinement dicts unsupported
+                if (refAgg == 1) throw UnsupportedImageException("JBIG2: Huffman refinement dictionaries are not supported")
                 return decodeSymbolDictHuffman(s, r, flags, input, numExSyms, numNewSyms)
             }
 
@@ -694,8 +695,7 @@ public object Jbig2Decoder {
                                 ),
                             )
                         } else {
-                            // Multi-instance aggregate coding: rare; emit a blank symbol to keep indices sane.
-                            newSyms.add(Bitmap(maxOf(1, symWidth), maxOf(1, hcHeight)))
+                            throw UnsupportedImageException("JBIG2: multi-instance symbol aggregation is not supported")
                         }
                     }
                 }
@@ -1025,7 +1025,9 @@ public object Jbig2Decoder {
                 val refs = LongArray(count) { when (refSize) { 1 -> r.u8().toLong(); 2 -> r.u16().toLong(); else -> r.u32() } }
                 val pageAssoc = if (pageAssocSize == 4) r.u32() else r.u8().toLong()
                 val dataLen = r.u32()
-                if (dataLen == 0xFFFFFFFFL) break // unknown-length generic region: unsupported
+                if (dataLen == 0xFFFFFFFFL) {
+                    throw UnsupportedImageException("JBIG2: unknown-length segments are not supported")
+                }
                 val start = r.pos
                 // Long: a length of 0xFFFFFFF5 is -11 as an Int, which put the cursor back on this header
                 // and made the walk parse it forever. In Long, end is never before start.

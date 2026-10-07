@@ -42,6 +42,8 @@ TIFF ReferenceBlackWhite follows TIFF 6.0 sections 20/21. The review consulted l
 
 CCITT Group 4 reference-run caching was reviewed against libtiff's [tif_fax3.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_fax3.c), under its permissive Sam Leffler / Silicon Graphics license; no source is vendored. The implementation keeps separate next-change pairs for each coding color with constant extra storage. `CcittReferenceTest` checks hand-built horizontal, vertical and pass modes; `CcittReferenceOracleTest` compares varied ImageIO-written Group 4 pages with libtiff.
 
+The JBIG2 multi-instance refusal fixture uses an independently encoded integer prefix from jbig2enc's [Apache-2.0 arithmetic encoder](https://github.com/agl/jbig2enc/blob/d0dfca46216c98f11312a9c9f15615ed490cd7b3/src/jbig2arith.cc): initialize, encode IADH=1, IADW=1, IAAI=2, finalize. Its four-byte output is checked in `Jbig2UnsupportedTest`; unsupported content is refused before consuming the aggregate body. No encoder source is vendored.
+
 ## Adapted code from the Kite libraries
 
 | Implementation | Origin and format reference | Code license |

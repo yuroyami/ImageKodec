@@ -35,6 +35,8 @@ reviewable in the diff.
 
 ### Fixed
 
+- JBIG2 returns null for unsupported unknown-length segments, Huffman refinement
+  dictionaries and multi-instance aggregates, preventing partial pages (#89).
 - Malformed JBIG2 symbol dictionaries end decoding instead of emitting blank
   symbols (#40).
 - TIFF/EXIF probe offsets are checked without overflowing (#66), and optional
