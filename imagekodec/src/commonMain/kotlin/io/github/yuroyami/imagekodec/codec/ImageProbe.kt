@@ -29,12 +29,6 @@ import io.github.yuroyami.imagekodec.internal.ByteReader
  */
 internal object ImageProbe {
 
-    /**
-     * JpxDecoder's own output ceiling. It is the one codec that does not go
-     * through the shared input-relative budget, and its limit is lower.
-     */
-    private const val MAX_JP2_PIXELS = 64L shl 20
-
     fun probe(data: ByteArray): ImageInfo = when (ImageFormat.sniff(data)) {
         ImageFormat.PNG -> png(data)
         ImageFormat.JPEG -> jpeg(data)
@@ -528,9 +522,7 @@ internal object ImageProbe {
      */
     private fun jp2Unsupported(data: ByteArray, siz: Int, comps: Int, w: Int, h: Int): String? {
         if (comps !in 1..16) return "JPEG 2000 with $comps components (1 to 16 are decodable)"
-        if (w.toLong() * h > MAX_JP2_PIXELS) {
-            return "JPEG 2000 larger than ${MAX_JP2_PIXELS shr 20} megapixels"
-        }
+        Jp2Limits.sizeRefusal(w, h, data.size)?.let { return it }
         // Per-component Ssiz/XRsiz/YRsiz triples follow Csiz.
         for (c in 0 until comps) {
             val at = siz + 38 + c * 3

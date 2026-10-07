@@ -1,6 +1,5 @@
 package io.github.yuroyami.imagekodec.codec
 
-import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import kotlin.math.max
@@ -456,8 +455,8 @@ public object JpxDecoder {
         val imgW = s.xsiz - s.xosiz
         val imgH = s.ysiz - s.yosiz
         if (imgW <= 0 || imgH <= 0) r.fail("SIZ has invalid image dimensions ${imgW}x$imgH")
-        if (imgW.toLong() * imgH > 64L shl 20 || !Budget.fits(imgW, imgH, data.size)) {
-            r.fail("SIZ image ${imgW}x$imgH exceeds safety limits")
+        Jp2Limits.sizeRefusal(imgW, imgH, data.size)?.let {
+            throw ImageDecodeException("$it at byte ${r.pos}")
         }
 
         // Drop at most the levels that every coding style in the file has (A.6.1 picks one of these

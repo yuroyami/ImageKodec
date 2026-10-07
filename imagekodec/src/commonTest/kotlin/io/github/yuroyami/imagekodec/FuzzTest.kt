@@ -104,6 +104,7 @@ class FuzzTest {
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
         "jp2-short-cod" to jp2ShortCodSeed(),
+        "jp2-oversize-siz" to jp2OversizeSeed(),
     )
 
     private fun corpus(): List<Pair<String, ByteArray>> = validCorpus() + malformedCorpus()

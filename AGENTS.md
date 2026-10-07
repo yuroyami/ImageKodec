@@ -16,9 +16,6 @@ being true.
 - Ubuntu's ImageMagick is version 6, which has no `magick` command, only
   `convert`. `Tools.find("magick")` falls back to it; before it did, the TIFF
   oracle suite skipped on every Ubuntu machine, CI included (#14).
-- The JPEG 2000 probe does not check the shared `Budget` guard that the decoder
-  checks, and both keep their own pixel ceiling, so the probe can call a file
-  decodable that the decoder refuses (#2).
 - A format with no file in the `FuzzTest` corpus is not fuzzed at all. JPEG 2000
   had none, so a packet header cut off by the end of the data looped forever and
   no test noticed.

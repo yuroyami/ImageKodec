@@ -48,6 +48,10 @@ reviewable in the diff.
 
 ### Fixed
 
+- JPEG 2000 probe and decode share the input-relative pixel budget and its
+  2^28-pixel absolute ceiling. The probe names the same size refusal as decode;
+  the separate 64-megapixel constants are removed (#2).
+
 - JPEG 2000 header failures name the missing marker, malformed field or
   truncated segment and its byte position. Unsupported markers and code-block
   styles use typed refusals. Segment readers stay inside their declared bounds;

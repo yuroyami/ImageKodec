@@ -348,8 +348,8 @@ web project that runs under Node should not use them.
   seven formats. Its check stops at the first tile-part and does not range-check
   the COD and QCD parameters. A per-tile coding-style override, or an
   out-of-range decomposition count, is therefore only found at decode.
-- **Output limits depend on the format.** PNG, JPEG, GIF, BMP, TIFF and WebP
-  cap output at 2^28 pixels (about 1 GiB of ARGB); JPEG 2000 caps it at 2^26.
+- **Output limits use a shared ceiling.** All image decoders cap output at
+  2^28 pixels (about 1 GiB of ARGB).
   WebP, fax-compressed TIFF, `CcittFax` and `Jbig2Decoder` use that absolute
   ceiling without an input-size ratio: constant VP8L pixels and fax reference
   rows can take no entropy bits or one bit per row. WebP animation frames
@@ -357,9 +357,9 @@ web project that runs under Node should not use them.
   bound of 4096 pixels per input byte, scaled by eight divided by the stored
   bits per pixel for PNG/TIFF pixels smaller than a byte. Those guards can still refuse unusually
   compressed files; PNG/GIF animations also count their full composited canvases
-  against the input-relative limit. JPEG 2000 applies its input-relative limit
-  at decode, while `probe` checks only its pixel ceiling. The ceiling bounds
-  output size; it does not guarantee that a device has enough free memory.
+  against the input-relative limit. JPEG 2000 probe and decode share the same
+  size decision. The ceiling bounds output size; it does not guarantee that a
+  device has enough free memory.
 - `probe` reads EXIF orientation from JPEG and TIFF files and reports it.
   `decode` only applies it when you pass `applyOrientation = true`. The Compose
   binding applies it for you.
