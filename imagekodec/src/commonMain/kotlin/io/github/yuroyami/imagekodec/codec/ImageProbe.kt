@@ -343,6 +343,7 @@ internal object ImageProbe {
         var photometric = -1
         var predictor = 1
         var t4Options = 0
+        var sampleFormats: IntArray? = null
 
         for (i in 0 until count) {
             val at = ifd + 2 + i * 12
@@ -386,11 +387,25 @@ internal object ImageProbe {
                 292 -> t4Options = single() ?: t4Options
                 317 -> predictor = single() ?: predictor
                 338 -> extraSamples = if (n >= 1) 1 else 0
+                339 -> {
+                    if (type != 3 || n !in 1..16) {
+                        throw ImageDecodeException("TIFF: SampleFormat requires SHORT values for 1 to 16 samples")
+                    }
+                    val base = if (n <= 2) at + 8 else u32(at + 8)
+                    if (base < 0 || base > data.size - n * 2) {
+                        throw ImageDecodeException("TIFF: truncated SampleFormat values")
+                    }
+                    sampleFormats = IntArray(n) { u16(base + it * 2) }
+                }
             }
         }
 
         val alpha = extraSamples > 0 || spp == 2 || spp == 4
-        val reason = tiffUnsupported(bits, compression, photometric, predictor, t4Options)
+        if (sampleFormats != null && sampleFormats.size != spp) {
+            throw ImageDecodeException("TIFF: SampleFormat requires $spp values, got ${sampleFormats.size}")
+        }
+        val sampleFormat = sampleFormats?.firstOrNull { it != 1 && it != 4 } ?: 1
+        val reason = tiffUnsupported(bits, compression, photometric, predictor, t4Options, sampleFormat)
         return ImageInfo(
             format = ImageFormat.TIFF,
             width = width,
@@ -416,9 +431,11 @@ internal object ImageProbe {
         photometric: Int,
         predictor: Int,
         t4Options: Int,
+        sampleFormat: Int,
     ): String? = when {
         bits !in intArrayOf(1, 2, 4, 8, 16) ->
             "TIFF with $bits bits per sample (1, 2, 4, 8 and 16 are decodable)"
+        sampleFormat != 1 -> "TIFF SampleFormat $sampleFormat (unsigned integer samples only)"
         photometric == 6 && bits != 8 -> "TIFF YCbCr with $bits-bit samples (8-bit only)"
         compression !in intArrayOf(1, 2, 3, 4, 5, 8, 32773, 32946) ->
             "TIFF compression $compression" + if (compression == 6 || compression == 7) " (JPEG-in-TIFF)" else ""

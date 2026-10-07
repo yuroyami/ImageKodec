@@ -25,6 +25,7 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    everywhere else in ImageKodec), horizontal-differencing predictor (2) for
  *    both 8- and 16-bit samples
  *  - **both planar configurations**: chunky (1) and separate planes (2)
+ *  - unsigned integer samples; undefined SampleFormat follows the unsigned default
  *
  * What is left out is named at the point of failure: JPEG-in-TIFF (compression 6
  * and 7) is a container trick rather than a TIFF encoding, and floating-point
@@ -155,6 +156,13 @@ internal object TiffDecoder {
             throw UnsupportedImageException("TIFF: $bits bits per sample is not supported (1, 2, 4, 8 or 16)")
         }
         if (bits == 1 && spp != 1 && photometric != 6) err("1-bit with $spp samples")
+
+        // TIFF 6.0 section 19 treats undefined samples like absent SampleFormat:
+        // unsigned integers. Signed and floating samples need another sample path.
+        val sampleFormats = optionalValues(339, "SampleFormat", 3, spp.toLong()) ?: longArrayOf(1)
+        sampleFormats.firstOrNull { it != 1L && it != 4L }?.let {
+            throw UnsupportedImageException("TIFF: SampleFormat $it is not supported (unsigned integer samples only)")
+        }
 
         // Chroma subsampling only exists for YCbCr; everything else is 1:1.
         val subSampling = if (photometric == 6) {

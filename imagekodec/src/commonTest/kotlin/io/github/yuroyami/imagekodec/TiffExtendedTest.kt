@@ -22,6 +22,77 @@ import kotlin.test.assertTrue
 class TiffExtendedTest {
 
     @Test
+    fun unsupportedSampleFormatsAreTypedRefusals() {
+        for (format in listOf(2, 3, 5, 6, 65535)) {
+            val stored = if (format == 3) intArrayOf(0, 0x3400, 0x3800, 0x3C00)
+                else intArrayOf(0x8000, 0xC000, 0, 0x7FFF)
+            val bytes = sampleFormatTiff(intArrayOf(format), stored = stored)
+            val info = ImageKodec.probe(bytes)
+            assertFalse(info.isDecodable)
+            assertTrue("SampleFormat $format" in info.unsupportedReason.orEmpty())
+            for (decode in listOf<() -> Unit>(
+                { ImageKodec.decode(bytes) }, { ImageKodec.decodeReduced(bytes, 2) },
+                { ImageKodec.decodeAnimation(bytes) },
+            )) {
+                val error = assertFailsWith<UnsupportedImageException> { decode() }
+                assertTrue("SampleFormat $format" in error.message.orEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun aNonFirstSampleFormatIsRefused() {
+        for (formats in listOf(intArrayOf(1, 1, 3), intArrayOf(1, 2, 1), intArrayOf(1, 1, 1, 3))) {
+            val bytes = sampleFormatTiff(formats, samples = formats.size)
+            assertFalse(ImageKodec.probe(bytes).isDecodable)
+            assertFailsWith<UnsupportedImageException> { ImageKodec.decode(bytes) }
+        }
+    }
+
+    @Test
+    fun unsignedAndUndefinedSampleFormatsKeepTheirPixels() {
+        for (samples in listOf(1, 3, 4)) {
+            val baseline = ImageKodec.decode(sampleFormatTiff(samples = samples))
+            for (format in listOf(1, 4)) {
+                val bytes = sampleFormatTiff(IntArray(samples) { format }, samples = samples)
+                assertTrue(ImageKodec.probe(bytes).isDecodable)
+                val bitmap = ImageKodec.decode(bytes)
+                for (i in bitmap.argb.indices) assertEquals(baseline.argb[i], bitmap.argb[i])
+            }
+        }
+    }
+
+    @Test
+    fun malformedSampleFormatsAreDecodeFaults() {
+        for (bytes in listOf(
+            sampleFormatTiff(intArrayOf(1), type = 1), sampleFormatTiff(intArrayOf(1), type = 4),
+            sampleFormatTiff(intArrayOf()), sampleFormatTiff(intArrayOf(1, 1)),
+            sampleFormatTiff(intArrayOf(1), samples = 3),
+        )) {
+            assertFailsWith<ImageDecodeException> { ImageKodec.decode(bytes) }
+            assertFailsWith<ImageDecodeException> { ImageKodec.probe(bytes) }
+        }
+    }
+
+    internal fun sampleFormatTiff(
+        formats: IntArray? = null,
+        samples: Int = 1,
+        type: Int = 3,
+        stored: IntArray = intArrayOf(0x8000, 0xC000, 0, 0x7FFF),
+    ): ByteArray {
+        val raw = ByteArray(4 * samples * 2) {
+            (stored[(it / 2) / samples] ushr (8 * (it % 2))).toByte()
+        }
+        val fields = mutableListOf(
+            long(256, 4), long(257, 1), Field(258, 3, LongArray(samples) { 16 }),
+            short(259, 1), short(262, if (samples >= 3) 2 else 1), short(277, samples),
+            short(284, 1), long(273, 0), long(278, 1), long(279, raw.size),
+        )
+        if (formats != null) fields.add(Field(339, type, LongArray(formats.size) { formats[it].toLong() }))
+        return tiff(fields, raw)
+    }
+
+    @Test
     fun deflateStripBoundariesAndInvalidCodesUseTheSameContract() {
         fun deflateTiff(width: Int, height: Int, compressed: ByteArray): ByteArray = tiff(
             listOf(long(256, width), long(257, height), short(258, 8), short(259, 8),

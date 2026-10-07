@@ -4,11 +4,13 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
+import javax.imageio.plugins.tiff.TIFFDirectory
 import org.junit.Assume.assumeTrue
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -90,6 +92,30 @@ class TiffOracleTest {
             "magick failed",
         )
         return out
+    }
+
+    @Test
+    fun imageMagickSampleFormatsHaveMatchingProbeAndDecodeRefusals() {
+        assumeTrue("TIFF tools not installed", tools())
+        for ((kind, format) in listOf("signed" to 2, "floating-point" to 3)) {
+            for (endian in listOf("LSB", "MSB")) {
+                val file = temp("sample-format-$format-$endian", ".tif")
+                assertEquals(0, run(magick.path, sourcePng().path, "-type", "TrueColor", "-depth", "16",
+                    "-define", "quantum:format=$kind", "-endian", endian, "-compress", "none", file.path))
+                val reader = ImageIO.getImageReadersByFormatName("TIFF").next()
+                ImageIO.createImageInputStream(file).use { input ->
+                    reader.input = input
+                    val directory = TIFFDirectory.createFromMetadata(reader.getImageMetadata(0))
+                    val field = assertNotNull(directory.getTIFFField(339))
+                    assertEquals(3, field.count)
+                    for (i in 0 until field.count) assertEquals(format, field.getAsInt(i))
+                }
+                reader.dispose()
+                val bytes = file.readBytes()
+                assertFalse(ImageKodec.probe(bytes).isDecodable)
+                assertFailsWith<UnsupportedImageException> { ImageKodec.decode(bytes) }
+            }
+        }
     }
 
     @Test
