@@ -139,11 +139,37 @@ class TiffOracleTest {
         }
     }
 
+    /** The version `tiff2rgba` prints in its usage text, such as 4.5.1, as one comparable number. */
+    private fun libtiffVersion(): Int {
+        val proc = ProcessBuilder(Tools.require("tiff2rgba").path).redirectErrorStream(true).start()
+        val text = proc.inputStream.readBytes().decodeToString()
+        proc.waitFor(120, TimeUnit.SECONDS)
+        val (major, minor, patch) = assertNotNull(Regex("""LIBTIFF, Version (\d+)\.(\d+)\.(\d+)""").find(text), text).destructured
+        return major.toInt() * 10000 + minor.toInt() * 100 + patch.toInt()
+    }
+
     @Test
     fun subsampledYcbcrTilesMatchLibtiff() {
         assumeTrue("TIFF tools not installed", tools())
         assumeTrue("tiff2rgba not installed", Tools.hasAll("tiff2rgba"))
-        for ((h, v) in listOf(2 to 1, 2 to 2, 4 to 1, 4 to 2, 4 to 4)) {
+        compareYcbcrTiles(listOf(2 to 1, 2 to 2, 4 to 1, 4 to 2))
+    }
+
+    /**
+     * libtiff before 4.7.2 skips the clipped part of a 4:4 tile by the group size of 4:2
+     * (`putcontig8bitYCbCr44tile`, fixed in libtiff a4e78184), so its later rows read luma as
+     * chroma. `TiffExtendedTest` checks 4:4 against the fixture's own values on every version (#104).
+     */
+    @Test
+    fun fourByFourYcbcrTilesMatchLibtiff() {
+        assumeTrue("TIFF tools not installed", tools())
+        assumeTrue("tiff2rgba not installed", Tools.hasAll("tiff2rgba"))
+        assumeTrue("libtiff before 4.7.2 misreads clipped 4:4 tiles", libtiffVersion() >= 40702)
+        compareYcbcrTiles(listOf(4 to 4))
+    }
+
+    private fun compareYcbcrTiles(sampling: List<Pair<Int, Int>>) {
+        for ((h, v) in sampling) {
             val input = temp("ycbcr-$h-$v", ".tif")
             val decoded = temp("ycbcr-$h-$v", ".tif")
             input.writeBytes(TiffExtendedTest().tiledYcbcr(h, v))

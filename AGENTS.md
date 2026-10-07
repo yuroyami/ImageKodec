@@ -30,5 +30,7 @@ being true.
 - jbig2enc's symbol mode moves some glyphs by a pixel, with no pattern to derive.
   jbig2dec decodes the same moved page, so symbol-mode tests compare against
   jbig2dec, not against the source page (#40).
+- libtiff before 4.7.2, Ubuntu 24.04's included, reads a clipped 4:4 YCbCr tile
+  wrong in `tiff2rgba`, so that oracle case skips on older versions (#104).
 - `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh
   clone, because `kotlin-js-store/` is ignored and yarn has no lockfile to work from.
