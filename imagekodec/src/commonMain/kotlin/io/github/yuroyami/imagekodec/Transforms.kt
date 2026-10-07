@@ -161,6 +161,18 @@ public fun KiteAnimation.rotated180(): KiteAnimation = mapFrames { it.rotated180
 /** [rotated270] applied to every frame. */
 public fun KiteAnimation.rotated270(): KiteAnimation = mapFrames { it.rotated270() }
 
+/** [flippedHorizontal] applied to every frame. */
+public fun KiteAnimation.flippedHorizontal(): KiteAnimation = mapFrames { it.flippedHorizontal() }
+
+/** [flippedVertical] applied to every frame. */
+public fun KiteAnimation.flippedVertical(): KiteAnimation = mapFrames { it.flippedVertical() }
+
+/** [transposed] applied to every frame. */
+public fun KiteAnimation.transposed(): KiteAnimation = mapFrames { it.transposed() }
+
+/** [transversed] applied to every frame. */
+public fun KiteAnimation.transversed(): KiteAnimation = mapFrames { it.transversed() }
+
 private inline fun KiteAnimation.mapFrames(transform: (KiteBitmap) -> KiteBitmap): KiteAnimation {
     val mapped = frames.map { f ->
         KiteFrame(transform(f.bitmap), f.delayMillis, f.delayRawCentiseconds)

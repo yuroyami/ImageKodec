@@ -12,6 +12,12 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+### Added
+
+- Animation-wide `flippedHorizontal`, `flippedVertical`, `transposed` and
+  `transversed` helpers, matching the bitmap geometry API and preserving every
+  frame's timing and the play count (#15).
+
 ### Changed
 
 - `KiteAnimation.loopCount` and `ImageInfo.loopCount` are now `Long`, preserving

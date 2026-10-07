@@ -118,7 +118,9 @@ public final class io/github/yuroyami/imagekodec/ScalingKt {
 public final class io/github/yuroyami/imagekodec/TransformsKt {
 	public static final fun cropped (Lio/github/yuroyami/imagekodec/KiteAnimation;IIII)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun cropped (Lio/github/yuroyami/imagekodec/KiteBitmap;IIII)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static final fun flippedHorizontal (Lio/github/yuroyami/imagekodec/KiteAnimation;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun flippedHorizontal (Lio/github/yuroyami/imagekodec/KiteBitmap;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static final fun flippedVertical (Lio/github/yuroyami/imagekodec/KiteAnimation;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun flippedVertical (Lio/github/yuroyami/imagekodec/KiteBitmap;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static final fun oriented (Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/Orientation;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun oriented (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/Orientation;)Lio/github/yuroyami/imagekodec/KiteBitmap;
@@ -128,7 +130,9 @@ public final class io/github/yuroyami/imagekodec/TransformsKt {
 	public static final fun rotated270 (Lio/github/yuroyami/imagekodec/KiteBitmap;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static final fun rotated90 (Lio/github/yuroyami/imagekodec/KiteAnimation;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun rotated90 (Lio/github/yuroyami/imagekodec/KiteBitmap;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static final fun transposed (Lio/github/yuroyami/imagekodec/KiteAnimation;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun transposed (Lio/github/yuroyami/imagekodec/KiteBitmap;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static final fun transversed (Lio/github/yuroyami/imagekodec/KiteAnimation;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun transversed (Lio/github/yuroyami/imagekodec/KiteBitmap;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 }
 

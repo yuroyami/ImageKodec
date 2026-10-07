@@ -219,9 +219,9 @@ until its last scan. A JPEG 2000 image drops its finest wavelet levels, as
 OpenJPEG's reduce option does. Other formats decode in full, then average each
 block of pixels.
 
-`oriented`, `cropped`, `scaled` and the three rotations also exist for a whole
-`KiteAnimation`. `cropped` throws `IllegalArgumentException` when the rectangle
-extends outside the image. It does not clamp the rectangle.
+All these geometry helpers also work on a whole `KiteAnimation`, preserving
+frame delays and the play count. `cropped` throws `IllegalArgumentException`
+when the rectangle extends outside the image. It does not clamp the rectangle.
 
 ### Show an image in Compose
 
