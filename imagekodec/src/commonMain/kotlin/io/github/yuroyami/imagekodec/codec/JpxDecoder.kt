@@ -81,58 +81,13 @@ public object JpxDecoder {
 
     private class Jp2Info(
         val codestream: ByteArray,
-        /** Channel definitions: component index -> channel type (0 colour, 1 opacity). */
-        val channelTypes: Map<Int, Int>,
+        /** What the JP2 header says the components mean; none of it for a raw codestream. */
+        val boxes: Jp2Color.Boxes,
     )
 
     private fun parseContainer(data: ByteArray): Jp2Info {
-        // Raw codestream: starts with the SOC marker.
-        if (data.size >= 2 && (data[0].toInt() and 0xFF) == 0xFF && (data[1].toInt() and 0xFF) == 0x4F) {
-            return Jp2Info(data, emptyMap())
-        }
-        val pos = 0
-        var codestream: ByteArray? = null
-        val channelTypes = HashMap<Int, Int>()
-
-        fun walk(start: Int, end: Int) {
-            var p = start
-            while (p + 8 <= end) {
-                var len = u32(data, p)
-                val type = u32(data, p + 4)
-                var body = p + 8
-                if (len == 1L) { // 64-bit extended length
-                    if (p + 16 > end) return
-                    len = (u32(data, p + 8) shl 32) or u32(data, p + 12)
-                    body = p + 16
-                }
-                val boxEnd = if (len == 0L) end else (p + len).toInt().coerceAtMost(end)
-                if (boxEnd < body) return
-                when (type) {
-                    0x6A703263L -> if (codestream == null) codestream = data.copyOfRange(body, boxEnd) // jp2c
-                    0x6A703268L -> walk(body, boxEnd) // jp2h superbox
-                    0x63646566L -> { // cdef
-                        if (body + 2 <= boxEnd) {
-                            val n = ((data[body].toInt() and 0xFF) shl 8) or (data[body + 1].toInt() and 0xFF)
-                            var q = body + 2
-                            repeat(n) {
-                                if (q + 6 <= boxEnd) {
-                                    val cn = ((data[q].toInt() and 0xFF) shl 8) or (data[q + 1].toInt() and 0xFF)
-                                    val typ = ((data[q + 2].toInt() and 0xFF) shl 8) or (data[q + 3].toInt() and 0xFF)
-                                    channelTypes[cn] = typ
-                                }
-                                q += 6
-                            }
-                        }
-                    }
-                    else -> {}
-                }
-                if (len == 0L) break
-                p = boxEnd
-            }
-        }
-        walk(pos, data.size)
-        val cs = codestream ?: throw IllegalStateException("no jp2c codestream box")
-        return Jp2Info(cs, channelTypes)
+        val boxes = Jp2Color.parse(data) ?: throw IllegalStateException("no jp2c codestream box")
+        return Jp2Info(data.copyOfRange(boxes.codestreamStart, boxes.codestreamEnd), boxes)
     }
 
     // ---- codestream headers --------------------------------------------------
@@ -457,7 +412,7 @@ public object JpxDecoder {
 
         // Assemble output: gray or RGB, plus optional cdef opacity channel. A reduced image takes
         // the rounded-up size; sampling clamps to the plane, so an offset grid repeats its edge.
-        val out = assemble(s, jp2, cod0.mct == 1, planes, planeW, planeH, ceilShift(imgW, drop), ceilShift(imgH, drop))
+        val out = assemble(s, jp2, planes, planeW, planeH, ceilShift(imgW, drop), ceilShift(imgH, drop))
         return if (drop < levels) out.averaged(1 shl (levels - drop)) else out
     }
 
@@ -1387,30 +1342,34 @@ public object JpxDecoder {
     private val ICT_GV = (0.71414 * 65536).roundToLong()
     private val ICT_BU = (1.772 * 65536).roundToLong()
 
+    /**
+     * The result in 8-bit samples: the components through the JP2 header's palette, channel
+     * definitions and colour space (Annex I.5.3), as [Jp2Color.plan] lays them out, converted to
+     * gray or RGB, with an opacity channel as the alpha plane.
+     */
     private fun assemble(
-        s: Siz, jp2: Jp2Info, mct: Boolean,
+        s: Siz, jp2: Jp2Info,
         planes: Array<IntArray>, planeW: IntArray, planeH: IntArray,
         imgW: Int, imgH: Int,
     ): Result {
-        // Colour channel count: 1 = gray, >= 3 = RGB. A cdef opacity channel
-        // (type 1) beyond the colour channels becomes the alpha plane.
-        var alphaComp = -1
-        for ((cn, typ) in jp2.channelTypes) {
-            if (typ == 1 && cn < s.comps) alphaComp = cn
-        }
-        val colorComps = when {
-            s.comps >= 3 && (alphaComp == -1 || alphaComp >= 3) -> 3
-            else -> 1
-        }
+        val plan = Jp2Color.plan(jp2.boxes, s.comps)
+        val palette = jp2.boxes.palette
 
-        fun sample(c: Int, x: Int, y: Int): Int {
-            val sx = x / s.dx[c]
-            val sy = y / s.dy[c]
+        // A component's display sample at image position (x, y): sampling clamps to the plane, so a
+        // subsampled or offset grid repeats its edge.
+        fun component(c: Int, x: Int, y: Int): Int {
             val cw = planeW[c]; val ch = planeH[c]
-            val cx = sx.coerceIn(0, cw - 1)
-            val cy = sy.coerceIn(0, ch - 1)
+            val cx = (x / s.dx[c]).coerceIn(0, cw - 1)
+            val cy = (y / s.dy[c]).coerceIn(0, ch - 1)
             return planes[c][cy * cw + cx]
         }
+        fun value(ch: Jp2Color.Channel, x: Int, y: Int): Int {
+            val v = component(ch.component, x, y)
+            if (ch.column < 0) return v
+            // Indices past the palette clamp to it, as OpenJPEG's opj_jp2_apply_pclr clamps them.
+            return palette!!.values[ch.column][v.coerceIn(0, palette.entries - 1)]
+        }
+        fun precision(ch: Jp2Color.Channel): Int = if (ch.column < 0) s.prec[ch.component] else palette!!.depth[ch.column]
 
         fun to8(v: Int, prec: Int): Int = when {
             prec == 8 -> v
@@ -1418,24 +1377,93 @@ public object JpxDecoder {
             else -> v * 255 / ((1 shl prec) - 1)
         }.coerceIn(0, 255)
 
-        val out = ByteArray(imgW * imgH * colorComps)
+        val colors = plan.colors
+        val precs = IntArray(colors.size) { precision(colors[it]) }
+        val n = if (plan.space == Jp2Color.Space.GRAY) 1 else 3
+        val out = ByteArray(imgW * imgH * n)
+        val samples = IntArray(colors.size)
+        val rgb = IntArray(3)
         for (y in 0 until imgH) for (x in 0 until imgW) {
-            for (c in 0 until colorComps) {
-                val v = to8(sample(c, x, y), s.prec[c])
-                out[(y * imgW + x) * colorComps + c] = v.toByte()
+            for (k in colors.indices) samples[k] = value(colors[k], x, y)
+            val o = (y * imgW + x) * n
+            when (plan.space) {
+                Jp2Color.Space.GRAY -> out[o] = to8(samples[0], precs[0]).toByte()
+                Jp2Color.Space.RGB -> for (k in 0 until 3) out[o + k] = to8(samples[k], precs[k]).toByte()
+                Jp2Color.Space.SYCC -> {
+                    syccToRgb(samples[0], samples[1], samples[2], precs[0], rgb)
+                    for (k in 0 until 3) out[o + k] = to8(rgb[k], precs[0]).toByte()
+                }
+                Jp2Color.Space.ESYCC -> {
+                    esyccToRgb(samples[0], samples[1], samples[2], precs[0], rgb)
+                    for (k in 0 until 3) out[o + k] = to8(rgb[k], precs[0]).toByte()
+                }
+                Jp2Color.Space.CMYK -> {
+                    // OpenJPEG's color_cmyk_to_rgb: each ink's share left uncovered, times the black's,
+                    // truncated to 8 bits.
+                    val kMax = (1L shl precs[3]) - 1
+                    val k = kMax - samples[3]
+                    for (c in 0 until 3) {
+                        val max = (1L shl precs[c]) - 1
+                        out[o + c] = (255L * (max - samples[c]) * k / (max * kMax)).toInt().coerceIn(0, 255).toByte()
+                    }
+                }
+                Jp2Color.Space.CMY -> for (k in 0 until 3) out[o + k] = to8(((1 shl precs[k]) - 1) - samples[k], precs[k]).toByte()
             }
         }
-        val alpha = if (alphaComp >= 0) {
+        val alphaChannel = plan.alpha
+        val alpha = if (alphaChannel != null) {
+            val p = precision(alphaChannel)
             ByteArray(imgW * imgH).also { ab ->
-                for (y in 0 until imgH) for (x in 0 until imgW) {
-                    ab[y * imgW + x] = to8(sample(alphaComp, x, y), s.prec[alphaComp]).toByte()
-                }
+                for (y in 0 until imgH) for (x in 0 until imgW) ab[y * imgW + x] = to8(value(alphaChannel, x, y), p).toByte()
             }
         } else null
-        return Result(
-            imgW, imgH,
-            if (colorComps == 3) "DeviceRGB" else "DeviceGray",
-            out, alpha,
-        )
+        if (alpha != null && plan.premultiplied) {
+            // Premultiplied opacity (cdef type 2): the result holds straight alpha, so divide it out.
+            for (i in 0 until imgW * imgH) {
+                val a = alpha[i].toInt() and 0xFF
+                for (k in 0 until n) {
+                    val c = out[i * n + k].toInt() and 0xFF
+                    out[i * n + k] = (if (a == 0) 0 else minOf(255, (c * 255 + a / 2) / a)).toByte()
+                }
+            }
+        }
+        return Result(imgW, imgH, if (n == 3) "DeviceRGB" else "DeviceGray", out, alpha)
+    }
+
+    // T.800-family YCC conversions with OpenJPEG's color.c factors, in fixed point: each product in
+    // 1/2^20ths, truncated toward zero where OpenJPEG casts a double to int.
+    private fun fix(v: Double): Long = kotlin.math.round(v * (1 shl 20)).toLong()
+    private val SYCC_RV = fix(1.402)
+    private val SYCC_GU = fix(0.344)
+    private val SYCC_GV = fix(0.714)
+    private val SYCC_BU = fix(1.772)
+
+    /** sYCC (enumerated 18) to RGB, as OpenJPEG's sycc_to_rgb: chroma centred on 2^(prec - 1), each product truncated. */
+    private fun syccToRgb(y: Int, cb: Int, cr: Int, prec: Int, out: IntArray) {
+        val offset = 1 shl (prec - 1)
+        val max = (1 shl prec) - 1
+        val u = (cb - offset).toLong()
+        val v = (cr - offset).toLong()
+        out[0] = (y + SYCC_RV * v / (1 shl 20)).toInt().coerceIn(0, max)
+        out[1] = (y - (SYCC_GU * u + SYCC_GV * v) / (1 shl 20)).toInt().coerceIn(0, max)
+        out[2] = (y + SYCC_BU * u / (1 shl 20)).toInt().coerceIn(0, max)
+    }
+
+    private val ESYCC = longArrayOf(
+        fix(0.0000368), fix(1.40199), fix(1.0003), fix(0.344125), fix(0.7141128), fix(0.999823), fix(1.77204), fix(0.000008),
+    )
+
+    /** e-sYCC (enumerated 24) to RGB, as OpenJPEG's color_esycc_to_rgb: rounded half up, then clipped. */
+    private fun esyccToRgb(y: Int, cb: Int, cr: Int, prec: Int, out: IntArray) {
+        val offset = 1 shl (prec - 1)
+        val max = (1 shl prec) - 1
+        val yy = y.toLong() shl 20
+        val u = (cb - offset).toLong()
+        val v = (cr - offset).toLong()
+        val half = 1L shl 19
+        fun round(x: Long): Int = (if (x >= 0) x shr 20 else -((-x) shr 20)).toInt()
+        out[0] = round(yy - ESYCC[0] * u + ESYCC[1] * v + half).coerceIn(0, max)
+        out[1] = round(ESYCC[2] * y - ESYCC[3] * u - ESYCC[4] * v + half).coerceIn(0, max)
+        out[2] = round(ESYCC[5] * y + ESYCC[6] * u - ESYCC[7] * v + half).coerceIn(0, max)
     }
 }

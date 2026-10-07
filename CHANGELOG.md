@@ -53,6 +53,15 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- A JP2 file's palette (`pclr` with `cmap`), channel definitions (`cdef`, with
+  their associations and premultiplied opacity) and colour specification
+  (`colr`) now apply, as T.800 Annex I orders them. sYCC, e-sYCC, CMYK, CMY and
+  bi-level samples convert as OpenJPEG converts them, and an ICC profile picks
+  gray, RGB or CMYK. These boxes used to be ignored, so such files decoded into
+  the wrong colours. A colour space with no exact conversion here, such as
+  CIELab, is refused by name, and `probe` reports the same reason and reads its
+  alpha from the same boxes (#57).
+
 - JPEG 2000's RPCL, PCRL and CPRL progressions visit each precinct where
   T.800 B.12.1.3 to B.12.1.5 reach it on the reference grid, instead of pairing
   precincts by their ordinal across resolutions and components. A file with more

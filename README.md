@@ -365,6 +365,11 @@ web project that runs under Node should not use them.
   headers name the marker, field and byte position. The public nullable
   `JpxDecoder.decode` overloads still return null on failure; `probe` names
   unsupported features in main and tile-part headers.
+- **JPEG 2000 colour comes from the JP2 header, without a colour engine.** The
+  palette, channel definitions and colour specification apply as T.800 Annex I
+  orders them. sRGB, greyscale, bi-level, sYCC, e-sYCC, CMYK and CMY convert to
+  RGB or gray; an ICC profile picks gray, RGB or CMYK but is not applied. Other
+  colour spaces, such as CIELab, throw `UnsupportedImageException` naming them.
 - **`probe` covers declared features, not pixel integrity.** JPEG 2000 checks
   main and tile-part headers with the decoder's coding and quantization readers,
   skipping packet bytes by their declared lengths. A corrupt packet payload can

@@ -453,10 +453,8 @@ internal object ImageProbe {
     private class Jp2Span(val start: Int, val end: Int)
 
     private fun jp2(data: ByteArray): ImageInfo {
-        val stream = when {
-            data.size >= 2 && (data[0].toInt() and 0xFF) == 0xFF && (data[1].toInt() and 0xFF) == 0x4F -> Jp2Span(0, data.size)
-            else -> jp2cSpan(data) ?: throw ImageDecodeException("JP2: no contiguous codestream box")
-        }
+        val boxes = Jp2Color.parse(data) ?: throw ImageDecodeException("JP2: no contiguous codestream box")
+        val stream = Jp2Span(boxes.codestreamStart, boxes.codestreamEnd)
         val r = Jp2Headers.Reader(data, stream.start, stream.end, stream.start)
         if (r.u16() != 0xFF4F) r.fail("does not start with SOC")
         if (r.u16() != 0xFF51) r.fail("SIZ must follow SOC")
@@ -477,12 +475,19 @@ internal object ImageProbe {
         val h = ysiz - yo
         if (w <= 0 || h <= 0 || w > Int.MAX_VALUE || h > Int.MAX_VALUE) r.fail("bad image size ${w}x$h")
         val reason = jp2Unsupported(data, stream, siz, r.end, grid.count, comps, w.toInt(), h.toInt())
+            ?: Jp2Color.unsupported(boxes)
+        // The decoder's own reading of the header boxes says which channel, if any, is opacity.
+        val alpha = if (comps in 1..16 && Jp2Color.unsupported(boxes) == null) {
+            Jp2Color.plan(boxes, comps).alpha != null
+        } else {
+            boxes.definitions?.any { it.type == 1 || it.type == 2 } == true
+        }
         return ImageInfo(
             format = ImageFormat.JP2,
             width = w.toInt(),
             height = h.toInt(),
             bitDepth = ssiz,
-            hasAlpha = comps == 2 || comps == 4,
+            hasAlpha = alpha,
             frameCount = 1,
             loopCount = 1,
             orientation = Orientation.Normal,
@@ -573,33 +578,6 @@ internal object ImageProbe {
     }
 
     /** The codestream box bounds a marker reader even when another box follows it. */
-    private fun jp2cSpan(data: ByteArray): Jp2Span? {
-        var p = 0
-        while (p <= data.size - 8) {
-            var len = ((data[p].toLong() and 0xFF) shl 24) or ((data[p + 1].toLong() and 0xFF) shl 16) or
-                ((data[p + 2].toLong() and 0xFF) shl 8) or (data[p + 3].toLong() and 0xFF)
-            val type = data.copyOfRange(p + 4, p + 8).decodeToString()
-            var header = 8
-            if (len == 1L) {
-                if (p > data.size - 16) return null
-                var xl = 0L
-                for (i in 0 until 8) xl = (xl shl 8) or (data[p + 8 + i].toLong() and 0xFF)
-                len = xl
-                header = 16
-            } else if (len == 0L) {
-                len = (data.size - p).toLong()
-            }
-            if (len < header) return null
-            if (type == "jp2c") {
-                val available = minOf(len, (data.size - p).toLong()).toInt()
-                return Jp2Span(p + header, p + available)
-            }
-            if (len > data.size - p) return null
-            p += len.toInt()
-        }
-        return null
-    }
-
     // --- WebP -------------------------------------------------------------------
 
     private fun webp(data: ByteArray): ImageInfo {

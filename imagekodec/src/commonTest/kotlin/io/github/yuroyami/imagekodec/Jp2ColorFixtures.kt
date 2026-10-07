@@ -1,0 +1,128 @@
+package io.github.yuroyami.imagekodec
+
+import kotlin.io.encoding.Base64
+
+/**
+ * JP2 files whose header boxes give the samples a meaning: OpenJPEG 2.5's `opj_compress -n 3`
+ * wrote the codestreams losslessly, and the colr, pclr, cmap and cdef boxes were written into
+ * the jp2h box afterwards. `JpxOracleTest` checks the ones OpenJPEG converts against
+ * `opj_decompress`.
+ */
+internal object Jp2ColorFixtures {
+
+    /** #57's own file: colr sYCC (18), samples Y/Cb/Cr 128/16/240, 32 by 32. */
+    val syccIssue: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAIAAAACAAAwcHAAAAAAAPY29scgEA" +
+        "AAAAABIAAAC1anAyY/9P/1EALwAAAAAAIAAAACAAAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAwcBAQcBAQcBAf9SAAwAAAAB" +
+        "AAEEBAAB/1wAB0BASEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS40/5AACgAAAAAAOgAB/5OAz7RE" +
+        "EVBUr98csrwAAAAAYSEv/3/PtEQUAFyv3xyyvAAAAABhIS//f4CAgP/Z",
+    )
+
+    /** Raw samples 128/16/240 with no MCT, and a cdef that associates channel 0 with blue and 2 with red, 32 by 32. */
+    val swapped: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAABJanAyaAAAABZpaGRyAAAAIAAAACAAAwcHAAAAAAAPY29scgEA" +
+        "AAAAABAAAAAcY2RlZgADAAAAAAADAAEAAAACAAIAAAABAAAAr2pwMmP/T/9RAC8AAAAAACAAAAAgAAAAAAAAAAAAAAAgAAAA" +
+        "IAAAAAAAAAAAAAMHAQEHAQEHAQH/UgAMAAAAAQAFBAQAAf9cABNAQEhIUEhIUEhIUEhIUEhIUP9kACUAAUNyZWF0ZWQgYnkg" +
+        "T3BlbkpQRUcgdmVyc2lvbiAyLjUuMP+QAAoAAAAAACgAAf+TgM+0CAl7z7QIACeAgICAgICAgICAgICAgID/2Q==",
+    )
+
+    /** One component of indices x / 8, a four-entry RGB pclr (red, green, blue, yellow) and a cmap through it, colr sRGB, 32 by 32. */
+    val palette: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAABbanAyaAAAABZpaGRyAAAAIAAAACAAAQcHAAAAAAAPY29scgEA" +
+        "AAAAABAAAAAacGNscgAEAwcHB/8AAAD/AAAA////AAAAABRjbWFwAAABAAAAAQEAAAECAAAAnmpwMmP/T/9RACkAAAAAACAA" +
+        "AAAgAAAAAAAAAAAAAAAgAAAAIAAAAAAAAAAAAAEHAQH/UgAMAAAAAQAFBAQAAf9cABNAQEhIUEhIUEhIUEhIUEhIUP9kACUA" +
+        "AUNyZWF0ZWQgYnkgT3BlbkpQRUcgdmVyc2lvbiAyLjUuMP+QAAoAAAAAAB0AAf+Tz7QECcA6CAPAEIAMgICA/9k=",
+    )
+
+    /** Samples 128/64/200 with no MCT, colr sYCC (18), 16 by 16. */
+    val sycc: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAEAAAABAAAwcHAAAAAAAPY29scgEA" +
+        "AAAAABIAAACmanAyY/9P/1EALwAAAAAAEAAAABAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAwcBAQcBAQcBAf9SAAwAAAAB" +
+        "AAIEBAAB/1wACkBASEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS4w/5AACgAAAAAAKAAB/5OA" +
+        "z7QQEVBJn8+0JBQAUVwIQYFqCICAgICAgP/Z",
+    )
+
+    /** The same samples, colr e-sYCC (24). */
+    val esycc: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAEAAAABAAAwcHAAAAAAAPY29scgEA" +
+        "AAAAABgAAACmanAyY/9P/1EALwAAAAAAEAAAABAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAwcBAQcBAQcBAf9SAAwAAAAB" +
+        "AAIEBAAB/1wACkBASEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS4w/5AACgAAAAAAKAAB/5OA" +
+        "z7QQEVBJn8+0JBQAUVwIQYFqCICAgICAgP/Z",
+    )
+
+    /** Four components in 8 by 8 blocks of C/M/Y/K 0/0/0/0, 255/255/255/255, 200/30/90/10 and 15/180/60/240, colr CMYK (12), 16 by 16. */
+    val cmyk: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAEAAAABAABAcHAAAAAAAPY29scgEA" +
+        "AAAAAAwAAAH1anAyY/9P/1EAMgAAAAAAEAAAABAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAABAcBAQcBAQcBAQcBAf9SAAwA" +
+        "AAABAAIEBAAB/1wACkBASEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS4w/5AACgAAAAABdAAB" +
+        "/5PfgKAQ2ww3y8zPLdskNG8NXXojdduGT9+AoBDcsrD6dTxe6bLLCNH9NKMIn7h/34CgENsMNMTzueIxGhOKf2CtAJMIxX/f" +
+        "gJgQ3SbV2JprBkLMKgZvlBQ294Ifz8AufgFx+AOAFxHkLy78Zz0SE34V9vEJKTIu0OJGPxYFJqpHauPPwCofUEwfUDAXEWw9" +
+        "a4uiCEefINrH4GGSrgLzFgUed5x/z8AqPtCYfaDgFxH4zYMIM4niHxXiVhVxaxySPxYEapQzcnvPwCoHyBoD5AgXLKiDlO1n" +
+        "RuvHINrH4mpFFgUef8/ALj7QqH2ggCTZuTNQ7XxzWW0wAMv/Hoo6m72uNyTcmmXPwC4fUFQPnBgk2cSc5jTpcL3TYykg+Wzr" +
+        "N8VauH8k3JnPwCo+0Lh9oIAk2dvQWGp1Hyu1KSD4eyIGqB5hT0Uk3WIjz8AuB8geAfCGJNnEnOfSFvdjvR8uQiq/NdpNJNyX" +
+        "/9k=",
+    )
+
+    /** The same file, colr CMY (11). */
+    val cmy: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAEAAAABAABAcHAAAAAAAPY29scgEA" +
+        "AAAAAAsAAAH1anAyY/9P/1EAMgAAAAAAEAAAABAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAABAcBAQcBAQcBAQcBAf9SAAwA" +
+        "AAABAAIEBAAB/1wACkBASEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS4w/5AACgAAAAABdAAB" +
+        "/5PfgKAQ2ww3y8zPLdskNG8NXXojdduGT9+AoBDcsrD6dTxe6bLLCNH9NKMIn7h/34CgENsMNMTzueIxGhOKf2CtAJMIxX/f" +
+        "gJgQ3SbV2JprBkLMKgZvlBQ294Ifz8AufgFx+AOAFxHkLy78Zz0SE34V9vEJKTIu0OJGPxYFJqpHauPPwCofUEwfUDAXEWw9" +
+        "a4uiCEefINrH4GGSrgLzFgUed5x/z8AqPtCYfaDgFxH4zYMIM4niHxXiVhVxaxySPxYEapQzcnvPwCoHyBoD5AgXLKiDlO1n" +
+        "RuvHINrH4mpFFgUef8/ALj7QqH2ggCTZuTNQ7XxzWW0wAMv/Hoo6m72uNyTcmmXPwC4fUFQPnBgk2cSc5jTpcL3TYykg+Wzr" +
+        "N8VauH8k3JnPwCo+0Lh9oIAk2dvQWGp1Hyu1KSD4eyIGqB5hT0Uk3WIjz8AuB8geAfCGJNnEnOfSFvdjvR8uQiq/NdpNJNyX" +
+        "/9k=",
+    )
+
+    /** Gray 64 with opacity 128, cdef type 2 (premultiplied opacity), 16 by 16. */
+    val premultiplied: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAABDanAyaAAAABZpaGRyAAAAEAAAABAAAgcHAAAAAAAPY29scgEA" +
+        "AAAAABEAAAAWY2RlZgACAAAAAAABAAEAAgAAAAAAlWpwMmP/T/9RACwAAAAAABAAAAAQAAAAAAAAAAAAAAAQAAAAEAAAAAAA" +
+        "AAAAAAIHAQEHAQH/UgAMAAAAAQACBAQAAf9cAApAQEhIUEhIUP9kACUAAUNyZWF0ZWQgYnkgT3BlbkpQRUcgdmVyc2lvbiAy" +
+        "LjUuMP+QAAoAAAAAABoAAf+Tz7QQEVBJn4CAgICA/9k=",
+    )
+
+    /** The same samples, cdef type 1 (opacity). */
+    val straight: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAABDanAyaAAAABZpaGRyAAAAEAAAABAAAgcHAAAAAAAPY29scgEA" +
+        "AAAAABEAAAAWY2RlZgACAAAAAAABAAEAAQAAAAAAlWpwMmP/T/9RACwAAAAAABAAAAAQAAAAAAAAAAAAAAAQAAAAEAAAAAAA" +
+        "AAAAAAIHAQEHAQH/UgAMAAAAAQACBAQAAf9cAApAQEhIUEhIUP9kACUAAUNyZWF0ZWQgYnkgT3BlbkpQRUcgdmVyc2lvbiAy" +
+        "LjUuMP+QAAoAAAAAABoAAf+Tz7QQEVBJn4CAgICA/9k=",
+    )
+
+    /** Gray 16x mod 256 in columns, colr method 2 with a profile header whose data colour space is GRAY. */
+    val iccGray: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAACpanAyaAAAABZpaGRyAAAAEAAAABAAAQcHAAAAAACLY29scgIA" +
+        "AAAAAAAAAAAAAAAAAAAAAABHUkFZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAo2pwMmP/T/9RACkA" +
+        "AAAAABAAAAAQAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAEHAQH/UgAMAAAAAQACBAQAAf9cAApAQEhIUEhIUP9kACUAAUNy" +
+        "ZWF0ZWQgYnkgT3BlbkpQRUcgdmVyc2lvbiAyLjUuMP+QAAoAAAAAACsAAf+T34BIEWI0+VX9sfKVw+oFACIaCF1/wfOEADah" +
+        "mc//2Q==",
+    )
+
+    /** The swapped file's samples with colr CIELab (14). */
+    val lab: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAIAAAACAAAwcHAAAAAAAPY29scgEA" +
+        "AAAAAA4AAACvanAyY/9P/1EALwAAAAAAIAAAACAAAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAwcBAQcBAQcBAf9SAAwAAAAB" +
+        "AAUEBAAB/1wAE0BASEhQSEhQSEhQSEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS4w/5AACgAA" +
+        "AAAAKAAB/5OAz7QICXvPtAgAJ4CAgICAgICAgICAgICAgP/Z",
+    )
+
+    /** The same with colr method 2 and a profile of data colour space Lab. */
+    val iccLab: ByteArray = Base64.decode(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAACpanAyaAAAABZpaGRyAAAAIAAAACAAAwcHAAAAAACLY29scgIA" +
+        "AAAAAAAAAAAAAAAAAAAAAABMYWIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAr2pwMmP/T/9RAC8A" +
+        "AAAAACAAAAAgAAAAAAAAAAAAAAAgAAAAIAAAAAAAAAAAAAMHAQEHAQEHAQH/UgAMAAAAAQAFBAQAAf9cABNAQEhIUEhIUEhI" +
+        "UEhIUEhIUP9kACUAAUNyZWF0ZWQgYnkgT3BlbkpQRUcgdmVyc2lvbiAyLjUuMP+QAAoAAAAAACgAAf+TgM+0CAl7z7QIACeA" +
+        "gICAgICAgICAgICAgID/2Q==",
+    )
+
+    /** The files that `opj_decompress` converts to RGB or gray the same way, by name. */
+    val converted: List<Pair<String, ByteArray>> = listOf(
+        "sYCC, #57" to syccIssue, "swapped associations" to swapped, "palette" to palette,
+        "sYCC" to sycc, "e-sYCC" to esycc, "CMYK" to cmyk, "ICC gray" to iccGray,
+    )
+}

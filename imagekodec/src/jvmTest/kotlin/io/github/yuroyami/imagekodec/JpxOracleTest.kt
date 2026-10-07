@@ -84,9 +84,9 @@ class JpxOracleTest {
         return Pnm(w, h, comps, d.copyOfRange(p, p + w * h * comps))
     }
 
-    /** Encode [src] with opj_compress + [extra] args, return the .jp2 file. */
-    private fun encode(src: File, vararg extra: String): File {
-        val jp2 = File.createTempFile("kite-jpx", ".jp2").apply { deleteOnExit() }
+    /** Encode [src] with opj_compress + [extra] args, return the .jp2 file, or with [raw] the bare codestream. */
+    private fun encode(src: File, vararg extra: String, raw: Boolean = false): File {
+        val jp2 = File.createTempFile("kite-jpx", if (raw) ".j2k" else ".jp2").apply { deleteOnExit() }
         val code = run(compress.absolutePath, "-i", src.absolutePath, "-o", jp2.absolutePath, *extra)
         assertEquals(0, code, "opj_compress failed")
         return jp2
@@ -431,11 +431,26 @@ class JpxOracleTest {
                 val (reduced, reducedRef) = bothReduced(precincts, levels)
                 compare("$order precincts reduced by ${1 shl levels}", reduced, reducedRef, tolerance = 0)
             }
-            val sub = encode(raw, "-F", "$w,$h,3,8,u@1x1:2x2:2x2", "-n", "3", "-c", "[32,32],[32,32],[32,32]", "-p", order)
+            // A bare codestream: in a JP2 file, opj_compress labels subsampled components sYCC.
+            val sub = encode(raw, "-F", "$w,$h,3,8,u@1x1:2x2:2x2", "-n", "3", "-c", "[32,32],[32,32],[32,32]", "-p", order, raw = true)
             val kite = assertNotNull(JpxDecoder.decode(sub.readBytes()), "$order subsampled")
             for (y in 0 until h) for (x in 0 until w) for (c in 0 until 3) {
                 assertEquals(source(x, y, c), kite.pixelBytes[(y * w + x) * 3 + c].toInt() and 0xFF, "$order subsampled at ($x, $y), component $c")
             }
+        }
+    }
+
+    /** The JP2 header's colour boxes, applied as OpenJPEG applies them, sample for sample (#57). */
+    @Test
+    fun headerColourBoxesMatchOpenjpeg() {
+        assumeTrue("OpenJPEG tools not found, skipping.", tools())
+        for ((tag, bytes) in Jp2ColorFixtures.converted) {
+            val jp2 = File.createTempFile("kite-jpx-colr", ".jp2").apply {
+                deleteOnExit()
+                writeBytes(bytes)
+            }
+            val (kite, ref) = both(jp2)
+            compare(tag, kite, ref, tolerance = 0)
         }
     }
 }
