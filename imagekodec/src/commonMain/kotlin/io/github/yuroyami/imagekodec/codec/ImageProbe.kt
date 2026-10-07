@@ -382,6 +382,15 @@ internal object ImageProbe {
                 258 -> bits = first() ?: bits
                 259 -> compression = single() ?: compression
                 262 -> photometric = single() ?: photometric
+                266 -> {
+                    if (type != 3 || n != 1) {
+                        throw ImageDecodeException("TIFF: FillOrder (266) requires one SHORT value")
+                    }
+                    val fillOrder = u16(at + 8)
+                    if (fillOrder != 1 && fillOrder != 2) {
+                        throw ImageDecodeException("TIFF: unknown FillOrder $fillOrder")
+                    }
+                }
                 274 -> orientation = Orientation.fromExif(scalar())
                 277 -> spp = scalar()
                 292 -> t4Options = single() ?: t4Options

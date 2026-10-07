@@ -25,6 +25,7 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    everywhere else in ImageKodec), horizontal-differencing predictor (2) for
  *    both 8- and 16-bit samples
  *  - **both planar configurations**: chunky (1) and separate planes (2)
+ *  - both FillOrder values, independent of sample byte order and compression
  *  - unsigned integer samples; undefined SampleFormat follows the unsigned default
  *
  * What is left out is named at the point of failure: JPEG-in-TIFF (compression 6
@@ -43,6 +44,16 @@ internal object TiffDecoder {
      * after the allocator gives up.
      */
     private const val MAX_BUFFER_BYTES = 1L shl 30
+
+    private val reversedBits = ByteArray(256) { value ->
+        var source = value
+        var reversed = 0
+        repeat(8) {
+            reversed = (reversed shl 1) or (source and 1)
+            source = source ushr 1
+        }
+        reversed.toByte()
+    }
 
     private fun err(msg: String): Nothing = throw ImageDecodeException("TIFF: $msg")
 
@@ -148,6 +159,8 @@ internal object TiffDecoder {
                 values(it)
             }
         val t4Options = if (compression == 3) optionalValues(292, "T4Options", 4, 1)?.first() ?: 0L else 0L
+        val fillOrder = optionalValues(266, "FillOrder", 3, 1)?.first()?.toInt() ?: 1
+        if (fillOrder != 1 && fillOrder != 2) err("unknown FillOrder $fillOrder")
 
         val bitsEntry = entries[258]?.let { values(it) }?.takeIf { it.isNotEmpty() } ?: longArrayOf(1)
         val bits = bitsEntry[0].toInt()
@@ -232,10 +245,10 @@ internal object TiffDecoder {
                 // TIFF's uncompressed size is determined by geometry. Like libtiff,
                 // recover a bogus byte count only when all those bytes are present.
                 if (expect > data.size - ofs) err("block $index ends early: need $expect bytes, have ${data.size - ofs}")
-                return data.copyOfRange(ofs, ofs + expect)
+                return normalizeFillOrder(data.copyOfRange(ofs, ofs + expect), fillOrder)
             }
             val len = minOf(counts[index], (data.size - ofs).toLong()).toInt()
-            val comp = data.copyOfRange(ofs, ofs + len)
+            val comp = normalizeFillOrder(data.copyOfRange(ofs, ofs + len), fillOrder)
             val decoded = when (compression) {
                 5 -> tiffLzw(comp, expect)
                 8, 32946 -> try {
@@ -439,6 +452,15 @@ internal object TiffDecoder {
         }
 
         return KiteBitmap(width, height, argb)
+    }
+
+    private fun normalizeFillOrder(buffer: ByteArray, fillOrder: Int): ByteArray {
+        // Like libtiff's TIFFFillStrip/Tile, reverse stored bytes before the codec:
+        // FillOrder=2 reverses compressed framing too, including Deflate headers.
+        if (fillOrder == 2) for (i in buffer.indices) {
+            buffer[i] = reversedBits[buffer[i].toInt() and 255]
+        }
+        return buffer
     }
 
     private fun read16(d: ByteArray, at: Int, le: Boolean): Int {

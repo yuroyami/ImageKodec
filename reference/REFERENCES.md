@@ -34,6 +34,8 @@ consulted for subsequent corrections, so the provenance remains accurate.
 | TIFF tiles, 16-bit samples, planar config 2, YCbCr | TIFF 6.0 specification | libtiff's `tiffcp` for fixture generation, `tiff2rgba` for subsampled YCbCr, and ImageIO as an independent reader (`TiffOracleTest`) | |
 | BMP RLE4/RLE8, BITFIELDS, OS/2 headers | Microsoft `wingdi.h` DIB documentation | ImageIO (`GifBmpInteropTest`) | |
 
+TIFF FillOrder normalization was checked against libtiff's [tif_read.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_read.c) and [tif_write.c](https://github.com/libsdl-org/libtiff/blob/master/libtiff/tif_write.c), under its [permissive Sam Leffler / Silicon Graphics license](https://github.com/libsdl-org/libtiff/blob/master/LICENSE.md). The reversal table is derived, and no source is vendored. `TiffFillOrderOracleTest` checks libtiff-written strips and tiles across compression, sample depth, byte order, prediction and planar layout.
+
 ## Adapted code from the Kite libraries
 
 | Implementation | Origin and format reference | Code license |

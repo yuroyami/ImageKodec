@@ -60,6 +60,8 @@ reviewable in the diff.
   malformed rows and incomplete TIFF fax strips raise decode errors (#92).
 - TIFF reads every SampleFormat component and classifies signed/floating samples
   as unsupported in probing and decoding; unsigned/undefined samples agree (#96).
+- TIFF normalizes FillOrder=2 before reading packed samples or compressed blocks,
+  including fax, LZW, PackBits and Deflate streams (#47).
 - GIF accepts a missing trailer after a complete frame at a block boundary,
   preserving animation pixels, delays and loop count (#80).
 - Codec origins and licenses are recorded, and the original zlib notices are
