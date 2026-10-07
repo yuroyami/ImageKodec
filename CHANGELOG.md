@@ -47,6 +47,15 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- A reduced JPEG decode reduces each chroma plane across and down by its own
+  power of two, as libjpeg 9 does, so a file sampled differently each way, such
+  as 4:2:2, 4:1:1 or 4x2, keeps the chroma detail of its finer direction instead
+  of reducing it too far and upsampling it back. Upsampling left over for a ratio
+  of 4 replicates, as the full decode does, so a reduced image stays the average
+  of the full one. A 4:1:1 file at an eighth used to be 13 levels off that
+  average and is now under 1; libjpeg-turbo's `djpeg -scale` stays as far off
+  as before, since it keeps one size for both directions (#63).
+
 - A reduced JPEG decode at 1/2 and 1/4 averages the full inverse DCT over each
   output pixel, as libjpeg's `jidctred.c` does, instead of keeping only the
   lowest frequencies of each block. One-pixel detail used to leave stripes up to

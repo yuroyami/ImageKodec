@@ -47,6 +47,9 @@ internal object JpegDecoder {
      */
     private const val MAX_SCANS = 512
 
+    /** The scratch an IDCT takes: 64 for the full one, 8 rows of up to 8 and a column of 8 for [reducedIdctRect]. */
+    private const val IDCT_SCRATCH = 72
+
     private const val MAX_DIMENSION = 1 shl 24
     private const val MAX_PIXELS = 1L shl 28
 
@@ -154,9 +157,9 @@ internal object JpegDecoder {
         var w2 = 0; var h2 = 0
         // The plane in [data] when the decode is reduced: its stride and its rows of image.
         var ws = 0; var ys = 0
-        // This component's own reduction, as a log2: smaller than the image's for subsampled
-        // chroma, which then decodes straight to the luma's resolution.
-        var scale = 0
+        // This component's own reduction across and down, as log2s: smaller than the image's for
+        // subsampled chroma, which then decodes straight to the luma's resolution.
+        var scaleH = 0; var scaleV = 0
         lateinit var data: ByteArray
         lateinit var linebuf: ByteArray
         // progressive only: raw coefficients, IDCT'd at EOI
@@ -500,11 +503,13 @@ internal object JpegDecoder {
 
     /** The IDCT of block ([bx], [by]) of [comp] into its plane: the full one, or the reduced one of a scaled decode. */
     private fun idctInto(j: State, comp: Component, bx: Int, by: Int, data: ShortArray, tmp: IntArray) {
-        if (comp.scale == 0) {
-            idctBlock(comp.data, comp.ws * by * 8 + bx * 8, comp.ws, data, tmp)
-        } else {
-            val n = 8 shr comp.scale
-            reducedIdct(comp.data, comp.ws * by * n + bx * n, comp.ws, data, n, tmp)
+        val nh = 8 shr comp.scaleH
+        val nv = 8 shr comp.scaleV
+        val at = comp.ws * by * nv + bx * nh
+        when {
+            nh == 8 && nv == 8 -> idctBlock(comp.data, at, comp.ws, data, tmp)
+            nh == nv -> reducedIdct(comp.data, at, comp.ws, data, nh, tmp)
+            else -> reducedIdctRect(comp.data, at, comp.ws, data, nh, nv, tmp)
         }
     }
 
@@ -526,8 +531,10 @@ internal object JpegDecoder {
         }
     }
 
+    internal val REDUCED_8 = reducedTable(8)
     internal val REDUCED_4 = reducedTable(4)
     internal val REDUCED_2 = reducedTable(2)
+    internal val REDUCED_1 = reducedTable(1)
 
     /**
      * The block that [data] holds, as [n] by [n] pixels, each the mean of the (8/n)-pixel square
@@ -616,6 +623,113 @@ internal object JpegDecoder {
             val o = rows[2 + x] * b + rows[6 + x] * d + rows[10 + x] * f + rows[14 + x] * h
             out[outOfs + x] = clamp(128 + ((e + o) shr 17)).toByte()
             out[outOfs + stride + x] = clamp(128 + ((e - o) shr 17)).toByte()
+        }
+    }
+
+    /**
+     * [reducedIdct] with [nh] points across and [nv] down, for a component whose two sampling
+     * ratios differ, so it reduces by a different power of two each way. The first pass runs
+     * the smaller transform: down each column when [nh] is larger, else across each row, so a
+     * 4:2:2 block at a half takes eight 4-point columns and four 8-point rows rather than eight
+     * 8-point rows. It descales as [reducedIdct4] descales. Only the lines of coefficients in
+     * [LIVE_ROWS] go through it: any other frequency averages to zero over every output of the
+     * second pass, so [reduce1d] never reads its line. A line with no coefficient but its first
+     * is a constant. [scratch] holds the first pass's 8 lines and, in its last 8 entries, one
+     * line of the second.
+     */
+    private fun reducedIdctRect(out: ByteArray, outOfs: Int, stride: Int, data: ShortArray, nh: Int, nv: Int, scratch: IntArray) {
+        val columnsFirst = nh > nv
+        // The first pass reduces to n1 points along lines that step by `along` in the block and
+        // lie `across` apart; the second reduces each of its results to n2 points.
+        val n1 = if (columnsFirst) nv else nh
+        val n2 = if (columnsFirst) nh else nv
+        val along = if (columnsFirst) 8 else 1
+        val across = if (columnsFirst) 1 else 8
+        for (line in LIVE_ROWS[n2.countTrailingZeroBits()]) {
+            val k = line * across
+            val r = line * n1
+            val s0 = data[k].toInt(); val s1 = data[k + along].toInt(); val s2 = data[k + 2 * along].toInt()
+            val s3 = data[k + 3 * along].toInt(); val s4 = data[k + 4 * along].toInt(); val s5 = data[k + 5 * along].toInt()
+            val s6 = data[k + 6 * along].toInt(); val s7 = data[k + 7 * along].toInt()
+            if ((s1 or s2 or s3 or s4 or s5 or s6 or s7) == 0) {
+                // The DC term's mean is C(0) = T1 at every output.
+                val dc = (s0 * T1 + (1 shl 10)) shr 11
+                for (i in 0 until n1) scratch[r + i] = dc
+                continue
+            }
+            reduce1d(n1, s0, s1, s2, s3, s4, s5, s6, s7, scratch, r)
+            for (i in 0 until n1) scratch[r + i] = (scratch[r + i] + (1 shl 10)) shr 11
+        }
+        for (i in 0 until n1) {
+            reduce1d(
+                n2, scratch[i], scratch[n1 + i], scratch[2 * n1 + i], scratch[3 * n1 + i],
+                scratch[4 * n1 + i], scratch[5 * n1 + i], scratch[6 * n1 + i], scratch[7 * n1 + i], scratch, 64,
+            )
+            // Line i of the second pass is row i of the output when the columns went first.
+            for (j in 0 until n2) {
+                val at = if (columnsFirst) outOfs + i * stride + j else outOfs + j * stride + i
+                out[at] = clamp(128 + ((scratch[64 + j] + (1 shl 16)) shr 17)).toByte()
+            }
+        }
+    }
+
+    /** For each n of 1, 2, 4 and 8, by its log2: the frequencies with a nonzero mean over some output. */
+    private val LIVE_ROWS = Array(4) { log ->
+        val n = 1 shl log
+        val table = when (n) {
+            1 -> REDUCED_1
+            2 -> REDUCED_2
+            4 -> REDUCED_4
+            else -> REDUCED_8
+        }
+        (0 until 8).filter { v -> (0 until n).any { y -> table[v * n + y] != 0 } }.toIntArray()
+    }
+
+    // The tables' entries as plain fields for [reduce1d]: T8 is the full 8-point basis, T1 only
+    // the DC term. The even frequencies of each are kept for the first half of the outputs, then
+    // the odd ones.
+    private val T8 = IntArray(32) { i ->
+        val u = if (i < 16) i / 4 * 2 else (i - 16) / 4 * 2 + 1
+        REDUCED_8[u * 8 + i % 4]
+    }
+    private val T1 = REDUCED_1[0]
+
+    /**
+     * The [n]-point reduced transform of one row or column s0..s7 into out[at until at + n]:
+     * the sum over u of s_u T(u, x), not yet descaled. Even frequencies have the same mean over
+     * output x and its mirror n - 1 - x and odd ones the negated mean, so each half of the outputs
+     * is the sum and the difference of the two. A frequency whose table row is zero is left out.
+     */
+    private fun reduce1d(n: Int, s0: Int, s1: Int, s2: Int, s3: Int, s4: Int, s5: Int, s6: Int, s7: Int, out: IntArray, at: Int) {
+        when (n) {
+            8 -> {
+                val t = T8
+                for (x in 0 until 4) {
+                    val e = s0 * t[x] + s2 * t[4 + x] + s4 * t[8 + x] + s6 * t[12 + x]
+                    val o = s1 * t[16 + x] + s3 * t[20 + x] + s5 * t[24 + x] + s7 * t[28 + x]
+                    out[at + x] = e + o
+                    out[at + 7 - x] = e - o
+                }
+            }
+            4 -> {
+                val t = R4
+                val e0 = s0 * t[0] + s2 * t[4] + s6 * t[12]
+                val e1 = s0 * t[1] + s2 * t[5] + s6 * t[13]
+                val o0 = s1 * t[2] + s3 * t[6] + s5 * t[10] + s7 * t[14]
+                val o1 = s1 * t[3] + s3 * t[7] + s5 * t[11] + s7 * t[15]
+                out[at] = e0 + o0
+                out[at + 1] = e1 + o1
+                out[at + 2] = e1 - o1
+                out[at + 3] = e0 - o0
+            }
+            2 -> {
+                val t = R2
+                val e = s0 * t[0]
+                val o = s1 * t[1] + s3 * t[3] + s5 * t[5] + s7 * t[7]
+                out[at] = e + o
+                out[at + 1] = e - o
+            }
+            else -> out[at] = s0 * T1
         }
     }
 
@@ -884,16 +998,20 @@ internal object JpegDecoder {
             comp.w2 = j.mcuX * comp.h * 8
             comp.h2 = j.mcuY * comp.v * 8
             // A reduced decode keeps each block at 8 >> scale pixels a side (w2 and h2 are multiples
-            // of 8). A component subsampled by the same power of two both ways reduces less, down
-            // to the luma's resolution, as libjpeg's jdmaster.c scales the chroma IDCT: it then
-            // needs no upsampling and keeps its detail.
+            // of 8). A subsampled component reduces less, across and down each by the power of two
+            // its ratio that way holds, as libjpeg 9's jdmaster.c sizes DCT_h_scaled_size and
+            // DCT_v_scaled_size apart: its upsampling then happens in the IDCT, as an exact average,
+            // and only a ratio beyond the reduction or one of 3 is left to the upsampler.
+            // libjpeg-turbo keeps one size for both ways, so a 4x2 or 4:2:2 file lost the chroma
+            // detail of its finer direction and was upsampled back (#63).
             val hs = hMax / comp.h
             val vs = vMax / comp.v
-            comp.scale = if (hs == vs && hs and (hs - 1) == 0) maxOf(0, j.scale - hs.countTrailingZeroBits()) else j.scale
-            comp.ws = comp.w2 shr comp.scale
-            comp.ys = (comp.y + (1 shl comp.scale) - 1) shr comp.scale
+            comp.scaleH = maxOf(0, j.scale - hs.countTrailingZeroBits())
+            comp.scaleV = maxOf(0, j.scale - vs.countTrailingZeroBits())
+            comp.ws = comp.w2 shr comp.scaleH
+            comp.ys = (comp.y + (1 shl comp.scaleV) - 1) shr comp.scaleV
             // A block the file never reaches stays mid-gray, as in libjpeg, not black.
-            comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scale)).also { it.fill(0x80.toByte()) }
+            comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scaleV)).also { it.fill(0x80.toByte()) }
             if (j.progressive) {
                 // w2/h2 are multiples of 8; one 64-short block per 8x8 tile
                 comp.coeffW = comp.w2 / 8
@@ -956,7 +1074,7 @@ internal object JpegDecoder {
             return
         }
         val data = ShortArray(64)
-        val tmp = IntArray(64)
+        val tmp = IntArray(IDCT_SCRATCH)
         if (j.scanN == 1) {
             // non-interleaved: one block at a time in scanline order
             val n = j.order[0]
@@ -1069,7 +1187,7 @@ internal object JpegDecoder {
     // stbi__jpeg_finish: dequantize + IDCT every block of every component
     private fun finishProgressive(j: State) {
         val block = ShortArray(64)
-        val tmp = IntArray(64)
+        val tmp = IntArray(IDCT_SCRATCH)
         for (n in 0 until j.imgN) {
             val comp = j.comp[n]
             val coeff = comp.coeff ?: continue
@@ -1110,7 +1228,15 @@ internal object JpegDecoder {
     private fun div16(x: Int) = (x shr 4) and 0xFF
 
     // stbi__resample per component
-    private class Resampler(val comp: Component, val hs: Int, val vs: Int, imgX: Int, val stride: Int, val rows: Int) {
+    /**
+     * [hs] and [vs] are the upsampling left after the component's own IDCT reduction. [filtered]
+     * says whether the file's own ratios are ones stb interpolates, 2 or 1 each way; any other
+     * ratio is replicated, so a reduced decode replicates what is left of it too, as the full
+     * decode would, and stays its average.
+     */
+    private class Resampler(
+        val comp: Component, val hs: Int, val vs: Int, imgX: Int, val stride: Int, val rows: Int, val filtered: Boolean,
+    ) {
         val wLores = (imgX + hs - 1) / hs
         var ystep = vs shr 1
         var ypos = 0
@@ -1135,13 +1261,13 @@ internal object JpegDecoder {
                 r.outArr = inp
                 r.outOfs = nearOfs
             }
-            r.hs == 1 && r.vs == 2 -> {   // stbi__resample_row_v_2
+            r.filtered && r.hs == 1 && r.vs == 2 -> {   // stbi__resample_row_v_2
                 for (i in 0 until w) {
                     out[i] = div4(3 * (inp[nearOfs + i].toInt() and 0xFF) + (inp[farOfs + i].toInt() and 0xFF) + 2).toByte()
                 }
                 r.outArr = out; r.outOfs = 0
             }
-            r.hs == 2 && r.vs == 1 -> {   // stbi__resample_row_h_2, with its last pair corrected
+            r.filtered && r.hs == 2 && r.vs == 1 -> {   // stbi__resample_row_h_2, with its last pair corrected
                 if (w == 1) {
                     out[0] = inp[nearOfs]; out[1] = inp[nearOfs]
                 } else {
@@ -1163,7 +1289,7 @@ internal object JpegDecoder {
                 }
                 r.outArr = out; r.outOfs = 0
             }
-            r.hs == 2 && r.vs == 2 -> {   // stbi__resample_row_hv_2
+            r.filtered && r.hs == 2 && r.vs == 2 -> {   // stbi__resample_row_hv_2
                 fun near(i: Int) = inp[nearOfs + i].toInt() and 0xFF
                 fun far(i: Int) = inp[farOfs + i].toInt() and 0xFF
                 if (w == 1) {
@@ -1312,8 +1438,12 @@ internal object JpegDecoder {
             comp.linebuf = ByteArray(outX + 3)
             // The upsampling left after the component's own reduction: none for chroma that
             // decoded straight to the luma's resolution.
-            val drop = scale - comp.scale
-            Resampler(comp, (j.hMax / comp.h) shr drop, (j.vMax / comp.v) shr drop, outX, stride = comp.ws, rows = comp.ys)
+            val hs = j.hMax / comp.h
+            val vs = j.vMax / comp.v
+            Resampler(
+                comp, hs shr (scale - comp.scaleH), vs shr (scale - comp.scaleV), outX,
+                stride = comp.ws, rows = comp.ys, filtered = hs <= 2 && vs <= 2,
+            )
         }
 
         val argb = IntArray(outX * outY)

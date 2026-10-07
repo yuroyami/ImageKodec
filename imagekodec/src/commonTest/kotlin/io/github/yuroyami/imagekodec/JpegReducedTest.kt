@@ -99,6 +99,33 @@ class JpegReducedTest {
     }
 
     @Test
+    fun unequalSamplingRatiosReduceToTheAverageOfTheFullDecode() {
+        // Each chroma plane reduces across and down by its own power of two, and what upsampling is
+        // left replicates as the full decode does for a ratio of 4, so each pixel is the average of
+        // the full decode. A ratio of 2 is the exception: the full decode interpolates it, which is
+        // no average, so 4:2:2 and 4:4:0 stay a little further off. Before #63 a 4:1:1 or 4x2 file
+        // was 23 to 34 levels off on average at every reduction, and up to 132 at worst.
+        val limits = mapOf("2x1" to (2.5 to 12), "1x2" to (2.5 to 12), "4x1" to (0.75 to 3), "4x2" to (0.75 to 3))
+        for ((name, jpeg) in JpegSamplingFixtures.all) {
+            val (meanLimit, worstLimit) = limits.getValue(name)
+            val full = ImageKodec.decode(jpeg)
+            for (r in listOf(2, 4, 8)) {
+                val reduced = ImageKodec.decodeReduced(jpeg, r)
+                val average = full.reducedBy(r)
+                var total = 0L
+                var worst = 0
+                for (i in reduced.argb.indices) for (shift in intArrayOf(16, 8, 0)) {
+                    val d = abs(((reduced.argb[i] shr shift) and 0xFF) - ((average.argb[i] shr shift) and 0xFF))
+                    total += d
+                    worst = maxOf(worst, d)
+                }
+                val mean = total.toDouble() / (reduced.argb.size * 3)
+                assertTrue(mean <= meanLimit && worst <= worstLimit, "luma $name, reduced by $r: mean $mean, worst $worst")
+            }
+        }
+    }
+
+    @Test
     fun aFlatGreyReducesToItsOwnValue() {
         // At quality 100 every quantiser is 1, so a flat block's DC is exactly 8 (v - 128). Each
         // reduced IDCT must round it back to v, including below 128, where truncation is one low.

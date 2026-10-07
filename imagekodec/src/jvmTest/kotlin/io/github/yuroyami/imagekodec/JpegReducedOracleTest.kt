@@ -64,7 +64,30 @@ class JpegReducedOracleTest {
         return out.toByteArray()
     }
 
-    /** `djpeg -scale 1/[r]` of [jpeg], read back from its PNM output as ARGB. */
+    /** [img] as a binary PPM, the input `cjpeg` reads. */
+    private fun ppm(img: BufferedImage): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write("P6\n${img.width} ${img.height}\n255\n".encodeToByteArray())
+        for (y in 0 until img.height) for (x in 0 until img.width) {
+            val p = img.getRGB(x, y)
+            out.write((p shr 16) and 0xFF); out.write((p shr 8) and 0xFF); out.write(p and 0xFF)
+        }
+        return out.toByteArray()
+    }
+
+    /** libjpeg-turbo's `cjpeg` of [img] at quality 90 with the luma sampled [sampling], such as 4x2. */
+    private fun cjpeg(img: BufferedImage, sampling: String, dir: File): ByteArray {
+        val input = File(dir, "in.ppm").apply { writeBytes(ppm(img)) }
+        val output = File(dir, "cjpeg.jpg")
+        val process = ProcessBuilder(
+            Tools.require("cjpeg").path, "-quality", "90", "-sample", "$sampling,1x1,1x1", "-outfile", output.path, input.path,
+        ).redirectErrorStream(true).start()
+        val log = process.inputStream.readBytes().decodeToString()
+        assertEquals(0, process.waitFor(), "cjpeg failed: $log")
+        return output.readBytes()
+    }
+
+    /** `djpeg -scale 1/[r]` of [jpeg], read back from its PNM output as ARGB. At 1 it is the full decode. */
     private fun djpeg(jpeg: ByteArray, r: Int, dir: File): KiteBitmap {
         val input = File(dir, "in.jpg").apply { writeBytes(jpeg) }
         val output = File(dir, "out.pnm")
@@ -138,6 +161,53 @@ class JpegReducedOracleTest {
         } finally {
             dir.deleteRecursively()
         }
+    }
+
+    /**
+     * Luma sampled 4x2, 2x1, 1x2, 4x1 and 2x4 against chroma 1x1, checked against the truth: djpeg's
+     * own full decode, averaged over each reduced pixel. libjpeg-turbo gives a chroma plane one IDCT
+     * size for both directions, so it reduces the finer direction too far and upsamples it back;
+     * this decoder sizes each direction apart, as libjpeg 9 does. It must come out at least as
+     * close to the truth as `djpeg -scale` at every reduction, and close outright at a quarter and
+     * an eighth, where no upsampling is left (#63).
+     */
+    @Test
+    fun unequalSamplingRatiosStayCloserToTheFullDecodeThanDjpegScale() {
+        assumeTrue("cjpeg and djpeg are not installed", Tools.hasAll("cjpeg", "djpeg"))
+        val dir = Files.createTempDirectory("imagekodec-reduced").toFile()
+        try {
+            val img = picture(203, 157, BufferedImage.TYPE_INT_RGB)
+            val report = StringBuilder()
+            for (sampling in listOf("4x2", "2x1", "1x2", "4x1", "2x4")) {
+                val bytes = cjpeg(img, sampling, dir)
+                val full = djpeg(bytes, 1, dir)
+                for (r in listOf(2, 4, 8)) {
+                    val truth = full.reducedBy(r)
+                    val (ourMean, ourWorst) = difference(ImageKodec.decodeReduced(bytes, r), truth)
+                    val (theirMean, theirWorst) = difference(djpeg(bytes, r, dir), truth)
+                    report.appendLine("luma $sampling 1/$r: ours mean $ourMean worst $ourWorst, djpeg -scale mean $theirMean worst $theirWorst")
+                    assertTrue(ourMean <= theirMean + 0.05, "luma $sampling, 1/$r is further from the truth than djpeg -scale\n$report")
+                    if (r >= 4) assertTrue(ourMean <= 1.0 && ourWorst <= 14, "luma $sampling, 1/$r: mean $ourMean, worst $ourWorst\n$report")
+                }
+            }
+            println(report)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    /** The mean and the worst channel difference between [a] and [b], which have one size. */
+    private fun difference(a: KiteBitmap, b: KiteBitmap): Pair<Double, Int> {
+        assertEquals(b.width, a.width)
+        assertEquals(b.height, a.height)
+        var total = 0L
+        var worst = 0
+        for (i in a.argb.indices) for (shift in intArrayOf(16, 8, 0)) {
+            val d = abs(((a.argb[i] shr shift) and 0xFF) - ((b.argb[i] shr shift) and 0xFF))
+            total += d
+            worst = maxOf(worst, d)
+        }
+        return total.toDouble() / (a.argb.size * 3) to worst
     }
 
     private fun compare(cases: List<Pair<String, ByteArray>>, dir: File, meanLimit: Double = MEAN_LIMIT, worstLimit: Int = WORST_LIMIT) {

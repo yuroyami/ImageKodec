@@ -214,7 +214,9 @@ ImageKodec.decodeReduced(bytes, reduction = 4)  // each side divided by 4, round
 
 The reduction is 1, 2, 4 or 8. A JPEG shrinks inside its inverse DCT, as
 libjpeg's `djpeg -scale` does, so a baseline JPEG needs memory only for the
-smaller image. A progressive JPEG still keeps the coefficients of the full size
+smaller image. Each reduced pixel is the average of the full inverse DCT over
+the pixels it stands for, and subsampled chroma reduces across and down apart,
+so it keeps the detail the smaller image can show. A progressive JPEG still keeps the coefficients of the full size
 until its last scan. A JPEG 2000 image drops its finest wavelet levels, as
 OpenJPEG's reduce option does. Other formats decode in full, then average each
 block of pixels.

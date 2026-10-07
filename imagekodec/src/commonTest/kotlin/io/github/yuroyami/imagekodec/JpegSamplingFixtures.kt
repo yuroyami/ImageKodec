@@ -1,0 +1,91 @@
+package io.github.yuroyami.imagekodec
+
+import kotlin.io.encoding.Base64
+
+/**
+ * Color JPEGs whose luma is sampled differently across and down, written by libjpeg-turbo's
+ * `cjpeg -quality 92 -sample <luma>,1x1,1x1 -optimize` from a 48 by 40 picture of crossing
+ * waves, so a reduced decode has chroma to keep at every scale.
+ */
+internal object JpegSamplingFixtures {
+
+    /** Luma 2x1, 4:2:2: chroma halved across. */
+    val luma2x1: ByteArray = Base64.decode(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDREN" +
+        "Dg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ" +
+        "EBAQEBAQEBAQEBAQEBD/wAARCAAoADADASEAAhEBAxEB/8QAFwABAQEBAAAAAAAAAAAAAAAABwgGBf/EACoQAAEDBQABAgUF" +
+        "AQAAAAAAAAECAwQABQYHERIhMQgTIkFRFBVhkaHB/8QAGAEBAQEBAQAAAAAAAAAAAAAABwYDAQT/xAAnEQABAwQCAQQCAwAA" +
+        "AAAAAAABAgMFAAQGEQchIyIygbExQRIzUf/aAAwDAQACEQMRAD8AqC2OWXFsYSk/LStDf/Klrc+1FSJL0SM/6dIABqdiLRTO" +
+        "dW06f639b+alWbJebWybb8lBoFj/ALlcrkHvrIUrtUVrTXqMghoTIZ8iR9xSfO3TeK5S5bJ6bfT90z5DONwGEGISdLA1SZDx" +
+        "uLrxwTCgICfWsptbe8WZZnbdHkjz8SngNGGDw6pebvYh4bSdkULcQxq2rlVzcD3Gj/bW9XYc161MSSACUgA0SwI0/MJ4kEKW" +
+        "Fq7V1HxoVx8zJ68rBG/96pI4Si02sq8Lkenv8014dqoKjodcY9QO+1L+HuRMSUEvFKQPzUVyRMKmrCxnGDspIBoo5Cm3ZDOD" +
+        "DtH0E1lN+bGiPWV0QXk+YSfY1D8K9XzIcqMRanFIU5z7/mkjHLNuCkLWfPSXUjZpivIpGL2LakjROq796sN2yy//AK1CVrQt" +
+        "fapPTeukxobS5TPqAPcVxy6RHJv8VV+wdCtspvEYNYpv0dFQpwaFvs8fwPiOChDcmei1tOLiPc532NFXHca5kEZeQj/amiSK" +
+        "IcXgF5FOpyRQ2ne90BW3Lbjm9wNucWpYWrnKcNdfDopt9q9OxfToWSU0hZRJi3wRLaD5GD89UvcgSiL5gNtH2itjpbUkW4WV" +
+        "mXKYBX4g9IrbXoxMOBaR4oCaiszmFHNLWTaPjd0D80bc1S6p2LbsbY7UNUS5vtAISsNP/wBGhi+TJmaOKjoKl+R5SLjUajFM" +
+        "xLixpu4T90tccRbUVx4p54eQCtrprTMqBeWZ8mOoI8gekVcbU2w2PD/lktpcQ1/H4o3nrlV1kt3jo9q9kChWJlVyzrqFn9kU" +
+        "a27JoOCxjb1qSjxHOUObdz1NzDjkV3ve+xrxQka5kWNJvlDa2FfVY8cWS8zyRVs92kGp/ffuF4lFr6j00z6W1q5KnNOymSUk" +
+        "gnopO5GlUt4vYzzB9begaVs2n0Y26ccbOgetVVF2sNnxXGzKQltK0I7/AJUg7N+IaRFuLtnZlEJ8ingVULFWZk8hsskHtXoE" +
+        "0YQMSuwvh/IdKNf/2Q==",
+    )
+
+    /** Luma 4x1, 4:1:1: chroma quartered across. */
+    val luma4x1: ByteArray = Base64.decode(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDREN" +
+        "Dg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ" +
+        "EBAQEBAQEBAQEBAQEBD/wAARCAAoADADAUEAAhEBAxEB/8QAGAAAAwEBAAAAAAAAAAAAAAAAAAcIBgX/xAAqEAABAwUAAQIF" +
+        "BQEAAAAAAAABAgMEAAUGBxESITEIEyJBURQVYZGhwf/EABkBAQADAQEAAAAAAAAAAAAAAAYDBAUHAv/EADARAAEDAwEFBgUF" +
+        "AAAAAAAAAAECAwQABQYRByEygrESExQVMXEWIkNhkUFygaHh/9oADAMBAAIRAxEAPwCoLY5ZcWxhKT8tK0N/8qWtz7UVIkvR" +
+        "Iz/p0gAGkLH/AHK5XIPfWQpXaorWmvUZBDQmQz5Ej7ipccAtVskTVfpMCuV5NWsTkCDBuF/X9Zgtg/cbqZkPG4uvHBMKAgJ9" +
+        "aym1t7xZlmdt0eSPPxKeA0UV4xLA/ie1CStOpQtxH4WdOtaWyuGljHG0vj5iSfzS/wBtb1dhzXrUxJIAJSADSlgRp+YTxIIU" +
+        "sLV2nXh2qgqOh1xj1A77U38PciYkoJeKUgfmoslX4LH/AAyOJyMw7zNqANFMgWq1bPrfFTxuySg+xNZTfmxoj1ldEF5PmEn2" +
+        "NQ/CvV8yHKjEWpxSFOc+/wCaKK7Hg91i43CXEe3dpXeDnSDSubJGNuCAncAkdK796sN2yy//AK1CVrQtfapPTeukxobS5TPq" +
+        "APcU8Ghb7PH8D4jgpIbkz0WtpxcR7nO+xrj95b8wvUK2j0CJEc8vzJFYWWxvML9Fx1HoypLxFIK25bcc3uBtzi1LC1c5Tw11" +
+        "8Oim32r07F9OhZJTRRQnajk79rnxURzuLDevunVJ6VWz+V4u8Kdb9NB/VbHS2pItwsrMuUwCvxB6RW2vRiYcC0jxQE0pc32g" +
+        "EJWGn/6NJi+TJmaOKjoKl+R5TuxLErIX7grhZmIXyup0NbmNlN22g3C5K4ERSB7gVtdNaZlQLyzPkx1BHkD0irjam2Gx4f8A" +
+        "LJbS4hr+PxRRQ24YyvLpb7gGvcuON/wFEjrQyD2rxHEhW86nrS1t2TQcFjG3rUlHiOcpObdz1NzDjkV3ve+xqf337heJRa+o" +
+        "9NOfS2tXJU5p2UySkkE9FJrITExuZOVxORm3R+5pWhrbxOSbbiL2QL4nnVNa/Y7qqi7WGz4rjZlIS2laEd/ypB2b8Q0iLcXb" +
+        "OzKIT5FPAqiinGzVDLLEp976zgcHstINS4lbixEUyoeiv9r/2Q==",
+    )
+
+    /** Luma 1x2, 4:4:0: chroma halved down. */
+    val luma1x2: ByteArray = Base64.decode(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDREN" +
+        "Dg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ" +
+        "EBAQEBAQEBAQEBAQEBD/wAARCAAoADADARIAAhEBAxEB/8QAGgAAAwADAQAAAAAAAAAAAAAAAAcIAwUGBP/EACoQAAEDBQAB" +
+        "AgUFAQAAAAAAAAECAwQABQYHERIhMQgTIkFRFBVhkaHB/8QAGgEAAwEBAQEAAAAAAAAAAAAABQYHCAMBBP/EACoRAAEDBAEC" +
+        "BgEFAAAAAAAAAAECBAUAAwYRBxIhFCIxQVFhExUWIyXB/9oADAMBAAIRAxEAPwCoLY5ZcWxhKT8tK0N/8qS9tb1dhzXrUxJI" +
+        "AJSADQ6Dxyzys36JLy3fukNk/mbN8N1glNe/c+1FSJL0SM/6dIABpLQI0/MJ4kEKWFq7RmMgXXELrV/zWf8AKtcFxFF5JZDx" +
+        "4QFeta6P+5XK5B76yFK7T8w7VQVHQ64x6gd9qcp17AZmz8VGEJvAe3zXkvmLDiRJtN9HVe7WmvUZBDQmQz5Ej7imjh7kTElB" +
+        "LxSkD81G7HIsrBODFSKSbZ7bNSaV5SkOS1lu22N1ih43F144JhQEBPrXM782NEesrogvJ8wk+xro+wF9PLErEqOj30K6xPDT" +
+        "3q8Y6J+axbW3vFmWZ23R5I8/Ep4DUSQr1fMhyoxFqcUhTnPv+aq2JREQ7b+CyAAXB7mqTHuWuOgWFj0rf3qw3bLL/wDrUJWt" +
+        "C19quNLaki3Cysy5TAK/EHpFDcyvtocfqONq9O+hTWtxjzZsV3Nddc1pvXSY0Npcpn1AHuKbd6MTDgWkeKAmlCN5J/fFsxMw" +
+        "nS/TZrO2ZclTUdfNmG2U/VbVoW+zx/A+I4KSGb7QCErDT/8ARpad8fz2JvBIR5KrJO+3xRHDcTfclKBmdjfzRuTPRa2nFxHu" +
+        "c77GkxfJkzNHFR0FS/I8q0wUNA5syCX2k3gPf5qyK4xieOrXirJBIrU23Lbjm9wNucWpYWrnKZemtMyoF5ZnyY6gjyB6RQR1" +
+        "lJ4tvFurzWqWHnLqLh8Gga9q6XXXw6KbfavTsX06FklNV81NsNjw/wCWS2lxDX8fikfKJW9naPFwZ0v6pbfXDLpNxJ7mlrbs" +
+        "mg4LGNvWpKPEc5RShxw9cXn/AIS6oqRv0PeoZJSzy++/Gu4dbpObdz1NzDjkV3ve+xoqv5fiMUwSl82R03PXYrXfEmIRMq3T" +
+        "ceW+o/dT++/cLxKLX1Hpoqj8ey7iSYFq60pOvcUc5GIxK2TEgI1Tn0trVyVOadlMkpJBPRRWdOV3l/GZP8kYooO/as7Ws0mJ" +
+        "66bD671JqqLtYbPiuNmUhLaVoR3/ACiiGPqOaR/9x5+1fZex5iP5gk9VSDs34hpEW4u2dmUQnyKeBVFM2FRLaAkghmO2/Q96" +
+        "YMfspF0I9q//2Q==",
+    )
+
+    /** Luma 4x2, chroma quartered across and halved down. */
+    val luma4x2: ByteArray = Base64.decode(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDREN" +
+        "Dg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ" +
+        "EBAQEBAQEBAQEBAQEBD/wAARCAAoADADAUIAAhEBAxEB/8QAGQAAAwEBAQAAAAAAAAAAAAAAAAcIBgUD/8QAKhAAAQQCAgEC" +
+        "BQUBAAAAAAAAAQACAwQFEQYHEiExCBMiQVEUFWGRocH/xAAYAQEBAAMAAAAAAAAAAAAAAAAGBQECBP/EAC8RAAECBAIGCgMA" +
+        "AAAAAAAAAAECAwAEBQYRIQcSEyJRUhUjMjM0QWFxgZExsdH/2gAMAwEAAhEDEQA/AKgxkmF4txhrT8tr2R/8Utdz9qOsWZql" +
+        "af02QACkLX/cslkhN9ZDnbVFdades5BTY2xD5Ej7hcDtrvWWndmxUFkgAloAKUtCtf5hfFghzw9206+HdVB1dkskHqBv2Tf4" +
+        "fJU4k4NmLWgflZLgteiuPo71Zbm08dVe66P7GjM8q1bY6bV4mcJlvXgDHlT43V68kFwsDA31WU7W73q3MNLjq9kefiW6BQhe" +
+        "vfnY1SbCyijM3zDT7FQ/SzWc5Dyo1Hukcx0mvv8AlCEwsyy6C9Ti3XCNolainHkVvJ/cX7bEvZUgilTfbGZx9c47+awOW5Zn" +
+        "/wBaxr3se/apPpvrptanE+1D6gD3CeEQx+Hr+B8RoJIdyc9GLikfUm1rfsVpOlupKuQwsNu1AC/xB2QttmjU4cDEzxYGpS83" +
+        "7QDGvEU/9FJjOXLnNJHV2Fz/ACOkQSlFerqEK7iXdXLq4bJ0YoPsDEtyVbu28F0xPhJRsPDhrpzPzHJxvLcjzfIHHSPc8Pdr" +
+        "SeHXXw6OjnizUtX02HklqELNdNdM2qGZhv2a7gzyB2Qrjiu4HB8P+WTG2RkX8fhCEMvBuuXHOpVRyQGBsVYczZIx+sIhVidc" +
+        "uqY6Ra/By+soWuO5NR4LWOPe5rPEa0k527z1uTEklWXe9+xU/wA8+QzFoxfUdlOfpbrWS1eiltQktJBOwhCEJVTCZa1JiZb7" +
+        "bkmFk+es2rdV7iOmgvrp+j41dg9e7MFtSvMpJzEVRlsDh+K8bNpjY2vYzf8AikHs34hrFXIy4eG0Q3yLdByEIQhCb6PCJaTc" +
+        "eSAS6UuKx5lIGJ+Yr2xIssMLaQMgqP/Z",
+    )
+
+    val all: List<Pair<String, ByteArray>> = listOf("2x1" to luma2x1, "4x1" to luma4x1, "1x2" to luma1x2, "4x2" to luma4x2)
+}
