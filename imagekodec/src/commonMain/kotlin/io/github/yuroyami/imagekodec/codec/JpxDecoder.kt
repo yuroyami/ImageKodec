@@ -1156,9 +1156,9 @@ public object JpxDecoder {
         val n = i1 - i0
         if (n <= 0) return
         if (n == 1) {
-            // Single-sample special case (F.3.7): an odd (high-pass only)
-            // sample halves; an even sample passes through.
-            if (i0 % 2 != 0 && reversible) x[0] = x[0] shr 1
+            // T.800 F.3.6 defines the singleton rule before selecting either
+            // filter: an odd high-pass sample halves, including fixed-point 9/7.
+            if (i0 % 2 != 0) x[0] = x[0] shr 1
             return
         }
         fun get(i: Int): Int {

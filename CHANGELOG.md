@@ -47,6 +47,9 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- JPEG 2000 irreversible 9/7 reconstruction applies the single-sample odd-origin
+  division in the fixed-point domain, correcting large errors in small tiles
+  and reduced decodes while preserving reversible output (#97).
 - Positive CCITT `K` selects mixed Group 3 decoding with per-row mode tags,
   reference-row resets, EOL/fill framing, byte alignment and RTC termination.
   TIFF T4Options bit 0 uses the same decoder; uncompressed fax extensions remain

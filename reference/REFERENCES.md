@@ -93,3 +93,5 @@ JPEG 2000 probe and decode share the COD/COC and QCD/QCC parameter readers. `Jp2
 cd reference
 for d in stb lodepng commons-imaging; do (cd "$d" && git pull --depth 1); done
 ```
+
+JPEG 2000 singleton reconstruction follows [ITU-T T.800 section F.3.6](https://www.fit.vut.cz/person/ibarina/public/tmp/20_T-REC-T_1_.800-200208-I__PDF-E.pdf) for both filters. `Jp2SingletonTest` contains native FFmpeg codestreams with 16×16 tiles and committed OpenJPEG reference pixels for horizontal, vertical and corner singleton cases, plus reversible and ordinary OpenJPEG controls. The source gray ramp is `x*181/(width-1) + y*71/(height-1)` with integer divisions. FFmpeg is used only as an encoder oracle; no source is copied. `Jp2SingletonOracleTest` independently checks full output and all public reduction factors against OpenJPEG.
