@@ -201,9 +201,9 @@ it is derived from the stated delay, because neither format stores centiseconds.
 ### Keep 16-bit samples
 
 `decode` returns 8 bits a channel. For a depth map, a scientific or medical image
-or a graded photograph, `decode16` keeps every bit a 16-bit PNG or TIFF stores, in
-the channels the file has once a palette is looked up: gray, gray and alpha, RGB
-or RGBA.
+or a graded photograph, `decode16` keeps every bit a 16-bit PNG or TIFF stores,
+and every bit of a JPEG 2000 component up to 16 bits deep, in the channels the file
+has once a palette is looked up: gray, gray and alpha, RGB or RGBA.
 
 ```kotlin
 val wide = ImageKodec.decode16(bytes)
@@ -212,8 +212,9 @@ wide[x, y, 0]                  // 0..65535
 wide.toBitmap()                // the high byte of each sample: exactly what decode returns
 ```
 
-Narrower samples replicate up, so an 8-bit value `v` becomes `v * 257`, and every
-other format decodes as `decode` does and widens the same way.
+Narrower samples replicate up, so an 8-bit value `v` becomes `v * 257` and a 12-bit
+one `v shl 4 or (v shr 8)`, and every other format decodes as `decode` does and
+widens the same way.
 
 ### Write an image out
 
@@ -407,8 +408,8 @@ web project that runs under Node should not use them.
 ## Limits
 
 - **`decode` keeps only the high byte of a 16-bit sample**, because `KiteBitmap`
-  is 8 bits a channel. `decode16` keeps the whole sample for PNG and TIFF; a JPEG
-  2000 file above 8 bits a component still comes through 8 bits there.
+  is 8 bits a channel. `decode16` keeps the whole sample for PNG, TIFF and JPEG
+  2000; other formats come through it at 8 bits, widened.
 - **ImageKodec writes PNG, JPEG, GIF and BMP only.** There is no encoder for WebP,
   TIFF or JPEG 2000.
 - **The PNG encoder writes 8-bit RGB or RGBA only**, with no interlace, no

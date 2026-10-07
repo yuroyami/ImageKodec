@@ -1,16 +1,19 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.internal.flate.Crc32
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * [ImageKodec.decode16] keeps every bit of a 16-bit PNG or TIFF (#10). The files here are
+ * [ImageKodec.decode16] keeps every bit of a 16-bit PNG or TIFF (#10), and of a JPEG 2000
+ * component up to 16 bits deep (#107). The files here are
  * built from known samples whose low bytes are not zero, so every expected value is exact,
  * and the 8-bit decode must still be the high byte of each of them.
  */
@@ -236,6 +239,40 @@ class Decode16Test {
         assertFailsWith<IllegalArgumentException> { ImageKodec.decode16(bytes, page = 1) }
         val pages = TiffPagesTest().let { it.tiff(it.pages) }
         assertContentEquals(ImageKodec.decodePage(pages, 2).argb, ImageKodec.decode16(pages, page = 2).toBitmap().argb)
+    }
+
+    @Test
+    fun jpeg2000KeepsEveryBitOfItsComponents() {
+        // Jp2SignedTest's ramps: sample i * max / 255 at every precision from 1 to 16 bits, signed and not.
+        val ramps = Jp2SignedTest()
+        for (precision in 1..16) for (signed in listOf(true, false)) {
+            val wide = ImageKodec.decode16(ramps.gray(precision, signed))
+            assertEquals(1, wide.channels)
+            val max = (1 shl precision) - 1
+            for (i in 0 until 256) {
+                val v = i * max / 255
+                // Replicated from 8 bits up; below, a sample has fewer levels than a byte and comes as its 8-bit value repeated.
+                val expected = if (precision >= 8) (v shl (16 - precision)) or (v shr (2 * precision - 16)) else v * 255 / max * 257
+                assertEquals(expected, wide.samples[i].toInt() and 0xFFFF, "$precision-bit sample $i, signed $signed")
+            }
+        }
+    }
+
+    @Test
+    fun jpeg2000NarrowsBackToWhatDecodeGives() {
+        val signed = Jp2SignedTest()
+        val files = listOf(
+            "ffmpeg" to hex(JP2), "gray and alpha" to signed.grayAlpha(), "rct" to signed.rgb(true),
+            "palette" to Jp2ColorFixtures.palette, "sYCC" to Jp2ColorFixtures.sycc, "e-sYCC" to Jp2ColorFixtures.esycc,
+            "CMYK" to Jp2ColorFixtures.cmyk, "CMY" to Jp2ColorFixtures.cmy, "premultiplied" to Jp2ColorFixtures.premultiplied,
+            "straight" to Jp2ColorFixtures.straight, "ICC gray" to Jp2ColorFixtures.iccGray, "swapped" to Jp2ColorFixtures.swapped,
+        ) + Jp2FeatureFixtures.all.map { it.first to it.second }
+        for ((name, data) in files) {
+            val narrow = assertNotNull(JpxDecoder.decode(data), name)
+            val wide = ImageKodec.decode16(data)
+            assertEquals((if (narrow.colorSpace == "DeviceRGB") 3 else 1) + (if (narrow.alpha != null) 1 else 0), wide.channels, name)
+            assertContentEquals(ImageKodec.decode(data).argb, wide.toBitmap().argb, name)
+        }
     }
 
     @Test

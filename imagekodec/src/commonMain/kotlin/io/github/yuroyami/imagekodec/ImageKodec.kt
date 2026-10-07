@@ -7,6 +7,7 @@ import io.github.yuroyami.imagekodec.codec.GifEncoder
 import io.github.yuroyami.imagekodec.codec.ImageProbe
 import io.github.yuroyami.imagekodec.codec.JpegDecoder
 import io.github.yuroyami.imagekodec.codec.JpegEncoder
+import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.codec.PngDecoder
 import io.github.yuroyami.imagekodec.codec.PngEncoder
 import io.github.yuroyami.imagekodec.codec.TiffDecoder
@@ -135,13 +136,14 @@ public object ImageKodec {
      * Decode page [page] of [data] at 16 bits a sample, for the files whose low byte
      * matters: depth maps, scientific and medical images, heavily graded photographs.
      * [decode] keeps 8 bits a channel; this keeps every bit a 16-bit PNG or TIFF stores,
-     * including a TIFF palette's 16-bit ColorMap. The channels are those the file
-     * stores once a palette is looked up (gray, gray and alpha, RGB or RGBA), so a gray
-     * depth map stays one sample a pixel. Narrower PNG and TIFF samples replicate up (an
-     * 8-bit `v` becomes `v * 257`, a 1-bit one 0 or 65535), and every other format
-     * decodes as [decode] does and widens the same way, as RGB, or RGBA when the file
-     * declares transparency. [KiteBitmap16.toBitmap] then gives exactly what [decode]
-     * returns. A JPEG 2000 file with components above 8 bits still comes through 8 bits.
+     * including a TIFF palette's 16-bit ColorMap, and every bit of a JPEG 2000 component
+     * up to 16 bits deep, through its palette, channel definitions and colour space. The
+     * channels are those the file stores once a palette is looked up (gray, gray and alpha,
+     * RGB or RGBA), so a gray depth map stays one sample a pixel. Narrower samples
+     * replicate up (an 8-bit `v` becomes `v * 257`, a 12-bit one `v shl 4 or (v shr 8)`, a
+     * 1-bit one 0 or 65535), and every other format decodes as [decode] does and widens
+     * the same way, as RGB, or RGBA when the file declares transparency.
+     * [KiteBitmap16.toBitmap] then gives exactly what [decode] returns.
      *
      * [page] counts from 0, as for [decodePage]. With [applyOrientation] the page's
      * orientation tag is honoured, as [decode] does.
@@ -160,6 +162,7 @@ public object ImageKodec {
         val wide = when (format) {
             ImageFormat.TIFF -> TiffDecoder.decode16(data, page)
             ImageFormat.PNG -> PngDecoder.decode16(data)
+            ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data)
             // A BMP that holds a PNG keeps that PNG's precision.
             ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { return decode16(it, 0, applyOrientation) }
                 ?: return widened(data, applyOrientation)
@@ -388,7 +391,7 @@ public object ImageKodec {
 
     /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored), each side divided by [reduction]. */
     private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1): KiteBitmap {
-        val r = io.github.yuroyami.imagekodec.codec.JpxDecoder.decodeForFacade(data, reduction)
+        val r = JpxDecoder.decodeForFacade(data, reduction)
         val n = if (r.colorSpace == "DeviceRGB") 3 else 1
         val argb = IntArray(r.width * r.height)
         for (i in argb.indices) {

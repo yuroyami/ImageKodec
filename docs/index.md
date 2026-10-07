@@ -87,8 +87,8 @@ decode, rather than throwing later.
 **WebP decodes, lossy and lossless, but does not encode.** Lossy files decode to
 the pixels libwebp's `dwebp` writes. There is no WebP encoder.
 
-PNG and TIFF read 16-bit files. `decode` keeps the high byte of each sample, and
-`decode16` keeps all of it, in a `KiteBitmap16`.
+PNG, TIFF and JPEG 2000 read files deeper than 8 bits. `decode` keeps the high byte
+of each sample, and `decode16` keeps all of it, in a `KiteBitmap16`.
 
 The README's Limits section has the full list.
 

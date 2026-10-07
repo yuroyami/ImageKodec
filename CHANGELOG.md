@@ -14,6 +14,14 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.decode16` keeps every bit of a JPEG 2000 component up to 16 bits
+  deep, replicated up to 16 bits, through the palette, channel definitions, sYCC
+  and e-sYCC, CMYK and CMY, and straight or premultiplied opacity, in the channels
+  the colour stage gives. A value the colour stage computes stays in the byte the
+  8-bit decode gives, so `toBitmap` still returns exactly what `decode` does. 10-,
+  12- and 16-bit gray, RGB, RGBA and sYCC files match opj_decompress's samples at
+  their own precision exactly, and 9/7 files within one level (#107).
+
 - JPEG 2000 decodes all of Part 1. Every code-block style: the arithmetic coding
   bypass with its raw passes, context reset, termination on each pass,
   vertically causal contexts and segmentation symbols, alone or together, each
@@ -193,6 +201,10 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+
+- JPEG 2000 sYCC converts to RGB as OpenJPEG's `sycc_to_rgb` does, each product in
+  double precision before it truncates. The fixed point it used before put a
+  12-bit product on the other side of an integer now and then, one level off (#107).
 - `FuzzTest` runs every mutant against a deadline, which on the JVM also stops a
   loop that never ends, and drives the JPEG 2000 and JBIG2 decoders through
   internal entry points that let a fault escape, where the facade and their
