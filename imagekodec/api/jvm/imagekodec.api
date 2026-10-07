@@ -109,6 +109,8 @@ public final class io/github/yuroyami/imagekodec/Orientation$Companion {
 }
 
 public final class io/github/yuroyami/imagekodec/ScalingKt {
+	public static final fun downscaledTo (Lio/github/yuroyami/imagekodec/KiteAnimation;II)Lio/github/yuroyami/imagekodec/KiteAnimation;
+	public static final fun downscaledTo (Lio/github/yuroyami/imagekodec/KiteBitmap;II)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static final fun scaled (Lio/github/yuroyami/imagekodec/KiteAnimation;II)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun scaled (Lio/github/yuroyami/imagekodec/KiteBitmap;II)Lio/github/yuroyami/imagekodec/KiteBitmap;
 }

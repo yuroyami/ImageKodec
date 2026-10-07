@@ -1,15 +1,17 @@
 package io.github.yuroyami.imagekodec.coil
 
 import coil3.ImageLoader
+import coil3.annotation.ExperimentalCoilApi
 import coil3.decode.DecodeResult
+import coil3.decode.DecodeUtils
 import coil3.decode.Decoder
 import coil3.decode.ImageSource
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
-import coil3.size.Dimension
+import coil3.request.maxBitmapSize
 import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.ImageKodec
-import io.github.yuroyami.imagekodec.scaled
+import io.github.yuroyami.imagekodec.downscaledTo
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import okio.use
@@ -33,8 +35,9 @@ import okio.use
  * CgBI PNGs, lossy WebP, lossless/arithmetic JPEGs). Coil's platform decoders
  * keep everything it turns down, so nothing regresses versus a stock setup.
  *
- * Static results honor the request's target size (box-filter downscale, never
- * up) and memory-cache normally. Animated results come back as
+ * Static results honor the request's size, FIT/FILL scale, single defined side
+ * and maximum bitmap size (box-filter downscale, never up), and memory-cache
+ * normally. Animated results come back as
  * [KiteAnimationImage] with **every frame downscaled** to the target size: that
  * is where animated memory goes: and are marked shareable (memory-cacheable)
  * when their pixel bytes fit under [Factory.maxCacheableAnimationBytes].
@@ -47,6 +50,7 @@ public class KiteImageDecoder(
     private val maxCacheableAnimationBytes: Long = Factory.DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES,
 ) : Decoder {
 
+    @OptIn(ExperimentalCoilApi::class)
     override suspend fun decode(): DecodeResult {
         val bytes = source.source().use { it.readByteArray() }
         val ctx = currentCoroutineContext()
@@ -55,18 +59,18 @@ public class KiteImageDecoder(
         // be a regression against a stock ImageLoader, not a neutral swap.
         val animation = ImageKodec.decodeAnimation(bytes, applyOrientation = true) { ctx.ensureActive() }
 
-        // Honor the request's target size (box-filter downscale, never up).
-        val tw = (options.size.width as? Dimension.Pixels)?.px ?: 0
-        val th = (options.size.height as? Dimension.Pixels)?.px ?: 0
-        val hasTarget = tw > 0 && th > 0
+        val target = DecodeUtils.computeDstSize(animation.width, animation.height,
+            options.size, options.scale, options.maxBitmapSize)
+        val multiplier = DecodeUtils.computeSizeMultiplier(animation.width, animation.height,
+            target.first, target.second, options.scale, options.maxBitmapSize).coerceAtMost(1.0)
+        // Coil's Skia conversion floors the scaled sides independently. Fitting
+        // that output box again would shrink non-integral ratios a second time.
+        val width = (animation.width * multiplier).toInt().coerceAtLeast(1)
+        val height = (animation.height * multiplier).toInt().coerceAtLeast(1)
+        val sampled = width < animation.width || height < animation.height
 
         if (animation.isAnimated) {
-            var anim = animation
-            var sampled = false
-            if (hasTarget && (anim.width > tw || anim.height > th)) {
-                anim = anim.scaled(tw, th)
-                sampled = true
-            }
+            val anim = if (sampled) animation.downscaledTo(width, height) else animation
             val pixelBytes = anim.frames.size.toLong() * anim.width * anim.height * 4
             return DecodeResult(
                 image = KiteAnimationImage(anim, shareable = pixelBytes <= maxCacheableAnimationBytes),
@@ -74,12 +78,8 @@ public class KiteImageDecoder(
             )
         }
 
-        var bitmap = animation.frames.first().bitmap
-        var sampled = false
-        if (hasTarget && (bitmap.width > tw || bitmap.height > th)) {
-            bitmap = bitmap.scaled(tw, th)
-            sampled = true
-        }
+        val original = animation.frames.first().bitmap
+        val bitmap = if (sampled) original.downscaledTo(width, height) else original
         return DecodeResult(image = bitmap.toCoilImage(shareable = true), isSampled = sampled)
     }
 

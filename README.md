@@ -199,6 +199,12 @@ bitmap.oriented(info.orientation)
 `scaled` is an alpha-weighted box filter. It preserves aspect ratio and never
 upscales. When the image already fits the box, it returns the image unchanged.
 
+`bitmap.downscaledTo(targetWidth = 128, targetHeight = 75)` uses the same filter
+with exact output dimensions. It leaves the aspect ratio to the caller and
+throws `IllegalArgumentException` if a side is not positive or exceeds the
+source. `KiteAnimation.downscaledTo` applies it to every frame and preserves
+timing and the play count.
+
 `scaled` works on a decoded image, so the full-size image exists first. To
 avoid that for a JPEG, decode at a smaller size:
 
@@ -276,9 +282,12 @@ Coil's memory cache holds an animation when its decoded frames fit under that
 limit. Larger ones re-decode from the disk cache instead of evicting everything
 else.
 
-`KiteAsyncImage` passes its layout constraints to the request as a target size.
-ImageKodec then box-filters still images and every animation frame to the size you
-actually draw.
+`KiteAsyncImage` uses its layout constraints as the target size, or original
+pixels for `ContentScale.None`. Fit/Inside request FIT; the other drawing scales
+request FILL. Explicit request size and scale take precedence. The decoder uses
+Coil's sizing rules, including one defined side and `maxBitmapSize`, and
+box-filters still images and every animation frame to those dimensions without
+upscaling.
 
 This module declares coil3 as `api`, so coil3 types appear on your compile
 classpath even when you do not use them.

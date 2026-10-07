@@ -33,7 +33,8 @@ On a Mac, add the Apple targets:
 ```
 
 `tools/ThrowsContract.swift` checks the exported API from a Swift caller:
-all seven checked API operations must return recoverable `NSError`s.
+checked API operations, including exact downscaling, must return recoverable
+`NSError`s.
 Build `:imagekodec:linkDebugFrameworkIosSimulatorArm64`, compile the source
 against that framework with the simulator SDK, and run it in a booted simulator.
 This complements the JVM reflection test, which checks declarations alone.

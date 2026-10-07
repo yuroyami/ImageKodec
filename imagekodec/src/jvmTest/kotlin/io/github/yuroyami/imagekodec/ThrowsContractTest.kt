@@ -46,6 +46,7 @@ class ThrowsContractTest {
         val transforms = Class.forName("io.github.yuroyami.imagekodec.TransformsKt")
         for (receiver in listOf(KiteBitmap::class.java, KiteAnimation::class.java)) {
             declares(scaling, "scaled", ex, receiver, int, int)
+            declares(scaling, "downscaledTo", ex, receiver, int, int)
             declares(transforms, "cropped", ex, receiver, int, int, int, int)
         }
         val bitmapConstructor = KiteBitmap::class.java.getConstructor(int, int, IntArray::class.java)

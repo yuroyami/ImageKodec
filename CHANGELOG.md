@@ -42,6 +42,11 @@ reviewable in the diff.
 
 ### Fixed
 
+- The Coil decoder honors FILL, requests with one defined dimension and
+  maxBitmapSize for stills and every animation frame. The core's new
+  `downscaledTo` operations retain the exact output geometry chosen by Coil
+  without a second aspect-ratio fit (#52).
+
 - `KiteAsyncImage` matches request sizing to ContentScale, requests original
   pixels for None, preserves explicit request size/scale, and updates inferred
   sizing when ContentScale changes (#54).

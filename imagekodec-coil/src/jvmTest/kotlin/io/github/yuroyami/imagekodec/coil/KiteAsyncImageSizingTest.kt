@@ -65,6 +65,7 @@ class KiteAsyncImageSizingTest {
         val stock = load(true, ContentScale.Crop)
         assertEquals(Triple(200, 100, Scale.FILL), stock)
         assertEquals(stock, load(false, ContentScale.Crop))
+        assertEquals(stock, load(false, ContentScale.Crop, kiteDecoder = true))
     }
 
     @Test

@@ -76,6 +76,8 @@ The first composited WebP canvas is independently checked through Skia's `Codec.
 
 Coil error-image precedence and request sizing were checked against [Coil 3.5.0 compose utilities](https://github.com/coil-kt/coil/blob/3.5.0/coil-compose-core/src/commonMain/kotlin/coil3/compose/internal/utils.kt), under its [Apache-2.0 license](https://github.com/coil-kt/coil/blob/3.5.0/LICENSE.txt). `KiteAsyncImageErrorTest` renders both the binding and stock `AsyncImage` with real failing requests, checking the request's image and explicit painter overrides. `KiteAsyncImageSizingTest` compares real request dimensions and scales with stock AsyncImage, including original-size drawing, explicit request fields and recomposition. No reference source is vendored.
 
+Coil decoder geometry uses the public [Coil 3.5.0 DecodeUtils](https://github.com/coil-kt/coil/blob/3.5.0/coil-core/src/commonMain/kotlin/coil3/decode/DecodeUtils.kt) sizing operations and the independent-side flooring used by its [Skia bitmap conversion](https://github.com/coil-kt/coil/blob/3.5.0/coil-core/src/nonAndroidMain/kotlin/coil3/util/utils.nonAndroid.kt), under Apache-2.0. `KiteImageDecoderSizingTest` compares real stock ImageLoader outputs with the binding for FIT/FILL, one-axis requests, non-integral ratios, original size and maximum bitmap size; animated frames are checked against the same stock geometry. No reference source is vendored.
+
 ## Refresh
 
 ```sh

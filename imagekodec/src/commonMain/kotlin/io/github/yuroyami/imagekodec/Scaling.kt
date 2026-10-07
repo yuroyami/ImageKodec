@@ -35,6 +35,26 @@ public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
         dh = maxHeight
         dw = maxOf(1, (width.toLong() * maxHeight / height).toInt())
     }
+    return downscaledTo(dw, dh)
+}
+
+/**
+ * Downscale to exactly [targetWidth]×[targetHeight] with [scaled]'s alpha-weighted
+ * box filter. The caller chooses the aspect ratio; this operation does not fit
+ * the requested dimensions inside another box. Equal dimensions return this
+ * instance.
+ *
+ * @throws IllegalArgumentException if either dimension is not positive or
+ *   exceeds the corresponding source dimension
+ */
+@Throws(IllegalArgumentException::class)
+public fun KiteBitmap.downscaledTo(targetWidth: Int, targetHeight: Int): KiteBitmap {
+    require(targetWidth in 1..width && targetHeight in 1..height) {
+        "downscale target ${targetWidth}x$targetHeight outside ${width}x$height"
+    }
+    if (width == targetWidth && height == targetHeight) return this
+    val dw = targetWidth
+    val dh = targetHeight
 
     // Invert floor(source * destinationSize / sourceSize) with ceiling
     // division. Each source sample belongs to exactly one destination bin.
@@ -92,10 +112,30 @@ public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
 public fun KiteAnimation.scaled(maxWidth: Int, maxHeight: Int): KiteAnimation {
     require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
     if (width <= maxWidth && height <= maxHeight) return this
+    return mapScaled { it.scaled(maxWidth, maxHeight) }
+}
 
+/**
+ * Downscale every frame to exactly [targetWidth]×[targetHeight] with
+ * [KiteBitmap.downscaledTo], preserving delays and the play count. Equal canvas
+ * dimensions return this instance.
+ *
+ * @throws IllegalArgumentException if either dimension is not positive or
+ *   exceeds the corresponding canvas or frame dimension
+ */
+@Throws(IllegalArgumentException::class)
+public fun KiteAnimation.downscaledTo(targetWidth: Int, targetHeight: Int): KiteAnimation {
+    require(targetWidth in 1..width && targetHeight in 1..height) {
+        "downscale target ${targetWidth}x$targetHeight outside ${width}x$height"
+    }
+    if (width == targetWidth && height == targetHeight) return this
+    return mapScaled { it.downscaledTo(targetWidth, targetHeight) }
+}
+
+private fun KiteAnimation.mapScaled(transform: (KiteBitmap) -> KiteBitmap): KiteAnimation {
     val scaledFrames = frames.map { f ->
         KiteFrame(
-            bitmap = f.bitmap.scaled(maxWidth, maxHeight),
+            bitmap = transform(f.bitmap),
             delayMillis = f.delayMillis,
             delayRawCentiseconds = f.delayRawCentiseconds,
         )
