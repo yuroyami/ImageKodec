@@ -35,6 +35,10 @@ reviewable in the diff.
 
 ### Fixed
 
+- JVM library artifacts target Java 11, restrict JDK API use to that release,
+  and declare the minimum in Gradle publication metadata. CI tests the core
+  and both bindings on Java 11 as well as Java 21 (#85).
+
 - JBIG2 returns null for unsupported unknown-length segments, Huffman refinement
   dictionaries and multi-instance aggregates, preventing partial pages (#89).
 - Malformed JBIG2 symbol dictionaries end decoding instead of emitting blank

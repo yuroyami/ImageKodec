@@ -14,7 +14,7 @@ class ScalingAllocationTest {
         assertTrue(bean.isThreadAllocatedMemorySupported)
         bean.isThreadAllocatedMemoryEnabled = true
         repeat(8) { source.scaled(999, 999) }
-        val thread = Thread.currentThread().threadId()
+        val thread = Thread.currentThread().id
         val before = bean.getThreadAllocatedBytes(thread)
         val result = source.scaled(999, 999)
         val allocated = bean.getThreadAllocatedBytes(thread) - before

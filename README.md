@@ -282,7 +282,7 @@ classpath even when you do not use them.
 
 | Family | Targets |
 | --- | --- |
-| Android, JVM | Android (minSdk 21), `jvm` |
+| Android, JVM | Android (minSdk 21), `jvm` (Java 11 or newer) |
 | Apple | `iosArm64`, `iosSimulatorArm64`, `iosX64`, `macosArm64`, `tvosArm64`, `tvosSimulatorArm64`, `watchosArm32`, `watchosArm64`, `watchosDeviceArm64`, `watchosSimulatorArm64` |
 | Other native | `linuxX64`, `linuxArm64`, `mingwX64`, `androidNativeArm32`, `androidNativeArm64`, `androidNativeX64`, `androidNativeX86` |
 | Web | `js` (browser and Node), `wasmJs` (browser and Node), `wasmWasi` (Node) |

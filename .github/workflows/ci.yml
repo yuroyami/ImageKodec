@@ -31,7 +31,9 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: |
+            11
+            21
 
       # The oracle suites skip themselves when their tool is missing, and a
       # skipped test reads exactly like a passing one, so these are installed
@@ -62,6 +64,9 @@ jobs:
 
       - name: Compose and Coil tests
         run: ./gradlew :imagekodec-compose:jvmTest :imagekodec-coil:jvmTest --stacktrace
+
+      - name: Core and bindings on Java 11
+        run: ./gradlew :imagekodec:jvmJava11Test :imagekodec-compose:jvmJava11Test :imagekodec-coil:jvmJava11Test --stacktrace
 
       - name: Public API check
         run: ./gradlew checkLegacyAbi --stacktrace

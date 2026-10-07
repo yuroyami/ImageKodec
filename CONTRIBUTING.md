@@ -15,6 +15,17 @@ request, run what CI runs:
           :imagekodec-compose:jvmTest :imagekodec-coil:jvmTest checkLegacyAbi
 ```
 
+The build uses JDK 21; the three JVM library variants target Java 11 and restrict
+JDK API use to that release. CI also runs their suites on a Java 11 worker:
+
+```sh
+./gradlew :imagekodec:jvmJava11Test :imagekodec-compose:jvmJava11Test \
+          :imagekodec-coil:jvmJava11Test
+```
+
+Install JDK 11 alongside JDK 21 for this check. Gradle still runs on JDK 21 and
+selects JDK 11 only for these test workers.
+
 On a Mac, add the Apple targets:
 
 ```sh

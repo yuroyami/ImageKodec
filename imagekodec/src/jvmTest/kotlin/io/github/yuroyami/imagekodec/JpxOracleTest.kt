@@ -236,9 +236,9 @@ class JpxOracleTest {
         val bytes = encode(ppm(1600, 1200), "-I", "-r", "20").readBytes()
         val bean = java.lang.management.ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
         fun allocated(block: () -> Unit): Long {
-            val before = bean.getThreadAllocatedBytes(Thread.currentThread().threadId())
+            val before = bean.getThreadAllocatedBytes(Thread.currentThread().id)
             block()
-            return bean.getThreadAllocatedBytes(Thread.currentThread().threadId()) - before
+            return bean.getThreadAllocatedBytes(Thread.currentThread().id) - before
         }
         repeat(2) { JpxDecoder.decode(bytes); JpxDecoder.decode(bytes, 8) } // warm up
         val full = allocated { JpxDecoder.decode(bytes) }
