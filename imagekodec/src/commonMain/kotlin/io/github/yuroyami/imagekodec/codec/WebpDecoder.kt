@@ -76,15 +76,7 @@ internal object WebpDecoder {
                 err("frame declares ${frame.width}x${frame.height} but decodes ${pixels.width}x${pixels.height}")
             }
             if (canvas.isEmpty()) canvas = IntArray(w * h)
-            for (y in 0 until frame.height) {
-                var s = y * frame.width
-                var d = (frame.y + y) * w + frame.x
-                for (x in 0 until frame.width) {
-                    val sp = pixels.argb[s++]
-                    canvas[d] = if (frame.blend) sourceOver(sp, canvas[d]) else sp
-                    d++
-                }
-            }
+            composite(canvas, w, pixels, frame)
 
             // Duration 0 means "as fast as possible"; clamp it the way browsers do.
             val millis = if (frame.durationMillis <= 10) 100 else frame.durationMillis
@@ -276,6 +268,13 @@ internal object WebpDecoder {
 
     private fun renderStill(data: ByteArray, file: File, frame: Frame): KiteBitmap {
         val pixels = decodeFrameImage(data, frame)
+        if (file.animated) {
+            // Still decode presents the first frame before its disposal, using
+            // the same transparent canvas and blending as animation playback.
+            val canvas = IntArray(file.canvasWidth * file.canvasHeight)
+            composite(canvas, file.canvasWidth, pixels, frame)
+            return KiteBitmap(file.canvasWidth, file.canvasHeight, canvas)
+        }
         // The spec requires a still file's canvas to match its image exactly, and
         // holding it to that is also what stops a corrupted VP8X header from
         // sizing an allocation the payload could never fill.
@@ -286,6 +285,18 @@ internal object WebpDecoder {
             )
         }
         return KiteBitmap(pixels.width, pixels.height, pixels.argb)
+    }
+
+    private fun composite(canvas: IntArray, canvasWidth: Int, pixels: Vp8lDecoder.Pixels, frame: Frame) {
+        for (y in 0 until frame.height) {
+            var source = y * frame.width
+            var destination = (frame.y + y) * canvasWidth + frame.x
+            for (x in 0 until frame.width) {
+                val pixel = pixels.argb[source++]
+                canvas[destination] = if (frame.blend) sourceOver(pixel, canvas[destination]) else pixel
+                destination++
+            }
+        }
     }
 
     private fun decodeFrameImage(data: ByteArray, frame: Frame): Vp8lDecoder.Pixels {

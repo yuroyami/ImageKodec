@@ -42,6 +42,10 @@ reviewable in the diff.
 
 ### Fixed
 
+- Still WebP decode composites the first animation rectangle at its declared
+  offset with the same alpha and disposal timing as animation playback, without
+  decoding or retaining later frame pixels (#50).
+
 - Flat lossless WebP and fax-compressed TIFF pages use the absolute output
   ceiling; packed PNG/TIFF expansion bounds account for bits per pixel (#83).
   WebP checks frame/header geometry before canvas allocation, and nonconstant

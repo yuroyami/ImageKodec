@@ -56,6 +56,7 @@ public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
                 val srcBase = y * width
                 for (x in x0 until x1) {
                     val p = argb[srcBase + x]
+                    if (p ushr 24 == 0) continue
                     val a = (p ushr 24).toLong()
                     sumA += a
                     sumR += ((p ushr 16) and 0xFF) * a
@@ -127,12 +128,13 @@ internal fun KiteBitmap.reducedBy(reduction: Int): KiteBitmap {
             for (y in oy * reduction until minOf((oy + 1) * reduction, height)) {
                 for (x in ox * reduction until minOf((ox + 1) * reduction, width)) {
                     val p = argb[y * width + x]
+                    n++
+                    if (p ushr 24 == 0) continue
                     val pa = (p ushr 24).toLong()
                     a += pa
                     r += ((p shr 16) and 0xFF) * pa
                     g += ((p shr 8) and 0xFF) * pa
                     b += (p and 0xFF) * pa
-                    n++
                 }
             }
             out[oy * dw + ox] = if (a == 0L) {

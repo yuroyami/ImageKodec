@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec
 
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
+import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -70,6 +71,7 @@ class FuzzTest {
         "tiff-bilevel-deflate" to faxTiff(Zlib.compress(ByteArray(8)), 8, width = 8, height = 8),
         "webp-normal-prefix" to prefixWebp(intArrayOf(1, 1)),
         "webp-animation" to hex(WEBP_ANIMATION),
+        "webp-partial-animation" to Base64.decode(PARTIAL_WEBP_ANIMATION),
         "tiff" to hex(TIFF_RGB),
         "tiff-packbits" to tiffBlock(32773, byteArrayOf(31) + ByteArray(32) { it.toByte() }),
         "tiff-ycbcr" to hex(buildTiff(ycbcr = true)),
