@@ -26,6 +26,8 @@ import coil3.request.ErrorResult
 import coil3.request.ImageRequest
 import coil3.request.ImageResult
 import coil3.request.SuccessResult
+import coil3.size.Scale
+import coil3.size.SizeResolver
 import io.github.yuroyami.imagekodec.compose.KiteAnimatedImage
 
 /**
@@ -42,13 +44,15 @@ import io.github.yuroyami.imagekodec.compose.KiteAnimatedImage
  * would, via `Image.asPainter`.
  *
  * The request carries this composable's **layout constraints** as its target
- * size (unless [model] is an [ImageRequest] that already defines one), so
+ * size, while [ContentScale.None] requests the original pixels. Drawing scales
+ * map to Coil's FIT/FILL policy; an [ImageRequest]'s explicit size and scale
+ * take precedence, so
  * [KiteImageDecoder] downscales still images *and every animation frame* to
  * what will actually be drawn instead of decoding wallpaper-sized pixels for an
  * avatar slot.
  *
  * [model] may be anything Coil accepts as data, or a prebuilt [ImageRequest]
- * (used as-is, plus the constraints size when it doesn't define its own).
+ * (with size and scale inferred from [contentScale] when not explicitly set).
  * [animate] pins animated results to their first frame when false. [placeholder]
  * shows while the request is in flight. On failure, [error] overrides the
  * request's error image; when absent, that image is displayed. [onSuccess] /
@@ -80,12 +84,18 @@ public fun KiteAsyncImage(
     // the in-flight request; every branch below must keep it in the chain.
     val chainedModifier = modifier.then(sizeResolver)
 
-    val request = remember(model, context, sizeResolver) {
-        when {
-            model is ImageRequest && model.defined.sizeResolver != null -> model
-            model is ImageRequest -> model.newBuilder().size(sizeResolver).build()
-            else -> ImageRequest.Builder(context).data(model).size(sizeResolver).build()
+    val request = remember(model, context, sizeResolver, contentScale) {
+        if (model is ImageRequest && model.defined.sizeResolver != null && model.defined.scale != null) {
+            return@remember model
         }
+        val builder = if (model is ImageRequest) model.newBuilder() else ImageRequest.Builder(context).data(model)
+        if (model !is ImageRequest || model.defined.sizeResolver == null) {
+            builder.size(if (contentScale == ContentScale.None) SizeResolver.ORIGINAL else sizeResolver)
+        }
+        if (model !is ImageRequest || model.defined.scale == null) {
+            builder.scale(if (contentScale == ContentScale.Fit || contentScale == ContentScale.Inside) Scale.FIT else Scale.FILL)
+        }
+        builder.build()
     }
 
     var result by remember(request, imageLoader) { mutableStateOf<ImageResult?>(null) }

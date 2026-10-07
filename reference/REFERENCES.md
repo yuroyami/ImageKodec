@@ -74,7 +74,7 @@ Animation play counts follow the [Skia repetition contract](https://github.com/g
 
 The first composited WebP canvas is independently checked through Skia's `Codec.readPixels` in `WebpFirstFrameOracleTest`, under the same BSD-3-Clause license. The partial-frame regression stream was written with libwebp's cwebp/webpmux tools and is preserved from issue #50; offset, blend and disposal behavior follows the WebP container specification. No reference source is vendored.
 
-Coil error-image precedence was checked against [Coil 3.5.0 compose utilities](https://github.com/coil-kt/coil/blob/3.5.0/coil-compose-core/src/commonMain/kotlin/coil3/compose/internal/utils.kt), under its [Apache-2.0 license](https://github.com/coil-kt/coil/blob/3.5.0/LICENSE.txt). `KiteAsyncImageErrorTest` renders both the binding and stock `AsyncImage` with real failing requests, checking the request's image and explicit painter overrides. No reference source is vendored.
+Coil error-image precedence and request sizing were checked against [Coil 3.5.0 compose utilities](https://github.com/coil-kt/coil/blob/3.5.0/coil-compose-core/src/commonMain/kotlin/coil3/compose/internal/utils.kt), under its [Apache-2.0 license](https://github.com/coil-kt/coil/blob/3.5.0/LICENSE.txt). `KiteAsyncImageErrorTest` renders both the binding and stock `AsyncImage` with real failing requests, checking the request's image and explicit painter overrides. `KiteAsyncImageSizingTest` compares real request dimensions and scales with stock AsyncImage, including original-size drawing, explicit request fields and recomposition. No reference source is vendored.
 
 ## Refresh
 

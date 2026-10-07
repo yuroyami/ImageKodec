@@ -42,6 +42,10 @@ reviewable in the diff.
 
 ### Fixed
 
+- `KiteAsyncImage` matches request sizing to ContentScale, requests original
+  pixels for None, preserves explicit request size/scale, and updates inferred
+  sizing when ContentScale changes (#54).
+
 - `KiteAsyncImage` renders a prebuilt request's error image when no explicit
   composable error painter overrides it (#53).
 
