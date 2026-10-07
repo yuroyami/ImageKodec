@@ -14,6 +14,21 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.decodeScaled` and `ImageKodec.decodeDownscaledTo` decode straight
+  to the size `scaled` or `downscaledTo` would give after a full decode. They
+  read the header, decode a JPEG or JPEG 2000 at the largest reduction whose
+  output still covers the target, and finish with the same box filter, so the
+  result is never smaller than asked for and never upscaled. A 6000 by 4000
+  JPEG asked for at 200 by 200 takes 65 ms of CPU time and allocates 2.6 MiB,
+  where a full decode and `scaled` take 331 ms and 126 MiB, and the pixels
+  differ by 1.3 to 2.5 levels on average. Other formats decode in full and
+  filter once (#13).
+
+- `KiteImageDecoder` passes Coil's computed size down for a still JPEG or
+  JPEG 2000, so a 4000 by 3000 photo in a 100 by 100 slot takes 30 ms and
+  1.3 MiB where it took 157 ms and 63 MiB. Sizes and the sampled flag stay
+  those of Coil's own decoder (#13).
+
 - A BMP whose header declares BI_JPEG or BI_PNG, as printer drivers and some
   Windows clipboard paths write them, decodes to the JPEG or PNG file its pixel
   array holds, where it used to be refused. As in ImageMagick, the file runs

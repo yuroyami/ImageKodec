@@ -144,7 +144,7 @@ internal class Deflater(private val data: ByteArray) {
             first = chunk.last
             at = chunk.end
         } while (first < tokenCount)
-        blocks.add(group!! to groupTables!!)
+        blocks.add(group to groupTables)
 
         var i = 0
         while (i < blocks.size) {

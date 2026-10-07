@@ -21,6 +21,7 @@ import io.github.yuroyami.imagekodec.codec.WebpDecoder
  * val anim = ImageKodec.decodeAnimation(bytes)   // frames + delays + loop count
  * val format = ImageKodec.detect(bytes)          // just the sniff
  * val info = ImageKodec.probe(bytes)             // size + depth + frames, no decode
+ * val thumb = ImageKodec.decodeScaled(bytes, 256, 256)  // fitted, reduced while decoding
  * ```
  */
 public object ImageKodec {
@@ -106,6 +107,81 @@ public object ImageKodec {
             ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { decodeReduced(it, reduction) } ?: decodeRaw(data).reducedBy(reduction)
             else -> decodeRaw(data).reducedBy(reduction)
         }
+    }
+
+    /**
+     * Decode [data] at the size `decode(data, applyOrientation).scaled(maxWidth, maxHeight)` gives:
+     * fitted inside [maxWidth] by [maxHeight] with the image's own aspect ratio, and never larger
+     * than the image. Use it for a thumbnail or a preview, where the full-size pixels would only
+     * be thrown away.
+     *
+     * A JPEG or JPEG 2000 decodes at the largest reduction [decodeReduced] offers whose output
+     * still covers that size, as libjpeg's scaled decode or Android's sample size is chosen, and
+     * the box filter of [scaled] finishes the rest. The full-size pixels never exist, and the
+     * result differs from the full decode only by the reduced inverse transform. Other formats
+     * decode in full and filter once.
+     *
+     * @throws IllegalArgumentException if [maxWidth] or [maxHeight] is not positive
+     * @throws ImageDecodeException on malformed/truncated input or unknown format
+     * @throws UnsupportedImageException on formats recognised but not yet decodable
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun decodeScaled(data: ByteArray, maxWidth: Int, maxHeight: Int, applyOrientation: Boolean = false): KiteBitmap {
+        require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
+        if (!reducesWhileDecoding(data)) return decode(data, applyOrientation).scaled(maxWidth, maxHeight)
+        val info = probe(data)
+        val width = if (applyOrientation) info.displayWidth else info.width
+        val height = if (applyOrientation) info.displayHeight else info.height
+        val (dw, dh) = fittedSize(width, height, maxWidth, maxHeight) ?: return decode(data, applyOrientation)
+        return reducedTo(data, info, dw, dh, applyOrientation)
+    }
+
+    /**
+     * Decode [data] at exactly [width] by [height], the size
+     * `decode(data, applyOrientation).downscaledTo(width, height)` gives. The caller chooses the
+     * aspect ratio: use it for the size of a centre crop, computed from [probe], or for a size a
+     * layout has already worked out. It reduces a JPEG or JPEG 2000 while decoding as
+     * [decodeScaled] does.
+     *
+     * @throws IllegalArgumentException if [width] or [height] is not positive or exceeds the side of
+     *   the image it applies to, after the orientation when [applyOrientation] is set
+     * @throws ImageDecodeException on malformed/truncated input or unknown format
+     * @throws UnsupportedImageException on formats recognised but not yet decodable
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun decodeDownscaledTo(data: ByteArray, width: Int, height: Int, applyOrientation: Boolean = false): KiteBitmap {
+        require(width > 0 && height > 0) { "target must be positive: ${width}x$height" }
+        if (!reducesWhileDecoding(data)) return decode(data, applyOrientation).downscaledTo(width, height)
+        return reducedTo(data, probe(data), width, height, applyOrientation)
+    }
+
+    private fun ceilDiv(side: Int, reduction: Int): Int = ((side.toLong() + reduction - 1) / reduction).toInt()
+
+    /** Whether [decodeReduced] reduces [data] inside its decoder, so that a smaller result costs less. */
+    private fun reducesWhileDecoding(data: ByteArray): Boolean = when (detect(data)) {
+        ImageFormat.JPEG, ImageFormat.JP2 -> true
+        ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { detect(it) == ImageFormat.JPEG } ?: false
+        else -> false
+    }
+
+    /**
+     * [data], whose header [info] describes, decoded at the largest reduction that still covers
+     * [width] by [height] and box-filtered to exactly that size. A reduced side is the full side
+     * divided by the reduction and rounded up, as [decodeReduced] promises.
+     */
+    private fun reducedTo(data: ByteArray, info: ImageInfo, width: Int, height: Int, applyOrientation: Boolean): KiteBitmap {
+        val orientation = if (applyOrientation) info.orientation else Orientation.Normal
+        // The reduction divides the stored sides, so compare them with the target before the orientation.
+        val storedWidth = if (orientation.swapsAxes) height else width
+        val storedHeight = if (orientation.swapsAxes) width else height
+        var reduction = 8
+        while (reduction > 1 && (ceilDiv(info.width, reduction) < storedWidth || ceilDiv(info.height, reduction) < storedHeight)) {
+            reduction /= 2
+        }
+        var bitmap = decodeReduced(data, reduction)
+        // A header that disagrees with its data must not make the result smaller than asked for.
+        if (bitmap.width < storedWidth || bitmap.height < storedHeight) bitmap = decodeRaw(data)
+        return bitmap.oriented(orientation).downscaledTo(width, height)
     }
 
     /**

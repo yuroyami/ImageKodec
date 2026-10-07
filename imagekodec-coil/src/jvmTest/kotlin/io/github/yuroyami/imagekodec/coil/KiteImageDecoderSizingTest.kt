@@ -85,6 +85,36 @@ class KiteImageDecoderSizingTest {
     }
 
     @Test
+    fun aStillJpegReducedInsideItsDecoderKeepsTheStockSizes() {
+        // The size goes down to the JPEG decoder, which reduces inside its inverse DCT (#13). The sizes
+        // and the sampled flag stay those of Coil's own decoder, and the pixels are what
+        // decodeDownscaledTo gives for that size.
+        val source = KiteBitmap(1370, 767, IntArray(1370 * 767) { i ->
+            val x = i % 1370
+            val y = i / 1370
+            (0xFF shl 24) or ((x * 255 / 1369) shl 16) or ((y * 255 / 766) shl 8) or ((x xor y) and 0x3F)
+        })
+        val bytes = ImageKodec.encodeJpeg(source, quality = 90)
+        val cases = listOf(
+            Size(200, 200) to Scale.FIT, Size(128, 128) to Scale.FIT, Size(200, 200) to Scale.FILL,
+            Size(Dimension.Pixels(100), Dimension.Undefined) to Scale.FILL, Size.ORIGINAL to Scale.FIT,
+        )
+        for ((size, scale) in cases) {
+            val stock = load(bytes, size, scale, stock = true)
+            val kite = load(bytes, size, scale, stock = false)
+            val width = kite.image.width
+            val height = kite.image.height
+            assertEquals(stock.image.width to stock.image.height, width to height, "$size $scale")
+            assertEquals(stock.isSampled, kite.isSampled, "$size $scale")
+            val expected = ImageKodec.decodeDownscaledTo(bytes, width, height, applyOrientation = true)
+            val pixels = assertIs<coil3.BitmapImage>(kite.image).bitmap
+            for ((x, y) in listOf(0 to 0, width / 2 to height / 3, width - 1 to height - 1)) {
+                assertEquals(expected[x, y], pixels.getColor(x, y), "$size $scale at $x, $y")
+            }
+        }
+    }
+
+    @Test
     fun animationFramesUseTheSameSizingAndPreservePlayback() {
         val source = bitmap()
         val bytes = ImageKodec.encodeGif(KiteAnimation(400, 200, listOf(

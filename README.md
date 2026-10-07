@@ -206,7 +206,19 @@ source. `KiteAnimation.downscaledTo` applies it to every frame and preserves
 timing and the play count.
 
 `scaled` works on a decoded image, so the full-size image exists first. To
-avoid that for a JPEG, decode at a smaller size:
+avoid that, decode straight to the size you need:
+
+```kotlin
+ImageKodec.decodeScaled(bytes, maxWidth = 256, maxHeight = 256)   // the size scaled(256, 256) gives
+ImageKodec.decodeDownscaledTo(bytes, width = 300, height = 200)   // exactly 300 by 200, as for a centre crop
+```
+
+Each reads the header, decodes a JPEG or JPEG 2000 at the largest reduction
+below whose output still covers the target, and finishes with the same box
+filter, so the result is never smaller than asked for and never upscaled. A
+6000 by 4000 JPEG asked for at 200 by 200 takes about a fifth of the time of a
+full decode and `scaled`, and allocates 2.6 MiB where that allocates 126 MiB.
+Other formats decode in full and filter once. To pick the reduction yourself:
 
 ```kotlin
 ImageKodec.decodeReduced(bytes, reduction = 4)  // each side divided by 4, rounded up
@@ -357,8 +369,9 @@ web project that runs under Node should not use them.
   palette and no 16-bit output. It picks a filter per row, which is a compression
   choice, not a format capability.
 - **Whole-array only.** Every entry point takes a complete `ByteArray`. There is
-  no streaming or partial-decode API. `decodeReduced` shrinks a JPEG or a
-  JPEG 2000 image inside the decoder, and `scaled` works after a full-size decode.
+  no streaming or partial-decode API. `decodeScaled`, `decodeDownscaledTo` and
+  `decodeReduced` shrink a JPEG or a JPEG 2000 image inside the decoder, and
+  `scaled` works after a full-size decode.
 - **JPEG 2000 refusals name their cause.** Unsupported RGN, POC, PPM/PPT and
   non-baseline code-block styles throw `UnsupportedImageException`; files with
   more than 1000 layers are also refused. Malformed

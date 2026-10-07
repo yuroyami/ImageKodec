@@ -37,7 +37,9 @@ import okio.use
  *
  * Static results honor the request's size, FIT/FILL scale, single defined side
  * and maximum bitmap size (box-filter downscale, never up), and memory-cache
- * normally. Animated results come back as
+ * normally. A still JPEG or JPEG 2000 passes that size down to the decoder,
+ * which reduces inside its inverse transform, so a photo shown as an avatar
+ * never exists at full size. Animated results come back as
  * [KiteAnimationImage] with **every frame downscaled** to the target size: that
  * is where animated memory goes: and are marked shareable (memory-cacheable)
  * when their pixel bytes fit under [Factory.maxCacheableAnimationBytes].
@@ -50,23 +52,23 @@ public class KiteImageDecoder(
     private val maxCacheableAnimationBytes: Long = Factory.DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES,
 ) : Decoder {
 
-    @OptIn(ExperimentalCoilApi::class)
     override suspend fun decode(): DecodeResult {
         val bytes = source.source().use { it.readByteArray() }
         val ctx = currentCoroutineContext()
         // EXIF orientation is applied, matching what Coil's own platform decoders
         // do: a decoder that quietly showed every portrait photo on its side would
         // be a regression against a stock ImageLoader, not a neutral swap.
+        val info = ImageKodec.probeOrNull(bytes)
+        if (info != null && info.frameCount == 1 && (info.format == ImageFormat.JPEG || info.format == ImageFormat.JP2)) {
+            // A still JPEG or JPEG 2000 reduces inside its decoder, so the size goes down to it and the
+            // full-size pixels never exist.
+            val (width, height) = targetSize(info.displayWidth, info.displayHeight)
+            val bitmap = ImageKodec.decodeDownscaledTo(bytes, width, height, applyOrientation = true)
+            val sampled = width < info.displayWidth || height < info.displayHeight
+            return DecodeResult(image = bitmap.toCoilImage(shareable = true), isSampled = sampled)
+        }
         val animation = ImageKodec.decodeAnimation(bytes, applyOrientation = true) { ctx.ensureActive() }
-
-        val target = DecodeUtils.computeDstSize(animation.width, animation.height,
-            options.size, options.scale, options.maxBitmapSize)
-        val multiplier = DecodeUtils.computeSizeMultiplier(animation.width, animation.height,
-            target.first, target.second, options.scale, options.maxBitmapSize).coerceAtMost(1.0)
-        // Coil's Skia conversion floors the scaled sides independently. Fitting
-        // that output box again would shrink non-integral ratios a second time.
-        val width = (animation.width * multiplier).toInt().coerceAtLeast(1)
-        val height = (animation.height * multiplier).toInt().coerceAtLeast(1)
+        val (width, height) = targetSize(animation.width, animation.height)
         val sampled = width < animation.width || height < animation.height
 
         if (animation.isAnimated) {
@@ -81,6 +83,23 @@ public class KiteImageDecoder(
         val original = animation.frames.first().bitmap
         val bitmap = if (sampled) original.downscaledTo(width, height) else original
         return DecodeResult(image = bitmap.toCoilImage(shareable = true), isSampled = sampled)
+    }
+
+    /**
+     * The size Coil draws a [sourceWidth] by [sourceHeight] image at for this request: its size, FIT
+     * or FILL scale, single defined side and maximum bitmap size, never larger than the source.
+     */
+    @OptIn(ExperimentalCoilApi::class)
+    private fun targetSize(sourceWidth: Int, sourceHeight: Int): Pair<Int, Int> {
+        val target = DecodeUtils.computeDstSize(sourceWidth, sourceHeight,
+            options.size, options.scale, options.maxBitmapSize)
+        val multiplier = DecodeUtils.computeSizeMultiplier(sourceWidth, sourceHeight,
+            target.first, target.second, options.scale, options.maxBitmapSize).coerceAtMost(1.0)
+        // Coil's Skia conversion floors the scaled sides independently. Fitting
+        // that output box again would shrink non-integral ratios a second time.
+        val width = (sourceWidth * multiplier).toInt().coerceAtLeast(1)
+        val height = (sourceHeight * multiplier).toInt().coerceAtLeast(1)
+        return width to height
     }
 
     /**

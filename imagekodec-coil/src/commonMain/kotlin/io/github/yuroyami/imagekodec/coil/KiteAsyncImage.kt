@@ -48,8 +48,10 @@ import io.github.yuroyami.imagekodec.compose.KiteAnimatedImage
  * map to Coil's FIT/FILL policy; an [ImageRequest]'s explicit size and scale
  * take precedence, so
  * [KiteImageDecoder] downscales still images *and every animation frame* to
- * what will actually be drawn instead of decoding wallpaper-sized pixels for an
- * avatar slot.
+ * what will actually be drawn. A still JPEG or JPEG 2000 also decodes at a
+ * reduced size inside its inverse transform, so a photo in an avatar slot
+ * never exists at wallpaper size; other formats decode in full first and keep
+ * only the downscaled pixels.
  *
  * [model] may be anything Coil accepts as data, or a prebuilt [ImageRequest]
  * (with size and scale inferred from [contentScale] when not explicitly set).

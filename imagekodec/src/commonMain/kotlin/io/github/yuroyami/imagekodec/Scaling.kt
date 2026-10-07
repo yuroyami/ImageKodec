@@ -16,26 +16,29 @@ package io.github.yuroyami.imagekodec
  *
  * This is a post-decode scale: the decoder still materialises the full-size
  * image transiently. What it saves is *retained* memory (the thumbnail you keep
- * vs the 12MP original). To shrink a JPEG while it decodes, use
- * [ImageKodec.decodeReduced] first.
+ * vs the 12MP original). [ImageKodec.decodeScaled] gives the same size from the
+ * encoded bytes, and shrinks a JPEG or JPEG 2000 while it decodes.
  *
  * @throws IllegalArgumentException if either target dimension is not positive
  */
 @Throws(IllegalArgumentException::class)
 public fun KiteBitmap.scaled(maxWidth: Int, maxHeight: Int): KiteBitmap {
     require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
-    if (width <= maxWidth && height <= maxHeight) return this
-
-    val dw: Int
-    val dh: Int
-    if (maxWidth.toLong() * height <= maxHeight.toLong() * width) {
-        dw = maxWidth
-        dh = maxOf(1, (height.toLong() * maxWidth / width).toInt())
-    } else {
-        dh = maxHeight
-        dw = maxOf(1, (width.toLong() * maxHeight / height).toInt())
-    }
+    val (dw, dh) = fittedSize(width, height, maxWidth, maxHeight) ?: return this
     return downscaledTo(dw, dh)
+}
+
+/**
+ * The size [scaled] gives a [width] by [height] image for a [maxWidth] by [maxHeight] box, or null
+ * when the image already fits. [ImageKodec.decodeScaled] sizes from it too.
+ */
+internal fun fittedSize(width: Int, height: Int, maxWidth: Int, maxHeight: Int): Pair<Int, Int>? {
+    if (width <= maxWidth && height <= maxHeight) return null
+    return if (maxWidth.toLong() * height <= maxHeight.toLong() * width) {
+        maxWidth to maxOf(1, (height.toLong() * maxWidth / width).toInt())
+    } else {
+        maxOf(1, (width.toLong() * maxHeight / height).toInt()) to maxHeight
+    }
 }
 
 /**

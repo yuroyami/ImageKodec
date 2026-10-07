@@ -29,6 +29,8 @@ class ThrowsContractTest {
         declares(ImageKodec::class.java, "probe", ex, bytes)
         declares(ImageKodec::class.java, "decode", ex, bytes, boolean)
         declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
+        declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
+        declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
         declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, Function0::class.java)
         declares(CcittFax::class.java, "decode", ex, bytes, int, CcittOptions::class.java)
@@ -38,6 +40,8 @@ class ThrowsContractTest {
     fun theEntryPointsThatRefuseAnArgumentDeclareIllegalArgumentException() {
         val ex = IllegalArgumentException::class.java
         declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
+        declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
+        declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteBitmap::class.java, boolean)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteAnimation::class.java, boolean)
