@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
  */
 class Jp2ProgressionTest {
 
-    private val rpcl: ByteArray = Base64.decode(
+    internal val rpcl: ByteArray = Base64.decode(
         "/0//UQAvAAAAAAAwAAAAIAAAAAAAAAAAAAAAMAAAACAAAAAAAAAAAAADBwEBBwICBwIC/1IADwECAAEAAgAAAAEzMzP/XAAK" +
         "QEBISFBISFD/ZAAlAAFDcmVhdGVkIGJ5IE9wZW5KUEVHIHZlcnNpb24gMi41LjD/kAAKAAAAAAZPAAH/k+/gH/wEP4Cn8BMS" +
         "DzHXeZ8o7dgQjTtK4n8e8Tfid9M8g/jGjkc96cbvGVK5ns1uxPI2LHBa9e9XJI7t2pcV92Pnwrh5pKaNYQLlSDVuOXWt7+Aj" +
@@ -42,7 +42,7 @@ class Jp2ProgressionTest {
         "qz6nJM4H/9k=",
     )
 
-    private val pcrl: ByteArray = Base64.decode(
+    internal val pcrl: ByteArray = Base64.decode(
         "/0//UQAvAAAAAAAwAAAAIAAAAAAAAAAAAAAAMAAAACAAAAAAAAAAAAADBwEBBwICBwIC/1IADwEDAAEAAgAAAAEzMzP/XAAK" +
         "QEBISFBISFD/ZAAlAAFDcmVhdGVkIGJ5IE9wZW5KUEVHIHZlcnNpb24gMi41LjD/kAAKAAAAAAZPAAH/k+/gH/wEP4Cn8BMS" +
         "DzHXeZ8o7dgQjTtK4n8e8Tfid9M8g/jGjkc96cbvGVK5ns1uxPI2LHBa9e9XJI7t2pcV92Pnwrh5pKaNYQLlSDVuOXWtgIDv" +
@@ -70,7 +70,7 @@ class Jp2ProgressionTest {
         "qz6nJM4H/9k=",
     )
 
-    private val cprl: ByteArray = Base64.decode(
+    internal val cprl: ByteArray = Base64.decode(
         "/0//UQAvAAAAAAAwAAAAIAAAAAAAAAAAAAAAMAAAACAAAAAAAAAAAAADBwEBBwICBwIC/1IADwEEAAEAAgAAAAEzMzP/XAAK" +
         "QEBISFBISFD/ZAAlAAFDcmVhdGVkIGJ5IE9wZW5KUEVHIHZlcnNpb24gMi41LjD/kAAKAAAAAAZPAAH/k+/gH/wEP4Cn8BMS" +
         "DzHXeZ8o7dgQjTtK4n8e8Tfid9M8g/jGjkc96cbvGVK5ns1uxPI2LHBa9e9XJI7t2pcV92Pnwrh5pKaNYQLlSDVuOXWtgICA" +

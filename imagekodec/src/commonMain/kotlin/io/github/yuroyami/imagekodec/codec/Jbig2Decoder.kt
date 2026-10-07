@@ -33,9 +33,17 @@ public object Jbig2Decoder {
      * [height] is not positive or the page would pass 2^28 pixels. The input size says little about the
      * page, because a blank scanned page takes a few dozen bytes, so only the pixel ceiling applies.
      */
-    public fun decode(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? {
+    public fun decode(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? =
+        runCatching { decodeChecked(data, globals, width, height) }.getOrNull()
+
+    /**
+     * [decode] without its catch-all: a damaged stream or a missing feature throws
+     * [ImageDecodeException], and anything else is a fault that escapes, so a test can tell the two
+     * apart (#102). [decode] keeps returning null for both.
+     */
+    internal fun decodeChecked(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? {
         if (width < 1 || height < 1 || width.toLong() * height > Budget.MAX_PIXELS) return null
-        return runCatching { Ctx().decodeEmbedded(data, globals, width, height) }.getOrNull()
+        return Ctx().decodeEmbedded(data, globals, width, height)
     }
 
     // The MQ arithmetic decoder (T.88 Annex E) lives in the shared [MqDecoder],
@@ -139,7 +147,7 @@ public object Jbig2Decoder {
                     }
                 }
             }
-            throw IllegalStateException("undefined JBIG2 Huffman prefix")
+            throw ImageDecodeException("JBIG2: undefined Huffman prefix")
         }
     }
 
@@ -149,7 +157,7 @@ public object Jbig2Decoder {
         private var bit = 0
 
         fun bit(): Int {
-            if (pos >= end) throw IllegalStateException("JBIG2 Huffman read past segment end")
+            if (pos >= end) throw ImageDecodeException("JBIG2: Huffman read past the segment end")
             val v = (d[pos].toInt() shr (7 - bit)) and 1
             if (++bit == 8) { bit = 0; pos++ }
             return v
@@ -221,7 +229,7 @@ public object Jbig2Decoder {
     private class Bitmap(val w: Int, val h: Int) {
         // Every size in a segment is a header field. One byte a pixel, so 2^28 pixels is 256 MiB.
         init {
-            require(w >= 0 && h >= 0 && w.toLong() * h <= Budget.MAX_PIXELS) { "JBIG2: a ${w}x$h bitmap passes the pixel ceiling" }
+            if (w < 0 || h < 0 || w.toLong() * h > Budget.MAX_PIXELS) throw ImageDecodeException("JBIG2: a ${w}x$h bitmap passes the pixel ceiling")
         }
         val bits = ByteArray(w * h) // 0/1 per pixel
         fun get(x: Int, y: Int): Int = if (x < 0 || x >= w || y < 0 || y >= h) 0 else bits[y * w + x].toInt()
@@ -351,7 +359,13 @@ public object Jbig2Decoder {
         private var page: Bitmap? = null
         private var pageDefault = 0
 
+        /** The caller's page: only these pixels are read out, so nothing past them is kept or decoded. */
+        private var outWidth = 0
+        private var outHeight = 0
+
         fun decodeEmbedded(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? {
+            outWidth = width
+            outHeight = height
             globals?.let { for (s in parseSegments(it)) processSegment(s) }
             for (s in parseSegments(data)) processSegment(s)
             val pg = page ?: return null
@@ -387,15 +401,22 @@ public object Jbig2Decoder {
             val flags = r.u8()
             pageDefault = (flags shr 2) and 1
             val h = if (h0 == -1 || h0 == 0xFFFFFFFF.toInt()) 1 else h0
-            page = Bitmap(w, if (h in 1..100000) h else 1).also {
+            page = Bitmap(minOf(w, outWidth), minOf(if (h in 1..100000) h else 1, outHeight)).also {
                 if (pageDefault == 1) it.bits.fill(1)
             }
         }
 
+        /**
+         * The page, grown to cover [w] by [h] as far as the caller's page reaches: a page that grew
+         * past it would only hold pixels nobody reads, and a damaged region size could make it
+         * hundreds of megabytes (#102).
+         */
         private fun ensurePage(w: Int, h: Int): Bitmap {
+            val needW = minOf(w, outWidth)
+            val needH = minOf(h, outHeight)
             var pg = page
-            if (pg == null || pg.h < h) {
-                val np = Bitmap(maxOf(w, pg?.w ?: w), maxOf(h, pg?.h ?: h))
+            if (pg == null || pg.h < needH) {
+                val np = Bitmap(maxOf(needW, pg?.w ?: needW), maxOf(needH, pg?.h ?: needH))
                 if (pageDefault == 1) np.bits.fill(1)
                 pg?.let { old -> for (y in 0 until old.h) for (x in 0 until old.w) np.set(x, y, old.get(x, y)) }
                 page = np; pg = np
@@ -405,6 +426,23 @@ public object Jbig2Decoder {
 
         /** Region segment info (7.4.1): width,height,x,y,combOp. */
         private class RegionInfo(val w: Int, val h: Int, val x: Int, val y: Int, val combOp: Int)
+
+        /**
+         * The rows of [ri] that reach the caller's page. A region is decoded row by row, so the rows
+         * below the page can be left undecoded without changing one that is shown, and a damaged
+         * height costs no more than the page (#102). A negative height stays, for the refusal. Every
+         * region handler asks before it allocates, so the width check below covers them all.
+         */
+        private fun rowsShown(ri: RegionInfo): Int {
+            // Every pixel of a row moves the arithmetic decoder, so a region decodes every column of
+            // each row it shows, however far past the page they reach. A damaged width could then cost
+            // a quarter of a billion pixels for a page a few thousand wide. No encoder writes a region
+            // several times wider than its page, so such a region is refused.
+            if (ri.w.toLong() > 4L * outWidth + 1024) {
+                throw ImageDecodeException("JBIG2: a region ${ri.w} pixels wide on a page $outWidth wide")
+            }
+            return if (ri.h < 0) ri.h else minOf(ri.h.toLong(), maxOf(0L, outHeight.toLong() - ri.y)).toInt()
+        }
 
         private fun readRegionInfo(r: R) = RegionInfo(r.u32().toInt(), r.u32().toInt(), r.u32().toInt(), r.u32().toInt(), r.u8() and 7)
 
@@ -443,20 +481,20 @@ public object Jbig2Decoder {
             if (mmr == 1) {
                 // MMR (T.88 6.2.6) IS T.6 Group 4: reuse the shared CCITT
                 // decoder (T-45). blackIs1 matches JBIG2's 1=black convention.
-                val bmp = decodeMmr(s.data, r.pos, s.end, ri.w, ri.h) ?: return
+                val bmp = decodeMmr(s.data, r.pos, s.end, ri.w, rowsShown(ri)) ?: return
                 blit(bmp, ri)
                 return
             }
             val at = readAt(r, template)
             val mq = MqDecoder(s.data, r.pos, s.end)
-            val bmp = decodeGeneric(mq, newCx(), ri.w, ri.h, template, at, tpgdon == 1)
+            val bmp = decodeGeneric(mq, newCx(), ri.w, rowsShown(ri), template, at, tpgdon == 1)
             blit(bmp, ri)
         }
 
         /** Decode an MMR-coded region body into a bitmap via the G4 core. */
         private fun decodeMmr(data: ByteArray, start: Int, end: Int, w: Int, h: Int): Bitmap? {
             if (w <= 0 || h <= 0 || start >= end) return null
-            val packed = runCatching {
+            val packed = try {
                 decodeGroup4(
                     BitReader(data.copyOfRange(start, end)),
                     CcittOptions(
@@ -464,7 +502,9 @@ public object Jbig2Decoder {
                         blackIs1 = true, encodedByteAlign = false, endOfLine = false,
                     ),
                 )
-            }.getOrNull() ?: return null
+            } catch (_: ImageDecodeException) {
+                return null
+            }
             return unpack(packed, w, h)
         }
 
@@ -497,10 +537,11 @@ public object Jbig2Decoder {
             val at = if (template == 0) Array(2) { Point(r.s8(), r.s8()) } else emptyArray()
             // The reference is the page content under the region (6.3.2).
             val pg = ensurePage(ri.x + ri.w, ri.y + ri.h)
-            val ref = Bitmap(ri.w, ri.h)
-            for (y in 0 until ri.h) for (x in 0 until ri.w) ref.set(x, y, pg.get(ri.x + x, ri.y + y))
+            val rows = rowsShown(ri)
+            val ref = Bitmap(ri.w, rows)
+            for (y in 0 until rows) for (x in 0 until ri.w) ref.set(x, y, pg.get(ri.x + x, ri.y + y))
             val mq = MqDecoder(s.data, r.pos, s.end)
-            val bmp = decodeRefinement(mq, newCx(), ri.w, ri.h, template, ref, 0, 0, at, tpgron == 1)
+            val bmp = decodeRefinement(mq, newCx(), ri.w, rows, template, ref, 0, 0, at, tpgron == 1)
             blit(bmp, ri)
         }
 
@@ -574,7 +615,7 @@ public object Jbig2Decoder {
                 for (i in p.bits.indices) p.bits[i] = (p.bits[i].toInt() xor prev.bits[i].toInt()).toByte()
             }
 
-            val region = Bitmap(ri.w, ri.h).also { if (defPixel == 1) it.bits.fill(1) }
+            val region = Bitmap(ri.w, rowsShown(ri)).also { if (defPixel == 1) it.bits.fill(1) }
             for (mg in 0 until hgh) for (ng in 0 until hgw) {
                 var g = 0
                 for (j in hbpp - 1 downTo 0) g = (g shl 1) or planes[j]!!.get(ng, mg)
@@ -587,7 +628,7 @@ public object Jbig2Decoder {
 
         /** One MMR bitplane from a shared stream; consumes a trailing EOFB and byte-aligns. */
         private fun decodeMmrPlane(reader: BitReader, w: Int, h: Int, totalBits: Int): Bitmap? {
-            val packed = runCatching {
+            val packed = try {
                 decodeGroup4(
                     reader,
                     CcittOptions(
@@ -595,7 +636,9 @@ public object Jbig2Decoder {
                         blackIs1 = true, encodedByteAlign = false, endOfLine = false,
                     ),
                 )
-            }.getOrNull() ?: return null
+            } catch (_: ImageDecodeException) {
+                return null
+            }
             if (totalBits - reader.bitsConsumed >= 24 && reader.peekBits(24) == 0x001001) reader.skipBits(24)
             reader.alignToByte()
             return unpack(packed, w, h)
@@ -603,7 +646,7 @@ public object Jbig2Decoder {
 
         // ---- custom code table segment (7.4.13 / B.2) ---------------------------
 
-        private fun parseCustomTable(s: Segment): HuffTable? = runCatching {
+        private fun parseCustomTable(s: Segment): HuffTable? = try {
             val hr = HuffReader(s.data, s.start, s.end)
             val flags = hr.bits(8)
             val oob = flags and 1
@@ -625,7 +668,9 @@ public object Jbig2Decoder {
             lines.add(HuffLine(hr.bits(htps), 32, high))    // upper range
             if (oob == 1) lines.add(HuffLine(hr.bits(htps), 0, 0))
             HuffTable(lines, oob == 1)
-        }.getOrNull()
+        } catch (_: ImageDecodeException) {
+            null
+        }
 
         // ---- symbol dictionary (6.5) ---------------------------------------
 
@@ -751,7 +796,7 @@ public object Jbig2Decoder {
         ): List<Bitmap> {
             val customTables = customTablesFor(s)
             var ti = 0
-            fun custom(): HuffTable = customTables.getOrNull(ti++) ?: throw IllegalStateException("missing custom table")
+            fun custom(): HuffTable = customTables.getOrNull(ti++) ?: throw ImageDecodeException("JBIG2: missing custom table")
             val tDH = when ((flags shr 2) and 3) { 0 -> TABLE_B4; 1 -> TABLE_B5; else -> custom() }
             val tDW = when ((flags shr 4) and 3) { 0 -> TABLE_B2; 1 -> TABLE_B3; else -> custom() }
             val tBM = if ((flags shr 6) and 1 == 0) TABLE_B1 else custom()
@@ -762,15 +807,15 @@ public object Jbig2Decoder {
             var hcHeight = 0
             var area = 0L
             while (newSyms.size < numNewSyms) {
-                hcHeight += tDH.decode(hr) ?: throw IllegalStateException("OOB height class delta")
-                if (hcHeight !in 1..MAX_SYMBOL_SIDE) throw IllegalStateException("bad height class")
+                hcHeight += tDH.decode(hr) ?: throw ImageDecodeException("JBIG2: out-of-band height class delta")
+                if (hcHeight !in 1..MAX_SYMBOL_SIDE) throw ImageDecodeException("JBIG2: bad height class")
                 var symWidth = 0
                 val widths = ArrayList<Int>()
                 while (true) {
                     val dw = tDW.decode(hr) ?: break // OOB ends the height class
                     symWidth += dw
                     if (symWidth !in 1..MAX_SYMBOL_SIDE || newSyms.size + widths.size >= numNewSyms) {
-                        throw IllegalStateException("bad symbol width run")
+                        throw ImageDecodeException("JBIG2: bad symbol width run")
                     }
                     widths.add(symWidth)
                 }
@@ -778,7 +823,7 @@ public object Jbig2Decoder {
                 val totWidth = widths.sum()
                 area += symbolArea(totWidth, hcHeight, area)
                 // 6.5.9: collective bitmap; 0 size means uncompressed rows padded to bytes.
-                val bmSize = tBM.decode(hr) ?: throw IllegalStateException("OOB BMSIZE")
+                val bmSize = tBM.decode(hr) ?: throw ImageDecodeException("JBIG2: out-of-band BMSIZE")
                 hr.align()
                 // Both forms are read straight from the segment, and on webassembly a read past the
                 // end is a trap that no catch sees, so the bytes they claim have to be there first.
@@ -797,7 +842,7 @@ public object Jbig2Decoder {
                     hr.advance(hcHeight * stride)
                 } else {
                     coll = decodeMmr(s.data, hr.pos, hr.pos + bmSize, totWidth, hcHeight)
-                        ?: throw IllegalStateException("collective MMR bitmap failed")
+                        ?: throw ImageDecodeException("JBIG2: collective MMR bitmap failed")
                     hr.advance(bmSize)
                 }
                 var x0 = 0
@@ -844,7 +889,7 @@ public object Jbig2Decoder {
 
             val customTables = customTablesFor(s)
             var ti = 0
-            fun custom(): HuffTable = customTables.getOrNull(ti++) ?: throw IllegalStateException("missing custom table")
+            fun custom(): HuffTable = customTables.getOrNull(ti++) ?: throw ImageDecodeException("JBIG2: missing custom table")
             var tFS: HuffTable? = null; var tDS: HuffTable? = null; var tDT: HuffTable? = null
             var tRDW: HuffTable? = null; var tRDH: HuffTable? = null
             var tRDX: HuffTable? = null; var tRDY: HuffTable? = null; var tRSIZE: HuffTable? = null
@@ -866,7 +911,7 @@ public object Jbig2Decoder {
             for (ref in s.refs) symbolsBySegment[ref]?.let { syms.addAll(it) }
 
             val strips = 1 shl logStrips
-            val region = Bitmap(ri.w, ri.h).also { if (defPixel == 1) it.bits.fill(1) }
+            val region = Bitmap(ri.w, rowsShown(ri)).also { if (defPixel == 1) it.bits.fill(1) }
             val refCx = newCx()
 
             val io: TextIo
@@ -881,7 +926,7 @@ public object Jbig2Decoder {
                 var idx = 0
                 var prevLen = 0
                 while (idx < numSyms) {
-                    val c = runTable.decode(hr) ?: throw IllegalStateException("OOB runcode")
+                    val c = runTable.decode(hr) ?: throw ImageDecodeException("JBIG2: out-of-band run code")
                     when {
                         c < 32 -> { symLens[idx++] = c; prevLen = c }
                         c == 32 -> { val n = hr.bits(2) + 3; repeat(n) { if (idx < numSyms) symLens[idx++] = prevLen } }

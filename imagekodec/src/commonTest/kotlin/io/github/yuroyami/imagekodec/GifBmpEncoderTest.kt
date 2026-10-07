@@ -2,6 +2,7 @@ package io.github.yuroyami.imagekodec
 
 import kotlin.math.abs
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -195,14 +196,16 @@ class GifBmpEncoderTest {
 
     @Test
     fun largeImageExercisesDictionaryResets() {
-        // Enough distinct runs to fill the 4096-entry LZW table several times over,
-        // which is where an off-by-one in the CLEAR handling would surface.
-        val src = bitmap(200, 200) { x, y -> argb(0xFF, (x * 7) and 0xFF, (y * 11) and 0xFF, ((x xor y) * 3) and 0xFF) }
+        // 256 exact colours in a pattern with little repetition, so the 40,000 indices fill the
+        // 4096-entry LZW table about ten times over, which is where an off-by-one in the CLEAR
+        // handling would surface. With no more colours than a palette holds the round trip is
+        // lossless, so every pixel after every reset must come back (#102).
+        val palette = IntArray(256) { argb(0xFF, it, (it * 7) and 0xFF, (it * 13) and 0xFF) }
+        val src = bitmap(200, 200) { x, y -> palette[(x * 31 + y * 17 + (x * y) % 7 + (x xor y)) and 0xFF] }
         val out = ImageKodec.encodeGif(src, dither = false)
         val back = ImageKodec.decode(out)
         assertEquals(200, back.width)
         assertEquals(200, back.height)
-        // Not exact (over 256 colours), but every pixel must decode to something.
-        assertEquals(src.argb.size, back.argb.size)
+        assertContentEquals(src.argb, back.argb)
     }
 }

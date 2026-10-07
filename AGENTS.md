@@ -24,9 +24,11 @@ being true.
   before the allocation, or a hostile file stops the whole program (#22, #33).
 - `FuzzTest` stops at a PNG chunk's checksum and cannot make two fields agree, so
   a fault that needs either has to be found with a test built by hand (#28, #29).
-- `CcittFax` and `Jbig2Decoder` are not in the `FuzzTest` corpus, because
-  `ImageKodec.decode` does not reach them (#33). `Jbig2DecoderTest` mutates its own
-  jbig2enc streams instead.
+- `ImageKodec.decode` reaches `CcittFax` through TIFF compressions 2, 3 and 4, so
+  the `FuzzTest` corpus fuzzes it through its fax TIFF seeds. It never reaches
+  `Jbig2Decoder`, and the facade turns any exception from `JpxDecoder` into a
+  decode error, so `FuzzTest` also drives both decoders through internal entry
+  points that let a fault escape (#102).
 - jbig2enc's symbol mode moves some glyphs by a pixel, with no pattern to derive.
   jbig2dec decodes the same moved page, so symbol-mode tests compare against
   jbig2dec, not against the source page (#40).

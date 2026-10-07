@@ -1,5 +1,7 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.imagekodec.codec.Jbig2Decoder
+import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
@@ -25,6 +27,11 @@ import kotlin.test.fail
  * exception type is a failure.
  */
 class FuzzTest {
+
+    private companion object {
+        /** Far past what any mutant needs, so only a loop or a runaway allocation reaches it. */
+        const val DEADLINE_MILLIS = 30_000L
+    }
 
     /** xorshift32: tiny, deterministic, and identical on every Kotlin target. */
     private class Rng(private var state: Int) {
@@ -111,6 +118,18 @@ class FuzzTest {
         "jp2-signed-rgb" to Jp2SignedTest().rgb(mct = true, signedMask = 5),
         "jp2-signed-opacity" to Jp2SignedTest().grayAlpha(),
         "jp2-signed-irreversible" to Jp2SignedTest().irreversible("rgb-ict", 5),
+        // Files other encoders wrote, for the features #102 found without a seed: ffmpeg's LZW TIFF with
+        // a predictor, libtiff's tiled LZW with a 16-bit predictor, cjpeg's 4:2:2, libjpeg's YCCK,
+        // OpenJPEG's multi-precinct RPCL and CPRL, and JP2 palette, CMYK and premultiplied opacity.
+        "tiff-lzw-predictor" to hex(TIFF_LZW_PREDICTOR),
+        "tiff-libtiff-tiled-lzw16" to hex(TIFF_LIBTIFF_TILED_LZW16),
+        "jpeg-422" to JpegSamplingFixtures.all.first { it.first == "2x1" }.second,
+        "jpeg-ycck" to JpegCmykFixtures.blocksAdobeYcck,
+        "jp2-rpcl" to Jp2ProgressionTest().rpcl,
+        "jp2-cprl" to Jp2ProgressionTest().cprl,
+        "jp2-palette" to Jp2ColorFixtures.palette,
+        "jp2-cmyk" to Jp2ColorFixtures.cmyk,
+        "jp2-premultiplied" to Jp2ColorFixtures.premultiplied,
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
@@ -233,10 +252,31 @@ class FuzzTest {
         }
     }
 
-    private fun exercise(label: String, bytes: ByteArray) {
+    /**
+     * One of three variants for [label], the same on every target: Kotlin's own string hash is
+     * not promised to be.
+     */
+    private fun variantOf(label: String): Int {
+        var hash = 0
+        for (c in label) hash = hash * 31 + c.code
+        return (hash and 0x7FFFFFFF) % 3
+    }
+
+    private fun exercise(label: String, bytes: ByteArray) = withDeadline(label, DEADLINE_MILLIS) {
         mustFailCleanly("$label decode") { ImageKodec.decode(bytes, applyOrientation = true) }
-        // The reduced JPEG path allocates and indexes its own planes, so it gets the same abuse.
-        mustFailCleanly("$label decodeReduced") { ImageKodec.decodeReduced(bytes, 8) }
+        // The reduced paths allocate and index their own planes, so they get the same abuse. Each
+        // mutant takes one reduction, and every third one the sized decode, so every path sees
+        // thousands of mutants while the suite costs about what it did.
+        val variant = variantOf(label)
+        val reduction = 2 shl variant
+        if (ImageFormat.sniff(bytes) == ImageFormat.JP2) {
+            // The facade reports any exception from the JPEG 2000 decoder as a decode error, so only
+            // the decoder's own entry point shows a fault as a fault (#102).
+            mustFailCleanly("$label JpxDecoder 1/$reduction") { JpxDecoder.decodeChecked(bytes, reduction) }
+        } else {
+            mustFailCleanly("$label decodeReduced 1/$reduction") { ImageKodec.decodeReduced(bytes, reduction) }
+        }
+        if (variant == 0) mustFailCleanly("$label decodeScaled") { ImageKodec.decodeScaled(bytes, 7, 5, applyOrientation = true) }
         mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes, applyOrientation = true) }
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
         // probeOrNull promises never to throw on unreadable input at all.
@@ -244,6 +284,38 @@ class FuzzTest {
             ImageKodec.probeOrNull(bytes)
         } catch (t: Throwable) {
             fail("$label probeOrNull leaked ${t::class.simpleName}: ${t.message}")
+        }
+    }
+
+    /**
+     * JBIG2 never comes through the facade, and its public entry point returns null for any
+     * exception, so its checked entry point takes the same kinds of damage here (#102).
+     */
+    @Test
+    fun jbig2MutantsFailOnlyByRefusal() {
+        val rng = Rng(0x7B16_2002)
+        val streams = listOf(
+            Triple("jbig2-generic", hex(GENERIC), null),
+            Triple("jbig2-generic-tpgd", hex(GENERIC_TPGD), null),
+            Triple("jbig2-text", hex(TEXT_PAGE), hex(SYMBOL_DICT)),
+            Triple("jbig2-mmr", hex(JBIG2_MMR), null),
+        )
+        for ((name, data, globals) in streams) {
+            val (width, height) = if (name == "jbig2-mmr") 64 to 24 else Jbig2Page.WIDTH to Jbig2Page.HEIGHT
+            fun run(label: String, stream: ByteArray, dictionary: ByteArray?) = withDeadline(label, DEADLINE_MILLIS) {
+                mustFailCleanly(label) { Jbig2Decoder.decodeChecked(stream, dictionary, width, height) }
+            }
+            run("$name whole", data, globals)
+            for (cut in 0 until data.size step maxOf(1, data.size / 150)) run("$name cut@$cut", data.copyOf(cut), globals)
+            fun damaged(source: ByteArray, i: Int): ByteArray = source.copyOf().also { bytes ->
+                when (i % 3) {
+                    0 -> bytes[rng.nextInt(bytes.size)] = (rng.next() and 0xFF).toByte()
+                    1 -> rng.nextInt(bytes.size).let { at -> bytes[at] = (bytes[at].toInt() xor (1 shl rng.nextInt(8))).toByte() }
+                    else -> repeat(1 + rng.nextInt(8)) { bytes[rng.nextInt(bytes.size)] = (rng.next() and 0xFF).toByte() }
+                }
+            }
+            repeat(600) { run("$name mutant $it", damaged(data, it), globals) }
+            if (globals != null) repeat(300) { run("$name dictionary mutant $it", data, damaged(globals, it)) }
         }
     }
 

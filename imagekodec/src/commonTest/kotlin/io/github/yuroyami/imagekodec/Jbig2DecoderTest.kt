@@ -4,6 +4,8 @@ import io.github.yuroyami.imagekodec.codec.Jbig2Decoder
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -36,9 +38,26 @@ class Jbig2DecoderTest {
     }
 
     @Test
-    fun aPageInformationSegmentThatClaimsMoreThanTheCeilingIsNull() {
-        // 2^20 by 2^10 is 2^30 pixels, one byte each: a gigabyte for a 30-byte stream.
-        assertNull(Jbig2Decoder.decode(page(1 shl 20, 1 shl 10), null, 8, 8))
+    fun aPageInformationSegmentThatClaimsMoreThanTheCeilingCostsOnlyTheCallersPage() {
+        // 2^20 by 2^10 is 2^30 pixels, one byte each: a gigabyte for a 30-byte stream. Only the
+        // caller's 8 by 8 pixels are read out, so only they are kept (#102).
+        assertContentEquals(ByteArray(8) { -1 }, Jbig2Decoder.decode(page(1 shl 20, 1 shl 10), null, 8, 8))
+    }
+
+    @Test
+    fun aRegionFarWiderThanThePageIsRefused() {
+        // Region information: 2^20 by 4 at the origin, then generic flags, template 0 and its four
+        // adaptive pixels. Every column of a row moves the arithmetic decoder, so the width could not
+        // be cut to the page, and decoding it would cost 4 million pixels for a 64-pixel page.
+        val region = beBytes(1 shl 20) + beBytes(4) + beBytes(0) + beBytes(0) + byteArrayOf(0, 0) +
+            byteArrayOf(3, -1, -3, -1, 2, -2, -2, -2) + ByteArray(16)
+        val stream = page(8, 8) + segment(38, region)
+        assertNull(Jbig2Decoder.decode(stream, null, 8, 8))
+        assertFailsWith<ImageDecodeException> { Jbig2Decoder.decodeChecked(stream, null, 8, 8) }
+        // Four times the page and 1024 more is still decoded.
+        val wide = beBytes(4 * 8 + 1024) + beBytes(4) + beBytes(0) + beBytes(0) + byteArrayOf(0, 0) +
+            byteArrayOf(3, -1, -3, -1, 2, -2, -2, -2) + ByteArray(16)
+        assertNotNull(Jbig2Decoder.decodeChecked(page(8, 8) + segment(38, wide), null, 8, 8))
     }
 
     @Test
@@ -63,6 +82,20 @@ class Jbig2DecoderTest {
         val page = Jbig2Decoder.decode(hex(TEXT_PAGE), hex(SYMBOL_DICT), Jbig2Page.WIDTH, Jbig2Page.HEIGHT)
         assertNotNull(page)
         assertContentEquals(hex(SYMBOL_PAGE_BY_JBIG2DEC), page)
+    }
+
+    @Test
+    fun anMmrGenericRegionDecodesExactly() {
+        // Group 4 data that ImageIO wrote for a 64 by 24 page of bars and dots, in an immediate generic
+        // region with the MMR flag set: the path JBIG2 shares with the CCITT decoder.
+        val page = Jbig2Decoder.decode(hex(JBIG2_MMR), null, 64, 24)
+        assertNotNull(page)
+        for (y in 0 until 24) for (x in 0 until 64) {
+            val ink = (x in 4..9 && y in 3..20) || (y in 10..12 && x in 14..40) ||
+                ((x + y) % 11 == 0 && x > 44) || (x in 20..30 && y in 16..19 && (x + y) % 2 == 0)
+            // A set bit is white.
+            assertEquals(!ink, (page[y * 8 + x / 8].toInt() ushr (7 - x % 8)) and 1 == 1, "($x, $y)")
+        }
     }
 
     /**
@@ -114,26 +147,32 @@ internal fun randomSymbolDictionary(template: Int, newSymbols: Int, seed: Int): 
 
 // jbig2enc 0.29 (Apache-2.0) output for [Jbig2Page], PDF-ready (`-p`, no file header).
 // `jbig2 -p page.png`: page information, one generic region, end of page.
-private val GENERIC = "00000000300001000000130000009d0000003d000000000000000001000000000001260001000000b80000009d000000" +
+/**
+ * A page information segment, an immediate generic region whose data is the Group 4 coding ImageIO
+ * writes for a 64 by 24 bitmap, with the MMR flag set, and an end of page.
+ */
+internal val JBIG2_MMR = "00000000300001000000130000004000000018000000000000000000000000000001260001000000590000004000000018000000000000000000012b0a9529b2497492e925d24ba497492e925cd865a497c52fa5c52e92e925c9d11d11d11d11d11d24976924924924ba4924924474925da492492492e2222292514928a54a0020020000000231000100000000"
+
+internal val GENERIC = "00000000300001000000130000009d0000003d000000000000000001000000000001260001000000b80000009d000000" +
     "3d0000000000000000000003fffdff02fefefeaa635993f776d4a7911ae9ccbfa07924665e710bf791da6c62e042a06f" +
     "4870847b0f3142601076da0acf3ba4fa0a79a4fac2e17a0dc1a8566a2d420bb0915b2bb2964289383dc4b027af30c759" +
     "adcfaa567d5b708c86c9a011a033c24609bd56c95adc89ad0f196515fe81c8d030d9e96b0754a1441ab3c10ab18c2517" +
     "0ed3ba1cae522afb239d6e7c4ce111526f3d7e633723ddd7221db62d68b63fffac"
 
 // `jbig2 -p -d page.png`: the same with typical prediction (TPGDON).
-private val GENERIC_TPGD = "00000000300001000000130000009d0000003d000000000000000001000000000001260001000000b50000009d000000" +
+internal val GENERIC_TPGD = "00000000300001000000130000009d0000003d000000000000000001000000000001260001000000b50000009d000000" +
     "3d0000000000000000000803fffdff02fefefea9aa07ca0159c128891ba27c1a0e344cccaae220e8d489eb8cbdaba042" +
     "3fda0817d53d48fba2d4dfb5e5c7cf5e6236201dd362d8cf4c0c6e3beed2eaf95b7787d0d6e282c34d11b3b8cc8a3218" +
     "9e213ec746135eb7d9936b628a7fff7fff7ac56085484f6bde3b7ff8ca163d42ccc45a54795990ef3abd84664c88ebeb" +
     "fb99ae8514dfb12beea1bd863682e7ab9124c9e3f30aec53e1b5653fffac"
 
 // `jbig2 -s -p -b sym page.png`: the global symbol dictionary (sym.sym) of 5 symbols...
-private val SYMBOL_DICT = "000000000001000000003e000003fffdff02fefefe00000005000000054259e6d359ba8fa513e575a3975718dee84bd8" +
+internal val SYMBOL_DICT = "000000000001000000003e000003fffdff02fefefe00000005000000054259e6d359ba8fa513e575a3975718dee84bd8" +
     "3ed51856824d4eb35d42db0a895bdd41d76b93ae640d9fffac"
 
 // ...and the page stream (sym.0000): page information and a text region that places them, some a
 // pixel away from where [Jbig2Page] has them.
-private val TEXT_PAGE = "00000001300001000000130000009d0000003d00000000000000000000000000000206220001000000320000009d0000" +
+internal val TEXT_PAGE = "00000001300001000000130000009d0000003d00000000000000000000000000000206220001000000320000009d0000" +
     "003d00000000000000000000000000001b9eec5176accec0a5a77736db94906f3bcfd094dcc49016d931ffac"
 
 // jbig2dec 0.20 (`jbig2dec -e -t pbm sym.sym sym.0000`) on the two streams above, inverted to a set

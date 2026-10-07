@@ -251,17 +251,12 @@ class WebpDecoderTest {
 
     @Test
     fun truncatedFilesThrowDecodeErrorsNotCrashes() {
+        // Every cut loses part of the image data the chunk declares, so none may decode to pixels the
+        // file does not hold (#79, #102).
         val whole = hex(LOSSLESS_RGB)
         for (cut in intArrayOf(4, 11, 13, 20, 30, whole.size - 1)) {
-            val cutBytes = whole.copyOf(cut)
-            try {
-                ImageKodec.decode(cutBytes)
-            } catch (_: ImageDecodeException) {
-                // expected for most cuts
-            }
+            assertFailsWith<ImageDecodeException>("cut at $cut") { ImageKodec.decode(whole.copyOf(cut)) }
         }
-        // A file that loses its whole payload must fail, not return garbage silently.
-        assertFailsWith<ImageDecodeException> { ImageKodec.decode(whole.copyOf(13)) }
     }
 
     @Test

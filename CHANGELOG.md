@@ -86,6 +86,27 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- `FuzzTest` runs every mutant against a deadline, which on the JVM also stops a
+  loop that never ends, and drives the JPEG 2000 and JBIG2 decoders through
+  internal entry points that let a fault escape, where the facade and their
+  public entry points turn any exception into a refusal. It also takes the
+  reductions 2 and 4 and the sized decode, and seeds written by libtiff (tiled
+  LZW with a 16-bit predictor), ffmpeg, cjpeg (4:2:2), libjpeg (YCCK),
+  OpenJPEG (multi-precinct RPCL and CPRL, palette, CMYK and premultiplied
+  opacity) and ImageIO (an MMR-coded JBIG2 region). Two weak tests now assert
+  their outcome: every WebP truncation is refused, and a GIF's pixels survive
+  ten LZW table resets (#102).
+
+- What the stronger fuzzing found: a JPEG 2000 packet header whose code-block
+  length runs past 32 bits is refused, as OpenJPEG refuses it, where the read
+  wrapped to a negative length, and a component subsampled past the whole image
+  is refused by name, where it had no samples to read. JBIG2's refusals are
+  `ImageDecodeException` throughout, and its page and regions keep only the
+  rows the caller's page shows, so a damaged size in a stream of a few hundred
+  bytes no longer costs seconds and hundreds of megabytes. A region more than
+  four times wider than the page, which no encoder writes and which would have
+  to be decoded in full, is refused (#102).
+
 - The deflate encoder behind PNG and the zlib and gzip framers writes stored
   blocks and splits its output into blocks, as zlib's `_tr_flush_block` does.
   Each block takes whichever of stored, fixed or dynamic Huffman is smallest,

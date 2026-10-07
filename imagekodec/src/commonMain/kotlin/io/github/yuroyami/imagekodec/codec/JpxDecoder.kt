@@ -57,6 +57,13 @@ public object JpxDecoder {
         return runCatching { decodeOrThrow(data, reduction.countTrailingZeroBits()) }.getOrNull()
     }
 
+    /**
+     * The decode with no catch at all: a damaged codestream or a missing feature throws
+     * [ImageDecodeException], and anything else is a fault that escapes, so a test can tell the two
+     * apart where [decode] returns null and the facade reports a decode error for both (#102).
+     */
+    internal fun decodeChecked(data: ByteArray, reduction: Int): Result = decodeOrThrow(data, reduction.countTrailingZeroBits())
+
     /** Preserve diagnostic failures for the facade without changing the nullable public API. */
     internal fun decodeForFacade(data: ByteArray, reduction: Int): Result = try {
         decodeOrThrow(data, reduction.countTrailingZeroBits())
@@ -86,7 +93,7 @@ public object JpxDecoder {
     )
 
     private fun parseContainer(data: ByteArray): Jp2Info {
-        val boxes = Jp2Color.parse(data) ?: throw IllegalStateException("no jp2c codestream box")
+        val boxes = Jp2Color.parse(data) ?: throw ImageDecodeException("JPEG 2000: no jp2c codestream box")
         return Jp2Info(data.copyOfRange(boxes.codestreamStart, boxes.codestreamEnd), boxes)
     }
 
@@ -383,6 +390,15 @@ public object JpxDecoder {
                 ceilShift(ceilDiv(s.ysiz, s.dy[c]), d) <= ceilShift(ceilDiv(s.yosiz, s.dy[c]), d)
         }
         while (drop > 0 && empty(drop)) drop--
+        // A component subsampled past the image area has no sample at all, even at full size, so it
+        // has nothing to show or to convert with the others; OpenJPEG cannot write such an image out
+        // either (#102).
+        if (empty(drop)) {
+            val c = (0 until s.comps).first { c ->
+                ceilDiv(s.xsiz, s.dx[c]) <= ceilDiv(s.xosiz, s.dx[c]) || ceilDiv(s.ysiz, s.dy[c]) <= ceilDiv(s.yosiz, s.dy[c])
+            }
+            throw ImageDecodeException("JPEG 2000: component $c, subsampled by ${s.dx[c]} by ${s.dy[c]}, has no samples in the image")
+        }
 
         // Component output planes at the component's resolution with those levels dropped, and
         // where each starts on that grid (B.5: a level halves the coordinates, rounding up).
@@ -704,6 +720,9 @@ public object JpxDecoder {
                     var bits = cb.lBlock
                     var passes = np
                     while (passes > 1) { bits++; passes = passes shr 1 }
+                    // OpenJPEG refuses a length of more than 32 bits ("Invalid bit number"): no data is
+                    // that long, and the read would wrap an Int to a negative length (#102).
+                    if (bits > 32) throw ImageDecodeException("JPEG 2000: a packet header gives a code-block length of $bits bits")
                     val segLen = bio.bits(bits)
                     included.add(cb)
                     newPassCounts.add(np)
@@ -717,7 +736,8 @@ public object JpxDecoder {
             for (k in included.indices) {
                 val cb = included[k]
                 val len = segLens[k]
-                val end = (pos + len).coerceAtMost(d.size)
+                // A length past the data, or a 32-bit one that reads as a negative Int, runs to its end.
+                val end = if (len < 0 || len > d.size - pos) d.size else pos + len
                 cb.data.add(d.copyOfRange(pos, end))
                 cb.passes += newPassCounts[k]
                 pos = end

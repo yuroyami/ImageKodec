@@ -239,7 +239,7 @@ class Jp2DecoderTest {
         patched[indexOfMarker(cs, 0xFF52) + 12] = 0x01   // selective arithmetic bypass
         val info = ImageKodec.probe(patched)
         assertFalse(info.isDecodable)
-        assertTrue(info.unsupportedReason!!.contains("code-block"), info.unsupportedReason!!)
+        assertTrue(info.unsupportedReason!!.contains("code-block"), info.unsupportedReason)
         assertFailsWith<ImageDecodeException> { ImageKodec.decode(patched) }
     }
 }
