@@ -96,6 +96,13 @@ internal object Vp8lDecoder {
 
     class Pixels(val width: Int, val height: Int, val argb: IntArray)
 
+    /**
+     * A VP8L image stream with no header, [width] by [height], as an `ALPH` chunk compresses a lossy
+     * image's opacity with it: its green channel holds the levels.
+     */
+    fun decodeImageStream(data: ByteArray, offset: Int, length: Int, width: Int, height: Int): IntArray =
+        decodeImage(BitReader(data, offset, length), width, height, isTopLevel = true)
+
     // --- image stream ------------------------------------------------------------
 
     private class Transform(

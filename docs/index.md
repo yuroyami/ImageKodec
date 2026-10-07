@@ -3,7 +3,7 @@
 # ImageKodec
 
 Image codecs written in Kotlin, for Kotlin Multiplatform. Decode PNG, JPEG, GIF,
-BMP, TIFF, JPEG 2000 and lossless WebP from a `ByteArray`. The same code runs on
+BMP, TIFF, JPEG 2000 and WebP from a `ByteArray`. The same code runs on
 Android, iOS, desktop, native, the browser and Wasm.
 
 <div class="kite-hero-actions" markdown>
@@ -84,12 +84,10 @@ decode, rather than throwing later.
 
 ## Check this before you choose ImageKodec
 
-**WebP is lossless only.** VP8L still images and animations decode. Lossy VP8
-does not, and most `.webp` files published on the internet are lossy. There is no
-WebP encoder either. If you load arbitrary images from the internet, check this
-limitation first.
+**WebP decodes, lossy and lossless, but does not encode.** Lossy files decode to
+the pixels libwebp's `dwebp` writes. There is no WebP encoder.
 
-Two more are worth knowing early:
+Two more limits are worth knowing early:
 
 - The TIFF decoder reads only the first IFD. A multi-page TIFF decodes to page 1
   and reports no error. IFD means Image File Directory, the record that describes

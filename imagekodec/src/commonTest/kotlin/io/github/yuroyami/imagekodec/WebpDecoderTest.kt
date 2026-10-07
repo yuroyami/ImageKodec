@@ -32,11 +32,21 @@ class WebpDecoderTest {
     /** Three-frame 8x8 animation, 100 ms each, looping forever. */
     private val ANIMATION = "52494646f200000057454250565038580a00000002000000070000070000414e494d06000000ffffffff0000414e4d4638000000000000000000070000070000640000025650384c200000002f07c00100b93244f43f7611d1ff0061b65149ce1f74af23188f8809c01efa0f414e4d463e000000000000000000070000070000640000005650384c260000002f07c00100b93244f43f7611d1ff0061b65149ce1f74af231008a43892991ead9800971ee83f414e4d4640000000000000000000070000070000640000005650384c270000002f07c00100b93244f43f7611d1ff0061b65149ce1f74af2310082491cc3eead0c604b8f440ff0100"
 
-    /** 24x16 lossy: the codec this build declines. */
-    private val LOSSY = "52494646ca0000005745425056503820be000000b005009d012a180010003e91389747a5a32221300800b012096c009d32847037807e3070811800d906feeab801a5955163ddf5e2b10000feef8d0ad5ae3d66257114627f597e714a374736f00111b0b69a46c1cb3ebd7512fd5ac6bf60021b9b78de832966bfff7764cadb83cb160c3fff9959353623cc3e9e8be57f82da025358929678ba8d58a3ce0e44b6b318fc037fbc2f4cbd6545ca38af729417d9e85d83611029c08a5d64b7bc959ed2b02d8b85c22881f7040eb4911411700000"
-
-    /** 16x16 lossy with a separate alpha chunk. */
-    private val LOSSY_ALPHA = "524946468200000057454250565038580a000000100000000f00000f0000414c504815000000010ff094ff888820102066ccd873ed20a2ff15305e005650382046000000d001009d012a1000100001402625b00274010eb589a80000fefe92532bfabaf61b2bfe6d7311f2d9de894ae0d53cb87ed1c9dd7fbe5d7ffe5e99eabfffeb4fcf4b6fef830000"
+    /**
+     * CRC-32 of [bitmap] as A, R, G, B bytes per pixel. With [cleanTransparent], a fully transparent
+     * pixel counts as 0, as anim_dump writes it.
+     */
+    private fun crc(bitmap: KiteBitmap, cleanTransparent: Boolean = false): Long {
+        val bytes = ByteArray(bitmap.argb.size * 4)
+        for ((i, pixel) in bitmap.argb.withIndex()) {
+            val p = if (cleanTransparent && pixel ushr 24 == 0) 0 else pixel
+            bytes[i * 4] = (p ushr 24).toByte()
+            bytes[i * 4 + 1] = (p ushr 16).toByte()
+            bytes[i * 4 + 2] = (p ushr 8).toByte()
+            bytes[i * 4 + 3] = p.toByte()
+        }
+        return io.github.yuroyami.imagekodec.internal.flate.Crc32().apply { update(bytes) }.value()
+    }
 
     // --- sniffing and probing ----------------------------------------------------
 
@@ -44,7 +54,7 @@ class WebpDecoderTest {
     fun webpIsSniffed() {
         assertEquals(ImageFormat.WEBP, ImageKodec.detect(hex(LOSSLESS_RGB)))
         assertEquals(ImageFormat.WEBP, ImageKodec.detect(hex(ANIMATION)))
-        assertEquals(ImageFormat.WEBP, ImageKodec.detect(hex(LOSSY)))
+        assertEquals(ImageFormat.WEBP, ImageKodec.detect(hex(WEBP_LOSSY)))
     }
 
     @Test
@@ -67,24 +77,27 @@ class WebpDecoderTest {
     }
 
     @Test
-    fun lossyIsReportedUndecodableUpFront() {
-        val info = ImageKodec.probe(hex(LOSSY))
+    fun lossyIsProbedFromItsHeader() {
+        val info = ImageKodec.probe(hex(WEBP_LOSSY))
         assertEquals(24, info.width)
         assertEquals(16, info.height)
-        assertFalse(info.isDecodable)
-        val reason = info.unsupportedReason
-        assertTrue(reason != null && "lossy" in reason, "expected a reason naming the codec, got $reason")
+        assertTrue(info.isDecodable, info.unsupportedReason)
+        assertFalse(info.hasAlpha)
 
-        val alpha = ImageKodec.probe(hex(LOSSY_ALPHA))
+        val alpha = ImageKodec.probe(hex(WEBP_LOSSY_ALPHA))
         assertEquals(16, alpha.width)
-        assertFalse(alpha.isDecodable)
+        assertTrue(alpha.isDecodable, alpha.unsupportedReason)
         assertTrue(alpha.hasAlpha)
+
+        val animation = ImageKodec.probe(hex(WEBP_LOSSY_ANIMATION))
+        assertEquals(3, animation.frameCount)
+        assertTrue(animation.isDecodable, animation.unsupportedReason)
+        assertTrue(animation.hasAlpha)
     }
 
     /**
-     * An animated WebP whose one frame is lossy VP8. libwebp writes these
-     * routinely, and the image chunk lives inside the ANMF body, so a probe that
-     * only reads top-level chunks calls the file decodable and is then wrong.
+     * An animated WebP whose one frame is a lossy VP8 key frame header and nothing more. The image
+     * chunk lives inside the ANMF body, so the probe has to descend to find it.
      */
     private fun lossyAnimation(): ByteArray {
         fun u16le(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
@@ -131,23 +144,43 @@ class WebpDecoderTest {
     }
 
     @Test
-    fun lossyAnimationFramesAreReportedUndecodableUpFront() {
+    fun aLossyFrameWithNothingPastItsHeaderIsProbedAndThenRefusedAsDamaged() {
         val bytes = lossyAnimation()
         val info = ImageKodec.probe(bytes)
         assertEquals(8, info.width)
         assertEquals(1, info.frameCount)
-        assertFalse(info.isDecodable, "a lossy animation frame is still lossy VP8")
-        assertTrue("lossy" in info.unsupportedReason.orEmpty(), info.unsupportedReason.orEmpty())
+        assertTrue(info.isDecodable, "the header is all a probe reads")
+        for (decode in listOf({ ImageKodec.decodeAnimation(bytes) }, { ImageKodec.decode(bytes) })) {
+            val e = assertFailsWith<ImageDecodeException> { decode() }
+            assertFalse(e is UnsupportedImageException, e.message)
+        }
+    }
 
-        assertFailsWith<UnsupportedImageException> { ImageKodec.decodeAnimation(bytes) }
-        assertFailsWith<UnsupportedImageException> { ImageKodec.decode(bytes) }
+    // --- lossy pixels: the CRCs are of dwebp's and anim_dump's output (#11) -------------
+
+    @Test
+    fun lossyStillsDecodeToDwebpsPixels() {
+        val still = ImageKodec.decode(hex(WEBP_LOSSY))
+        assertEquals(24 to 16, still.width to still.height)
+        assertEquals(0x0D1F34F3L, crc(still))
+        val alpha = ImageKodec.decode(hex(WEBP_LOSSY_ALPHA))
+        assertEquals(16 to 16, alpha.width to alpha.height)
+        assertEquals(0xE33C325CL, crc(alpha))
     }
 
     @Test
-    fun lossyDecodeFailsByNameNotByCrash() {
-        val e = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(hex(LOSSY)) }
-        assertTrue("VP8" in e.message.orEmpty(), e.message.orEmpty())
-        assertFailsWith<UnsupportedImageException> { ImageKodec.decode(hex(LOSSY_ALPHA)) }
+    fun aLibvpxFrameWithFourTokenPartitionsAndFilterDeltasDecodesToDwebpsPixels() {
+        val frame = ImageKodec.decode(hex(WEBP_LOSSY_LIBVPX))
+        assertEquals(32 to 32, frame.width to frame.height)
+        assertEquals(0xC3F05DBEL, crc(frame))
+    }
+
+    @Test
+    fun aLossyAnimationWithOpacityDecodesToAnimDumpsFrames() {
+        val animation = ImageKodec.decodeAnimation(hex(WEBP_LOSSY_ANIMATION))
+        assertEquals(0L, animation.loopCount)
+        assertEquals(listOf(0x0BD846EBL, 0x8078BC26L, 0xE0F9C361L), animation.frames.map { crc(it.bitmap, cleanTransparent = true) })
+        assertEquals(listOf(50, 50, 50), animation.frames.map { it.delayMillis })
     }
 
     // --- lossless pixels ----------------------------------------------------------
@@ -290,12 +323,13 @@ class WebpDecoderTest {
     private val vp8x = chunk("VP8X", byteArrayOf(0x20, 0, 0, 0) + le24(15) + le24(15))
 
     @Test
-    fun aLossyChunkCutOffMidwayIsStillLossy() {
+    fun aLossyChunkCutOffMidwayIsProbedFromItsHeader() {
         // VP8X, then a VP8 chunk that the data stops in the middle of. Its first bytes are there.
         val cut = riff(vp8x, lossyChunk(padding = 5000)).copyOf(12 + 18 + 8 + 100)
         val info = ImageKodec.probe(cut)
-        assertFalse(info.isDecodable)
-        assertTrue("lossy" in info.unsupportedReason.orEmpty(), info.unsupportedReason.orEmpty())
+        assertEquals(16, info.width)
+        assertTrue(info.isDecodable, info.unsupportedReason)
+        assertFailsWith<ImageDecodeException> { ImageKodec.decode(cut) }
     }
 
     @Test
@@ -303,8 +337,8 @@ class WebpDecoderTest {
         // No VP8X: the probe read nothing from a chunk that ran past the data, and threw.
         val lossy = ImageKodec.probe(riff(lossyChunk(padding = 5000)).copyOf(12 + 8 + 100))
         assertEquals(16, lossy.width)
-        assertFalse(lossy.isDecodable)
-        assertTrue("lossy" in lossy.unsupportedReason.orEmpty(), lossy.unsupportedReason.orEmpty())
+        assertEquals(16, lossy.height)
+        assertTrue(lossy.isDecodable, lossy.unsupportedReason.orEmpty())
 
         val lossless = ImageKodec.probe(riff(losslessChunk(padding = 5000)).copyOf(12 + 8 + 100))
         assertEquals(16, lossless.width)
@@ -315,13 +349,29 @@ class WebpDecoderTest {
     @Test
     fun aPrefixThatEndsBeforeTheImageChunkIsNotDecodable() {
         // A 70,000-byte profile pushes the image chunk past the first 64 KiB. Nothing in the prefix says
-        // whether the image is lossy, so the probe must not say it can decode it.
+        // which codec the image uses, so the probe must not say it can decode it.
         val file = riff(vp8x, chunk("ICCP", ByteArray(70_000)), lossyChunk(padding = 2000))
         val info = ImageKodec.probe(file.copyOf(65_536))
         assertEquals(16, info.width)
         assertFalse(info.isDecodable)
         assertTrue("image chunk" in info.unsupportedReason.orEmpty(), info.unsupportedReason.orEmpty())
         // The whole file is read correctly.
-        assertTrue("lossy" in ImageKodec.probe(file).unsupportedReason.orEmpty())
+        assertTrue(ImageKodec.probe(file).isDecodable)
     }
 }
+
+/** 24x16 lossy, as cwebp writes it. */
+internal const val WEBP_LOSSY = "52494646ca0000005745425056503820be000000b005009d012a180010003e91389747a5a32221300800b012096c009d32847037807e3070811800d906feeab801a5955163ddf5e2b10000feef8d0ad5ae3d66257114627f597e714a374736f00111b0b69a46c1cb3ebd7512fd5ac6bf60021b9b78de832966bfff7764cadb83cb160c3fff9959353623cc3e9e8be57f82da025358929678ba8d58a3ce0e44b6b318fc037fbc2f4cbd6545ca38af729417d9e85d83611029c08a5d64b7bc959ed2b02d8b85c22881f7040eb4911411700000"
+
+/** 16x16 lossy with a separate alpha chunk. */
+internal const val WEBP_LOSSY_ALPHA = "524946468200000057454250565038580a000000100000000f00000f0000414c504815000000010ff094ff888820102066ccd873ed20a2ff15305e005650382046000000d001009d012a1000100001402625b00274010eb589a80000fefe92532bfabaf61b2bfe6d7311f2d9de894ae0d53cb87ed1c9dd7fbe5d7ffe5e99eabfffeb4fcf4b6fef830000"
+
+/**
+ * libvpx's 32 by 32 key frame through ffmpeg (`-slices 4 -b:v 5k -qmin 55 -qmax 63`), wrapped as a
+ * simple-format WebP: four token partitions and the normal loop filter at level 20 with its
+ * reference and mode deltas, none of which cwebp writes.
+ */
+internal const val WEBP_LOSSY_LIBVPX = "5249464664000000574542505650382057000000d002009d012a20002000050708858588858488b38202b0ca24f8057f07062600150000170000010000fee12187e05c81172bedf6b528761a6a00794c5780fd1d5092b46172920939a989cbdcb62febdb7451fdfb80000000"
+
+/** img2webp's `-lossy -q 50` animation of three 12 by 10 frames; the second keeps its opacity in ALPH. */
+internal const val WEBP_LOSSY_ANIMATION = "52494646a001000057454250565038580a000000120000000b0000090000414e494d06000000ffffffff0000414e4d46620000000000000000000b000009000032000002565038204a000000f001009d012a0c000a0002c04c25b00274010ee1bf11542000fef339370a25133c92e060b0f0937d4518c73158f94b644062ea6ce11ffb23f85e78f7438e161ff99adfcefcffe0907000414e4d469e0000000000000000000b000009000032000002414c50482b000000015f40906d738bce5ff5121191f320a8866c85ba08b1c472592e479fb1e4f73488e87f9853591b102f2a1b0056503820520000001002009d012a0c000a0002c04c25b00274010b64db3474388000feeeef4f0336c0a4ac94c23fbfac3b72c3b5c89ebd0e97ab3b893edf1b75979a5ce12525df57d7e77438e2a5ff6e44d47f58ecbe4ac00000414e4d46640000000000000000000b000009000032000000565038204c000000f401009d012a0c000a0000004c25b00274010ee1bf6af6c000fef339370a29cc0b0b88d67ee87e85505114b1989fd324f9fa57caf14541fe557d8a61a8c0b04ffb7226a4e07debc542000000"

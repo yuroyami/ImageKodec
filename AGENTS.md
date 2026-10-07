@@ -32,6 +32,13 @@ being true.
 - jbig2enc's symbol mode moves some glyphs by a pixel, with no pattern to derive.
   jbig2dec decodes the same moved page, so symbol-mode tests compare against
   jbig2dec, not against the source page (#40).
+- `anim_dump` sets every fully transparent pixel to 0 before it writes a frame
+  (`CleanupTransparentPixels` in libwebp's `examples/anim_util.c`), so its frames
+  differ from any decoder's under alpha 0. Clean the decoded frame the same way
+  before comparing (#11).
+- cwebp writes neither several token partitions nor loop filter deltas, and
+  libvpx turns its key-frame loop filter off at constant quality. ffmpeg's
+  libvpx with `-slices` and a tight `-b:v` writes both (#11).
 - libtiff before 4.7.2, Ubuntu 24.04's included, reads a clipped 4:4 YCbCr tile
   wrong in `tiff2rgba`, so that oracle case skips on older versions (#104).
 - `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh

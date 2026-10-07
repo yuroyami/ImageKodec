@@ -14,6 +14,17 @@ reviewable in the diff.
 
 ### Added
 
+- Lossy WebP decodes: VP8 key frames, their `ALPH` opacity (raw or VP8L
+  compressed, with any of the three prediction filters), and animation frames
+  that are lossy or mix both codecs. The VP8 decoder is a port of libwebp
+  1.3.2's, and the chroma is upsampled as dwebp's default output does, so every
+  pixel matches `dwebp`, checked across cwebp's quality, filter, segment, noise
+  shaping and method settings, every alpha coding, libvpx key frames with up to
+  eight token partitions and filter deltas, and img2webp animations against
+  `anim_dump`. The constant tables come from libwebp's source through
+  `tools/vp8_tables.py`, which records their checksums. `probe` reports lossy
+  files as decodable, and `KiteImageDecoder` claims them (#11).
+
 - `ImageKodec.decodeScaled` and `ImageKodec.decodeDownscaledTo` decode straight
   to the size `scaled` or `downscaledTo` would give after a full decode. They
   read the header, decode a JPEG or JPEG 2000 at the largest reduction whose

@@ -3,12 +3,13 @@ package io.github.yuroyami.imagekodec.coil
 import okio.BufferedSource
 
 /**
- * WebP permits VP8 and VP8L in different animation frames. A fixed peek cannot
- * establish support for the whole file. Walk the RIFF/ANMF headers on a peek,
- * skipping compressed payloads without copying them into a second byte array.
- * Chunk lengths and padding follow the WebP container specification.
+ * Whether every image chunk of the WebP on this source is one ImageKodec decodes: a VP8 key frame
+ * or a VP8L image of the version it knows. Animation frames can mix the two, and a fixed peek cannot
+ * reach a late frame, so this walks the RIFF and ANMF headers on a peek, skipping compressed payloads
+ * without copying them into a second byte array. Chunk lengths and padding follow the WebP container
+ * specification.
  */
-internal fun BufferedSource.hasOnlyLosslessWebpImages(): Boolean {
+internal fun BufferedSource.hasOnlyDecodableWebpImages(): Boolean {
     if (!request(12) || readUtf8(4) != "RIFF") return false
     val riffSize = readIntLe().toLong() and 0xffffffffL
     if (riffSize < 4 || readUtf8(4) != "WEBP") return false
@@ -35,7 +36,15 @@ internal fun BufferedSource.hasOnlyLosslessWebpImages(): Boolean {
                     if (!chunks(size - 16, insideFrame = true)) return false
                     sawImage = true
                 }
-                "VP8 " -> return false
+                "VP8 " -> {
+                    // A key frame (bit 0 of the frame tag clear) with the 9D 01 2A start code.
+                    if (size < 10 || !request(10)) return false
+                    val frameTag = readByte().toInt()
+                    skip(2)
+                    val start = readByte().toInt() and 255 shl 16 or (readByte().toInt() and 255 shl 8) or (readByte().toInt() and 255)
+                    if (frameTag and 1 != 0 || start != 0x9D012A || !skipPayload(size - 6)) return false
+                    sawImage = true
+                }
                 "VP8X" -> if (size != 10L || !skipPayload(size)) return false
                 "ANIM" -> if (size != 6L || !skipPayload(size)) return false
                 "VP8L" -> {

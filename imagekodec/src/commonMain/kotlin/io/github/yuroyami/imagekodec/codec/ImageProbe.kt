@@ -616,7 +616,6 @@ internal object ImageProbe {
         var animated = false
         var sawAny = false
         var sawImage = false
-        var lossy = false
 
         fun u16le(at: Int) = (data[at].toInt() and 0xFF) or ((data[at + 1].toInt() and 0xFF) shl 8)
         fun u24le(at: Int) = u16le(at) or ((data[at + 2].toInt() and 0xFF) shl 16)
@@ -650,19 +649,15 @@ internal object ImageProbe {
                 "ANMF" -> {
                     frames++
                     // The frame's own image chunk sits past the 16-byte ANMF
-                    // header. Without descending, a lossy animation would probe
-                    // decodable and then fail inside the frame loop.
+                    // header, and only finding it shows the data reaches an image.
                     val end = minOf(body + size.toInt(), data.size)
-                    val frameIsLossy = webpFrameIsLossy(data, body + 16, end)
-                    if (frameIsLossy != null) sawImage = true
-                    if (frameIsLossy == true) lossy = true
+                    if (webpFrameIsLossy(data, body + 16, end) != null) sawImage = true
                 }
                 "ALPH" -> alpha = true
                 "VP8 " -> {
                     // Uncompressed data chunk of a key frame: 3-byte frame tag,
                     // 3-byte start code 9D 01 2A, then 14-bit width and height.
                     if (body + 10 > data.size) break
-                    lossy = true
                     sawImage = true
                     if (!sawAny) {
                         width = u16le(body + 6) and 0x3FFF
@@ -688,12 +683,8 @@ internal object ImageProbe {
         }
 
         if (!sawAny) throw ImageDecodeException("WebP: no VP8/VP8L/VP8X chunk")
-        // Without an image chunk the data cannot say whether the image is lossy, so it is not decodable.
-        val reason = when {
-            lossy -> "WebP lossy (VP8)"
-            !sawImage -> "WebP data ends before its first image chunk"
-            else -> null
-        }
+        // Without an image chunk the data cannot say which codec the image uses, so it is not decodable.
+        val reason = if (!sawImage) "WebP data ends before its first image chunk" else null
 
         return ImageInfo(
             format = ImageFormat.WEBP,

@@ -1,8 +1,8 @@
 # ImageKodec
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
-BMP, TIFF, JPEG 2000 and lossless WebP from a `ByteArray`, with the same code on
-every target.
+BMP, TIFF, JPEG 2000 and WebP from a `ByteArray`, with the same code on every
+target.
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/imagekodec)](https://central.sonatype.com/artifact/io.github.yuroyami/imagekodec)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuroyami/ImageKodec/ci.yml?branch=main&label=CI)](https://github.com/yuroyami/ImageKodec/actions/workflows/ci.yml)
@@ -97,13 +97,13 @@ info.isDecodable                 // and info.unsupportedReason when it is false
 
 `isDecodable` is a statement about features. It is false when the file uses
 something this build does not implement, and `unsupportedReason` names it.
-Examples are lossy WebP, a CgBI PNG, an arithmetic-coded JPEG and JPEG-in-TIFF.
+Examples are a CgBI PNG, an arithmetic-coded JPEG and JPEG-in-TIFF.
 The Coil decoder uses this flag to decide which files to claim.
 
 `isDecodable` stays true for a file that declares only supported features and is
 then truncated or corrupt. A decode can therefore still fail after a clean probe.
 One case is different: WebP data that ends before its first image chunk probes as
-not decodable. Until that chunk, nothing says whether the image is lossy.
+not decodable. Until that chunk, nothing says which codec the image uses.
 
 ### Decode a still
 
@@ -128,17 +128,17 @@ at a lower resolution than brightness.
 | JPEG | baseline SOF0, extended sequential SOF1, progressive SOF2, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
-| WebP | lossless VP8L only, still and animated. Lossy VP8 is not implemented at all |
+| WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
 | TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4, photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, first IFD only |
 | JPEG 2000 | JP2 container and raw J2K codestream, part 1 baseline |
 
-Two rows above are narrower than the format name suggests:
+One row above is narrower than the format name suggests:
 
-- **Only lossless VP8L WebP decodes.** Lossy VP8 throws
-  `UnsupportedImageException`, in stills and inside animation frames alike. Most
-  `.webp` files published on the internet are lossy.
 - **The TIFF decoder reads only the first IFD.** A multi-page TIFF decodes to
   page 1 and reports no error.
+
+Lossy WebP decodes to the pixels libwebp's `dwebp` writes: its VP8 decoder is a
+port of libwebp's, and the chroma is upsampled as dwebp's default output does.
 
 `ImageFormat.sniff` (and `ImageKodec.detect`) recognize PNG, JPEG, GIF, BMP, WEBP,
 TIFF and JP2. Sniffing is deliberately wider than decoding, which is why `probe`
@@ -303,8 +303,9 @@ loader, which does not have `KiteImageDecoder`.
 
 `KiteImageDecoder.Factory` probes the first 64 KiB for supported features.
 For WebP, it walks the complete RIFF and frame chunk headers, skipping payloads
-without a second whole-file byte array. It accepts lossless frames and declines
-the file if any frame uses lossy VP8, so Coil can choose its platform decoder.
+without a second whole-file byte array. It accepts VP8L frames and VP8 key frames,
+and declines a file with any other image chunk, so Coil can choose its platform
+decoder.
 The factory claims TIFF and JP2 even when the probe fails. A TIFF's IFD is often
 further into the file than 64 KiB, and no platform decoder handles either format.
 
@@ -353,10 +354,6 @@ web project that runs under Node should not use them.
 
 ## Limits
 
-- **Lossy WebP does not decode**, which covers most `.webp` files published on
-  the internet. `probe` reports them as undecodable and `decode` throws
-  `UnsupportedImageException`. You can therefore route them to a platform decoder
-  without a failed attempt first.
 - **ImageKodec keeps only the high byte of a 16-bit sample.** PNG and TIFF read
   16-bit files, but the output buffer is 8 bits per channel. ImageKodec discards
   the low byte rather than dithering or scaling it. `probe` still reports the
@@ -422,6 +419,7 @@ expectations:
 | JPEG encode | `javax.imageio` reads the output back | lossy: per-pixel/mean-error and PSNR thresholds |
 | JPEG reduced decode | libjpeg-turbo `djpeg -scale` | pixel comparisons with a stated tolerance |
 | WebP lossless | libwebp `cwebp` and `dwebp` | pixel-exact |
+| WebP lossy | libwebp `cwebp`, `dwebp`, `img2webp` and `anim_dump`, and libvpx key frames through ffmpeg | pixel-exact |
 | JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 1/255 and a mean of 0.05 for irreversible 9/7, 16-bit included |
 | TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1 |
 | JBIG2 | jbig2enc's streams: generic regions against the source page, symbol mode against jbig2dec | exact |

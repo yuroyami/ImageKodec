@@ -31,8 +31,8 @@ import okio.use
  *
  * The factory uses `ImageKodec.probe` and a complete WebP chunk-header walk to
  * decide whether this build can decode the bytes. It claims PNG and APNG, JPEG,
- * GIF, BMP, lossless WebP (including animations), TIFF and JP2. Unsupported
- * formats such as SVG, CgBI PNGs, lossy WebP and lossless/arithmetic JPEGs fall
+ * GIF, BMP, lossy and lossless WebP (including animations), TIFF and JP2.
+ * Unsupported formats such as SVG, CgBI PNGs and lossless/arithmetic JPEGs fall
  * through to Coil's platform decoders.
  *
  * Static results honor the request's size, FIT/FILL scale, single defined side
@@ -129,7 +129,7 @@ public class KiteImageDecoder(
                 // A lossless first frame does not prove that later frames use
                 // a supported codec; an initial peek may miss all image chunks.
                 ImageFormat.sniff(header) == ImageFormat.WEBP ->
-                    result.source.source().peek().use { it.hasOnlyLosslessWebpImages() }
+                    result.source.source().peek().use { it.hasOnlyDecodableWebpImages() }
                 info != null -> info.isDecodable
                 // A probe can legitimately fail on a truncated peek: TIFF in
                 // particular often puts its IFD at the *end* of the file. Those

@@ -74,16 +74,24 @@ class KiteImageFactoryClaimTest {
     }
 
     @Test
-    fun aLossyWebpWhoseImageChunkFollowsALargeProfileIsDeclined() {
-        // The profile ends at byte 70,038, past the peek, so the peek never reaches the VP8 chunk.
-        assertNull(claim(riff(vp8x, chunk("ICCP", ByteArray(70_000)), lossyChunk(padding = 2000))))
+    fun aLossyWebpWhoseImageChunkFollowsALargeProfileIsClaimed() {
+        // The profile ends at byte 70,038, past the peek; the chunk walk reaches the VP8 chunk anyway.
+        assertNotNull(claim(riff(vp8x, chunk("ICCP", ByteArray(70_000)), lossyChunk(padding = 2000))))
     }
 
     @Test
-    fun aLossyWebpWhoseImageChunkRunsPastThePeekIsDeclined() {
-        // The VP8 chunk starts inside the peek and ends far outside it. Its first bytes say it is lossy.
-        assertNull(claim(riff(vp8x, lossyChunk(padding = 100_000))))
-        assertNull(claim(riff(lossyChunk(padding = 100_000))))
+    fun aLossyWebpWhoseImageChunkRunsPastThePeekIsClaimed() {
+        // The VP8 chunk starts inside the peek and ends far outside it. Its first bytes are a key frame.
+        assertNotNull(claim(riff(vp8x, lossyChunk(padding = 100_000))))
+        assertNotNull(claim(riff(lossyChunk(padding = 100_000))))
+    }
+
+    @Test
+    fun aLossyChunkThatIsNotAKeyFrameIsDeclined() {
+        val interFrame = lossyChunk(padding = 0).also { it[8] = 0x31 }
+        assertNull(claim(riff(vp8x, interFrame)))
+        val badStartCode = lossyChunk(padding = 0).also { it[11] = 0 }
+        assertNull(claim(riff(vp8x, badStartCode)))
     }
 
     @Test
@@ -97,8 +105,8 @@ class KiteImageFactoryClaimTest {
     private val animationControl = chunk("ANIM", ByteArray(6))
 
     @Test
-    fun lossyFramesAfterALargeLosslessPayloadAreDeclined() {
-        assertNull(claim(riff(animatedHeader, animationControl, frame(losslessChunk(100_000)), frame(lossyChunk(0)))))
+    fun lossyFramesAfterALargeLosslessPayloadAreClaimed() {
+        assertNotNull(claim(riff(animatedHeader, animationControl, frame(losslessChunk(100_000)), frame(lossyChunk(0)))))
     }
 
     @Test
@@ -110,7 +118,7 @@ class KiteImageFactoryClaimTest {
     fun headersCanFollowLargeMetadataAndArriveInSmallFragments() {
         val beforeFrames = listOf(animatedHeader, chunk("ICCP", ByteArray(70_001)), animationControl)
         assertNotNull(claim(riff(*(beforeFrames + listOf(frame(losslessChunk(0)), frame(losslessChunk(0)))).toTypedArray()), fragmented = true))
-        assertNull(claim(riff(*(beforeFrames + listOf(frame(losslessChunk(0)), frame(lossyChunk(0)))).toTypedArray()), fragmented = true))
+        assertNotNull(claim(riff(*(beforeFrames + listOf(frame(losslessChunk(0)), frame(lossyChunk(0)))).toTypedArray()), fragmented = true))
     }
 
     @Test
@@ -150,10 +158,12 @@ class KiteImageFactoryClaimTest {
     }
 
     @Test
-    fun aRealMixedAnimationFallsThroughToTheStockDecoder() {
+    fun aRealMixedAnimationDecodesBothFrames() {
+        // Both codecs decode now (#11), so the file is claimed and plays both frames, where Coil's stock
+        // decoder shows only the first.
         val bytes = realMixedAnimation()
         assertEquals(true, ImageKodec.probe(bytes.copyOf(65_536)).isDecodable)
-        assertEquals(false, ImageKodec.probe(bytes).isDecodable)
+        assertEquals(true, ImageKodec.probe(bytes).isDecodable)
         val stock = ImageLoader(context)
         val registered = ImageLoader.Builder(context).components { add(KiteImageDecoder.Factory()) }.build()
         try {
@@ -161,10 +171,15 @@ class KiteImageFactoryClaimTest {
                 loader.execute(ImageRequest.Builder(context).data(bytes).build())
             })
             val reference = assertIs<BitmapImage>(load(stock).image)
-            val result = assertIs<BitmapImage>(load(registered).image)
+            val result = assertIs<KiteAnimationImage>(load(registered).image)
             assertEquals(1 to 1, result.width to result.height)
+            assertEquals(listOf(100, 200), result.animation.frames.map { it.delayMillis })
             assertEquals(0xffff0000.toInt(), reference.bitmap.getColor(0, 0))
-            assertEquals(reference.bitmap.getColor(0, 0), result.bitmap.getColor(0, 0))
+            assertEquals(reference.bitmap.getColor(0, 0), result.animation.frames[0].bitmap[0, 0])
+            // The second frame is cwebp's lossy green.
+            val green = result.animation.frames[1].bitmap[0, 0]
+            assertEquals(0xFF, green ushr 24)
+            assertEquals(true, (green ushr 8 and 0xFF) > 200 && (green ushr 16 and 0xFF) < 40, green.toUInt().toString(16))
         } finally { stock.shutdown(); registered.shutdown() }
     }
 
