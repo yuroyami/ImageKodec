@@ -78,10 +78,11 @@ internal object PngDecoder {
      * decodes as a single frame holding the default image, so this is total over
      * every PNG [decode] accepts.
      *
-     * [cancellationCheck] runs after each composited frame and may throw to
-     * abandon a decode whose result no longer matters.
+     * Only the first [maxFrames] frames decode. [cancellationCheck] runs after
+     * each composited frame and may throw to abandon a decode whose result no
+     * longer matters.
      */
-    fun decodeAnimation(data: ByteArray, cancellationCheck: (() -> Unit)? = null): KiteAnimation {
+    fun decodeAnimation(data: ByteArray, maxFrames: Int = Int.MAX_VALUE, cancellationCheck: (() -> Unit)? = null): KiteAnimation {
         val png = parse(data, wantAnimation = true)
 
         if (png.frames.isEmpty()) {
@@ -94,17 +95,18 @@ internal object PngDecoder {
             )
         }
 
-        if (!Budget.framesFit(png.width, png.height, png.frames.size, data.size, png.bitDepth * png.channels)) {
+        val frames = if (png.frames.size > maxFrames) png.frames.subList(0, maxFrames) else png.frames
+        if (!Budget.framesFit(png.width, png.height, frames.size, data.size, png.bitDepth * png.channels)) {
             throw ImageDecodeException(
-                "APNG: ${png.frames.size} frames of ${png.width}x${png.height} cannot come from ${data.size} bytes",
+                "APNG: ${frames.size} frames of ${png.width}x${png.height} cannot come from ${data.size} bytes",
             )
         }
 
         val canvas = IntArray(png.width * png.height)   // starts fully transparent
-        val out = ArrayList<KiteFrame>(png.frames.size)
+        val out = ArrayList<KiteFrame>(frames.size)
         var saved: IntArray? = null
 
-        for (frame in png.frames) {
+        for (frame in frames) {
             if (frame.disposeOp == DISPOSE_PREVIOUS) saved = canvas.copyOf()
 
             val pixels = renderSubImage(png, frame.width, frame.height, frame.data)

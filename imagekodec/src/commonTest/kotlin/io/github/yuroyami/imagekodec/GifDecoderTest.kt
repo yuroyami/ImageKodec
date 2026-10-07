@@ -206,6 +206,24 @@ class GifDecoderTest {
         assertEquals(2, calls)
     }
 
+    @Test
+    fun maxFramesStopsTheDecodeAndReadsNothingPastIt() {
+        val full = ImageKodec.decodeAnimation(hex(ANIM_KEEP_2F))
+        val first = ImageKodec.decodeAnimation(hex(ANIM_KEEP_2F), maxFrames = 1)
+        assertEquals(1, first.frames.size)
+        assertContentEquals(full.frames[0].bitmap.argb, first.frames[0].bitmap.argb)
+        assertEquals(full.frames[0].delayMillis, first.frames[0].delayMillis)
+        assertEquals(full.loopCount, first.loopCount)
+        assertEquals(2, ImageKodec.decodeAnimation(hex(ANIM_KEEP_2F), maxFrames = 5).frames.size)
+
+        // The second frame's last sub-block is cut short: the whole file fails, its first frame does not.
+        val cut = hex(ANIM_KEEP_2F).let { it.copyOf(it.size - 3) }
+        assertFailsWith<ImageDecodeException> { ImageKodec.decodeAnimation(cut) }
+        assertContentEquals(full.frames[0].bitmap.argb, ImageKodec.decodeAnimation(cut, maxFrames = 1).frames[0].bitmap.argb)
+
+        assertFailsWith<IllegalArgumentException> { ImageKodec.decodeAnimation(hex(ANIM_KEEP_2F), maxFrames = 0) }
+    }
+
     /** A 1x1 screen with a two-entry table and one frame that declares [frameWidth] by [frameHeight]. */
     private fun gifWithFrame(frameWidth: Int, frameHeight: Int, lzw: String = "0200"): ByteArray {
         fun le16(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v ushr 8) and 0xFF).toByte())

@@ -32,7 +32,7 @@ class ThrowsContractTest {
         declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
-        declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, Function0::class.java)
+        declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, int, Function0::class.java)
         declares(CcittFax::class.java, "decode", ex, bytes, int, CcittOptions::class.java)
     }
 
@@ -43,6 +43,7 @@ class ThrowsContractTest {
         declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)
         declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
+        declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, int, Function0::class.java)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteBitmap::class.java, boolean)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteAnimation::class.java, boolean)
         declares(ImageKodec::class.java, "encodeJpeg", ex, KiteBitmap::class.java, int)

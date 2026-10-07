@@ -270,6 +270,19 @@ class WebpDecoderTest {
     }
 
     @Test
+    fun maxFramesStopsAfterThatManyFrames() {
+        for (bytes in listOf(hex(ANIMATION), hex(WEBP_LOSSY_ANIMATION))) {
+            val full = ImageKodec.decodeAnimation(bytes)
+            assertTrue(full.frames.size > 1)
+            val first = ImageKodec.decodeAnimation(bytes, maxFrames = 1)
+            assertEquals(1, first.frames.size)
+            assertTrue(full.frames[0].bitmap.argb.contentEquals(first.frames[0].bitmap.argb))
+            assertEquals(full.frames[0].delayMillis, first.frames[0].delayMillis)
+            assertEquals(full.loopCount, first.loopCount)
+        }
+    }
+
+    @Test
     fun probeAgreesWithTheAnimationDecoder() {
         for (v in listOf(LOSSLESS_RGB, LOSSLESS_ALPHA, LOSSLESS_PALETTE, ANIMATION)) {
             val info = ImageKodec.probe(hex(v))

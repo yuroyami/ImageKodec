@@ -210,7 +210,7 @@ public object ImageKodec {
     private fun decodeRaw(data: ByteArray): KiteBitmap = when (detect(data)) {
         ImageFormat.PNG -> PngDecoder.decode(data)
         ImageFormat.BMP -> BmpDecoder.decode(data)
-        ImageFormat.GIF -> GifDecoder.decode(data, firstFrameOnly = true).frames.first().bitmap
+        ImageFormat.GIF -> GifDecoder.decode(data, maxFrames = 1).frames.first().bitmap
         ImageFormat.JPEG -> JpegDecoder.decode(data)
         ImageFormat.JP2 -> jp2ToBitmap(data)
         ImageFormat.WEBP -> WebpDecoder.decode(data)
@@ -306,6 +306,13 @@ public object ImageKodec {
      * delays and the loop count; static formats return a single zero-delay frame,
      * so this is safe to call on anything [decode] accepts.
      *
+     * [maxFrames] stops the decode after that many frames, and nothing past them
+     * is read, so a damaged later frame does not fail it. `1` gives the first
+     * frame of the animation as it plays, for a thumbnail or a paused image: for
+     * an APNG whose default image sits outside the animation that is not what
+     * [decode] returns. The result keeps the file's delays and loop count, so it
+     * plays as only those frames would.
+     *
      * [cancellationCheck], when given, runs between frames of a multi-frame
      * decode and may throw to abandon work whose result no longer matters
      * (pass `{ coroutineContext.ensureActive() }` from a coroutine). Static
@@ -313,17 +320,21 @@ public object ImageKodec {
      *
      * [applyOrientation] honours the EXIF orientation tag on every frame, the
      * same way [decode] does for a still.
+     *
+     * @throws IllegalArgumentException if [maxFrames] is less than 1
      */
-    @Throws(ImageDecodeException::class)
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
     public fun decodeAnimation(
         data: ByteArray,
         applyOrientation: Boolean = false,
+        maxFrames: Int = Int.MAX_VALUE,
         cancellationCheck: (() -> Unit)? = null,
     ): KiteAnimation {
+        require(maxFrames >= 1) { "maxFrames must be at least 1, was $maxFrames" }
         val animation = when (detect(data)) {
-            ImageFormat.GIF -> GifDecoder.decode(data, firstFrameOnly = false, cancellationCheck)
-            ImageFormat.PNG -> PngDecoder.decodeAnimation(data, cancellationCheck)
-            ImageFormat.WEBP -> WebpDecoder.decodeAnimation(data, cancellationCheck)
+            ImageFormat.GIF -> GifDecoder.decode(data, maxFrames, cancellationCheck)
+            ImageFormat.PNG -> PngDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
+            ImageFormat.WEBP -> WebpDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             else -> {
                 val single = decodeRaw(data)
                 KiteAnimation(

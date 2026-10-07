@@ -159,6 +159,12 @@ val anim = ImageKodec.decodeAnimation(bytes)
 anim.frames.size
 anim.loopCount        // Long total plays: 0 means forever, 1 means once
 anim.durationMillis
+
+// A thumbnail or a paused image needs only the first frame, and nothing past it is read.
+val first = ImageKodec.decodeAnimation(bytes, maxFrames = 1)
+
+// From a coroutine, stop between frames once the result no longer matters.
+val frames = ImageKodec.decodeAnimation(bytes) { coroutineContext.ensureActive() }
 ```
 
 `KiteAnimation.loopCount` and `ImageInfo.loopCount` use `Long`. GIF's stored repeat
@@ -267,15 +273,18 @@ KiteImage(
     data = bytes,
     contentDescription = "avatar",
     modifier = Modifier.size(96.dp),
-    animate = true,                    // false shows only the first frame
+    animate = true,                    // false decodes and shows only the first frame
     onError = { log(it) },             // malformed input draws nothing
 )
 ```
 
-Decoding runs on `Dispatchers.Default` and re-runs when `data` changes. The
-composable holds its layout slot and draws nothing until decoding finishes. It
-applies EXIF orientation, even though `ImageKodec.decode` does not apply it by
-default.
+Decoding runs on `Dispatchers.Default` and re-runs when `data` changes. It stops
+at the next frame once the composable leaves composition, so a list scrolled past
+animated images does not keep decoding them. Frames become `ImageBitmap`s on
+`Dispatchers.Default` too, ahead of playback, so the thread that draws never
+copies a frame. The composable holds its layout slot and draws nothing until the
+first frame is ready. It applies EXIF orientation, even though
+`ImageKodec.decode` does not apply it by default.
 
 Two more composables are public, for pipelines that decode themselves: an
 overload of `KiteImage` that takes a `KiteBitmap`, and `KiteAnimatedImage` that

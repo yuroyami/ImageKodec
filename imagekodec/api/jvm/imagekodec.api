@@ -44,8 +44,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/ImageKodec;
 	public final fun decode ([BZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decodeAnimation ([BZLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
-	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
+	public final fun decodeAnimation ([BZILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
+	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public final fun decodeDownscaledTo ([BIIZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeJpegComponents ([BI)Lio/github/yuroyami/imagekodec/JpegComponents;

@@ -36,6 +36,8 @@ internal object GifDecoder {
     private const val MAX_CODES = 4096               // LZW dictionary limit (12-bit codes)
 
     /**
+     * Decodes at most [maxFrames] frames and reads nothing past the last of them.
+     *
      * [cancellationCheck], when given, runs after each frame is composited and
      * may throw (e.g. `CoroutineContext.ensureActive`) to abandon a decode whose
      * result no longer matters: a fast-scrolled-away Coil request stops burning
@@ -43,7 +45,7 @@ internal object GifDecoder {
      */
     fun decode(
         data: ByteArray,
-        firstFrameOnly: Boolean,
+        maxFrames: Int,
         cancellationCheck: (() -> Unit)? = null,
     ): KiteAnimation {
         val r = ByteReader(data)
@@ -146,7 +148,7 @@ internal object GifDecoder {
                             delayRawCentiseconds = delayCs,
                         ),
                     )
-                    if (firstFrameOnly) return KiteAnimation(width, height, frames, loopCount)
+                    if (frames.size == maxFrames) return KiteAnimation(width, height, frames, loopCount)
                     cancellationCheck?.invoke()
 
                     // Dispose AFTER presenting, preparing the canvas for the next frame.

@@ -31,7 +31,8 @@ internal object WebpDecoder {
         return renderStill(data, file, frame)
     }
 
-    fun decodeAnimation(data: ByteArray, cancellationCheck: (() -> Unit)? = null): KiteAnimation {
+    /** Decodes the first [maxFrames] frames, calling [cancellationCheck] after each. */
+    fun decodeAnimation(data: ByteArray, maxFrames: Int = Int.MAX_VALUE, cancellationCheck: (() -> Unit)? = null): KiteAnimation {
         val file = parse(data)
         if (!file.animated) {
             val still = decode(data)
@@ -45,15 +46,16 @@ internal object WebpDecoder {
 
         val w = file.canvasWidth
         val h = file.canvasHeight
-        if (!Budget.framesFitAbsolute(w, h, file.frames.size)) {
-            err("${file.frames.size} frames of ${w}x$h exceed the output safety limit")
+        val frames = if (file.frames.size > maxFrames) file.frames.subList(0, maxFrames) else file.frames
+        if (!Budget.framesFitAbsolute(w, h, frames.size)) {
+            err("${frames.size} frames of ${w}x$h exceed the output safety limit")
         }
 
         // A corrupt first entropy stream must fail before the canvas allocation.
         var canvas = IntArray(0)
-        val out = ArrayList<KiteFrame>(file.frames.size)
+        val out = ArrayList<KiteFrame>(frames.size)
 
-        for (frame in file.frames) {
+        for (frame in frames) {
             // A frame rectangle that leaves the canvas is malformed, not something
             // to clip: the file is claiming pixels that have nowhere to go.
             if (frame.x < 0 || frame.y < 0 ||

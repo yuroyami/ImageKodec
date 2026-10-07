@@ -8,8 +8,9 @@ import io.github.yuroyami.imagekodec.KiteBitmap
  * a Compose [ImageBitmap].
  *
  * Android goes through `android.graphics.Bitmap`; every other target goes
- * through one shared Skiko path (an UNPREMUL RGBA_8888 raster: straight alpha,
- * exactly what [KiteBitmap] holds).
+ * through one shared Skiko path, which premultiplies into Skia's native N32
+ * raster in one pass. Either way it copies every pixel, so for a large bitmap
+ * call it off the main thread, as [KiteImage] and [KiteAnimatedImage] do.
  *
  * Fidelity contract (both paths: Compose's backing store premultiplies):
  * opaque pixels are bit-exact, semi-transparent channels may wobble ±1 from the

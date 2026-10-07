@@ -14,6 +14,12 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.decodeAnimation` takes `maxFrames` and stops after that many
+  frames without reading past them, so a damaged later frame does not fail
+  them. `maxFrames = 1` gives the first frame of the animation as it plays,
+  which for an APNG whose default image sits outside the animation is not what
+  `decode` returns. The result keeps the file's delays and loop count (#74).
+
 - Lossy WebP decodes: VP8 key frames, their `ALPH` opacity (raw or VP8L
   compressed, with any of the three prediction filters), and animation frames
   that are lossy or mix both codecs. The VP8 decoder is a port of libwebp
@@ -59,6 +65,30 @@ reviewable in the diff.
   frame's timing and the play count (#15).
 
 ### Changed
+
+- `decodeAnimation` takes `maxFrames` before `cancellationCheck`. A call that
+  passes the check as a trailing lambda or by name compiles unchanged; one that
+  passes it third by position needs its name. Code compiled against the old
+  signature must be compiled again (#74).
+
+- `KiteImage(data)` does its work on `Dispatchers.Default` and stops it when
+  nobody will see it. Its decode stops at the next frame once it leaves
+  composition or `data` changes, where it ran to the end and threw the frames
+  away. `animate = false` decodes only the first frame: 3 to 45 ms and 1.2 MB
+  for a 120-frame 640 by 480 GIF, where all of it took 207 to 469 ms and 147 MB.
+  Turning `animate` on later decodes the rest while that frame stays up. The
+  first frame becomes an `ImageBitmap` in the same background step, and
+  `KiteAnimatedImage` converts the others there ahead of playback, so the
+  thread that draws never copies a frame; when one comes due before it is
+  ready, the newest converted frame stays up. `KiteImage(bitmap)` converts off
+  that thread as well, except a bitmap of at most 65,536 pixels, which
+  converts at once because that costs less than a frame of nothing. While a
+  bitmap converts, the composable lays out at its size and draws nothing (#74).
+
+- `toImageBitmap` on every target but Android premultiplies into Skia's
+  native N32 raster itself, where it had Skia draw an unpremultiplied image
+  into a new bitmap. The bitmap is byte for byte the same, and a 4000 by 3000
+  photo converts in 38 ms where it took 165 ms (#74).
 
 - The CCITT decoder behind TIFF fax compression, `CcittFax` and JBIG2's MMR
   regions holds each row as its changing elements, as libtiff and xpdf do,

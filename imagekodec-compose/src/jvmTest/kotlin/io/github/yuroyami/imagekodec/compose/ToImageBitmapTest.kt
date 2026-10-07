@@ -1,8 +1,16 @@
 package io.github.yuroyami.imagekodec.compose
 
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import io.github.yuroyami.imagekodec.KiteBitmap
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageInfo
+import kotlin.random.Random
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -58,6 +66,39 @@ class ToImageBitmapTest {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * The conversion premultiplies by itself rather than having Skia draw an UNPREMUL
+     * image into a new bitmap, which took five times as long (#74). Every alpha with
+     * every channel value, and random pixels, must come out as Skia's own conversion
+     * leaves them, byte for byte, in the same color type.
+     */
+    @Test
+    fun premultipliesExactlyAsSkiasOwnConversionDoes() {
+        val grid = IntArray(256 * 256) {
+            val a = it ushr 8
+            val c = it and 0xFF
+            (a shl 24) or (c shl 16) or ((255 - c) shl 8) or (c / 2)
+        }
+        val random = Random(74)
+        val noise = IntArray(97 * 31) { random.nextInt() }
+        for ((width, pixels) in listOf(256 to grid, 97 to noise)) {
+            val bitmap = KiteBitmap(width, pixels.size / width, pixels)
+            val rgba = ByteArray(pixels.size * 4)
+            for (i in pixels.indices) {
+                val p = pixels[i]
+                rgba[i * 4] = (p ushr 16).toByte()
+                rgba[i * 4 + 1] = (p ushr 8).toByte()
+                rgba[i * 4 + 2] = p.toByte()
+                rgba[i * 4 + 3] = (p ushr 24).toByte()
+            }
+            val info = ImageInfo(bitmap.width, bitmap.height, ColorType.RGBA_8888, ColorAlphaType.UNPREMUL)
+            val skias = Image.makeRaster(info, rgba, bitmap.width * 4).toComposeImageBitmap().asSkiaBitmap()
+            val ours = bitmap.toImageBitmap().asSkiaBitmap()
+            assertEquals(skias.imageInfo, ours.imageInfo)
+            assertContentEquals(skias.readPixels(), ours.readPixels(), "${bitmap.width}x${bitmap.height}")
         }
     }
 

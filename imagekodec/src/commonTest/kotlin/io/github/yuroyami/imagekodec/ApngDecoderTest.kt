@@ -392,4 +392,21 @@ class ApngDecoderTest {
         }
         assertEquals(1, calls)
     }
+
+    @Test
+    fun maxFramesGivesTheFirstFrameOfTheAnimationNotTheDefaultImage() {
+        val bytes = apng(
+            width = 1, height = 1,
+            defaultImage = solid(1, 1, red),
+            frames = listOf(solid(1, 1, green), solid(1, 1, blue)),
+            defaultIsFirstFrame = false,
+            loops = 3,
+        )
+        val first = ImageKodec.decodeAnimation(bytes, maxFrames = 1)
+        assertEquals(1, first.frames.size)
+        assertEquals(green, first.frames[0].bitmap[0, 0])
+        assertEquals(3L, first.loopCount)
+        assertEquals(red, ImageKodec.decode(bytes)[0, 0])
+        assertEquals(2, ImageKodec.decodeAnimation(bytes, maxFrames = 2).frames.size)
+    }
 }
