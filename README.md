@@ -339,11 +339,11 @@ web project that runs under Node should not use them.
 - **Whole-array only.** Every entry point takes a complete `ByteArray`. There is
   no streaming or partial-decode API. `decodeReduced` shrinks a JPEG or a
   JPEG 2000 image inside the decoder, and `scaled` works after a full-size decode.
-- **Feature refusals are typed, with one exception.** Everything a decoder
-  recognizes but cannot handle throws `UnsupportedImageException` naming the
-  feature. The JPEG 2000 decoder reports one failure signal for everything, so
-  its refusals surface as plain `ImageDecodeException`. `probe` still names the
-  main-header ones: RGN, POC, PPM/PPT and non-baseline code-block styles.
+- **JPEG 2000 refusals name their cause.** Unsupported RGN, POC, PPM/PPT and
+  non-baseline code-block styles throw `UnsupportedImageException`. Malformed
+  headers name the marker, field and byte position. The public nullable
+  `JpxDecoder.decode` overloads still return null on failure; `probe` names
+  unsupported features in the main header.
 - **`probe` covers features, not corruption.** JPEG 2000 is the loosest of the
   seven formats. Its check stops at the first tile-part and does not range-check
   the COD and QCD parameters. A per-tile coding-style override, or an

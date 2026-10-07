@@ -48,6 +48,11 @@ reviewable in the diff.
 
 ### Fixed
 
+- JPEG 2000 header failures name the missing marker, malformed field or
+  truncated segment and its byte position. Unsupported markers and code-block
+  styles use typed refusals. Segment readers stay inside their declared bounds;
+  public nullable decoder methods and partial-packet recovery are preserved (#3).
+
 - The Coil factory checks every WebP frame codec beyond its initial peek, so
   mixed animations with later lossy frames fall through to the platform decoder.
   Large lossless animations remain supported; chunk lengths, padding and

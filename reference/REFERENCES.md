@@ -80,6 +80,8 @@ Coil decoder geometry uses the public [Coil 3.5.0 DecodeUtils](https://github.co
 
 Coil WebP claiming follows the [WebP RIFF container specification](https://developers.google.com/speed/webp/docs/riff_container). `KiteImageFactoryClaimTest` uses a cwebp/webpmux-written mixed animation and checks stock-decoder fallback beyond the initial peek; libwebp tools (BSD-3-Clause) independently confirm its frame codecs. Synthetic chunk fixtures check bounds, padding, fragmented reads and source preservation. No reference source is vendored.
 
+JPEG 2000 diagnostic and marker-boundary validation was checked against [OpenJPEG’s j2k.c](https://github.com/uclouvain/openjpeg/blob/master/src/lib/openjp2/j2k.c), under its [BSD-2-Clause license](https://github.com/uclouvain/openjpeg/blob/master/LICENSE). `Jp2DiagnosticsTest` checks distinct marker/field failures, typed unsupported features and nullable API compatibility; the existing partial-packet and OpenJPEG pixel comparisons remain covered. No reference source is vendored.
+
 ## Refresh
 
 ```sh

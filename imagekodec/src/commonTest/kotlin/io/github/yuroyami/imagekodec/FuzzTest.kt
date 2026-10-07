@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -44,7 +45,7 @@ class FuzzTest {
     })
 
     /** One small, valid file per format the library decodes. */
-    private fun corpus(): List<Pair<String, ByteArray>> = listOf(
+    private fun validCorpus(): List<Pair<String, ByteArray>> = listOf(
         "png" to ImageKodec.encodePng(sample(9, 7)),
         "png-opaque" to ImageKodec.encodePng(KiteBitmap(8, 8, IntArray(64) { argb(0xFF, it, 255 - it, 128) })),
         "png-flushed" to (PNG_SIGNATURE + pngHeader(16, 2, 8, 0) +
@@ -100,6 +101,12 @@ class FuzzTest {
         "tiff-reference-rgb" to withReferences(referenceTiff(ycbcr = false),
             longArrayOf(255,1,0,1,0,1,255,1,0,1,255,1)),
     )
+
+    private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
+        "jp2-short-cod" to jp2ShortCodSeed(),
+    )
+
+    private fun corpus(): List<Pair<String, ByteArray>> = validCorpus() + malformedCorpus()
 
     /** Two frames: the default image doubles as frame 0, then a 2 by 2 frame that disposes to background. */
     private fun apngSeed(): ByteArray {
@@ -228,9 +235,19 @@ class FuzzTest {
 
     @Test
     fun everySeedFileStillDecodes() {
-        for ((name, bytes) in corpus()) {
+        for ((name, bytes) in validCorpus()) {
             val bm = ImageKodec.decode(bytes)
             assertTrue(bm.width > 0 && bm.height > 0, "$name seed should decode")
+        }
+    }
+
+    @Test
+    fun malformedSeedsHaveTypedFailures() {
+        for ((name, bytes) in malformedCorpus()) {
+            assertFailsWith<ImageDecodeException>("$name decode") { ImageKodec.decode(bytes) }
+            assertFailsWith<ImageDecodeException>("$name decodeReduced") { ImageKodec.decodeReduced(bytes, 8) }
+            assertFailsWith<ImageDecodeException>("$name decodeAnimation") { ImageKodec.decodeAnimation(bytes) }
+            exercise(name, bytes)
         }
     }
 

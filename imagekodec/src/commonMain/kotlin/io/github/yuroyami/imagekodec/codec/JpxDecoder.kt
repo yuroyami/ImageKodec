@@ -2,6 +2,7 @@ package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.UnsupportedImageException
 import kotlin.math.max
 import kotlin.math.min
 
@@ -55,7 +56,7 @@ public object JpxDecoder {
     }
 
     /** Preserve diagnostic failures for the facade without changing the nullable public API. */
-    internal fun decodeForFacade(data: ByteArray, reduction: Int): Result? = try {
+    internal fun decodeForFacade(data: ByteArray, reduction: Int): Result = try {
         decodeOrThrow(data, reduction.countTrailingZeroBits())
     } catch (e: ImageDecodeException) {
         throw e
@@ -135,14 +136,24 @@ public object JpxDecoder {
     // ---- codestream headers --------------------------------------------------
 
     private class R(val d: ByteArray, var pos: Int) {
+        var end: Int = d.size
+        var context: String = "codestream"
+
+        fun fail(detail: String): Nothing =
+            throw ImageDecodeException("JPEG 2000: $context $detail at byte $pos")
+
+        fun unsupported(detail: String): Nothing =
+            throw UnsupportedImageException("JPEG 2000 $detail in $context at byte $pos")
+
         // A read past the end must throw here: on WebAssembly an index out of bounds is a trap
         // that no catch sees, so a cut header would stop the whole program.
         private fun need(n: Int) {
-            if (pos < 0 || pos + n > d.size) throw IllegalStateException("JPEG 2000 header cut off at $pos")
+            if (pos < 0 || pos > end - n) fail("header cut off (need $n bytes, segment ends at $end)")
         }
         fun u8(): Int { need(1); return d[pos++].toInt() and 0xFF }
         fun u16(): Int { need(2); val v = ((d[pos].toInt() and 0xFF) shl 8) or (d[pos + 1].toInt() and 0xFF); pos += 2; return v }
         fun u32i(): Int { need(4); val v = u32(d, pos); pos += 4; return v.toInt() }
+        fun u32long(): Long { need(4); val v = u32(d, pos); pos += 4; return v }
     }
 
     private class Siz(
@@ -317,18 +328,17 @@ public object JpxDecoder {
     // ---- main decode -----------------------------------------------------------
 
     /** The decode with the [levels] finest wavelet levels dropped, as far as every component has them. */
-    private fun decodeOrThrow(data: ByteArray, levels: Int): Result? {
+    private fun decodeOrThrow(data: ByteArray, levels: Int): Result {
         val jp2 = parseContainer(data)
         val cs = jp2.codestream
         val r = R(cs, 0)
-        if (r.u16() != 0xFF4F) return null // SOC
+        if (r.u16() != 0xFF4F) r.fail("missing SOC marker")
 
         var siz: Siz? = null
         var mainCod: Cod? = null
         val mainCoc = HashMap<Int, Cod>()
         var mainQcd: Quant? = null
         val mainQcc = HashMap<Int, Quant>()
-        // Tile bodies: tile index -> concatenated bitstream of its tile-parts.
         val tileBodies = HashMap<Int, ArrayList<ByteArray>>()
         val tileCod = HashMap<Int, Cod>()
         val tileCoc = HashMap<Int, HashMap<Int, Cod>>()
@@ -336,106 +346,119 @@ public object JpxDecoder {
         val tileQcc = HashMap<Int, HashMap<Int, Quant>>()
 
         var inTile = -1
-        var tileEnd = 0
+        var tileEnd = 0L
 
-        while (r.pos + 2 <= cs.size) {
+        while (r.pos <= cs.size - 2) {
+            val markerAt = r.pos
             val marker = r.u16()
-            if (marker == 0xFFD9) break // EOC
+            if (marker == 0xFFD9) break
+            if (marker == 0xFF93) {
+                if (inTile < 0) r.fail("SOD before SOT")
+                if (r.pos > tileEnd) r.fail("SOD crosses the SOT tile-part length")
+                val bodyEnd = minOf(tileEnd, cs.size.toLong()).toInt()
+                tileBodies.getOrPut(inTile) { ArrayList() }.add(cs.copyOfRange(r.pos, bodyEnd))
+                r.pos = bodyEnd
+                inTile = -1
+                continue
+            }
+            if (marker in 0xFF30..0xFF3F) continue
+            if (marker < 0xFF00) r.fail("invalid marker 0x${marker.toString(16)}")
+
+            r.context = when (marker) {
+                0xFF51 -> "SIZ"
+                0xFF52 -> "COD"
+                0xFF53 -> "COC"
+                0xFF5C -> "QCD"
+                0xFF5D -> "QCC"
+                0xFF90 -> "SOT"
+                else -> "marker 0x${marker.toString(16)}"
+            }
+            val len = r.u16()
+            if (len < 2) r.fail("invalid segment length $len")
+            val segmentEnd = r.pos.toLong() + len - 2
+            if (segmentEnd > cs.size) r.fail("header cut off (segment length $len)")
+            if (inTile >= 0 && segmentEnd > tileEnd) r.fail("header crosses the SOT tile-part length")
+            // OpenJPEG bounds each marker reader by its payload length. A short
+            // header must not read plausible fields from the following marker.
+            r.end = segmentEnd.toInt()
             when (marker) {
-                0xFF51 -> { // SIZ
-                    val len = r.u16(); val start = r.pos
-                    r.u16() // Rsiz (capabilities; be lenient)
+                0xFF51 -> {
+                    r.u16()
                     val xsiz = r.u32i(); val ysiz = r.u32i()
                     val xo = r.u32i(); val yo = r.u32i()
                     val xt = r.u32i(); val yt = r.u32i()
                     val xto = r.u32i(); val yto = r.u32i()
                     val nc = r.u16()
-                    if (nc <= 0 || nc > 16) return null
+                    if (nc <= 0) r.fail("invalid component count $nc")
+                    if (nc > 16) r.unsupported("with $nc components (1 to 16 are decodable)")
                     val prec = IntArray(nc); val signed = BooleanArray(nc)
                     val dx = IntArray(nc); val dy = IntArray(nc)
                     for (c in 0 until nc) {
-                        val s = r.u8()
-                        prec[c] = (s and 0x7F) + 1
-                        signed[c] = (s and 0x80) != 0
+                        val sample = r.u8()
+                        prec[c] = (sample and 0x7F) + 1
+                        signed[c] = sample and 0x80 != 0
                         dx[c] = r.u8(); dy[c] = r.u8()
-                        if (prec[c] > 16 || dx[c] <= 0 || dy[c] <= 0) return null
+                        if (prec[c] > 16) r.unsupported("with ${prec[c]}-bit samples (16-bit maximum)")
+                        if (dx[c] == 0 || dy[c] == 0) r.fail("component $c has a zero subsampling factor")
                     }
                     siz = Siz(xsiz, ysiz, xo, yo, xt, yt, xto, yto, nc, prec, signed, dx, dy)
-                    r.pos = start + len - 2
                 }
-                0xFF52 -> { // COD
-                    val len = r.u16(); val start = r.pos
-                    val cod = readCod(r) ?: return null
+                0xFF52 -> {
+                    val cod = readCod(r)
                     if (inTile >= 0) tileCod[inTile] = cod else mainCod = cod
-                    r.pos = start + len - 2
                 }
-                0xFF53 -> { // COC
-                    val len = r.u16(); val start = r.pos
-                    val nComps = siz?.comps ?: return null
+                0xFF53 -> {
+                    val nComps = siz?.comps ?: r.fail("before SIZ")
                     val c = if (nComps < 257) r.u8() else r.u16()
-                    val base = (if (inTile >= 0) tileCod[inTile] else null) ?: mainCod ?: return null
-                    val coc = readCoc(r, base) ?: return null
+                    if (c >= nComps) r.fail("component index $c outside $nComps components")
+                    val base = (if (inTile >= 0) tileCod[inTile] else null) ?: mainCod ?: r.fail("before COD")
+                    val coc = readCoc(r, base)
                     if (inTile >= 0) tileCoc.getOrPut(inTile) { HashMap() }[c] = coc else mainCoc[c] = coc
-                    r.pos = start + len - 2
                 }
-                0xFF5C -> { // QCD
-                    val len = r.u16(); val start = r.pos
-                    val q = readQuant(r, start + len - 2) ?: return null
+                0xFF5C -> {
+                    val q = readQuant(r, r.end)
                     if (inTile >= 0) tileQcd[inTile] = q else mainQcd = q
-                    r.pos = start + len - 2
                 }
-                0xFF5D -> { // QCC
-                    val len = r.u16(); val start = r.pos
-                    val nComps = siz?.comps ?: return null
+                0xFF5D -> {
+                    val nComps = siz?.comps ?: r.fail("before SIZ")
                     val c = if (nComps < 257) r.u8() else r.u16()
-                    val q = readQuant(r, start + len - 2) ?: return null
+                    if (c >= nComps) r.fail("component index $c outside $nComps components")
+                    val q = readQuant(r, r.end)
                     if (inTile >= 0) tileQcc.getOrPut(inTile) { HashMap() }[c] = q else mainQcc[c] = q
-                    r.pos = start + len - 2
                 }
-                0xFF90 -> { // SOT
-                    r.u16() // Lsot
+                0xFF90 -> {
+                    if (inTile >= 0) r.fail("missing SOD before the next SOT")
+                    if (len != 10) r.fail("invalid segment length $len (expected 10)")
                     val isot = r.u16()
-                    val grid = siz?.grid ?: throw ImageDecodeException("JPEG 2000: SOT before SIZ")
-                    if (isot >= grid.count) throw ImageDecodeException("JPEG 2000: tile index $isot outside ${grid.count} tiles")
-                    val psot = r.u32i()
-                    r.u8() // TPsot
-                    r.u8() // TNsot
+                    val grid = siz?.grid ?: r.fail("before SIZ")
+                    if (isot >= grid.count) r.fail("tile index $isot outside ${grid.count} tiles")
+                    val psot = r.u32long()
+                    r.u8(); r.u8()
                     inTile = isot
-                    tileEnd = if (psot == 0) cs.size else (r.pos - 12 + psot)
+                    tileEnd = if (psot == 0L) cs.size.toLong() else markerAt.toLong() + psot
+                    if (tileEnd < r.end.toLong() + 2) r.fail("tile-part length $psot leaves no SOD header")
                 }
-                0xFF93 -> { // SOD: tile-part body runs to tileEnd
-                    val bodyEnd = tileEnd.coerceAtMost(cs.size)
-                    tileBodies.getOrPut(inTile) { ArrayList() }.add(cs.copyOfRange(r.pos, bodyEnd))
-                    r.pos = bodyEnd
-                    inTile = -1
-                }
-                0xFF64, 0xFF55, 0xFF57, 0xFF58, 0xFF63 -> {
-                    // COM, TLM, PLM, PLT, CRG: informational, skip by length.
-                    val len = r.u16(); r.pos += len - 2
-                }
-                0xFF5E -> return null // RGN: region of interest, unsupported
-                0xFF5F -> return null // POC: progression order changes, unsupported
-                0xFF60, 0xFF61 -> return null // PPM/PPT packed packet headers, unsupported
-                else -> {
-                    if (marker < 0xFF30 || marker > 0xFF3F) {
-                        // Unknown segment with a length field; try to skip it.
-                        if (r.pos + 2 > cs.size) return null
-                        val len = r.u16(); r.pos += len - 2
-                    }
-                }
+                0xFF5E -> r.unsupported("region of interest (RGN)")
+                0xFF5F -> r.unsupported("progression order change (POC)")
+                0xFF60, 0xFF61 -> r.unsupported("packed packet headers (PPM/PPT)")
             }
-            if (r.pos < 0 || r.pos > cs.size) return null
+            r.pos = r.end
+            r.end = cs.size
+            r.context = "codestream"
         }
 
-        val s = siz ?: return null
-        val cod0 = mainCod ?: return null
-        val qcd0 = mainQcd ?: return null
+        val s = siz ?: r.fail("missing SIZ marker")
+        val cod0 = mainCod ?: r.fail("missing COD marker")
+        val qcd0 = mainQcd ?: r.fail("missing QCD marker")
+        if (inTile >= 0) r.fail("missing SOD marker for tile $inTile")
+        if (tileBodies.isEmpty()) r.fail("missing SOT/SOD tile data")
 
         val imgW = s.xsiz - s.xosiz
         val imgH = s.ysiz - s.yosiz
-        // The size a header claims must fit the input's budget too, so a damaged SIZ cannot
-        // make a small file allocate planes for tens of megapixels.
-        if (imgW <= 0 || imgH <= 0 || imgW.toLong() * imgH > 64L shl 20 || !Budget.fits(imgW, imgH, data.size)) return null
+        if (imgW <= 0 || imgH <= 0) r.fail("SIZ has invalid image dimensions ${imgW}x$imgH")
+        if (imgW.toLong() * imgH > 64L shl 20 || !Budget.fits(imgW, imgH, data.size)) {
+            r.fail("SIZ image ${imgW}x$imgH exceeds safety limits")
+        }
 
         // Drop at most the levels that every coding style in the file has (A.6.1 picks one of these
         // per tile and component), and none where the reduced grid of a component would be empty.
@@ -512,18 +535,20 @@ public object JpxDecoder {
         return Result(w, h, colorSpace, average(pixelBytes, n), alpha?.let { average(it, 1) })
     }
 
-    private fun readCod(r: R): Cod? {
+    private fun readCod(r: R): Cod {
         val scod = r.u8()
         val prog = r.u8()
         val layers = r.u16()
         val mct = r.u8()
         val decomp = r.u8()
-        if (decomp > 32 || layers <= 0 || layers > 1000) return null
+        if (decomp > 32) r.fail("decomposition levels $decomp exceed 32")
+        if (layers == 0) r.fail("invalid layers $layers")
+        if (layers > 1000) r.unsupported("with $layers layers (1000-layer maximum)")
         val cbW = (r.u8() and 0x0F) + 2
         val cbH = (r.u8() and 0x0F) + 2
         val cbStyle = r.u8()
         val transform = r.u8()
-        if (cbW + cbH > 12) return null
+        if (cbW + cbH > 12) r.fail("code-block exponents $cbW+$cbH exceed 12")
         val ppx = IntArray(decomp + 1) { 15 }
         val ppy = IntArray(decomp + 1) { 15 }
         if (scod and 1 != 0) {
@@ -533,22 +558,23 @@ public object JpxDecoder {
                 ppy[i] = (p shr 4) and 0x0F
             }
         }
-        if (cbStyle != 0) return null // non-baseline code-block styles unsupported
+        if (cbStyle != 0) r.unsupported("code-block style 0x${cbStyle.toString(16)}")
         return Cod(
             prog, layers, mct, decomp, cbW, cbH, cbStyle, reversible = transform == 1,
             ppx = ppx, ppy = ppy, sop = scod and 2 != 0, eph = scod and 4 != 0,
         )
     }
 
-    private fun readCoc(r: R, base: Cod): Cod? {
+    private fun readCoc(r: R, base: Cod): Cod {
         val scoc = r.u8()
         val decomp = r.u8()
-        if (decomp > 32) return null
+        if (decomp > 32) r.fail("decomposition levels $decomp exceed 32")
         val cbW = (r.u8() and 0x0F) + 2
         val cbH = (r.u8() and 0x0F) + 2
         val cbStyle = r.u8()
         val transform = r.u8()
-        if (cbStyle != 0 || cbW + cbH > 12) return null
+        if (cbW + cbH > 12) r.fail("code-block exponents $cbW+$cbH exceed 12")
+        if (cbStyle != 0) r.unsupported("code-block style 0x${cbStyle.toString(16)}")
         val ppx = IntArray(decomp + 1) { 15 }
         val ppy = IntArray(decomp + 1) { 15 }
         if (scoc and 1 != 0) {
@@ -564,7 +590,7 @@ public object JpxDecoder {
         )
     }
 
-    private fun readQuant(r: R, end: Int): Quant? {
+    private fun readQuant(r: R, end: Int): Quant {
         val sq = r.u8()
         val style = sq and 0x1F
         val guard = (sq shr 5) and 7
@@ -573,9 +599,10 @@ public object JpxDecoder {
         when (style) {
             0 -> while (r.pos < end) { val v = r.u8(); exps.add(v shr 3); mants.add(0) }
             1 -> { val v = r.u16(); exps.add(v shr 11); mants.add(v and 0x7FF) } // scalar derived
-            2 -> while (r.pos + 1 < end) { val v = r.u16(); exps.add(v shr 11); mants.add(v and 0x7FF) }
-            else -> return null
+            2 -> while (r.pos < end) { val v = r.u16(); exps.add(v shr 11); mants.add(v and 0x7FF) }
+            else -> r.fail("invalid quantization style $style")
         }
+        if (exps.isEmpty()) r.fail("empty quantization table")
         return Quant(style, guard, exps.toIntArray(), mants.toIntArray())
     }
 
