@@ -448,7 +448,7 @@ internal object ImageProbe {
         photometric == 6 && bits != 8 -> "TIFF YCbCr with $bits-bit samples (8-bit only)"
         compression !in intArrayOf(1, 2, 3, 4, 5, 8, 32773, 32946) ->
             "TIFF compression $compression" + if (compression == 6 || compression == 7) " (JPEG-in-TIFF)" else ""
-        compression == 3 && (t4Options and 1) != 0 -> "TIFF CCITT G3 two-dimensional coding (T4Options bit 0)"
+        compression == 3 && (t4Options and 2) != 0 -> "TIFF CCITT G3 uncompressed mode (T4Options bit 1)"
         predictor !in intArrayOf(1, 2) -> "TIFF predictor $predictor"
         // Horizontal differencing is only implemented for whole-byte samples.
         predictor == 2 && bits != 8 && bits != 16 -> "TIFF predictor 2 with $bits-bit samples"

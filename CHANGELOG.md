@@ -47,6 +47,10 @@ reviewable in the diff.
   stays on Maven Central under the old coordinates.
 
 ### Fixed
+- Positive CCITT `K` selects mixed Group 3 decoding with per-row mode tags,
+  reference-row resets, EOL/fill framing, byte alignment and RTC termination.
+  TIFF T4Options bit 0 uses the same decoder; uncompressed fax extensions remain
+  named unsupported features. Invalid or incomplete mixed rows throw (#60).
 
 - JPEG 2000 probe reads main and tile-part coding/quantization declarations with
   the decoder's shared bounded readers. It checks later tile-parts while

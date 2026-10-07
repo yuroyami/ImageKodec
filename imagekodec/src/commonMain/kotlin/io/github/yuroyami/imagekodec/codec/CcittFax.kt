@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 
 /*
@@ -22,17 +23,22 @@ import io.github.yuroyami.imagekodec.internal.Budget
 public object CcittFax {
     /**
      * Decode with the mode selection PDF's `/K` uses: negative = pure 2D
-     * (Group 4, T.6), zero = pure 1D (Group 3, T.4). Positive (mixed 1D/2D)
-     * falls back to 1D, matching the KitePDF behavior this came from.
+     * (Group 4, T.6), zero = pure 1D (Group 3, T.4), positive = mixed
+     * 1D/2D (Group 3, T.4). Positive values share the per-row mode-tag
+     * interpretation specified by PDF; their numerical cadence is not enforced.
      *
      * @throws ImageDecodeException if [CcittOptions.columns] is outside 1 to 2^24, if
      *   [CcittOptions.rows] is negative, the decoded image would pass 2^28 pixels,
-     *   or a 1D row is invalid or incomplete
+     *   or a Group 3 row is invalid or incomplete
      */
     @Throws(ImageDecodeException::class)
     public fun decode(input: ByteArray, k: Int, options: CcittOptions): ByteArray {
         val reader = BitReader(input)
-        return if (k < 0) decodeGroup4(reader, options) else decodeGroup3OneD(reader, options)
+        return when {
+            k < 0 -> decodeGroup4(reader, options)
+            k == 0 -> decodeGroup3OneD(reader, options)
+            else -> decodeGroup3Mixed(reader, options)
+        }
     }
 }
 
@@ -562,7 +568,7 @@ private fun peekEofb(reader: BitReader): Boolean {
  * `b1` is the next changing element on the ref line to the right of `a0`
  * with opposite color to `a0`'s color. `b2` is the next change after `b1`.
  */
-private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): IntArray? {
+private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int, strict: Boolean = false): IntArray? {
     val coding = IntArray(cols)
     var a0 = -1
     var a0Color = 0  // 0 = white (the color of the imaginary element before column 0)
@@ -587,6 +593,9 @@ private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): Int
                 val r2 = decodeRun(reader, a0Color != 0)
                 if (r1 < 0 || r2 < 0) return null
                 val start1 = maxOf(a0, 0)
+                if (strict && (r1 > cols - start1 || r2 > cols - start1 - r1)) {
+                    throw ImageDecodeException("CCITT: horizontal runs exceed $cols pixels")
+                }
                 val end1 = minOf(cols, start1 + r1)
                 fillRange(coding, start1, end1, a0Color)
                 val start2 = end1
@@ -616,6 +625,7 @@ private fun decodeOneG4Row(reader: BitReader, refLine: IntArray, cols: Int): Int
                 a0Color = 1 - a0Color
             }
             CcittFaxTables.MODE_EXTENSION -> {
+                if (strict) throw UnsupportedImageException("CCITT: uncompressed 2D extension is not supported")
                 // Extension codes signal end-of-page-block or escape sequences.
                 // Treat as end of row: emit what we have.
                 fillRange(coding, maxOf(a0, 0), cols, a0Color)
@@ -696,21 +706,8 @@ internal fun decodeGroup3OneD(reader: BitReader, opts: CcittOptions): ByteArray 
         // Accept recognizable T.4 framing even without an EndOfLine hint.
         if (opts.endOfLine || reader.peekBits(12) <= 1) consumeOptionalEol(reader)
         checkRoomForRow(rowIndex, cols)
-        val coding = IntArray(cols)
-        var pos = 0
-        var color = 0
-        while (pos < cols) {
-            val run = decodeRun(reader, color == 0)
-            if (run == Int.MIN_VALUE && pos == 0 && opts.rows == 0 && opts.endOfBlock) {
-                return packAll(rows, bytesPerRow)
-            }
-            if (run < 0) throw ImageDecodeException("CCITT: row $rowIndex ends after $pos of $cols pixels")
-            if (run > cols - pos) throw ImageDecodeException("CCITT: row $rowIndex run exceeds $cols pixels")
-            val end = pos + run
-            fillRange(coding, pos, end, color)
-            pos = end
-            color = 1 - color
-        }
+        val coding = decodeOneG3Row(reader, cols, rowIndex, opts.rows == 0 && opts.endOfBlock)
+            ?: return packAll(rows, bytesPerRow)
         rows += packRow(coding, cols, bytesPerRow, opts.blackIs1)
         rowIndex++
     }
@@ -720,18 +717,78 @@ internal fun decodeGroup3OneD(reader: BitReader, opts: CcittOptions): ByteArray 
     return packAll(rows, bytesPerRow)
 }
 
-private fun consumeOptionalEol(reader: BitReader): Boolean {
-    var probed = 0
-    while (probed < 64 && !reader.atEnd()) {
-        val bit = reader.readBit()
-        probed++
-        if (bit != 0) {
-            if (probed >= 12) return true
-            reader.rewindBits(probed)
+/** T.4 EOL tags select a row decoder; PDF does not distinguish positive K values. */
+private fun decodeGroup3Mixed(reader: BitReader, opts: CcittOptions): ByteArray {
+    checkGeometry(opts)
+    val cols = opts.columns
+    val bytesPerRow = (cols + 7) / 8
+    var reference = IntArray(cols)
+    val rows = ArrayList<ByteArray>()
+    var row = 0
+    while (true) {
+        if (!opts.endOfBlock && opts.rows > 0 && row >= opts.rows) break
+        if (reader.atEnd() || reader.onlyBytePadding()) break
+        if (opts.encodedByteAlign) reader.alignToByte()
+        if (reader.atEnd()) break
+        if (opts.endOfBlock && consumeMixedRtc(reader)) return packAll(rows, bytesPerRow)
+        if (!consumeOptionalEol(reader) && opts.endOfLine) {
+            throw ImageDecodeException("CCITT: mixed row $row is missing its EOL")
+        }
+        if (!reader.hasBits(1)) throw ImageDecodeException("CCITT: mixed row $row is missing its mode tag")
+        val oneDimensional = reader.readBit() == 1
+        checkRoomForRow(row, cols)
+        val coding = (if (oneDimensional) decodeOneG3Row(reader, cols, row)
+            else decodeOneG4Row(reader, reference, cols, strict = true))
+            ?: throw ImageDecodeException("CCITT: mixed row $row is invalid or incomplete")
+        rows += packRow(coding, cols, bytesPerRow, opts.blackIs1)
+        reference = coding
+        row++
+    }
+    if (opts.rows > 0 && row < opts.rows) {
+        throw ImageDecodeException("CCITT: decoded $row of ${opts.rows} mixed rows")
+    }
+    return packAll(rows, bytesPerRow)
+}
+
+private fun decodeOneG3Row(reader: BitReader, cols: Int, row: Int, allowEol: Boolean = false): IntArray? {
+    val coding = IntArray(cols)
+    var pos = 0
+    var color = 0
+    while (pos < cols) {
+        val run = decodeRun(reader, color == 0)
+        if (run == Int.MIN_VALUE && pos == 0 && allowEol) return null
+        if (run < 0) throw ImageDecodeException("CCITT: row $row ends after $pos of $cols pixels")
+        if (run > cols - pos) throw ImageDecodeException("CCITT: row $row run exceeds $cols pixels")
+        fillRange(coding, pos, pos + run, color)
+        pos += run
+        color = 1 - color
+    }
+    return coding
+}
+
+/** T.4 section 4.2.4 uses six EOL+1 synchronization words for mixed-mode RTC. */
+private fun consumeMixedRtc(reader: BitReader): Boolean {
+    val saved = reader.bitsConsumed
+    repeat(6) {
+        if (!consumeOptionalEol(reader) || !reader.hasBits(1) || reader.readBit() != 1) {
+            reader.rewindTo(saved)
             return false
         }
     }
-    reader.rewindBits(probed)
+    return true
+}
+
+private fun consumeOptionalEol(reader: BitReader): Boolean {
+    val saved = reader.bitsConsumed
+    // T.4 fill is an arbitrary run of zeros; the input bounds the scan.
+    while (!reader.atEnd()) {
+        if (reader.readBit() != 0) {
+            if (reader.bitsConsumed - saved >= 12) return true
+            reader.rewindTo(saved)
+            return false
+        }
+    }
+    reader.rewindTo(saved)
     return false
 }
 

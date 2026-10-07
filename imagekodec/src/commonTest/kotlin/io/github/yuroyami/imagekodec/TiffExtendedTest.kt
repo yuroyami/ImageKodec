@@ -525,7 +525,7 @@ class TiffExtendedTest {
             "floating-point predictor" to greyTiff(short(317, 3)),
             "predictor 2 at 4 bits" to greyTiff(short(317, 2), short(258, 4)),
             "CMYK photometric" to greyTiff(short(262, 5)),
-            "CCITT G3 two-dimensional" to greyTiff(short(259, 3), long(292, 1)),
+            "CCITT G3 uncompressed mode" to greyTiff(short(259, 3), long(292, 2)),
             "16-bit YCbCr" to greyTiff(short(262, 6), short(258, 16), short(277, 3)),
         )
         for ((name, bytes) in cases) {

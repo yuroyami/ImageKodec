@@ -15,7 +15,7 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *  - **strips and tiles**: tiled files assemble edge-padded tiles back into full
  *    rows after restoring any per-tile horizontal predictor
  *  - compressions: none (1), CCITT G3-1D (2, byte-aligned rows), G3 via
- *    T4Options bit0=0 (3), G4 (4), the absorbed [CcittFax] codec, TIFF-LZW
+ *    T4Options 1D/mixed 2D (3), G4 (4), the absorbed [CcittFax] codec, TIFF-LZW
  *    with EarlyChange (5), Deflate (8 / 32946), PackBits (32773)
  *  - photometric 0/1 (bilevel + gray, either polarity, optional alpha), 2 (RGB,
  *    optional associated or straight alpha via ExtraSamples), 3 (palette, 16-bit
@@ -155,8 +155,8 @@ internal object TiffDecoder {
                 values(it)
             }
         val t4Options = if (compression == 3) optionalValues(292, "T4Options", 4, 1)?.first() ?: 0L else 0L
-        if (compression == 3 && t4Options and 1L != 0L) {
-            throw UnsupportedImageException("TIFF: G3 2D (T4Options bit 0) is not supported")
+        if (compression == 3 && t4Options and 2L != 0L) {
+            throw UnsupportedImageException("TIFF: CCITT G3 uncompressed mode (T4Options bit 1) is not supported")
         }
         val fillOrder = optionalValues(266, "FillOrder", 3, 1)?.first()?.toInt() ?: 1
         if (fillOrder != 1 && fillOrder != 2) err("unknown FillOrder $fillOrder")
@@ -291,7 +291,7 @@ internal object TiffDecoder {
                 2 -> fax(k = 0, byteAligned = true)
                 3 -> {
                     // T4Options fill zeros align the end of EOL, not the row cursor.
-                    fax(k = 0, byteAligned = false, endOfLine = true)
+                    fax(k = if (t4Options and 1L != 0L) 1 else 0, byteAligned = false, endOfLine = true)
                 }
                 4 -> fax(k = -1, byteAligned = false)
                 else -> throw UnsupportedImageException("TIFF: compression $compression is not supported")

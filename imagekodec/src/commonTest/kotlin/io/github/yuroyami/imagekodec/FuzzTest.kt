@@ -101,6 +101,7 @@ class FuzzTest {
             longArrayOf(1,2,511,2,257,2,511,2,257,2,511,2)),
         "tiff-reference-rgb" to withReferences(referenceTiff(ycbcr = false),
             longArrayOf(255,1,0,1,0,1,255,1,0,1,255,1)),
+        "tiff-ccitt-mixed" to faxTiff(CcittMixedTest().stream(fill = 3), 3, height = 6, t4Options = 5),
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
