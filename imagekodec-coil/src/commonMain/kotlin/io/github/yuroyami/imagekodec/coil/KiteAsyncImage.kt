@@ -50,7 +50,8 @@ import io.github.yuroyami.imagekodec.compose.KiteAnimatedImage
  * [model] may be anything Coil accepts as data, or a prebuilt [ImageRequest]
  * (used as-is, plus the constraints size when it doesn't define its own).
  * [animate] pins animated results to their first frame when false. [placeholder]
- * shows while the request is in flight, [error] on failure; [onSuccess] /
+ * shows while the request is in flight. On failure, [error] overrides the
+ * request's error image; when absent, that image is displayed. [onSuccess] /
  * [onError] fire once per completed request.
  */
 @Composable
@@ -125,7 +126,8 @@ public fun KiteAsyncImage(
                 )
             }
         }
-        is ErrorResult -> PainterOrEmpty(error, contentDescription, chainedModifier, alignment, contentScale, alpha, colorFilter)
+        is ErrorResult -> PainterOrEmpty(error ?: r.image?.asPainter(context, filterQuality),
+            contentDescription, chainedModifier, alignment, contentScale, alpha, colorFilter)
         else -> PainterOrEmpty(placeholder, contentDescription, chainedModifier, alignment, contentScale, alpha, colorFilter)
     }
 }

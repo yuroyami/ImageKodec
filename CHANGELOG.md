@@ -42,6 +42,9 @@ reviewable in the diff.
 
 ### Fixed
 
+- `KiteAsyncImage` renders a prebuilt request's error image when no explicit
+  composable error painter overrides it (#53).
+
 - Still WebP decode composites the first animation rectangle at its declared
   offset with the same alpha and disposal timing as animation playback, without
   decoding or retaining later frame pixels (#50).
