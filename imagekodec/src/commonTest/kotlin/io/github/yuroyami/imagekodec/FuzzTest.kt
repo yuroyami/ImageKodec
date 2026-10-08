@@ -298,7 +298,14 @@ class FuzzTest {
         return (hash and 0x7FFFFFFF) % 3
     }
 
-    private fun exercise(label: String, bytes: ByteArray) = withDeadline(label, DEADLINE_MILLIS) {
+    /** Which mutants this process runs; all of them unless CI splits the suite (see [FuzzShard]). */
+    private val shard = FuzzShard.fromEnvironment()
+
+    private fun exercise(label: String, bytes: ByteArray) {
+        if (shard.takesNext()) withDeadline(label, DEADLINE_MILLIS) { exerciseEveryPath(label, bytes) }
+    }
+
+    private fun exerciseEveryPath(label: String, bytes: ByteArray) {
         mustFailCleanly("$label decode") { ImageKodec.decode(bytes, applyOrientation = true) }
         // The reduced paths allocate and index their own planes, so they get the same abuse. Each
         // mutant takes one reduction, and every third one the sized decode, so every path sees
@@ -357,8 +364,11 @@ class FuzzTest {
         )
         for ((name, data, globals) in streams) {
             val (width, height) = if (name == "jbig2-mmr") 64 to 24 else Jbig2Page.WIDTH to Jbig2Page.HEIGHT
-            fun run(label: String, stream: ByteArray, dictionary: ByteArray?) = withDeadline(label, DEADLINE_MILLIS) {
-                mustFailCleanly(label) { Jbig2Decoder.decodeChecked(stream, dictionary, width, height) }
+            fun run(label: String, stream: ByteArray, dictionary: ByteArray?) {
+                if (!shard.takesNext()) return
+                withDeadline(label, DEADLINE_MILLIS) {
+                    mustFailCleanly(label) { Jbig2Decoder.decodeChecked(stream, dictionary, width, height) }
+                }
             }
             run("$name whole", data, globals)
             for (cut in 0 until data.size step maxOf(1, data.size / 150)) run("$name cut@$cut", data.copyOf(cut), globals)

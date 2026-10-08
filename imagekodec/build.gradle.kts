@@ -1,5 +1,7 @@
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.TestExecutable
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -27,6 +29,8 @@ plugins {
  */
 tasks.withType<Test>().configureEach {
     maxHeapSize = "3g"
+    // CI passes -PtestForks to give each test class one of several JVMs. A local run keeps one.
+    maxParallelForks = providers.gradleProperty("testForks").map { it.toInt() }.getOrElse(1)
 }
 
 kotlin {
@@ -100,6 +104,15 @@ kotlin {
     }
 
     jvm()
+
+    // An optimised native test binary runs the fuzz suite about eight times faster than a debug
+    // one and links about a minute slower. CI passes -PoptimizedNativeTests; a local run keeps
+    // the debug binary.
+    if (providers.gradleProperty("optimizedNativeTests").isPresent) {
+        targets.withType<KotlinNativeTarget>().configureEach {
+            binaries.withType<TestExecutable>().configureEach { optimized = true }
+        }
+    }
 
     sourceSets {
         all {
