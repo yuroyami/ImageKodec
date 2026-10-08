@@ -14,6 +14,14 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.encodePng(animation)` writes an animated PNG, so an animation keeps
+  full colour and partial alpha where a GIF would quantise it: 8-bit RGB, or RGBA
+  when any frame has alpha, each frame's delay to the millisecond and the loop
+  count. The first frame is the default image; each later frame stores the
+  rectangle that changed, replacing the canvas there or drawn over it with the
+  unchanged pixels transparent, whichever compresses smaller. Pillow and ffmpeg
+  read every frame back exactly (#64).
+
 - AVIF decodes on every target, through `decode`, `decode16`, `probe` and the
   sized and reduced decodes. A pure-Kotlin AV1 decoder follows the decoding process
   of the AV1 specification for every intra coding tool, with the loop filter, CDEF,

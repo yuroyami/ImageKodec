@@ -272,6 +272,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun encodeGif(io.github.yuroyami.imagekodec/KiteAnimation, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteAnimation;kotlin.Boolean){}[0]
     final fun encodeGif(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Boolean){}[0]
     final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
+    final fun encodePng(io.github.yuroyami.imagekodec/KiteAnimation): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteAnimation){}[0]
     final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun probe(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probe|probe(kotlin.ByteArray){}[0]
     final fun probeOrNull(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo? // io.github.yuroyami.imagekodec/ImageKodec.probeOrNull|probeOrNull(kotlin.ByteArray){}[0]

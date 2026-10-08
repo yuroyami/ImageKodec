@@ -344,6 +344,23 @@ public object ImageKodec {
     public fun encodePng(bitmap: KiteBitmap): ByteArray = PngEncoder.encode(bitmap)
 
     /**
+     * Encode [animation] as an animated PNG (APNG): 8-bit RGB, or RGBA when any frame
+     * carries alpha, each frame's delay to the millisecond and the animation's loop
+     * count. Lossless: [decodeAnimation] returns the same frames, delays and loop
+     * count, and a reader without APNG support shows the first frame. A single frame
+     * is written as a plain PNG. Frames must all be canvas-sized, which is exactly
+     * what [decodeAnimation] produces.
+     *
+     * Each frame after the first stores only the rectangle that changed, replacing the
+     * canvas there or drawn over it, whichever compresses smaller.
+     *
+     * @throws IllegalArgumentException if the frames are not all canvas-sized, or if the
+     *   play count does not fit APNG's 32 bits
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodePng(animation: KiteAnimation): ByteArray = PngEncoder.encode(animation)
+
+    /**
      * Encode [bitmap] as a baseline JPEG at [quality] 1..100 (default 90).
      * Alpha is discarded (JPEG has none); quality ≤ 90 uses 4:2:0 chroma
      * subsampling, above that 4:4:4; stb_image_write's behavior.

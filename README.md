@@ -235,6 +235,7 @@ ImageKodec.encodePng(bitmap)                    // 8-bit RGB, or RGBA when alpha
 ImageKodec.encodeJpeg(bitmap, quality = 85)     // baseline; 4:2:0 at quality <= 90, 4:4:4 above
 ImageKodec.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colors
 ImageKodec.encodeGif(anim)                      // animated, delays and loop count preserved
+ImageKodec.encodePng(anim)                      // APNG: lossless frames, alpha, delays and loop count
 ImageKodec.encodeBmp(bitmap)                    // 24-bit BI_RGB, or 32-bit V4 BITFIELDS with alpha
 ```
 
