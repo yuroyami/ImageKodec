@@ -30,8 +30,8 @@ env:
 # GitHub runs at most five macOS jobs of one account at a time, across all its repositories,
 # so there are five. When another repository holds some of the five, the jobs here wait.
 #
-# One job for each operating system saves the caches (`build` and `link-debug-frameworks`),
-# and the others restore them. .github/actions/setup explains why.
+# One job for each operating system saves the Kotlin/Native cache (`build` and
+# `link-debug-frameworks`), and the others restore it. .github/actions/setup explains why.
 jobs:
   # The JVM suite is the one that holds the decoders to the reference codecs. The OpenJPEG,
   # libwebp, libtiff, libjpeg, jbig2enc, ffmpeg, libavif, libheif and libjxl suites skip
@@ -255,7 +255,6 @@ jobs:
         id: setup
         with:
           kotlin-native: 'true'
-          saves-caches: 'true'
 
       - name: Assemble every module and check the public API
         run: ./gradlew assemble checkLegacyAbi --stacktrace
@@ -362,7 +361,6 @@ jobs:
         id: setup
         with:
           kotlin-native: 'true'
-          saves-caches: 'true'
 
       - name: Link the Compose and Coil debug frameworks
         run: >
