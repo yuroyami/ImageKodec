@@ -16,8 +16,8 @@ public final class io/github/yuroyami/imagekodec/coil/KiteAsyncImageKt {
 
 public final class io/github/yuroyami/imagekodec/coil/KiteImageDecoder : coil3/decode/Decoder {
 	public static final field $stable I
-	public fun <init> (Lcoil3/decode/ImageSource;Lcoil3/request/Options;J)V
-	public synthetic fun <init> (Lcoil3/decode/ImageSource;Lcoil3/request/Options;JILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lcoil3/decode/ImageSource;Lcoil3/request/Options;JLio/github/yuroyami/imagekodec/ColorTarget;)V
+	public synthetic fun <init> (Lcoil3/decode/ImageSource;Lcoil3/request/Options;JLio/github/yuroyami/imagekodec/ColorTarget;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun decode (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
@@ -26,8 +26,8 @@ public final class io/github/yuroyami/imagekodec/coil/KiteImageDecoder$Factory :
 	public static final field Companion Lio/github/yuroyami/imagekodec/coil/KiteImageDecoder$Factory$Companion;
 	public static final field DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES J
 	public fun <init> ()V
-	public fun <init> (J)V
-	public synthetic fun <init> (JILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (JLio/github/yuroyami/imagekodec/ColorTarget;)V
+	public synthetic fun <init> (JLio/github/yuroyami/imagekodec/ColorTarget;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun create (Lcoil3/fetch/SourceFetchResult;Lcoil3/request/Options;Lcoil3/ImageLoader;)Lcoil3/decode/Decoder;
 }
 

@@ -150,6 +150,10 @@ converts at full precision before an 8-bit decode narrows it. A file that declar
 nothing, declares sRGB, or carries a profile for another colour space than its own comes
 back untouched, as browsers leave it.
 
+The Compose and Coil bindings draw for a person, so they convert to sRGB by default.
+`KiteImage(colorTarget = ColorTarget.Source)` and
+`KiteImageDecoder.Factory(colorTarget = ColorTarget.Source)` keep the samples as stored.
+
 ### Decode a still
 
 ```kotlin
@@ -384,7 +388,9 @@ animated images does not keep decoding them. Frames become `ImageBitmap`s on
 `Dispatchers.Default` too, ahead of playback, so the thread that draws never
 copies a frame. The composable holds its layout slot and draws nothing until the
 first frame is ready. It applies EXIF orientation, even though
-`ImageKodec.decode` does not apply it by default.
+`ImageKodec.decode` does not apply it by default. It also converts the colours to
+sRGB, as a browser does; pass `colorTarget = ColorTarget.Source` to draw the
+samples as stored.
 
 Two more composables are public, for pipelines that decode themselves: an
 overload of `KiteImage` that takes a `KiteBitmap`, and `KiteAnimatedImage` that
@@ -424,6 +430,10 @@ and `KiteImageDecoder.Factory(maxCacheableAnimationBytes = ...)` changes it.
 Coil's memory cache holds an animation when its decoded frames fit under that
 limit. Larger ones re-decode from the disk cache instead of evicting everything
 else.
+
+The decoder converts the colours of every image to sRGB, as Coil's platform
+decoders do. `KiteImageDecoder.Factory(colorTarget = ColorTarget.Source)` keeps
+the samples as stored.
 
 `ImageRequest.Builder.maxFrames(n)` decodes at most `n` frames of an animation,
 and `maxFrames(1)` returns its first frame as a still. The count is part of the
@@ -493,7 +503,7 @@ web project that runs under Node should not use them.
 - **AVIF colour stops at the matrix.** AV1 matrices that are not linear, BT.2020
   and chromaticity-derived constant luminance, SMPTE ST 2085 and ICtCp, throw
   `UnsupportedImageException`, as libavif refuses them. An ICC profile or a
-  transfer function is reported, not applied. An image sequence whose edit list is
+  transfer function is reported, and applied only with a `colorTarget`. An image sequence whose edit list is
   missing loops for ever, as browsers play it; a frame coded at another size than
   the first, which AV1 allows, is scaled to the first frame's size. Large scale tile
   lists, which no image uses, are refused.
@@ -526,7 +536,8 @@ web project that runs under Node should not use them.
 - **JPEG 2000 colour comes from the JP2 header, without a colour engine.** The
   palette, channel definitions and colour specification apply as T.800 Annex I
   orders them. sRGB, greyscale, bi-level, sYCC, e-sYCC, CMYK and CMY convert to
-  RGB or gray; an ICC profile picks gray, RGB or CMYK but is not applied. Other
+  RGB or gray; an ICC profile picks gray, RGB or CMYK and is applied only with a
+  `colorTarget`. Other
   colour spaces, such as CIELab, throw `UnsupportedImageException` naming them.
 - **`probe` covers declared features, not pixel integrity.** JPEG 2000 checks
   main and tile-part headers with the decoder's coding and quantization readers,

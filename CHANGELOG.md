@@ -163,7 +163,7 @@ reviewable in the diff.
   34675 per page, WebP `ICCP`, JPEG 2000 `colr`, a BMP V5 header's profile and
   GIF's `ICCRGBG1012` extension), PNG's `sRGB`, `gAMA`, `cHRM` and `cICP`, and
   the profile's color space and description. A damaged color chunk is ignored,
-  and decoded samples do not change; converting them is #108. The JDK's sRGB
+  and decoded samples do not change unless a `colorTarget` asks (#108). The JDK's sRGB
   and PhotoYCC profiles embedded by ImageMagick come back byte for byte from
   every format it writes them to (#16).
 
@@ -262,6 +262,14 @@ reviewable in the diff.
   `decodeDownscaledTo` and `decodeAnimation` gained a `colorTarget` parameter, before
   `decodeAnimation`'s `cancellationCheck`. Source calls compile as before; code compiled
   against an earlier version must be recompiled (#108).
+
+- The Compose and Coil bindings convert colours to sRGB by default (#108). `KiteImage`
+  and `KiteImageDecoder` decode with `ColorTarget.Srgb()`, so a Display P3 photo, a PNG
+  with `gAMA` or an HDR picture draws as a browser draws it. A file that declares
+  nothing, or sRGB, draws as before. `KiteImage` gained a `colorTarget` parameter before
+  `onError`, and `KiteImageDecoder` and its `Factory` gained one after
+  `maxCacheableAnimationBytes`; pass `ColorTarget.Source` to keep the samples as stored.
+  Code compiled against an earlier version must be recompiled.
 
 - `ImageFormat` has a new entry, `AVIF`, which `sniff` and `detect` return for an
   ISO base media file whose `ftyp` names the `avif` or `avis` brand. A `when` over

@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.DefaultAlpha
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
+import io.github.yuroyami.imagekodec.ColorTarget
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.ImageKodec
 import io.github.yuroyami.imagekodec.KiteAnimation
@@ -44,6 +45,11 @@ import kotlinx.coroutines.withContext
  * animated input (thumbnails, previews), and only that frame is decoded. Turning
  * it on later decodes the rest while the pinned frame stays on screen; turning it
  * off keeps the frames already decoded. Static inputs ignore it.
+ *
+ * The colours are converted to sRGB by default, through the ICC profile or the
+ * colour chunks the file carries, as a browser draws it. A file that declares
+ * nothing, or sRGB, is not touched. Pass [ColorTarget.Source] as [colorTarget] to
+ * draw the samples as stored.
  */
 @Composable
 public fun KiteImage(
@@ -56,11 +62,12 @@ public fun KiteImage(
     colorFilter: ColorFilter? = null,
     filterQuality: FilterQuality = DrawScope.DefaultFilterQuality,
     animate: Boolean = true,
+    colorTarget: ColorTarget = ColorTarget.Srgb(),
     onError: ((ImageDecodeException) -> Unit)? = null,
 ) {
     DecodedImage(
         data, contentDescription, modifier, alignment, contentScale, alpha, colorFilter, filterQuality,
-        animate, onError, decodeForDisplay,
+        animate, onError, remember(colorTarget) { displayDecoder(colorTarget) },
     )
 }
 
@@ -103,12 +110,17 @@ public fun KiteImage(
  */
 internal typealias AnimationDecoder = (data: ByteArray, maxFrames: Int, cancellationCheck: () -> Unit) -> KiteAnimation
 
-internal val decodeForDisplay: AnimationDecoder = { data, maxFrames, cancellationCheck ->
+internal fun displayDecoder(colorTarget: ColorTarget): AnimationDecoder = { data, maxFrames, cancellationCheck ->
     // Orientation is applied here, unlike the raw `ImageKodec.decode` default:
     // this composable draws for a human, and a phone photo whose EXIF tag says
     // "rotate me" is simply sideways without it.
-    ImageKodec.decodeAnimation(data, applyOrientation = true, maxFrames = maxFrames, cancellationCheck = cancellationCheck)
+    ImageKodec.decodeAnimation(
+        data, applyOrientation = true, maxFrames = maxFrames, colorTarget = colorTarget, cancellationCheck = cancellationCheck,
+    )
 }
+
+/** What [KiteImage] decodes with by default: colours converted to sRGB. */
+internal val decodeForDisplay: AnimationDecoder = displayDecoder(ColorTarget.Srgb())
 
 /** [KiteImage] over a [decode] of its own. */
 @Composable
@@ -127,8 +139,8 @@ internal fun DecodedImage(
 ) {
     val currentOnError by rememberUpdatedState(onError)
 
-    val state by produceState<DecodeState>(DecodeState.Loading, data, animate) {
-        val held = (value as? DecodeState.Ready)?.takeIf { it.data === data }
+    val state by produceState<DecodeState>(DecodeState.Loading, data, animate, decode) {
+        val held = (value as? DecodeState.Ready)?.takeIf { it.data === data && it.decode === decode }
         // Every frame is already there, or the pinned one is all that is asked for.
         if (held != null && (held.complete || !animate)) return@produceState
         // A pinned frame stays on screen while the rest decodes.
@@ -137,7 +149,7 @@ internal fun DecodedImage(
             value = withContext(Dispatchers.Default) {
                 val animation = decode(data, if (animate) Int.MAX_VALUE else 1) { ensureActive() }
                 val first = animation.frames[0].bitmap.toPreparedImageBitmap()
-                DecodeState.Ready(data, FrameBitmaps(animation, first), complete = animate)
+                DecodeState.Ready(data, decode, FrameBitmaps(animation, first), complete = animate)
             }
         } catch (e: ImageDecodeException) {
             currentOnError?.invoke(e)
@@ -167,6 +179,6 @@ private sealed interface DecodeState {
     data object Loading : DecodeState
     data object Failed : DecodeState
 
-    /** [frames] of [data], all of them when [complete], or only the first. */
-    class Ready(val data: ByteArray, val frames: FrameBitmaps, val complete: Boolean) : DecodeState
+    /** [frames] of [data] as [decode] gave them, all of them when [complete], or only the first. */
+    class Ready(val data: ByteArray, val decode: AnimationDecoder, val frames: FrameBitmaps, val complete: Boolean) : DecodeState
 }

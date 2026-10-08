@@ -24,12 +24,12 @@ final class io.github.yuroyami.imagekodec.coil/KiteAnimationImage : coil3/Image 
 }
 
 final class io.github.yuroyami.imagekodec.coil/KiteImageDecoder : coil3.decode/Decoder { // io.github.yuroyami.imagekodec.coil/KiteImageDecoder|null[0]
-    constructor <init>(coil3.decode/ImageSource, coil3.request/Options, kotlin/Long = ...) // io.github.yuroyami.imagekodec.coil/KiteImageDecoder.<init>|<init>(coil3.decode.ImageSource;coil3.request.Options;kotlin.Long){}[0]
+    constructor <init>(coil3.decode/ImageSource, coil3.request/Options, kotlin/Long = ..., io.github.yuroyami.imagekodec/ColorTarget = ...) // io.github.yuroyami.imagekodec.coil/KiteImageDecoder.<init>|<init>(coil3.decode.ImageSource;coil3.request.Options;kotlin.Long;io.github.yuroyami.imagekodec.ColorTarget){}[0]
 
     final suspend fun decode(): coil3.decode/DecodeResult // io.github.yuroyami.imagekodec.coil/KiteImageDecoder.decode|decode(){}[0]
 
     final class Factory : coil3.decode/Decoder.Factory { // io.github.yuroyami.imagekodec.coil/KiteImageDecoder.Factory|null[0]
-        constructor <init>(kotlin/Long = ...) // io.github.yuroyami.imagekodec.coil/KiteImageDecoder.Factory.<init>|<init>(kotlin.Long){}[0]
+        constructor <init>(kotlin/Long = ..., io.github.yuroyami.imagekodec/ColorTarget = ...) // io.github.yuroyami.imagekodec.coil/KiteImageDecoder.Factory.<init>|<init>(kotlin.Long;io.github.yuroyami.imagekodec.ColorTarget){}[0]
 
         final fun create(coil3.fetch/SourceFetchResult, coil3.request/Options, coil3/ImageLoader): coil3.decode/Decoder? // io.github.yuroyami.imagekodec.coil/KiteImageDecoder.Factory.create|create(coil3.fetch.SourceFetchResult;coil3.request.Options;coil3.ImageLoader){}[0]
 

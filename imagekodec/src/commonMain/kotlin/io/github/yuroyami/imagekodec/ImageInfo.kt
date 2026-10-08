@@ -91,8 +91,8 @@ public enum class Orientation(public val exifValue: Int) {
  *   that was probed, the first unless [ImageKodec.probePage] asked for another.
  * @property colorProfile what the file declares about its color space (an embedded
  *   ICC profile, and PNG's sRGB, gamma, chromaticity and cICP chunks), or null
- *   when it declares nothing. It is reported, not applied: decoded samples are the
- *   file's own.
+ *   when it declares nothing. A decode applies it only when its `colorTarget` asks;
+ *   without one, decoded samples are the file's own.
  */
 public class ImageInfo(
     public val format: ImageFormat,

@@ -9,6 +9,7 @@ import coil3.decode.ImageSource
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.request.maxBitmapSize
+import io.github.yuroyami.imagekodec.ColorTarget
 import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.ImageKodec
 import io.github.yuroyami.imagekodec.downscaledTo
@@ -47,11 +48,17 @@ import okio.use
  * A cancelled request (fast scroll) aborts a multi-frame decode at the next
  * frame boundary instead of finishing the whole file, and a request with
  * [maxFrames] decodes only that many frames.
+ *
+ * The colours are converted to sRGB by default, through the ICC profile or the
+ * colour chunks the file carries, as Coil's platform decoders and browsers do. A
+ * file that declares nothing, or sRGB, is not touched. Pass [ColorTarget.Source]
+ * to [Factory] to keep the samples as stored.
  */
 public class KiteImageDecoder(
     private val source: ImageSource,
     private val options: Options,
     private val maxCacheableAnimationBytes: Long = Factory.DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES,
+    private val colorTarget: ColorTarget = ColorTarget.Srgb(),
 ) : Decoder {
 
     override suspend fun decode(): DecodeResult {
@@ -65,14 +72,14 @@ public class KiteImageDecoder(
             // A still JPEG or JPEG 2000 reduces inside its decoder, so the size goes down to it and the
             // full-size pixels never exist.
             val (width, height) = targetSize(info.displayWidth, info.displayHeight)
-            val bitmap = ImageKodec.decodeDownscaledTo(bytes, width, height, applyOrientation = true)
+            val bitmap = ImageKodec.decodeDownscaledTo(bytes, width, height, applyOrientation = true, colorTarget = colorTarget)
             val sampled = width < info.displayWidth || height < info.displayHeight
             return DecodeResult(image = bitmap.toCoilImage(shareable = true), isSampled = sampled)
         }
         // A request for fewer frames, such as a paused thumbnail's, decodes no more than those.
-        val animation = ImageKodec.decodeAnimation(bytes, applyOrientation = true, maxFrames = options.maxFrames) {
-            ctx.ensureActive()
-        }
+        val animation = ImageKodec.decodeAnimation(
+            bytes, applyOrientation = true, maxFrames = options.maxFrames, colorTarget = colorTarget,
+        ) { ctx.ensureActive() }
         val (width, height) = targetSize(animation.width, animation.height)
         val sampled = width < animation.width || height < animation.height
 
@@ -115,9 +122,13 @@ public class KiteImageDecoder(
      * from the disk cache on revisit) so a single huge GIF cannot evict
      * everything else. `0` restores the old always-skip behavior;
      * [Long.MAX_VALUE] caches unconditionally.
+     *
+     * [colorTarget]: the colour space every image of this factory decodes to.
+     * sRGB by default; [ColorTarget.Source] keeps the samples as stored.
      */
     public class Factory(
         private val maxCacheableAnimationBytes: Long = DEFAULT_MAX_CACHEABLE_ANIMATION_BYTES,
+        private val colorTarget: ColorTarget = ColorTarget.Srgb(),
     ) : Decoder.Factory {
 
         override fun create(
@@ -144,7 +155,7 @@ public class KiteImageDecoder(
                 else -> ImageFormat.sniff(header).let { it == ImageFormat.TIFF || it == ImageFormat.JP2 }
             }
             return if (claimed) {
-                KiteImageDecoder(result.source, options, maxCacheableAnimationBytes)
+                KiteImageDecoder(result.source, options, maxCacheableAnimationBytes, colorTarget)
             } else {
                 null
             }
