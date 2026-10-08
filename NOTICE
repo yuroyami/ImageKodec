@@ -16,6 +16,15 @@ zlib-licensed; Inflate.kt retains the original copyright and license notice.
 The DEFLATE encoder's length-limited Huffman construction follows zlib's trees.c
 (Jean-loup Gailly and Mark Adler). Deflate.kt retains the zlib notice.
 
+The JPEG decoder's arithmetic decoding follows libjpeg-turbo 3.1.0's jdarith.c
+(developed 1997-2015 by Guido Vollbeding; libjpeg-turbo modifications Copyright
+(C) 2015-2020, 2022, D. R. Commander), and its 12-bit inverse DCT is an altered
+Kotlin port of jpeg_idct_islow in libjpeg-turbo 3.1.0's jidctint.c (Copyright
+(C) 1991-1998, Thomas G. Lane; modification developed 2002-2018 by Guido
+Vollbeding; libjpeg-turbo modifications Copyright (C) 2015, 2020, 2022, D. R.
+Commander), both under the Independent JPEG Group's license. This software is
+based in part on the work of the Independent JPEG Group.
+
 The porting references include stb_image and stb_image_write (public domain /
 MIT), lodepng (zlib), and Apache Commons Imaging (Apache-2.0). Original reference
 source trees are used for study and are not redistributed in this repository.

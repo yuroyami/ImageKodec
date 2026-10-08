@@ -89,6 +89,8 @@ being true.
   says 2^(P-Pt-1), in its encoder and decoder alike. ffmpeg and libjpeg-turbo follow
   T.81, so such a file round-trips through it and decodes to something else elsewhere.
   The test writer `losslessJpeg` makes conformant ones (#19).
+- Ubuntu's libjpeg-turbo is 2.1, which reads and writes 8-bit JPEG only. 12-bit files
+  need 3.x (`cjpeg -precision 12`), built from source as `cjpeg3` and `djpeg3` (#109).
 - thorfdbg/libjpeg keeps a hierarchical image's samples in fixed point from frame to frame,
   where T.81 hands on integer samples, so its decode of its own pyramid differs from
   T.81's by a level or so, and its "lossless" pyramids do not decode to their source by

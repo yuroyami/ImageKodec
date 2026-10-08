@@ -69,6 +69,7 @@ Every codec's tests compare its output against an independent implementation:
 | JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
 | JPEG lossless decode | The T.81 reference software (`t81jpeg`, below) writes every precision from 2 to 16 bits, Huffman and arithmetic, and ffmpeg's `ljpeg` encoder writes subsampled YCbCr: each must decode to its source. ffmpeg's decoder reads the files with a point transform, and the files a small Annex H writer in the tests makes |
 | JPEG hierarchical decode | `t81jpeg` writes pyramids of every kind, which must match its own decode within the bounds `JpegHierarchicalOracleTest` explains, and lossless pyramids written to the letter of T.81 Annex J by the tests must decode to their source |
+| JPEG 12-bit decode | libjpeg-turbo 3.1 (`cjpeg3 -precision 12` and `djpeg3 -dct int`, below): equal samples where no colour conversion or upsampling stands between, within 2 levels where they do |
 | JPEG arithmetic decode | libjpeg-turbo's `jpegtran -arithmetic`, and `tools/arith_jpeg.c` for the DAC conditioning, re-encode a `cjpeg` file's coefficients: the arithmetic file must decode to exactly the pixels of the Huffman one |
 | JBIG2 | jbig2enc (`jbig2`) writes the streams: generic regions must decode to the source page, symbol mode must match jbig2dec |
 | WebP lossless encode | `dwebp` reads our output back pixel for pixel, and it must be smaller than our PNG |
@@ -86,13 +87,23 @@ brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmp
 sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev   # Debian/Ubuntu
 ```
 
-The lossless JPEG suites also need `t81jpeg`, the `jpeg` tool of the T.81 reference software, built
+The lossless and hierarchical JPEG suites also need `t81jpeg`, the `jpeg` tool of the T.81 reference software, built
 at release 1.70 with the repository's patch (later commits cannot write lossless files):
 
 ```sh
 git clone https://github.com/thorfdbg/libjpeg.git t81 && cd t81 && git checkout c719010
 git apply ../ImageKodec/tools/t81-libjpeg.patch && ./configure && make
 sudo install -m 755 jpeg /usr/local/bin/t81jpeg
+```
+
+The 12-bit JPEG suite needs libjpeg-turbo 3.1, which distributions do not package yet,
+installed as `cjpeg3` and `djpeg3`:
+
+```sh
+git clone --depth 1 --branch 3.1.0 https://github.com/libjpeg-turbo/libjpeg-turbo.git ljt3
+cmake -S ljt3 -B ljt3/build -DENABLE_SHARED=0 -DWITH_SIMD=0 && make -C ljt3/build cjpeg-static djpeg-static
+sudo install -m 755 ljt3/build/cjpeg-static /usr/local/bin/cjpeg3
+sudo install -m 755 ljt3/build/djpeg-static /usr/local/bin/djpeg3
 ```
 
 CI sets `IMAGEKODEC_REQUIRE_ORACLES=1`, which makes a missing tool fail the test

@@ -118,11 +118,11 @@ class JpegComponentsTest {
         assertFailsWith<ImageDecodeException> { ImageKodec.decodeJpegComponents(png) }
         val jpeg = hex(JpegVectors.j444)
         for (r in listOf(0, 3, 16)) assertFailsWith<IllegalArgumentException> { ImageKodec.decodeJpegComponents(jpeg, r) }
-        // A 12-bit frame: the precision byte follows the frame header's marker and length.
+        // A 16-bit DCT frame: the precision byte follows the frame header's marker and length.
         val sof = (0 until jpeg.size - 1).first { jpeg[it] == 0xFF.toByte() && jpeg[it + 1] == 0xC0.toByte() }
-        val twelveBit = jpeg.copyOf().also { it[sof + 4] = 12 }
-        val refused = assertFailsWith<UnsupportedImageException> { ImageKodec.decodeReduced(twelveBit, 2) }
-        val same = assertFailsWith<UnsupportedImageException> { ImageKodec.decodeJpegComponents(twelveBit, 2) }
+        val sixteenBit = jpeg.copyOf().also { it[sof + 4] = 16 }
+        val refused = assertFailsWith<UnsupportedImageException> { ImageKodec.decodeReduced(sixteenBit, 2) }
+        val same = assertFailsWith<UnsupportedImageException> { ImageKodec.decodeJpegComponents(sixteenBit, 2) }
         assertEquals(refused.message, same.message)
         val truncated = jpeg.copyOf(40)
         assertEquals(

@@ -28,6 +28,12 @@ reviewable in the diff.
   reference software and ffmpeg's `ljpeg` encoder write the test files, and each
   decodes to its source (#19).
 
+- 12-bit JPEG decodes, sequential and progressive, Huffman and arithmetic, and
+  inside hierarchical images: libjpeg's `jpeg_idct_islow` at 12 bits, so a gray or
+  untransformed RGB file gives exactly the samples libjpeg-turbo 3.1's
+  `djpeg -dct int` gives. `decode16` keeps all 12 bits and `decode` the high 8. A
+  reduced decode averages the full one, as for lossless files (#109).
+
 - Hierarchical JPEG decodes: a DHP segment, then frames of any process (DCT
   sequential or progressive, lossless, Huffman or arithmetic) refined by
   differential frames, each reference doubled as its EXP segment asks. A lossless

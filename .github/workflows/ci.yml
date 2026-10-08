@@ -53,6 +53,16 @@ jobs:
           sudo install -m 755 /tmp/t81/jpeg /usr/local/bin/t81jpeg
           command -v t81jpeg || { echo "::error::t81jpeg did not build"; exit 1; }
 
+      # libjpeg-turbo 3.1 writes and reads 12-bit JPEG; the packaged 2.1 does not.
+      - name: Build libjpeg-turbo 3.1
+        run: |
+          git clone --quiet --depth 1 --branch 3.1.0 https://github.com/libjpeg-turbo/libjpeg-turbo.git /tmp/ljt3
+          cmake -S /tmp/ljt3 -B /tmp/ljt3/build -DENABLE_SHARED=0 -DWITH_SIMD=0 > /dev/null
+          make -C /tmp/ljt3/build -j"$(nproc)" cjpeg-static djpeg-static > /dev/null
+          sudo install -m 755 /tmp/ljt3/build/cjpeg-static /usr/local/bin/cjpeg3
+          sudo install -m 755 /tmp/ljt3/build/djpeg-static /usr/local/bin/djpeg3
+          cjpeg3 -version
+
       - name: Install codec oracles
         run: |
           sudo apt-get update

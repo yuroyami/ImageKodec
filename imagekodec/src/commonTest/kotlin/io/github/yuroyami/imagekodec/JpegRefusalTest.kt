@@ -27,7 +27,7 @@ class JpegRefusalTest {
         "5-component JPEG" to frame(List(5) { 0x11 }),
         "JPEG with 3 components sampled 3x1, 2x1, 2x1 (factors must divide the largest)" to frame(listOf(0x31, 0x21, 0x21)),
         "JPEG with 3 components sampled 1x4, 1x3, 1x1 (factors must divide the largest)" to frame(listOf(0x14, 0x13, 0x11)),
-        "12-bit JPEG (8-bit samples only)" to frame(listOf(0x11), precision = 12),
+        "16-bit DCT JPEG (8 or 12 bits only)" to frame(listOf(0x11), precision = 16),
     )
 
     @Test

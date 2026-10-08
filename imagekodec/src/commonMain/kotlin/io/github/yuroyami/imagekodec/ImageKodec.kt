@@ -141,7 +141,8 @@ public object ImageKodec {
      * [decode] keeps 8 bits a channel; this keeps every bit a 16-bit PNG or TIFF stores,
      * including a TIFF palette's 16-bit ColorMap, every bit of a JPEG 2000 component
      * up to 16 bits deep, through its palette, channel definitions and colour space, and
-     * every bit of a lossless JPEG of 9 to 16 bits, converted at that precision. The
+     * every bit of a 12-bit JPEG or a lossless one of 9 to 16 bits, converted at that
+     * precision. The
      * channels are those the file stores once a palette is looked up (gray, gray and alpha,
      * RGB or RGBA), so a gray depth map stays one sample a pixel. Narrower samples
      * replicate up (an 8-bit `v` becomes `v * 257`, a 12-bit one `v shl 4 or (v shr 8)`, a

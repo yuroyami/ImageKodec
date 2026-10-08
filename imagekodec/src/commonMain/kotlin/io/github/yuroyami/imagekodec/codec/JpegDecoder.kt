@@ -18,7 +18,9 @@ import kotlin.math.sqrt
  * design). Function-level comments name the stb original so the two can be
  * diffed side by side. Scope:
  *
- *  - baseline sequential (SOF0) and extended sequential (SOF1), 8-bit
+ *  - baseline sequential (SOF0) and extended sequential (SOF1), 8-bit, and
+ *    every DCT process at 12 bits through libjpeg's islow IDCT, which [decode16]
+ *    keeps whole
  *  - Huffman decode with stb's 9-bit fast table + fast-AC combined table
  *  - restart intervals (DRI/RSTn), multi-scan non-interleaved baseline files
  *  - chroma subsampling with integer factors 1..4: 4:4:4, 4:2:0, 4:2:2, 4:1:1
@@ -309,6 +311,9 @@ internal object JpegDecoder {
         // sample, is coded with no prediction and its inverse DCT has no level shift.
         var differential = false
         var scans = 0
+        // The 12-bit IDCT's two passes.
+        val work12 = LongArray(64)
+        val pass12 = LongArray(64)
 
         // header reads: truncation is a decode error
         fun u8(): Int {
@@ -620,6 +625,8 @@ internal object JpegDecoder {
         val nv = 8 shr comp.scaleV
         val at = comp.ws * by * nv + bx * nh
         when {
+            // A 12-bit frame has no reduced IDCT: its reduced decode averages the full one.
+            j.precision > 8 -> idctBlock12(comp.samples, if (j.differential) comp.difference else null, at, comp.ws, data, j.work12, j.pass12)
             j.differential -> idctDifference(comp.difference!!, at, comp.ws, data, tmp)
             nh == 8 && nv == 8 -> idctBlock(comp.data, at, comp.ws, data, tmp)
             nh == nv -> reducedIdct(comp.data, at, comp.ws, data, nh, tmp)
@@ -940,6 +947,105 @@ internal object JpegDecoder {
         }
     }
 
+    // The 12-bit inverse DCT below is an altered port of jpeg_idct_islow in libjpeg-turbo 3.1.0's
+    // jidctint.c: Copyright (C) 1991-1998, Thomas G. Lane; modification developed 2002-2018 by
+    // Guido Vollbeding; libjpeg-turbo modifications Copyright (C) 2015, 2020, 2022, D. R.
+    // Commander; under the Independent JPEG Group's license (see NOTICE). This software is based
+    // in part on the work of the Independent JPEG Group.
+    //
+    // jidctint.c's constants, in 1/8192ths (CONST_BITS 13)
+    private const val FIX_0_298631336 = 2446L
+    private const val FIX_0_390180644 = 3196L
+    private const val FIX_0_541196100 = 4433L
+    private const val FIX_0_765366865 = 6270L
+    private const val FIX_0_899976223 = 7373L
+    private const val FIX_1_175875602 = 9633L
+    private const val FIX_1_501321110 = 12299L
+    private const val FIX_1_847759065 = 15137L
+    private const val FIX_1_961570560 = 16069L
+    private const val FIX_2_053119869 = 16819L
+    private const val FIX_2_562915447 = 20995L
+    private const val FIX_3_072711026 = 25172L
+
+    /**
+     * One pass of jidctint.c's jpeg_idct_islow over the 8 values at [i] in steps of [step]:
+     * calls [emit] with the even part's tmp10 to tmp13 and the odd part's tmp0 to tmp3, before
+     * the butterfly, all scaled by 2^13.
+     */
+    private inline fun islow1d(v: LongArray, i: Int, step: Int, emit: (Long, Long, Long, Long, Long, Long, Long, Long) -> Unit) {
+        var z2 = v[i + 2 * step]
+        var z3 = v[i + 6 * step]
+        var z1 = (z2 + z3) * FIX_0_541196100
+        var tmp2 = z1 - z3 * FIX_1_847759065
+        var tmp3 = z1 + z2 * FIX_0_765366865
+        z2 = v[i]
+        z3 = v[i + 4 * step]
+        var tmp0 = (z2 + z3) shl 13
+        var tmp1 = (z2 - z3) shl 13
+        val tmp10 = tmp0 + tmp3
+        val tmp13 = tmp0 - tmp3
+        val tmp11 = tmp1 + tmp2
+        val tmp12 = tmp1 - tmp2
+        tmp0 = v[i + 7 * step]
+        tmp1 = v[i + 5 * step]
+        tmp2 = v[i + 3 * step]
+        tmp3 = v[i + step]
+        z1 = tmp0 + tmp3
+        z2 = tmp1 + tmp2
+        z3 = tmp0 + tmp2
+        var z4 = tmp1 + tmp3
+        val z5 = (z3 + z4) * FIX_1_175875602
+        tmp0 *= FIX_0_298631336
+        tmp1 *= FIX_2_053119869
+        tmp2 *= FIX_3_072711026
+        tmp3 *= FIX_1_501321110
+        z1 *= -FIX_0_899976223
+        z2 *= -FIX_2_562915447
+        z3 = z3 * -FIX_1_961570560 + z5
+        z4 = z4 * -FIX_0_390180644 + z5
+        emit(tmp10, tmp11, tmp12, tmp13, tmp0 + z1 + z3, tmp1 + z2 + z4, tmp2 + z2 + z3, tmp3 + z1 + z4)
+    }
+
+    /**
+     * libjpeg's jpeg_idct_islow for 12-bit samples (PASS1_BITS 1), from the dequantized block
+     * [data] into [out] at [outOfs] in rows of [outStride]: level shifted by 2048 and clamped to
+     * 0 to 4095, or, for a differential frame, neither, into [difference].
+     */
+    private fun idctBlock12(out: ShortArray?, difference: IntArray?, outOfs: Int, outStride: Int, data: ShortArray, work: LongArray, pass: LongArray) {
+        for (k in 0 until 64) work[k] = data[k].toLong()
+        for (c in 0 until 8) {
+            islow1d(work, c, 8) { t10, t11, t12, t13, t0, t1, t2, t3 ->
+                val r = 1L shl 11   // CONST_BITS - PASS1_BITS = 12
+                pass[c] = (t10 + t3 + r) shr 12
+                pass[c + 56] = (t10 - t3 + r) shr 12
+                pass[c + 8] = (t11 + t2 + r) shr 12
+                pass[c + 48] = (t11 - t2 + r) shr 12
+                pass[c + 16] = (t12 + t1 + r) shr 12
+                pass[c + 40] = (t12 - t1 + r) shr 12
+                pass[c + 24] = (t13 + t0 + r) shr 12
+                pass[c + 32] = (t13 - t0 + r) shr 12
+            }
+        }
+        for (row in 0 until 8) {
+            val o = outOfs + row * outStride
+            islow1d(pass, row * 8, 1) { t10, t11, t12, t13, t0, t1, t2, t3 ->
+                val r = 1L shl 16   // CONST_BITS + PASS1_BITS + 3 = 17
+                fun put(at: Int, v: Long) {
+                    val x = ((v + r) shr 17).toInt()
+                    if (difference != null) difference[at] = x else out!![at] = (x + 2048).coerceIn(0, 4095).toShort()
+                }
+                put(o, t10 + t3)
+                put(o + 7, t10 - t3)
+                put(o + 1, t11 + t2)
+                put(o + 6, t11 - t2)
+                put(o + 2, t12 + t1)
+                put(o + 5, t12 - t1)
+                put(o + 3, t13 + t0)
+                put(o + 4, t13 - t0)
+            }
+        }
+    }
+
     // STBI__IDCT_1D
     private inline fun idct1d(
         s0: Int, s1: Int, s2: Int, s3: Int, s4: Int, s5: Int, s6: Int, s7: Int,
@@ -1124,11 +1230,12 @@ internal object JpegDecoder {
      */
     internal fun unsupportedFrame(marker: Int, precision: Int, height: Int, factors: IntArray): String? {
         when (marker) {
-            0xC0, 0xC1, 0xC2, 0xC9, 0xCA -> if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
+            // T.81 codes DCT samples at 8 and 12 bits only.
+            0xC0, 0xC1, 0xC2, 0xC9, 0xCA -> if (precision != 8 && precision != 12) return "$precision-bit DCT JPEG (8 or 12 bits only)"
             // Any precision from 2 to 16; [processFrameHeader] reports another as a fault.
             0xC3, 0xCB -> {}
             // Differential frames, read inside a hierarchical image; [decodeFrame] faults one outside it.
-            0xC5, 0xC6, 0xCD, 0xCE -> if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
+            0xC5, 0xC6, 0xCD, 0xCE -> if (precision != 8 && precision != 12) return "$precision-bit DCT JPEG (8 or 12 bits only)"
             0xC7, 0xCF -> {}
             else -> return "JPEG SOF marker 0x${marker.toString(16)}"
         }
@@ -1166,6 +1273,11 @@ internal object JpegDecoder {
         unsupportedFrame(marker, precision, j.imgY, factors)?.let { throw UnsupportedImageException("$it is not supported") }
         if (j.lossless && precision !in 2..16) err("bad lossless precision $precision")
         j.precision = precision
+        // A 12-bit DCT frame has no reduced IDCT, so its reduced decode averages the full one.
+        if (!j.lossless && precision > 8 && j.scale > 0) {
+            j.reduceAfter = j.scale
+            j.scale = 0
+        }
 
         if (j.imgX == 0) err("zero width")
         if (j.imgX > MAX_DIMENSION || j.imgY > MAX_DIMENSION || j.imgX.toLong() * j.imgY > MAX_PIXELS) {
@@ -1234,7 +1346,11 @@ internal object JpegDecoder {
             comp.ws = comp.w2 shr comp.scaleH
             comp.ys = (comp.y + (1 shl comp.scaleV) - 1) shr comp.scaleV
             // A block the file never reaches stays mid-gray, as in libjpeg, not black.
-            comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scaleV)).also { it.fill(0x80.toByte()) }
+            if (precision > 8) {
+                comp.samples = ShortArray(comp.ws * comp.h2).also { it.fill((1 shl (precision - 1)).toShort()) }
+            } else {
+                comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scaleV)).also { it.fill(0x80.toByte()) }
+            }
             // A differential block the file never reaches adds nothing to its reference.
             if (j.differential) comp.difference = IntArray(comp.ws * comp.h2)
             if (j.progressive) {
@@ -1975,7 +2091,7 @@ internal object JpegDecoder {
     }
 
     /** True when [j] holds samples deeper than 8 bits, which [decode16] keeps and the 8-bit paths narrow. */
-    private fun wide(j: State): Boolean = j.lossless && j.precision > 8
+    private fun wide(j: State): Boolean = j.precision > 8
 
     /**
      * One output row's worth of upsampling per component of a deep lossless frame, as
@@ -2562,6 +2678,7 @@ internal object JpegDecoder {
             out[y * comp.x + x] = when {
                 j.lossless -> ((comp.samples!![y * comp.w2 + x].toInt() and 0xFFFF) shl comp.pointTransform) and 0xFFFF
                 j.differential -> comp.difference!![y * comp.ws + x]
+                j.precision > 8 -> comp.samples!![y * comp.ws + x].toInt() and 0xFFFF
                 else -> comp.data[y * comp.ws + x].toInt() and 0xFF
             }
         }

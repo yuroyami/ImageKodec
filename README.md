@@ -97,7 +97,7 @@ info.isDecodable                 // and info.unsupportedReason when it is false
 
 `isDecodable` is a statement about features. It is false when the file uses
 something this build does not implement, and `unsupportedReason` names it.
-Examples are a CgBI PNG, a 12-bit JPEG and a TIFF with floating-point
+Examples are a CgBI PNG and a TIFF with floating-point
 samples.
 The Coil decoder uses this flag to decide which files to claim.
 
@@ -137,7 +137,7 @@ at a lower resolution than brightness.
 | --- | --- |
 | PNG | color types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and color-key, Adam7 interlace |
 | APNG | dispose none/background/previous, blend source/over, frame rects, loop count |
-| JPEG | baseline SOF0, extended sequential SOF1, progressive SOF2, arithmetic coding SOF9 and SOF10 with DAC conditioning, lossless SOF3 and SOF11 at 2 to 16 bits with every predictor and point transform, hierarchical SOF5 to SOF7 and SOF13 to SOF15 over any of them, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
+| JPEG | 8- and 12-bit DCT: baseline SOF0, extended sequential SOF1, progressive SOF2, arithmetic coding SOF9 and SOF10 with DAC conditioning, lossless SOF3 and SOF11 at 2 to 16 bits with every predictor and point transform, hierarchical SOF5 to SOF7 and SOF13 to SOF15 over any of them, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
@@ -213,8 +213,8 @@ AVIF it is derived from the stated delay, because none of them stores centisecon
 
 `decode` returns 8 bits a channel. For a depth map, a scientific or medical image
 or a graded photograph, `decode16` keeps every bit a 16-bit PNG or TIFF stores,
-every bit of a JPEG 2000 component up to 16 bits deep, and every bit of a lossless
-JPEG of 9 to 16 bits, as medical images carry them, in the channels the file has
+every bit of a JPEG 2000 component up to 16 bits deep, and every bit of a 12-bit
+JPEG or a lossless one of 9 to 16 bits, as medical images carry them, in the channels the file has
 once a palette is looked up: gray, gray and alpha, RGB or RGBA. A 10- or 12-bit
 AVIF converts to RGB at 16 bits.
 
@@ -427,7 +427,7 @@ web project that runs under Node should not use them.
 
 - **`decode` keeps only the high byte of a 16-bit sample**, because `KiteBitmap`
   is 8 bits a channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000
-  and lossless JPEG, and converts AVIF at 16 bits; other formats come through it at
+  and 12-bit or lossless JPEG, and converts AVIF at 16 bits; other formats come through it at
   8 bits, widened.
 - **ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF and lossless WebP.** There
   is no encoder for lossy WebP, JPEG 2000 or AVIF.

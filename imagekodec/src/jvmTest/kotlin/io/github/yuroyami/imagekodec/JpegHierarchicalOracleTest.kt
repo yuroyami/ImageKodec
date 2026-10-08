@@ -79,6 +79,8 @@ class JpegHierarchicalOracleTest {
                 Case("-q 75 -a -y 3 -s 1x1,2x2,2x2", 3, 8, 8, mean = 2),
                 Case("-q 90 -h -y 0 -c", 3, 8, 10),
                 Case("-q 95 -a -y 0 -c", 1, 8, 10),
+                Case("-q 85 -h -y 2", 1, 12, 48),
+                Case("-q 90 -a -y 0 -c", 1, 12, 160),
             )
             for ((w, h) in listOf(21 to 13, 32 to 24)) for (case in cases) {
                 val name = "${w}x$h ${case.options}, ${case.bits} bits"
