@@ -1,0 +1,28 @@
+Lets the environment choose the predictor and the point transform that the
+T.81 reference software's `jpeg -p` writes, which it otherwise fixes at 4 and 0:
+T81_PREDICTOR (1 to 7) and T81_POINT_TRANSFORM. Applies to thorfdbg/libjpeg at
+c719010 (release 1.70); later commits cannot write lossless files at all.
+
+--- a/marker/scan.cpp
++++ b/marker/scan.cpp
+@@ -48,6 +48,7 @@
+ 
+ /// Includes
+ #include "marker/scan.hpp"
++#include <stdlib.h>
+ #include "io/bytestream.hpp"
+ #include "marker/frame.hpp"
+ #include "marker/component.hpp"
+@@ -633,10 +634,10 @@
+     break;
+   case Lossless:
+   case ACLossless:
+-    m_ucScanStart = 4; // predictor to use. This is the default.
++    m_ucScanStart = getenv("T81_PREDICTOR") ? atoi(getenv("T81_PREDICTOR")) : 4; // predictor to use. This is the default.
+     m_ucScanStop  = 0; // shall be zero
+     m_ucHighBit   = 0; // shall be zero
+-    m_ucLowBit    = 0; // point transform.
++    m_ucLowBit    = getenv("T81_POINT_TRANSFORM") ? atoi(getenv("T81_POINT_TRANSFORM")) : 0; // point transform.
+     break;
+   case DifferentialLossless:
+   case ACDifferentialLossless:

@@ -21,6 +21,13 @@ reviewable in the diff.
   Huffman file's, so a file `jpegtran -arithmetic` re-encodes decodes to exactly
   the pixels of its original, and `probe` calls it decodable (#19).
 
+- Lossless JPEG decodes: Huffman (SOF3) and arithmetic (SOF11) frames at every
+  precision from 2 to 16 bits, with all seven predictors, the point transform and
+  restart intervals, as medical images carry them. `decode16` keeps every bit of a
+  file deeper than 8, gray as one channel, and `decode` its high byte. The T.81
+  reference software and ffmpeg's `ljpeg` encoder write the test files, and each
+  decodes to its source (#19).
+
 - `ImageKodec.encodeWebp` writes a lossless WebP. The image is tried as a palette
   when it has 256 colours or fewer, alone or with the predictor over its indices,
   and through the subtract-green, predictor and cross-colour transforms, each

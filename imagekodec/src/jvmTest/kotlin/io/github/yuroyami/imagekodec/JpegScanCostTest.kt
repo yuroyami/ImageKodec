@@ -63,9 +63,11 @@ class JpegScanCostTest {
         val one = emptyScanJpeg(side = 4096, scans = 1, padding = 5000, frameMarker = 0xC9)
         val many = emptyScanJpeg(side = 4096, scans = 500, padding = 5000, frameMarker = 0xC9)
         val progressive = emptyArithmeticProgressiveJpeg(side = 4096, acScans = List(500) { 0 to 0 }, padding = 5000)
+        // A lossless scan whose data has ended decodes zeros over the whole image too.
+        val lossless = emptyLosslessJpeg(side = 4096, scans = 500, padding = 5000)
         millis(one)
         val single = millis(one)
-        for ((name, jpeg) in listOf("500 sequential scans" to many, "500 first scans of one band" to progressive)) {
+        for ((name, jpeg) in listOf("500 sequential scans" to many, "500 first scans of one band" to progressive, "500 lossless scans" to lossless)) {
             val elapsed = millis(jpeg)
             assertTrue(elapsed <= 4 * single + 500, "$name took $elapsed ms, one scan took $single ms")
         }

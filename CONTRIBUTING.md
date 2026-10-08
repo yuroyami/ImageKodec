@@ -67,6 +67,7 @@ Every codec's tests compare its output against an independent implementation:
 | WebP lossless | libwebp (`cwebp` and `dwebp`), bit-identical |
 | TIFF | libtiff (`tiffcp`, `tiff2rgba`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
 | JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
+| JPEG lossless decode | The T.81 reference software (`t81jpeg`, below) writes every precision from 2 to 16 bits, Huffman and arithmetic, and ffmpeg's `ljpeg` encoder writes subsampled YCbCr: each must decode to its source. ffmpeg's decoder reads the files with a point transform, and the files a small Annex H writer in the tests makes |
 | JPEG arithmetic decode | libjpeg-turbo's `jpegtran -arithmetic`, and `tools/arith_jpeg.c` for the DAC conditioning, re-encode a `cjpeg` file's coefficients: the arithmetic file must decode to exactly the pixels of the Huffman one |
 | JBIG2 | jbig2enc (`jbig2`) writes the streams: generic regions must decode to the source page, symbol mode must match jbig2dec |
 | WebP lossless encode | `dwebp` reads our output back pixel for pixel, and it must be smaller than our PNG |
@@ -82,6 +83,15 @@ check the skip count, not only whether the run passed:
 ```sh
 brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif pillow     # macOS
 sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev   # Debian/Ubuntu
+```
+
+The lossless JPEG suites also need `t81jpeg`, the `jpeg` tool of the T.81 reference software, built
+at release 1.70 with the repository's patch (later commits cannot write lossless files):
+
+```sh
+git clone https://github.com/thorfdbg/libjpeg.git t81 && cd t81 && git checkout c719010
+git apply ../ImageKodec/tools/t81-libjpeg.patch && ./configure && make
+sudo install -m 755 jpeg /usr/local/bin/t81jpeg
 ```
 
 CI sets `IMAGEKODEC_REQUIRE_ORACLES=1`, which makes a missing tool fail the test

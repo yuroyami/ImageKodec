@@ -3,8 +3,10 @@ package io.github.yuroyami.imagekodec.codec
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.JpegComponents
 import io.github.yuroyami.imagekodec.KiteBitmap
+import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
+import io.github.yuroyami.imagekodec.reducedBy
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -38,9 +40,14 @@ import kotlin.math.sqrt
  *    coefficients, IDCT and upsampling as the Huffman paths, so an arithmetic
  *    file decodes to exactly the pixels of the Huffman file with its coefficients
  *
- * Hierarchical JPEG is refused: libjpeg, libjpeg-turbo and ffmpeg refuse it too,
- * so no file reaches a user and no oracle exists to hold a decoder to (#19).
- * EXIF orientation is metadata and deliberately not applied.
+ *  - lossless (SOF3, SOF11), T.81 Annex H: 2 to 16 bits, the seven predictors,
+ *    the point transform and restarts, Huffman or with the two-dimensional
+ *    arithmetic model. At 8 bits or fewer the samples go through the same
+ *    upsampling and colour conversion; deeper, [decode16] keeps them, converted
+ *    with the same filters and fixed point at their own precision
+ *
+ * Hierarchical JPEG is not read yet (#19). EXIF orientation is metadata and
+ * deliberately not applied.
  */
 internal object JpegDecoder {
 
@@ -192,8 +199,13 @@ internal object JpegDecoder {
         var dcPred = 0
         // arithmetic only: the conditioning category of the last DC difference (T.81 F.1.4.4.1.2)
         var dcContext = 0
-        // arithmetic sequential only: whether a scan has coded this component, so a repeat is passed over
+        // arithmetic sequential and lossless: whether a scan has coded this component, so a repeat is passed over
         var coded = false
+        // lossless only: the samples, 16 bits each before the point transform, in rows of w2; the
+        // category of each one's difference for the arithmetic model; the scan's point transform
+        var samples: ShortArray? = null
+        var categories: ByteArray? = null
+        var pointTransform = 0
         var x = 0; var y = 0
         var w2 = 0; var h2 = 0
         // The plane in [data] when the decode is reduced: its stride and its rows of image.
@@ -268,6 +280,15 @@ internal object JpegDecoder {
         var arCt = 0
         // A code that cannot be valid stops the decode until the next restart, as libjpeg's ct = -1 does.
         var arBroken = false
+
+        // Lossless (SOF3, SOF11): the sample precision, 2 to 16 bits, the 158 statistics bins a table
+        // of T.81 H.1.2.3.2, and the category of the difference just decoded.
+        var lossless = false
+        var precision = 8
+        val losslessStats = Array(4) { ByteArray(158) }
+        var lastCategory = 0
+        // The reduction asked of a lossless frame, which has no DCT to reduce inside: its pixels are averaged.
+        var reduceAfter = 0
 
         // header reads: truncation is a decode error
         fun u8(): Int {
@@ -1039,12 +1060,12 @@ internal object JpegDecoder {
      */
     internal fun unsupportedFrame(marker: Int, precision: Int, height: Int, factors: IntArray): String? {
         when (marker) {
-            0xC0, 0xC1, 0xC2, 0xC9, 0xCA -> {}
-            0xC3, 0xCB -> return "lossless JPEG"
+            0xC0, 0xC1, 0xC2, 0xC9, 0xCA -> if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
+            // Any precision from 2 to 16; [processFrameHeader] reports another as a fault.
+            0xC3, 0xCB -> {}
             0xC5, 0xC6, 0xC7, 0xCD, 0xCE, 0xCF -> return "hierarchical/differential JPEG"
             else -> return "JPEG SOF marker 0x${marker.toString(16)}"
         }
-        if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
         if (height == 0) return "JPEG with its height deferred to a DNL marker"
         val n = factors.size
         if (n != 1 && n != 3 && n != 4) return "$n-component JPEG"
@@ -1077,6 +1098,8 @@ internal object JpegDecoder {
             tables[i] = j.u8()
         }
         unsupportedFrame(marker, precision, j.imgY, factors)?.let { throw UnsupportedImageException("$it is not supported") }
+        if (j.lossless && precision !in 2..16) err("bad lossless precision $precision")
+        j.precision = precision
 
         if (j.imgX == 0) err("zero width")
         if (j.imgX > MAX_DIMENSION || j.imgY > MAX_DIMENSION || j.imgX.toLong() * j.imgY > MAX_PIXELS) {
@@ -1109,8 +1132,10 @@ internal object JpegDecoder {
         }
         j.hMax = hMax
         j.vMax = vMax
-        val mcuW = hMax * 8
-        val mcuH = vMax * 8
+        // A lossless frame's data unit is one sample, not a block of 8 by 8 (T.81 H.1.1).
+        val unit = if (j.lossless) 1 else 8
+        val mcuW = hMax * unit
+        val mcuH = vMax * unit
         j.mcuX = (j.imgX + mcuW - 1) / mcuW
         j.mcuY = (j.imgY + mcuH - 1) / mcuH
 
@@ -1118,8 +1143,15 @@ internal object JpegDecoder {
             val comp = j.comp[i]
             comp.x = (j.imgX * comp.h + hMax - 1) / hMax
             comp.y = (j.imgY * comp.v + vMax - 1) / vMax
-            comp.w2 = j.mcuX * comp.h * 8
-            comp.h2 = j.mcuY * comp.v * 8
+            comp.w2 = j.mcuX * comp.h * unit
+            comp.h2 = j.mcuY * comp.v * unit
+            if (j.lossless) {
+                comp.samples = ShortArray(comp.w2 * comp.h2)
+                if (j.arithmetic) comp.categories = ByteArray(comp.w2 * comp.h2)
+                comp.ws = comp.w2
+                comp.ys = comp.y
+                continue
+            }
             // A reduced decode keeps each block at 8 >> scale pixels a side (w2 and h2 are multiples
             // of 8). A subsampled component reduces less, across and down each by the power of two
             // its ratio that way holds, as libjpeg 9's jdmaster.c sizes DCT_h_scaled_size and
@@ -1171,6 +1203,22 @@ internal object JpegDecoder {
         j.succHigh = aa shr 4
         j.succLow = aa and 15
         j.skipScan = false
+        if (j.lossless) {
+            // T.81 H.1.2.1 and A.4: Ss selects the predictor and Al is the point transform.
+            if (j.specStart !in 1..7 || j.succHigh != 0 || j.succLow >= j.precision) {
+                err("bad lossless SOS: predictor ${j.specStart}, Ah ${j.succHigh}, point transform ${j.succLow}")
+            }
+            // A lossless frame codes each component in one scan. A second one is passed over, as a
+            // scan whose data has ended still costs a pass over its components.
+            for (i in 0 until j.scanN) if (j.comp[j.order[i]].coded) j.skipScan = true
+            if (!j.skipScan) {
+                for (i in 0 until j.scanN) {
+                    j.comp[j.order[i]].coded = true
+                    j.comp[j.order[i]].pointTransform = j.succLow
+                }
+            }
+            return
+        }
         if (j.progressive) {
             if (j.specStart > 63 || j.specEnd > 63 || j.specStart > j.specEnd ||
                 j.succHigh > 13 || j.succLow > 13
@@ -1221,6 +1269,10 @@ internal object JpegDecoder {
 
     // stbi__parse_entropy_coded_data
     private fun parseEntropyCodedData(j: State) {
+        if (j.lossless) {
+            parseLosslessScan(j)
+            return
+        }
         if (j.arithmetic) {
             parseArithmeticScan(j)
             return
@@ -1645,6 +1697,346 @@ internal object JpegDecoder {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // lossless (T.81 Annex H): differences, Huffman or arithmetic coded, added to predictions
+
+    // jdarith.c start_pass for a lossless scan: fresh statistics for the scan's tables, and a decoder
+    // that reads its first two bytes again
+    private fun losslessArithReset(j: State) {
+        for (i in 0 until j.scanN) j.losslessStats[j.comp[j.order[i]].hd].fill(0)
+        j.arC = 0
+        j.arA = 0
+        j.arCt = -16
+        j.arBroken = false
+        j.nomore = false
+        j.marker = MARKER_NONE
+        j.todo = if (j.restartInterval != 0) j.restartInterval else Int.MAX_VALUE
+    }
+
+    /**
+     * The next arithmetic-coded difference of [comp] (T.81 H.1.2.3), conditioned on the categories
+     * [left] and [above] of the differences decoded to the left and above, as Figure H.2 arranges
+     * them. Its own category goes to [State.lastCategory].
+     */
+    private fun losslessArithDiff(j: State, comp: Component, left: Int, above: Int): Int {
+        val tbl = comp.hd
+        val stats = j.losslessStats[tbl]
+        val s0 = 20 * left + 4 * above
+        if (arithDecode(j, stats, s0) == 0) {
+            j.lastCategory = 0
+            return 0
+        }
+        val sign = arithDecode(j, stats, s0 + 1)
+        var st = s0 + 2 + sign
+        var m = arithDecode(j, stats, st)
+        if (m != 0) {
+            // X1 is 100 when the difference above is zero or small, 129 when it is large.
+            st = if (above < 3) 100 else 129
+            while (arithDecode(j, stats, st) != 0) {
+                m = m shl 1
+                if (m == 0x8000) {
+                    j.arBroken = true
+                    j.lastCategory = 0
+                    return 0
+                }
+                st++
+            }
+        }
+        // The categories of F.1.4.4.1.2: zero, small positive, small negative, large positive, large negative.
+        j.lastCategory = when {
+            m < (1 shl j.dcL[tbl]) shr 1 -> 0
+            m > (1 shl j.dcU[tbl]) shr 1 -> 3 + sign
+            else -> 1 + sign
+        }
+        var v = m
+        st += 14
+        while (true) {
+            m = m shr 1
+            if (m == 0) break
+            if (arithDecode(j, stats, st) != 0) v = v or m
+        }
+        v += 1
+        return if (sign != 0) -v else v
+    }
+
+    /** The next Huffman-coded difference (T.81 H.1.2.2): a DC category up to 16, whose 16 means 32768. */
+    private fun losslessHuffmanDiff(j: State, comp: Component): Int {
+        // As in decodeBlock: a marker met here stops the buffer filling, and huffDecode's own fill pads it.
+        if (j.codeBits < 16) growBuffer(j)
+        val t = huffDecode(j, j.huffDc[comp.hd])
+        if (t < 0 || t > 16) err("bad huffman code")
+        return when (t) {
+            0 -> 0
+            16 -> 32768
+            else -> extendReceive(j, t)
+        }
+    }
+
+    /**
+     * One lossless scan: each sample's difference decoded in MCU order and added, modulo 2^16, to
+     * the prediction of T.81 H.1.2.1 from its neighbours in the component, so the planes hold
+     * every sample before the point transform. A non-interleaved scan's MCU is one sample.
+     *
+     * T.81 H.1.1 asks a restart interval to hold whole MCU rows, and libjpeg-turbo refuses one that
+     * does not. The reference software of ISO/IEC 18477 writes them, though, and reads them by
+     * starting the entropy decoder afresh in the middle of the row while the prediction runs on,
+     * which is what this does: only a restart at the start of a row restarts the prediction. The
+     * arithmetic model's neighbours count only when decoded since the last restart, which is
+     * T.81's "first line" rule for a restart at the start of a row and the reference's for one
+     * inside it.
+     */
+    private fun parseLosslessScan(j: State) {
+        val single = j.scanN == 1
+        val across = if (single) j.comp[j.order[0]].x else j.mcuX
+        val down = if (single) j.comp[j.order[0]].y else j.mcuY
+        if (j.arithmetic) losslessArithReset(j) else reset(j)
+        val predictor = j.specStart
+        val pt = j.succLow
+        val initial = 1 shl (j.precision - pt - 1)
+        // Per component of the scan: the row its prediction starts again from, with no row above.
+        val firstRow = IntArray(j.scanN)
+        // The MCU the current restart interval began at.
+        var intervalStart = 0
+        // The data ended early, at a marker that is not the restart due: the rest decodes as zeros.
+        var ended = false
+        for (my in 0 until down) {
+            for (mx in 0 until across) {
+                for (k in 0 until j.scanN) {
+                    val comp = j.comp[j.order[k]]
+                    val s = comp.samples!!
+                    val categories = comp.categories
+                    val stride = comp.w2
+                    val bw = if (single) 1 else comp.h
+                    val bh = if (single) 1 else comp.v
+                    for (y in 0 until bh) {
+                        val sy = my * bh + y
+                        val top = sy == firstRow[k]
+                        for (x in 0 until bw) {
+                            val sx = mx * bw + x
+                            val i = sy * stride + sx
+                            val diff = when {
+                                ended -> 0
+                                j.arithmetic -> {
+                                    if (j.arBroken) {
+                                        0
+                                    } else {
+                                        val left = if (sx == 0 || (sy / bh) * across + (sx - 1) / bw < intervalStart) 0 else categories!![i - 1].toInt()
+                                        val above = if (top || ((sy - 1) / bh) * across + sx / bw < intervalStart) 0 else categories!![i - stride].toInt()
+                                        losslessArithDiff(j, comp, left, above).also { categories!![i] = j.lastCategory.toByte() }
+                                    }
+                                }
+                                starved(j) -> 0
+                                else -> losslessHuffmanDiff(j, comp)
+                            }
+                            val prediction = when {
+                                top -> if (sx == 0) initial else s[i - 1].toInt() and 0xFFFF
+                                sx == 0 -> s[i - stride].toInt() and 0xFFFF
+                                else -> {
+                                    val ra = s[i - 1].toInt() and 0xFFFF
+                                    val rb = s[i - stride].toInt() and 0xFFFF
+                                    val rc = s[i - stride - 1].toInt() and 0xFFFF
+                                    when (predictor) {
+                                        1 -> ra
+                                        2 -> rb
+                                        3 -> rc
+                                        4 -> ra + rb - rc
+                                        5 -> ra + ((rb - rc) shr 1)
+                                        6 -> rb + ((ra - rc) shr 1)
+                                        else -> (ra + rb) shr 1
+                                    }
+                                }
+                            }
+                            s[i] = (prediction + diff).toShort()
+                        }
+                    }
+                }
+                if (!ended && --j.todo <= 0) {
+                    if (j.arithmetic) {
+                        if (j.marker == MARKER_NONE) j.marker = skipJunkAtEnd(j)
+                    } else if (j.codeBits < 24) {
+                        growBuffer(j)
+                    }
+                    if (!isRestart(j.marker)) {
+                        ended = true
+                    } else {
+                        if (j.arithmetic) losslessArithReset(j) else reset(j)
+                        intervalStart = my * across + mx + 1
+                        if (mx == across - 1) {
+                            for (k in 0 until j.scanN) firstRow[k] = (my + 1) * (if (single) 1 else j.comp[j.order[k]].v)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** A lossless sample of [precision] bits at 8 bits, as [ImageKodec.decode16]'s narrower samples narrow. */
+    private fun to8(v: Int, precision: Int): Int = when {
+        precision == 8 -> v
+        precision > 8 -> v shr (precision - 8)
+        else -> v * 255 / ((1 shl precision) - 1)
+    }
+
+    /** A sample of [precision] bits, 9 to 16, at 16 bits, its bits replicated down. */
+    private fun to16(v: Int, precision: Int): Int = (v shl (16 - precision)) or (v shr (2 * precision - 16))
+
+    /**
+     * The end of a lossless frame: each component's samples through its point transform and cut to
+     * the frame's precision, then, at 8 bits or fewer, into the 8-bit planes the DCT paths fill, so
+     * upsampling and colour conversion are theirs. A component no scan coded is mid-gray.
+     */
+    private fun finishLossless(j: State) {
+        val precision = j.precision
+        val mask = (1 shl precision) - 1
+        for (n in 0 until j.imgN) {
+            val comp = j.comp[n]
+            val s = comp.samples!!
+            if (!comp.coded) {
+                s.fill((1 shl (precision - 1)).toShort())
+            } else {
+                for (i in s.indices) s[i] = (((s[i].toInt() and 0xFFFF) shl comp.pointTransform) and mask).toShort()
+            }
+            if (precision <= 8) comp.data = ByteArray(s.size) { to8(s[it].toInt() and 0xFFFF, precision).toByte() }
+        }
+    }
+
+    /** True when [j] holds samples deeper than 8 bits, which [decode16] keeps and the 8-bit paths narrow. */
+    private fun wide(j: State): Boolean = j.lossless && j.precision > 8
+
+    /**
+     * One output row's worth of upsampling per component of a deep lossless frame, as
+     * [resampleRow] upsamples an 8-bit one: the same filters, at the samples' own precision.
+     */
+    private class WideResampler(val comp: Component, val hs: Int, val vs: Int, imgX: Int) {
+        val filtered = hs <= 2 && vs <= 2
+        val wLores = (imgX + hs - 1) / hs
+        var ystep = vs shr 1
+        var ypos = 0
+        var line0 = 0
+        var line1 = 0
+        val out = IntArray(imgX + 3)
+    }
+
+    private fun wideRow(r: WideResampler) {
+        val inp = r.comp.samples!!
+        val yBot = r.ystep >= (r.vs shr 1)
+        val nearOfs = if (yBot) r.line1 else r.line0
+        val farOfs = if (yBot) r.line0 else r.line1
+        val out = r.out
+        val w = r.wLores
+        fun near(i: Int) = inp[nearOfs + i].toInt() and 0xFFFF
+        fun far(i: Int) = inp[farOfs + i].toInt() and 0xFFFF
+        when {
+            r.hs == 1 && r.vs == 1 -> for (i in 0 until w) out[i] = near(i)
+            r.filtered && r.hs == 1 && r.vs == 2 -> for (i in 0 until w) out[i] = (3 * near(i) + far(i) + 2) shr 2
+            r.filtered && r.hs == 2 && r.vs == 1 -> {
+                if (w == 1) {
+                    out[0] = near(0); out[1] = near(0)
+                } else {
+                    out[0] = near(0)
+                    out[1] = (near(0) * 3 + near(1) + 2) shr 2
+                    var i = 1
+                    while (i < w - 1) {
+                        val n = 3 * near(i) + 2
+                        out[i * 2] = (n + near(i - 1)) shr 2
+                        out[i * 2 + 1] = (n + near(i + 1)) shr 2
+                        i++
+                    }
+                    out[i * 2] = (near(w - 1) * 3 + near(w - 2) + 2) shr 2
+                    out[i * 2 + 1] = near(w - 1)
+                }
+            }
+            r.filtered && r.hs == 2 && r.vs == 2 -> {
+                if (w == 1) {
+                    val v = (3 * near(0) + far(0) + 2) shr 2
+                    out[0] = v; out[1] = v
+                } else {
+                    var t1 = 3 * near(0) + far(0)
+                    out[0] = (t1 + 2) shr 2
+                    for (i in 1 until w) {
+                        val t0 = t1
+                        t1 = 3 * near(i) + far(i)
+                        out[i * 2 - 1] = (3 * t0 + t1 + 8) shr 4
+                        out[i * 2] = (3 * t1 + t0 + 8) shr 4
+                    }
+                    out[w * 2 - 1] = (t1 + 2) shr 2
+                }
+            }
+            else -> for (i in 0 until w) for (k in 0 until r.hs) out[i * r.hs + k] = near(i)
+        }
+        if (++r.ystep >= r.vs) {
+            r.ystep = 0
+            r.line0 = r.line1
+            if (++r.ypos < r.comp.y) r.line1 += r.comp.w2
+        }
+    }
+
+    /** Each output row of a deep lossless frame, every component upsampled to the image's width. */
+    private inline fun forEachWideRow(j: State, emit: (row: Int, rows: Array<IntArray>) -> Unit) {
+        val res = Array(j.imgN) { k ->
+            val comp = j.comp[k]
+            WideResampler(comp, j.hMax / comp.h, j.vMax / comp.v, j.imgX)
+        }
+        val rows = Array(j.imgN) { res[it].out }
+        for (row in 0 until j.imgY) {
+            for (r in res) wideRow(r)
+            emit(row, rows)
+        }
+    }
+
+    /**
+     * A deep lossless frame at 16 bits: gray as one channel, anything else as RGB, converted at the
+     * samples' own precision with [ycbcrToRgbRow]'s fixed point and [blinn]'s rounding, then each
+     * sample's bits replicated down to 16.
+     */
+    private fun wideBitmap(j: State): KiteBitmap16 {
+        val model = colorModel(j)
+        val p = j.precision
+        val max = (1 shl p) - 1
+        val center = 1L shl (p - 1)
+        val channels = if (model == ColorModel.GRAY) 1 else 3
+        val out = ShortArray(j.imgX * j.imgY * channels)
+        fun ink(x: Int, k: Int): Int = ((x.toLong() * k + max / 2) / max).toInt()
+        forEachWideRow(j) { row, rows ->
+            var at = row * j.imgX * channels
+            for (i in 0 until j.imgX) {
+                var r: Int
+                var g: Int
+                var b: Int
+                when (model) {
+                    ColorModel.GRAY -> {
+                        out[at++] = to16(rows[0][i], p).toShort()
+                        continue
+                    }
+                    ColorModel.RGB -> {
+                        r = rows[0][i]; g = rows[1][i]; b = rows[2][i]
+                    }
+                    ColorModel.CMYK -> {
+                        val k = rows[3][i]
+                        r = ink(rows[0][i], k); g = ink(rows[1][i], k); b = ink(rows[2][i], k)
+                    }
+                    else -> {
+                        // stbi__YCbCr_to_RGB_row's fixed point, centred on the precision's middle
+                        val yFixed = (rows[0][i].toLong() shl 20) + (1L shl 19)
+                        val cb0 = rows[1][i] - center
+                        val cr0 = rows[2][i] - center
+                        r = ((yFixed + cr0 * FIX_1_40200) shr 20).toInt().coerceIn(0, max)
+                        g = ((yFixed + cr0 * -FIX_0_71414 + ((cb0 * -FIX_0_34414) and -65536L)) shr 20).toInt().coerceIn(0, max)
+                        b = ((yFixed + cb0 * FIX_1_77200) shr 20).toInt().coerceIn(0, max)
+                        if (model == ColorModel.YCCK) {
+                            val k = rows[3][i]
+                            r = ink(max - r, k); g = ink(max - g, k); b = ink(max - b, k)
+                        }
+                    }
+                }
+                out[at++] = to16(r, p).toShort()
+                out[at++] = to16(g, p).toShort()
+                out[at++] = to16(b, p).toShort()
+            }
+        }
+        return KiteBitmap16(j.imgX, j.imgY, channels, out)
+    }
+
     /** Passes over the entropy-coded data of a skipped scan, its restart markers included, to the marker after it. */
     private fun skipScanData(j: State) {
         var m = skipJunkAtEnd(j)
@@ -1817,11 +2209,26 @@ internal object JpegDecoder {
      */
     fun decode(input: ByteArray, scale: Int = 0): KiteBitmap {
         val j = decodeFrame(input, scale)
+        // A lossless frame has no DCT to shrink inside, so its reduced decode averages the pixels.
+        return (if (wide(j)) wideBitmap(j).toBitmap() else bitmap(j)).reducedBy(1 shl j.reduceAfter)
+    }
+
+    /**
+     * Decodes [input] at 16 bits a sample: every bit of a lossless frame deeper than 8, gray as one
+     * channel, and an 8-bit frame as [decode] gives it, widened to RGB.
+     */
+    fun decode16(input: ByteArray): KiteBitmap16 {
+        val j = decodeFrame(input, 0)
+        return if (wide(j)) wideBitmap(j) else KiteBitmap16.widened(bitmap(j), alpha = false)
+    }
+
+    /** The 8-bit frame [j] through upsampling and colour conversion, at its reduced size. */
+    private fun bitmap(j: State): KiteBitmap {
         val model = colorModel(j)
-        val outX = outSize(j.imgX, scale)
-        val argb = IntArray(outX * outSize(j.imgY, scale))
+        val outX = outSize(j.imgX, j.scale)
+        val argb = IntArray(outX * outSize(j.imgY, j.scale))
         forEachRow(j) { row, arrays, offsets -> convertRow(model, argb, row * outX, arrays, offsets, outX) }
-        return KiteBitmap(outX, outSize(j.imgY, scale), argb)
+        return KiteBitmap(outX, outSize(j.imgY, j.scale), argb)
     }
 
     /** What [decodeComponents] returns: the samples, and the color model [decode] would apply to them. */
@@ -1834,6 +2241,7 @@ internal object JpegDecoder {
     fun decodeComponents(input: ByteArray, scale: Int = 0): Components {
         val j = decodeFrame(input, scale)
         val n = j.imgN
+        if (wide(j) || j.reduceAfter > 0) return Components(losslessComponents(j), colorModel(j))
         val outX = outSize(j.imgX, scale)
         // At most 2^28 pixels of 4 samples: the frame header's limit keeps this an Int.
         val samples = ByteArray(outX * outSize(j.imgY, scale) * n)
@@ -1863,6 +2271,42 @@ internal object JpegDecoder {
         return Components(JpegComponents(outX, outSize(j.imgY, scale), n, samples, j.app14ColorTransform), colorModel(j))
     }
 
+    /**
+     * The upsampled components of lossless frame [j], each sample at 8 bits as [decode] narrows it,
+     * and averaged over blocks of 2^reduceAfter a side for a reduced decode.
+     */
+    private fun losslessComponents(j: State): JpegComponents {
+        val n = j.imgN
+        val w = j.imgX
+        val full = ByteArray(w * j.imgY * n)
+        if (wide(j)) {
+            forEachWideRow(j) { row, rows ->
+                var at = row * w * n
+                for (i in 0 until w) for (k in 0 until n) full[at++] = to8(rows[k][i], j.precision).toByte()
+            }
+        } else {
+            forEachRow(j) { row, arrays, offsets ->
+                var at = row * w * n
+                for (i in 0 until w) for (k in 0 until n) full[at++] = arrays[k]!![offsets[k] + i]
+            }
+        }
+        val r = 1 shl j.reduceAfter
+        if (r == 1) return JpegComponents(w, j.imgY, n, full, j.app14ColorTransform)
+        val dw = outSize(w, j.reduceAfter)
+        val dh = outSize(j.imgY, j.reduceAfter)
+        val out = ByteArray(dw * dh * n)
+        for (oy in 0 until dh) for (ox in 0 until dw) for (k in 0 until n) {
+            var sum = 0
+            var count = 0
+            for (y in oy * r until minOf(oy * r + r, j.imgY)) for (x in ox * r until minOf(ox * r + r, w)) {
+                sum += full[(y * w + x) * n + k].toInt() and 0xFF
+                count++
+            }
+            out[(oy * dw + ox) * n + k] = ((sum + count / 2) / count).toByte()
+        }
+        return JpegComponents(dw, dh, n, out, j.app14ColorTransform)
+    }
+
     /** One component as the inverse DCT leaves it: [width] by [height] samples in rows of [stride]. */
     internal class Plane(val samples: ByteArray, val stride: Int, val width: Int, val height: Int, val h: Int, val v: Int)
 
@@ -1879,7 +2323,8 @@ internal object JpegDecoder {
         val j = decodeFrame(input, 0)
         val planes = List(j.imgN) { k ->
             val c = j.comp[k]
-            Plane(c.data, c.ws, c.x, c.y, c.h, c.v)
+            val data = if (wide(j)) ByteArray(c.samples!!.size) { to8(c.samples!![it].toInt() and 0xFFFF, j.precision).toByte() } else c.data
+            Plane(data, c.ws, c.x, c.y, c.h, c.v)
         }
         return Planes(j.imgX, j.imgY, j.hMax, j.vMax, planes)
     }
@@ -1908,7 +2353,6 @@ internal object JpegDecoder {
     private fun decodeFrame(input: ByteArray, scale: Int): State {
         require(scale in 0..3) { "scale must be 0 to 3, was $scale" }
         val j = State(input)
-        j.scale = scale
 
         // stbi__decode_jpeg_header: SOI, then markers until SOF
         if (j.u8() != 0xFF || j.u8() != 0xD8) err("no SOI")
@@ -1926,7 +2370,9 @@ internal object JpegDecoder {
             }
         }
         j.progressive = m == 0xC2 || m == 0xCA
-        j.arithmetic = m == 0xC9 || m == 0xCA
+        j.arithmetic = m == 0xC9 || m == 0xCA || m == 0xCB
+        j.lossless = m == 0xC3 || m == 0xCB
+        if (j.lossless) j.reduceAfter = scale else j.scale = scale
         processFrameHeader(j, m)
 
         // stbi__decode_jpeg_image: scans until EOI
@@ -1960,6 +2406,7 @@ internal object JpegDecoder {
         }
         if (!sawScan) err("no SOS scan before EOI")
         if (j.progressive) finishProgressive(j)
+        if (j.lossless) finishLossless(j)
 
         return j
     }

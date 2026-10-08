@@ -102,3 +102,20 @@ internal fun emptyArithmeticProgressiveJpeg(side: Int, acScans: List<Pair<Int, I
     add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
     return out.toByteArray()
 }
+
+/**
+ * A lossless gray JPEG, [side] by [side], with [scans] copies of a scan with no data, predictor 1:
+ * one DC table whose one-bit code is category 0. A comment segment of [padding] bytes keeps a file
+ * with few scans within the input-size budget.
+ */
+internal fun emptyLosslessJpeg(side: Int, scans: Int, padding: Int = 0): ByteArray {
+    val out = ArrayList<Byte>()
+    fun add(b: ByteArray) = b.forEach { out.add(it) }
+    add(byteArrayOf(0xFF.toByte(), 0xD8.toByte()))
+    if (padding > 0) add(jpegSegment(0xFE, ByteArray(padding)))
+    add(jpegSegment(0xC3, byteArrayOf(8, (side ushr 8).toByte(), side.toByte(), (side ushr 8).toByte(), side.toByte(), 1, 1, 0x11, 0)))
+    add(jpegSegment(0xC4, byteArrayOf(0x00, 1) + ByteArray(15) + byteArrayOf(0)))
+    repeat(scans) { add(jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 1, 0, 0))) }
+    add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
+    return out.toByteArray()
+}

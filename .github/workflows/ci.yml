@@ -40,6 +40,19 @@ jobs:
       # rather than left to chance, and a missing one fails this step. The tests
       # find them on PATH. Ubuntu's ImageMagick is version 6, whose command is
       # `convert`; the tests fall back to it when there is no `magick`.
+      # The T.81 reference software (Thomas Richter's libjpeg, GPL-3.0, run as a tool and
+      # never linked) writes lossless JPEG at every precision and arithmetic coding, which
+      # nothing packaged does. Release 1.70: later commits cannot write lossless files.
+      # The patch lets the tests choose its predictor and point transform.
+      - name: Build the T.81 reference codec
+        run: |
+          git clone --quiet https://github.com/thorfdbg/libjpeg.git /tmp/t81
+          git -C /tmp/t81 checkout --quiet c719010
+          git -C /tmp/t81 apply "$GITHUB_WORKSPACE/tools/t81-libjpeg.patch"
+          (cd /tmp/t81 && ./configure > /dev/null && make -j"$(nproc)" > /dev/null)
+          sudo install -m 755 /tmp/t81/jpeg /usr/local/bin/t81jpeg
+          command -v t81jpeg || { echo "::error::t81jpeg did not build"; exit 1; }
+
       - name: Install codec oracles
         run: |
           sudo apt-get update

@@ -138,6 +138,8 @@ class FuzzTest {
         "jpeg-ycck" to JpegCmykFixtures.blocksAdobeYcck,
         "jpeg-arithmetic" to JpegArithmeticTest().sequential,
         "jpeg-arithmetic-progressive" to JpegArithmeticTest().progressive,
+        "jpeg-lossless" to losslessJpeg(IntArray(48) { it * 5 }, 4, 4, 3, 8, predictor = 7, restartInterval = 8),
+        "jpeg-lossless-arithmetic" to JpegLosslessTest().gray12,
         "jp2-rpcl" to Jp2ProgressionTest().rpcl,
         "jp2-cprl" to Jp2ProgressionTest().cprl,
         "jp2-palette" to Jp2ColorFixtures.palette,

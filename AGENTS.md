@@ -84,3 +84,11 @@ being true.
   conditioning (L 0, U 1, K 5), so a decoder that ignores DAC passes every file they
   write. `tools/arith_jpeg.c` sets other bounds through libjpeg's `arith_dc_L`,
   `arith_dc_U` and `arith_ac_K` (#19).
+- thorfdbg/libjpeg after release 1.70 cannot write lossless JPEG ("DQT marker missing"),
+  and 1.70 seeds the prediction of a file with a point transform at 2^(P-1) where T.81
+  says 2^(P-Pt-1), in its encoder and decoder alike. ffmpeg and libjpeg-turbo follow
+  T.81, so such a file round-trips through it and decodes to something else elsewhere.
+  The test writer `losslessJpeg` makes conformant ones (#19).
+- ffmpeg 6 misreads the lossless difference -32768 (category 16, no extra bits) and
+  reads a three-component 4:4:4 lossless file as RGB; its `ljpeg` encoder writes BGR
+  through a private 9-bit transform no other decoder knows (#19).
