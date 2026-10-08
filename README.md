@@ -127,14 +127,19 @@ profile:
 val bitmap = ImageKodec.decode(bytes, colorTarget = ColorTarget.Srgb())
 val exact = ImageKodec.decode16(bytes, colorTarget = ColorTarget.Srgb(RenderingIntent.RelativeColorimetric))
 val again = ImageKodec.convertToSrgb(bitmap, profile)   // a profile from elsewhere, such as a PDF
+val ink = ImageKodec.convertCmykToSrgb(width, height, cmyk, profile)   // CMYK samples, 0 is no ink
 ```
 
-Matrix and TRC profiles, v2 and v4, with every curve type, and gray profiles convert as
-lcms2 converts them, to within one level: perceptual by default, as browsers and lcms2's
-tools convert, with black point compensation where lcms2 applies it. A file that declares
-nothing, or declares sRGB, comes back untouched. Profiles built from lookup tables, as
-CMYK and printer profiles are, and PNG's `gAMA`, `cHRM` and `cICP` chunks are not
-converted yet (#108).
+Every kind of input profile converts as lcms2 converts it, to within one level: matrix
+and TRC profiles, v2 and v4, with every curve type, gray profiles, and profiles built
+from lookup tables (`lut8`, `lut16` and `lutAToB`, with a Lab or XYZ connection space),
+as CMYK printer profiles and many camera profiles are. The conversion is perceptual by
+default, as browsers and lcms2's tools convert, with black point compensation where
+lcms2 applies it. A CMYK or YCCK JPEG and a CMYK TIFF convert from their ink through
+their profile, where a decode without a target draws ink with the usual naive formula.
+A file that declares nothing, declares sRGB, or carries a profile for another colour
+space than its own comes back untouched, as browsers leave it. PNG's `gAMA`, `cHRM`
+and `cICP` chunks are not converted yet (#108).
 
 ### Decode a still
 
@@ -160,7 +165,7 @@ at a lower resolution than brightness.
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
-| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
+| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/5/6 including subsampled YCbCr and CMYK, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
 | JPEG 2000 | JP2 container and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN) |
 | AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
 

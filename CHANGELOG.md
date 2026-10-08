@@ -18,8 +18,17 @@ reviewable in the diff.
   `colorTarget = ColorTarget.Srgb(intent)` and converts through the file's embedded ICC
   profile, and `ImageKodec.convertToSrgb` converts a bitmap through a profile from
   elsewhere. Matrix/TRC profiles (v2 and v4, `curv` gammas and tables, all five `para`
-  types) and gray profiles convert in each rendering intent as lcms2 converts them to
-  its built-in sRGB, within one level at 8 bits; `decode16` converts at full precision.
+  types), gray profiles and lookup-table profiles (`mft1`, `mft2` and `mAB`, Lab or XYZ
+  connection space, CLUTs interpolated in lcms2's 16-bit fixed point) convert in each
+  rendering intent as lcms2 converts them to its built-in sRGB, within one level at 8
+  bits; `decode16` converts at full precision. A CMYK or YCCK JPEG and a CMYK TIFF convert
+  from their ink through their CMYK profile, and `ImageKodec.convertCmykToSrgb` converts
+  CMYK ink from elsewhere, such as a PDF's ICCBased image. A profile for another colour
+  space than the image's is ignored, as browsers ignore it.
+
+- CMYK TIFF (photometric 5, InkSet 1) decodes at 8 and 16 bits, chunky or in planes,
+  with alpha. Without a profile it draws as libtiff's RGBA interface draws it, exactly;
+  `decode16` keeps all 16 bits. Other ink sets are named refusals.
 
 - Arithmetic-coded JPEG decodes: sequential (SOF9) and progressive (SOF10)
   frames, with restart intervals and the conditioning of the DAC marker, through

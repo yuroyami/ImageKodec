@@ -8,7 +8,11 @@ internal class TiffAlpha(samples: Int, photometric: Int, extras: LongArray?) {
     val associated: Boolean
 
     init {
-        val colors = if (photometric == 2 || photometric == 6) 3 else 1
+        val colors = when (photometric) {
+            2, 6 -> 3
+            5 -> 4
+            else -> 1
+        }
         if (extras == null) {
             // Preserve the existing straight-alpha fallback for omitted metadata.
             sample = if (photometric in 0..3 && samples > colors) colors else -1

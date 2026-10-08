@@ -104,6 +104,8 @@ class FuzzTest {
         "tiff-jpeg" to TiffJpegTest().seed(),
         "tiff-old-jpeg" to TiffOldJpegTest().interchangeFormat(),
         *ColorProfileTest().seeds().toTypedArray(),
+        "tiff-cmyk-icc" to CmykTiffs.tiff(3, 2, IntArray(24) { it * 10 }, icc = ColorConversionTest().cmykV2),
+        "jpeg-ycck-icc" to ColorProfileTest().withIcc(JpegCmykFixtures.blocksAdobeYcck, ColorConversionTest().cmykV4),
         "tiff-pages-be" to TiffPagesTest().let {
             it.tiff(listOf(TiffPagesTest.Page(3, 2, 40), TiffPagesTest.Page(2, 5, 90, orientation = 6)), littleEndian = false)
         },
@@ -309,6 +311,13 @@ class FuzzTest {
         val format = ImageFormat.sniff(bytes)
         if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF) {
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
+        }
+        // A file with a profile converts through it when asked, so the profile's tables take the damage too.
+        if (ImageKodec.probeOrNull(bytes)?.colorProfile?.icc != null) {
+            mustFailCleanly("$label decode to sRGB") { ImageKodec.decode(bytes, colorTarget = ColorTarget.Srgb()) }
+            if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.JPEG) {
+                mustFailCleanly("$label decode16 to sRGB") { ImageKodec.decode16(bytes, colorTarget = ColorTarget.Srgb()) }
+            }
         }
         // A damaged chain of TIFF pages: the last page the probe counts must be reachable.
         val pages = ImageKodec.probeOrNull(bytes)?.pageCount ?: 1

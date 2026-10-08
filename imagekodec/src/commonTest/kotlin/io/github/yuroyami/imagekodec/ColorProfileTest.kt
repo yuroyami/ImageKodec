@@ -130,6 +130,9 @@ class ColorProfileTest {
 
     // --- JPEG -----------------------------------------------------------------------
 
+    /** [jpeg] with [icc] in one APP2 segment after its SOI. */
+    internal fun withIcc(jpeg: ByteArray, icc: ByteArray): ByteArray = jpeg.copyOf(2) + app2(1, 1, icc) + jpeg.copyOfRange(2, jpeg.size)
+
     private fun app2(sequence: Int, count: Int, part: ByteArray): ByteArray {
         val body = "ICC_PROFILE".encodeToByteArray() + byteArrayOf(0, sequence.toByte(), count.toByte()) + part
         val length = body.size + 2

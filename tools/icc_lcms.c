@@ -5,7 +5,7 @@
  *
  *   cc -O2 -o icc_lcms tools/icc_lcms.c -llcms2 -lm
  *   ./icc_lcms make KIND > profile.icc
- *   ./icc_lcms convert profile.icc INTENT CHANNELS < samples > rgb
+ *   ./icc_lcms convert profile.icc INTENT CHANNELS [BYTES] < samples > rgb
  *
  * make writes a profile of KIND:
  *
@@ -20,12 +20,15 @@
  *   cmyk-v2        a CMYK printer profile of lut16Type tables (mft2), Lab PCS, a
  *                  different table for each intent and a paper white
  *   cmyk-v4        the same as lutAToBType (mAB): curves, CLUT, curves, matrix, curves
+ *   cmyk-tiny-v2, cmyk-tiny-v4   the same with a CLUT of 3 points a side, and no
+ *                  curves (v2) or gamma curves (v4), small enough to keep in a test as text
  *   rgb-lut8-v2    an RGB input profile of lut8Type tables (mft1) with a Lab PCS
  *   rgb-xyz-v2     an RGB input profile of lut16Type tables with an XYZ PCS
  *   rgb-mab-v4     an RGB display profile of lutAToBType tables with a Lab PCS
  *
- * convert reads CHANNELS 8-bit samples a pixel from stdin (1 gray, 3 RGB, 4 CMYK)
- * and writes three float32 sRGB values a pixel, 0 to 1, little endian. INTENT is
+ * convert reads CHANNELS samples a pixel from stdin (1 gray, 3 RGB, 4 CMYK ink), each
+ * of BYTES bytes, 1 (the default) or 2 in the machine's byte order, and writes three
+ * float32 sRGB values a pixel, 0 to 1, in the machine's byte order. INTENT is
  * 0 perceptual, 1 relative colorimetric, 2 saturation, 3 absolute colorimetric.
  */
 #include <lcms2.h>
@@ -114,12 +117,19 @@ static cmsPipeline *table(int inputs, int grid, int intent, int lab, int v2, int
     if (curves) {
         // lut8Type holds 256-entry tables only.
         for (int i = 0; i < inputs; i++) {
-            if (eightBit) {
+            if (curves == 2) {
+                // Parametric, which a lutAToBType keeps as a few numbers.
+                in[i] = cmsBuildGamma(NULL, 1.0 + 0.1 * i);
+            } else if (eightBit) {
                 cmsUInt16Number t[256];
                 for (int v = 0; v < 256; v++) t[v] = (cmsUInt16Number) floor(pow(v / 255.0, 1.0 + 0.1 * i) * 65535 + 0.5);
                 in[i] = cmsBuildTabulatedToneCurve16(NULL, 256, t);
             } else {
-                in[i] = cmsBuildGamma(NULL, 1.0 + 0.1 * i);
+                // Tabulated, all of one length: lcms2 writes a lut16Type with the first curve's
+                // length in its header and each curve at its own, and a gamma of 1 has two entries.
+                cmsUInt16Number t[1024];
+                for (int v = 0; v < 1024; v++) t[v] = (cmsUInt16Number) floor(pow(v / 1023.0, 1.0 + 0.1 * i) * 65535 + 0.5);
+                in[i] = cmsBuildTabulatedToneCurve16(NULL, 1024, t);
             }
         }
         cmsPipelineInsertStage(p, cmsAT_END, cmsStageAllocToneCurves(NULL, inputs, in));
@@ -130,9 +140,14 @@ static cmsPipeline *table(int inputs, int grid, int intent, int lab, int v2, int
     cmsPipelineInsertStage(p, cmsAT_END, clut);
     if (curves) {
         for (int i = 0; i < 3; i++) {
-            cmsUInt16Number t[256];
-            for (int v = 0; v < 256; v++) t[v] = (cmsUInt16Number) (v * 257);
-            out[i] = eightBit ? cmsBuildTabulatedToneCurve16(NULL, 256, t) : cmsBuildGamma(NULL, 1.0);
+            if (curves == 2) {
+                out[i] = cmsBuildGamma(NULL, 1.0 - 0.02 * i);
+                continue;
+            }
+            int n = eightBit ? 256 : 1024;
+            cmsUInt16Number t[1024];
+            for (int v = 0; v < n; v++) t[v] = (cmsUInt16Number) floor(pow(v / (n - 1.0), 1.0 - 0.02 * i) * 65535 + 0.5);
+            out[i] = cmsBuildTabulatedToneCurve16(NULL, n, t);
         }
         cmsPipelineInsertStage(p, cmsAT_END, cmsStageAllocToneCurves(NULL, 3, out));
     }
@@ -203,6 +218,10 @@ static int make(const char *kind) {
         h = lutProfile(cmsSigCmykData, cmsSigOutputClass, cmsSigLabData, 2.1, 9, 1, 0);
     } else if (!strcmp(kind, "cmyk-v4")) {
         h = lutProfile(cmsSigCmykData, cmsSigOutputClass, cmsSigLabData, 4.3, 11, 1, 0);
+    } else if (!strcmp(kind, "cmyk-tiny-v2")) {
+        h = lutProfile(cmsSigCmykData, cmsSigOutputClass, cmsSigLabData, 2.1, 3, 0, 0);
+    } else if (!strcmp(kind, "cmyk-tiny-v4")) {
+        h = lutProfile(cmsSigCmykData, cmsSigOutputClass, cmsSigLabData, 4.3, 3, 2, 0);
     } else if (!strcmp(kind, "rgb-lut8-v2")) {
         h = lutProfile(cmsSigRgbData, cmsSigInputClass, cmsSigLabData, 2.1, 17, 1, 1);
     } else if (!strcmp(kind, "rgb-xyz-v2")) {
@@ -223,16 +242,18 @@ static int make(const char *kind) {
     return 0;
 }
 
-static int convert(const char *path, int intent, int channels) {
+static int convert(const char *path, int intent, int channels, int bytes) {
     cmsHPROFILE in = cmsOpenProfileFromFile(path, "r");
     if (in == NULL) return 3;
     cmsHPROFILE out = cmsCreate_sRGBProfile();
-    cmsUInt32Number format = channels == 1 ? TYPE_GRAY_8 : channels == 3 ? TYPE_RGB_8 : TYPE_CMYK_8;
+    cmsUInt32Number format = bytes == 2
+        ? (channels == 1 ? TYPE_GRAY_16 : channels == 3 ? TYPE_RGB_16 : TYPE_CMYK_16)
+        : (channels == 1 ? TYPE_GRAY_8 : channels == 3 ? TYPE_RGB_8 : TYPE_CMYK_8);
     cmsHTRANSFORM x = cmsCreateTransform(in, format, out, TYPE_RGB_FLT, intent, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE);
     if (x == NULL) return 4;
-    unsigned char sample[4];
+    unsigned char sample[8];
     float rgb[3];
-    while (fread(sample, 1, channels, stdin) == (size_t) channels) {
+    while (fread(sample, bytes, channels, stdin) == (size_t) channels) {
         cmsDoTransform(x, sample, rgb, 1);
         fwrite(rgb, sizeof(float), 3, stdout);
     }
@@ -244,7 +265,11 @@ static int convert(const char *path, int intent, int channels) {
 
 int main(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "make")) return make(argv[2]);
-    if (argc == 5 && !strcmp(argv[1], "convert")) return convert(argv[2], atoi(argv[3]), atoi(argv[4]));
-    fprintf(stderr, "usage: %s make KIND | convert PROFILE INTENT CHANNELS\n", argv[0]);
+    if ((argc == 5 || argc == 6) && !strcmp(argv[1], "convert")) {
+        int bytes = argc == 6 ? atoi(argv[5]) : 1;
+        if (bytes != 1 && bytes != 2) return 2;
+        return convert(argv[2], atoi(argv[3]), atoi(argv[4]), bytes);
+    }
+    fprintf(stderr, "usage: %s make KIND | convert PROFILE INTENT CHANNELS [BYTES]\n", argv[0]);
     return 2;
 }

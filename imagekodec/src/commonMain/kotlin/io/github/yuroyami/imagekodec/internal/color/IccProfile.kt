@@ -56,7 +56,9 @@ internal class IccProfile private constructor(
         return when (type(at)) {
             "curv" -> {
                 val count = u32(at + 8)
-                if (count > (end - at - 12) / 2) return null
+                // lcms2 refuses a table of more than 0x7FFF entries (Type_Curve_Read), and its
+                // fixed point needs no more.
+                if (count > 0x7FFF || count > (end - at - 12) / 2) return null
                 val n = count.toInt()
                 val curve = when (n) {
                     0 -> IccCurve.Identity
@@ -130,7 +132,7 @@ internal sealed class IccCurve {
      */
     class Table(private val samples: IntArray) : IccCurve() {
         override fun eval(x: Double): Double {
-            val v = (x * 65535.0 + 0.5).toInt().coerceIn(0, 65535)
+            val v = IccLut.quickSaturateWord(x * 65535.0)
             val domain = samples.size - 1
             if (v == 0xFFFF || domain == 0) return samples[domain] / 65535.0
             var fixed = domain * v
@@ -139,7 +141,8 @@ internal sealed class IccCurve {
             val rest = fixed and 0xFFFF
             val y0 = samples[cell]
             val y1 = samples[cell + 1]
-            return ((((y1 - y0) * rest + 0x8000) shr 16) + y0) / 65535.0
+            // LinearInterp in unsigned 32 bits, which a step of the whole range overflows.
+            return (((((y1 - y0) * rest + 0x8000) ushr 16) + y0) and 0xFFFF) / 65535.0
         }
     }
 

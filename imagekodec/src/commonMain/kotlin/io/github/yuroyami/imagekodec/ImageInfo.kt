@@ -111,6 +111,13 @@ public class ImageInfo(
     /** True when [frameCount] > 1. */
     public val isAnimated: Boolean get() = frameCount > 1
 
+    /**
+     * The colour channels the file stores, before any palette or conversion: 1 for gray, 3 for
+     * RGB or YCbCr, 4 for CMYK or YCCK, and 0 where the probe does not say. A profile for
+     * another space does not fit the image and converts nothing.
+     */
+    internal var colorChannels: Int = 0
+
     /** [width] after [orientation] is applied: what the user will actually see. */
     public val displayWidth: Int get() = if (orientation.swapsAxes) height else width
 

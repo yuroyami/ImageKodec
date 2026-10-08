@@ -81,6 +81,10 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 
 public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/ImageKodec;
+	public final fun convertCmykToSrgb (II[BLio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun convertCmykToSrgb (II[SLio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public static synthetic fun convertCmykToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;II[BLio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun convertCmykToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;II[SLio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public final fun convertToSrgb (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public final fun convertToSrgb (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun convertToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;

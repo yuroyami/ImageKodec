@@ -39,8 +39,15 @@ internal object Zlib {
      * memory is allocated. PNG/TIFF callers pass the exact expected size
      * computed from the headers, so anything larger is malformed by definition;
      * that exact size also preallocates the output buffer (no growth copies).
+     * A caller whose [maximumSize] is only a ceiling passes a [sizeHint] of its
+     * own, or 0 to let the buffer grow, so a small stream does not take the
+     * whole ceiling's memory.
      */
-    fun decompress(input: ByteArray, maximumSize: Long): ByteArray {
+    fun decompress(
+        input: ByteArray,
+        maximumSize: Long,
+        sizeHint: Int = if (maximumSize <= Int.MAX_VALUE) maximumSize.toInt() else 0,
+    ): ByteArray {
         require(maximumSize > 0) { "maximumSize must be > 0" }
         if (input.size < 2) throw InflateException(InflateError.INVALID_ZLIB_HEADER)
 
@@ -55,7 +62,7 @@ internal object Zlib {
         return Inflate.inflate(
             input,
             offset = 2,
-            sizeHint = if (maximumSize <= Int.MAX_VALUE) maximumSize.toInt() else 0,
+            sizeHint = sizeHint,
             maxOutput = maximumSize,
         )
     }

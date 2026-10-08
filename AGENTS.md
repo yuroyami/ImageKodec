@@ -100,3 +100,13 @@ being true.
 - ffmpeg 6 misreads the lossless difference -32768 (category 16, no extra bits) and
   reads a three-component 4:4:4 lossless file as RGB; its `ljpeg` encoder writes BGR
   through a private 9-bit transform no other decoder knows (#19).
+- lcms2 interpolates every CLUT an ICC profile holds in 16-bit fixed point, even inside a
+  floating-point transform (`EvaluateCLUTfloatIn16`), and its `LinearInterp` works in
+  unsigned 32 bits, which a two-entry table overflows in signed arithmetic. A port in
+  doubles lands a 16-bit step off now and then (#108).
+- lcms2 leaves out a black point compensation or absolute colorimetric layer whose matrix
+  and offset sum to within 0.002 of nothing (`IsEmptyLayer`), so a profile whose black is
+  almost zero converts as if it had none (#108).
+- lcms2 writes a `lut16Type` whose header gives the first curve's length and then each curve
+  at its own, and a gamma of 1 is two entries long, so curves of different kinds make a
+  broken file. `tools/icc_lcms.c` tabulates every curve at one length (#108).

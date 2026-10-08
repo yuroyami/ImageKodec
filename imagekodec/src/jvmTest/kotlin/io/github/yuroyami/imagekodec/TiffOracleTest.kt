@@ -182,6 +182,27 @@ class TiffOracleTest {
         }
     }
 
+    /** CMYK separations (photometric 5) draw exactly as libtiff's RGBA interface draws them, chunky or in planes. */
+    @Test
+    fun cmykMatchesLibtiff() {
+        assumeTrue("tiff2rgba not installed", Tools.hasAll("tiff2rgba"))
+        val w = 29
+        val h = 13
+        val random = kotlin.random.Random(55)
+        val ink = IntArray(w * h * 4) { random.nextInt(256) }
+        for ((name, bytes) in listOf(
+            "chunky" to CmykTiffs.tiff(w, h, ink),
+            "planar" to CmykTiffs.tiff(w, h, CmykTiffs.planes(ink, 4), planar = true),
+        )) {
+            val input = temp("cmyk-$name", ".tif").apply { writeBytes(bytes) }
+            val decoded = temp("cmyk-$name-rgba", ".tif")
+            assertEquals(0, run(Tools.require("tiff2rgba").path, "-c", "none", input.path, decoded.path))
+            val reference = assertNotNull(ImageIO.read(decoded))
+            val ours = ImageKodec.decode(bytes)
+            for (y in 0 until h) for (x in 0 until w) assertEquals(reference.getRGB(x, y), ours[x, y], "$name at $x, $y")
+        }
+    }
+
     @Test
     fun stripBaselineStillAgrees() {
         assumeTrue("TIFF tools not installed", tools())

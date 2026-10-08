@@ -124,7 +124,7 @@ internal object ImageProbe {
             isDecodable = reason == null,
             unsupportedReason = reason,
             colorProfile = color.profile(),
-        )
+        ).also { it.colorChannels = if (colorType == 0 || colorType == 4) 1 else 3 }
     }
 
     // --- JPEG -------------------------------------------------------------------
@@ -176,7 +176,7 @@ internal object ImageProbe {
                 isDecodable = why == null,
                 unsupportedReason = why,
                 colorProfile = ColorChunks.profile(ColorChunks.jpegIcc(data)),
-            )
+            ).also { it.colorChannels = components }
         }
     }
 
@@ -240,7 +240,7 @@ internal object ImageProbe {
             // rule out. A malformed or bomb-sized file still fails at decode.
             isDecodable = true,
             colorProfile = ColorChunks.profile(icc),
-        )
+        ).also { it.colorChannels = 3 }
     }
 
     private fun skipSubBlocks(r: ByteReader) {
@@ -295,7 +295,7 @@ internal object ImageProbe {
                 isDecodable = inner.isDecodable,
                 unsupportedReason = inner.unsupportedReason,
                 colorProfile = inner.colorProfile,
-            )
+            ).also { it.colorChannels = inner.colorChannels }
         }
 
         // 32-bit BI_RGB alpha is usually a lie (all zero); BI_BITFIELDS/V4/V5 with
@@ -320,7 +320,7 @@ internal object ImageProbe {
                 else -> null
             },
             colorProfile = ColorChunks.profile(ColorChunks.bmpIcc(data)),
-        )
+        ).also { it.colorChannels = 3 }
     }
 
     // --- TIFF -------------------------------------------------------------------
@@ -363,6 +363,8 @@ internal object ImageProbe {
         var jpegProc = 1
         var predictor = 1
         var t4Options = 0
+        var inkSet = 1
+        var inks = 4
         var sampleFormats: IntArray? = null
         var referenceOffset = -1
         var referenceType = 0
@@ -422,6 +424,8 @@ internal object ImageProbe {
                 512 -> jpegProc = single() ?: jpegProc
                 292 -> t4Options = single() ?: t4Options
                 317 -> predictor = single() ?: predictor
+                332 -> inkSet = single() ?: inkSet
+                334 -> inks = single() ?: inks
                 338 -> {
                     if (type != 3 || n !in 0..15) {
                         throw ImageDecodeException("TIFF: ExtraSamples requires up to 15 SHORT values")
@@ -465,6 +469,13 @@ internal object ImageProbe {
         val sampleFormat = sampleFormats?.firstOrNull { it != 1 && it != 4 } ?: 1
         val reason = tiffUnsupported(bits, compression, photometric, planar, predictor, t4Options, sampleFormat)
             ?: when {
+                photometric != 5 -> null
+                inkSet != 1 -> "TIFF InkSet $inkSet (inks other than CMYK)"
+                inks != 4 -> "TIFF with $inks inks (CMYK only)"
+                bits != 8 && bits != 16 -> "TIFF CMYK with $bits-bit samples (8 or 16)"
+                else -> null
+            }
+            ?: when {
                 compression != 6 -> null
                 planar == 2 && spp > 1 -> "TIFF old-style JPEG in separate planes"
                 jpegProc == 14 -> "TIFF old-style lossless JPEG"
@@ -485,7 +496,14 @@ internal object ImageProbe {
             unsupportedReason = reason,
             pageCount = chain.size,
             colorProfile = ColorChunks.profile(icc),
-        )
+        ).also {
+            it.colorChannels = when (photometric) {
+                0, 1 -> 1
+                2, 3, 6 -> 3
+                5 -> 4
+                else -> 0
+            }
+        }
     }
 
     /**
@@ -514,7 +532,7 @@ internal object ImageProbe {
         predictor !in intArrayOf(1, 2) -> "TIFF predictor $predictor"
         // Horizontal differencing is only implemented for whole-byte samples.
         predictor == 2 && bits != 8 && bits != 16 -> "TIFF predictor 2 with $bits-bit samples"
-        photometric >= 0 && photometric !in intArrayOf(0, 1, 2, 3, 6) ->
+        photometric >= 0 && photometric !in intArrayOf(0, 1, 2, 3, 5, 6) ->
             "TIFF photometric interpretation $photometric"
         else -> null
     }
@@ -759,7 +777,7 @@ internal object ImageProbe {
             isDecodable = reason == null,
             unsupportedReason = reason,
             colorProfile = ColorChunks.profile(icc),
-        )
+        ).also { it.colorChannels = 3 }
     }
 
     /**

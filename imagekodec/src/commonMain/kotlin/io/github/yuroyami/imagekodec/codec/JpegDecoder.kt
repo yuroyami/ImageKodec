@@ -6,6 +6,7 @@ import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
+import io.github.yuroyami.imagekodec.internal.color.Ink
 import io.github.yuroyami.imagekodec.reducedBy
 import kotlin.math.PI
 import kotlin.math.cos
@@ -2183,10 +2184,10 @@ internal object JpegDecoder {
         val model = colorModel(j)
         val p = j.precision
         val max = (1 shl p) - 1
-        val center = 1L shl (p - 1)
         val channels = if (model == ColorModel.GRAY) 1 else 3
         val out = ShortArray(j.imgX * j.imgY * channels)
         fun ink(x: Int, k: Int): Int = ((x.toLong() * k + max / 2) / max).toInt()
+        val rgb = IntArray(3)
         forEachWideRow(j) { row, rows ->
             var at = row * j.imgX * channels
             for (i in 0 until j.imgX) {
@@ -2206,13 +2207,8 @@ internal object JpegDecoder {
                         r = ink(rows[0][i], k); g = ink(rows[1][i], k); b = ink(rows[2][i], k)
                     }
                     else -> {
-                        // stbi__YCbCr_to_RGB_row's fixed point, centred on the precision's middle
-                        val yFixed = (rows[0][i].toLong() shl 20) + (1L shl 19)
-                        val cb0 = rows[1][i] - center
-                        val cr0 = rows[2][i] - center
-                        r = ((yFixed + cr0 * FIX_1_40200) shr 20).toInt().coerceIn(0, max)
-                        g = ((yFixed + cr0 * -FIX_0_71414 + ((cb0 * -FIX_0_34414) and -65536L)) shr 20).toInt().coerceIn(0, max)
-                        b = ((yFixed + cb0 * FIX_1_77200) shr 20).toInt().coerceIn(0, max)
+                        wideYcc(rows, i, p, rgb)
+                        r = rgb[0]; g = rgb[1]; b = rgb[2]
                         if (model == ColorModel.YCCK) {
                             val k = rows[3][i]
                             r = ink(max - r, k); g = ink(max - g, k); b = ink(max - b, k)
@@ -2225,6 +2221,20 @@ internal object JpegDecoder {
             }
         }
         return KiteBitmap16(j.imgX, j.imgY, channels, out)
+    }
+
+    /**
+     * The YCbCr samples at [i] of [rows], [p] bits deep, as RGB into [out], with
+     * stbi__YCbCr_to_RGB_row's fixed point centred on the precision's middle.
+     */
+    private fun wideYcc(rows: Array<IntArray>, i: Int, p: Int, out: IntArray) {
+        val max = (1 shl p) - 1
+        val yFixed = (rows[0][i].toLong() shl 20) + (1L shl 19)
+        val cb0 = rows[1][i] - (1L shl (p - 1))
+        val cr0 = rows[2][i] - (1L shl (p - 1))
+        out[0] = ((yFixed + cr0 * FIX_1_40200) shr 20).toInt().coerceIn(0, max)
+        out[1] = ((yFixed + cr0 * -FIX_0_71414 + ((cb0 * -FIX_0_34414) and -65536L)) shr 20).toInt().coerceIn(0, max)
+        out[2] = ((yFixed + cb0 * FIX_1_77200) shr 20).toInt().coerceIn(0, max)
     }
 
     /** Passes over the entropy-coded data of a skipped scan, its restart markers included, to the marker after it. */
@@ -2410,6 +2420,74 @@ internal object JpegDecoder {
     fun decode16(input: ByteArray): KiteBitmap16 {
         val j = decodeFrame(input, 0)
         return if (wide(j)) wideBitmap(j) else KiteBitmap16.widened(bitmap(j), alpha = false)
+    }
+
+    /**
+     * The [Ink] of [input] at the size [decode] gives with [scale], or null when the frame is not
+     * CMYK or YCCK. The samples are Adobe's, which store 255 for no ink, so CMYK ink is 255 less
+     * each sample, and YCCK's YCbCr becomes the ink of cyan, magenta and yellow directly (libjpeg's
+     * ycck_cmyk_convert, inverted back), with black stored as CMYK's.
+     */
+    fun decodeInk(input: ByteArray, scale: Int = 0): Ink? {
+        val decoded = decodeComponents(input, scale)
+        val model = decoded.model
+        if (model != ColorModel.CMYK && model != ColorModel.YCCK) return null
+        val c = decoded.components
+        val w = c.width
+        val samples = c.samples
+        val ink = ByteArray(w * c.height * 4)
+        if (model == ColorModel.CMYK) {
+            for (i in ink.indices) ink[i] = (255 - (samples[i].toInt() and 0xFF)).toByte()
+        } else {
+            val y = ByteArray(w)
+            val cb = ByteArray(w)
+            val cr = ByteArray(w)
+            val rgb = IntArray(w)
+            for (row in 0 until c.height) {
+                val base = row * w * 4
+                for (i in 0 until w) {
+                    y[i] = samples[base + 4 * i]; cb[i] = samples[base + 4 * i + 1]; cr[i] = samples[base + 4 * i + 2]
+                }
+                ycbcrToRgbRow(rgb, 0, y, 0, cb, 0, cr, 0, w)
+                for (i in 0 until w) {
+                    val p = rgb[i]
+                    ink[base + 4 * i] = (p shr 16).toByte()
+                    ink[base + 4 * i + 1] = (p shr 8).toByte()
+                    ink[base + 4 * i + 2] = p.toByte()
+                    ink[base + 4 * i + 3] = (255 - (samples[base + 4 * i + 3].toInt() and 0xFF)).toByte()
+                }
+            }
+        }
+        return Ink(w, c.height, ink = ink)
+    }
+
+    /** [decodeInk] at 16 bits, every bit of a deep frame kept as [decode16] keeps it. */
+    fun decodeInk16(input: ByteArray): Ink? {
+        val j = decodeFrame(input, 0)
+        val model = colorModel(j)
+        if (model != ColorModel.CMYK && model != ColorModel.YCCK) return null
+        if (!wide(j)) {
+            val narrow = decodeInk(input) ?: return null
+            val narrowInk = narrow.ink!!
+            return Ink(narrow.width, narrow.height, ink16 = ShortArray(narrowInk.size) { ((narrowInk[it].toInt() and 0xFF) * 257).toShort() })
+        }
+        val p = j.precision
+        val max = (1 shl p) - 1
+        val out = ShortArray(j.imgX * j.imgY * 4)
+        val rgb = IntArray(3)
+        forEachWideRow(j) { row, rows ->
+            var at = row * j.imgX * 4
+            for (i in 0 until j.imgX) {
+                if (model == ColorModel.CMYK) {
+                    for (k in 0 until 3) rgb[k] = max - rows[k][i]
+                } else {
+                    wideYcc(rows, i, p, rgb)
+                }
+                for (k in 0 until 3) out[at++] = to16(rgb[k], p).toShort()
+                out[at++] = to16(max - rows[3][i], p).toShort()
+            }
+        }
+        return Ink(j.imgX, j.imgY, ink16 = out)
     }
 
     /** The 8-bit frame [j] through upsampling and colour conversion, at its reduced size. */

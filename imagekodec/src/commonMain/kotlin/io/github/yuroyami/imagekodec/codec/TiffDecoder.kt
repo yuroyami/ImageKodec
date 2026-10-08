@@ -5,6 +5,7 @@ import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
+import io.github.yuroyami.imagekodec.internal.color.Ink
 import io.github.yuroyami.imagekodec.internal.flate.InflateException
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 
@@ -23,7 +24,9 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    Deflate (8 / 32946), PackBits (32773)
  *  - photometric 0/1 (bilevel + gray, either polarity, optional alpha), 2 (RGB,
  *    optional associated or straight alpha via ExtraSamples), 3 (palette, 16-bit
- *    ColorMap entries), 6 (**YCbCr**, including chroma subsampling in both the
+ *    ColorMap entries), 5 (**CMYK** separations, InkSet 1, at 8 or 16 bits, drawn
+ *    as libtiff's RGBA interface draws them, or through the page's profile by
+ *    [decodeInk]), 6 (**YCbCr**, including chroma subsampling in both the
  *    chunky unit layout and separate planes)
  *  - bits per sample 1, 2, 4, 8 and 16 ([decode] narrows 16-bit to its high byte,
  *    [decode16] keeps it whole), horizontal-differencing predictor (2) for
@@ -130,10 +133,17 @@ internal object TiffDecoder {
     /** Decodes page [page] at 16 bits a sample, in the channels it stores. */
     fun decode16(data: ByteArray, page: Int = 0): KiteBitmap16 = read(data, page).wide()
 
+    /**
+     * The ink of page [page] when it is CMYK, at 16 bits with [wide] and else at 8, for
+     * conversion through its profile; null for any other photometric interpretation.
+     */
+    fun decodeInk(data: ByteArray, page: Int = 0, wide: Boolean = false): Ink? = read(data, page).ink(wide)
+
     /** A page whose samples are read and ready to convert, at 8 or at 16 bits a channel. */
     private interface Raster {
         fun argb(): KiteBitmap
         fun wide(): KiteBitmap16
+        fun ink(wide: Boolean): Ink?
     }
 
     private fun read(data: ByteArray, page: Int): Raster {
@@ -308,6 +318,16 @@ internal object TiffDecoder {
         }
         val subH = subSampling[0].toInt()
         val subV = subSampling[1].toInt()
+        if (photometric == 5) {
+            // TIFF 6.0 section 16: InkSet 1 is CMYK in that order; any other set of inks
+            // has no meaning without a separation of its own.
+            val inkSet = optionalValues(332, "InkSet", 3, 1)?.first() ?: 1L
+            if (inkSet != 1L) throw UnsupportedImageException("TIFF: InkSet $inkSet (inks other than CMYK) is not supported")
+            val inks = optionalValues(334, "NumberOfInks", 3, 1)?.first() ?: 4L
+            if (inks != 4L) throw UnsupportedImageException("TIFF: $inks inks are not supported (CMYK only)")
+            if (spp < 4) err("CMYK with $spp samples")
+            if (bits != 8 && bits != 16) throw UnsupportedImageException("TIFF: CMYK with $bits-bit samples is not supported (8 or 16)")
+        }
         if (photometric == 6) {
             if (subH !in intArrayOf(1, 2, 4) || subV !in intArrayOf(1, 2, 4)) {
                 err("YCbCr subsampling ${subH}x$subV is not legal")
@@ -574,6 +594,20 @@ internal object TiffDecoder {
                         argb[y * width + x] = (scale8(opacity) shl 24) or (rr shl 16) or (gg shl 8) or bb
                     }
                 }
+                5 -> for (y in 0 until height) for (x in 0 until width) {
+                    val opacity = opacity(x, y)
+                    val rgb = if (alpha.associated && opacity == 0) 0 else if (bits == 8) {
+                        // putRGBcontig8bitCMYKtile, truncating as libtiff does.
+                        val k = 255 - straight(sample(x, y, 3), opacity)
+                        fun channel(c: Int) = k * (255 - straight(sample(x, y, c), opacity)) / 255
+                        (channel(0) shl 16) or (channel(1) shl 8) or channel(2)
+                    } else {
+                        // libtiff draws no 16-bit CMYK; this is the high byte of what wide() gives.
+                        fun channel(c: Int) = cmyk16(straight(sample(x, y, c), opacity), straight(sample(x, y, 3), opacity)) ushr 8
+                        (channel(0) shl 16) or (channel(1) shl 8) or channel(2)
+                    }
+                    argb[y * width + x] = (scale8(opacity) shl 24) or rgb
+                }
                 6 -> {
                     val ranges = references?.ycbcrTables()
                     for (y in 0 until height) for (x in 0 until width) {
@@ -677,12 +711,55 @@ internal object TiffDecoder {
                     }
                     KiteBitmap16(width, height, channels, out)
                 }
+                5 -> if (bits == 8) {
+                    // Exactly what argb() draws, widened.
+                    KiteBitmap16.widened(argb(), alpha = withAlpha)
+                } else {
+                    val channels = if (withAlpha) 4 else 3
+                    val out = ShortArray(width * height * channels)
+                    for (y in 0 until height) for (x in 0 until width) {
+                        val opacity = opacity(x, y)
+                        val at = (y * width + x) * channels
+                        if (!(alpha.associated && opacity == 0)) {
+                            val k = straight(sample(x, y, 3), opacity)
+                            for (c in 0 until 3) out[at + c] = cmyk16(straight(sample(x, y, c), opacity), k).toShort()
+                        }
+                        if (withAlpha) out[at + 3] = opacity.toShort()
+                    }
+                    KiteBitmap16(width, height, channels, out)
+                }
                 // YCbCr is 8-bit only, so its 8-bit conversion widens without loss.
                 else -> KiteBitmap16.widened(argb(), alpha = false)
             }
         }
+
+        override fun ink(wide: Boolean): Ink? {
+            if (pixels != 5) return null
+            val n = width * height
+            val withAlpha = alpha.sample >= 0
+            val ink8 = if (wide) null else ByteArray(n * 4)
+            val ink16 = if (wide) ShortArray(n * 4) else null
+            val alpha8 = if (withAlpha && !wide) ByteArray(n) else null
+            val alpha16 = if (withAlpha && wide) ShortArray(n) else null
+            for (y in 0 until height) for (x in 0 until width) {
+                val i = y * width + x
+                val opacity = opacity(x, y)
+                for (c in 0 until 4) {
+                    // Associated alpha over nothing leaves no ink to read.
+                    val v = if (alpha.associated && opacity == 0) 0 else straight(sample(x, y, c), opacity)
+                    if (ink8 != null) ink8[4 * i + c] = scale8(v).toByte()
+                    else ink16!![4 * i + c] = (if (bits == 8) v * 257 else v).toShort()
+                }
+                if (alpha8 != null) alpha8[i] = scale8(opacity).toByte()
+                if (alpha16 != null) alpha16[i] = (if (bits == 8) opacity * 257 else opacity).toShort()
+            }
+            return Ink(width, height, ink8, ink16, alpha8, alpha16)
+        }
         }
     }
+
+    /** A 16-bit CMYK colorant [c] under black [k] as RGB, the 16-bit form of libtiff's formula, rounded. */
+    private fun cmyk16(c: Int, k: Int): Int = (((65535L - k) * (65535 - c) + 32767) / 65535).toInt()
 
     /**
      * JPEG block [index]: the shared [tables] with their EOI removed, then the block's

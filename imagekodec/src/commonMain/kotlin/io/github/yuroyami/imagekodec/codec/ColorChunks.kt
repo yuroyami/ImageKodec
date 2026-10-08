@@ -40,7 +40,7 @@ internal object ColorChunks {
             val nul = body.indexOf(0)
             if (nul !in 1..79 || nul + 2 > body.size || body[nul + 1].toInt() != 0) return
             val profile = try {
-                Zlib.decompress(body.copyOfRange(nul + 2, body.size), maximumSize = MAX_ICC)
+                Zlib.decompress(body.copyOfRange(nul + 2, body.size), maximumSize = MAX_ICC, sizeHint = 0)
             } catch (_: Exception) {
                 return
             }

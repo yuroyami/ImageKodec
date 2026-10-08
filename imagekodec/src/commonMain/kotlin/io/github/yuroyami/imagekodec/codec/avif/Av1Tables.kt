@@ -884,7 +884,7 @@ internal object Av1Tables {
     internal val tables: List<IntArray> get() = all.toList()
 
     private fun unpack(text: String, counts: IntArray): Array<IntArray> {
-        val bytes = Zlib.decompress(base64(text), maximumSize = 1L shl 22)
+        val bytes = Zlib.decompress(base64(text), maximumSize = 1L shl 22, sizeHint = 0)
         var at = 0
         fun next(): Int {
             var z = 0L
