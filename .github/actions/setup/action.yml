@@ -28,7 +28,7 @@ runs:
 
     # Each job saves its own Gradle cache. A job that only restored another job's cache had
     # to download its test libraries on every run, and one failed download failed the job.
-    - uses: gradle/actions/setup-gradle@v5
+    - uses: gradle/actions/setup-gradle@v6
 
     # The Kotlin/Native compiler, its LLVM and the caches it builds for each dependency are
     # more than a gigabyte, and a download and a rebuild of them cost minutes. Every job of
