@@ -22,6 +22,8 @@ internal object ColorChunks {
         var gamma: Int? = null
         var chromaticities: IntArray? = null
         var cicp: IntArray? = null
+        var contentLight: IntArray? = null
+        var masteringDisplay: IntArray? = null
 
         /** Takes [body] of chunk [type] if it is a color chunk; the first of each kind counts. */
         fun take(type: String, body: ByteArray) {
@@ -33,6 +35,8 @@ internal object ColorChunks {
                     chromaticities = IntArray(8) { u32be(body, it * 4).toInt() }.takeIf { v -> v.all { it >= 0 } }
                 }
                 "cICP" -> if (cicp == null && body.size == 4) cicp = IntArray(4) { body[it].toInt() and 0xFF }
+                "cLLi" -> if (contentLight == null && body.size == 8) contentLight = lightLevels(body, 0, 2)
+                "mDCv" -> if (masteringDisplay == null && body.size == 24) masteringDisplay = masteringDisplay(body, 0)
             }
         }
 
@@ -51,8 +55,28 @@ internal object ColorChunks {
         }
 
         fun profile(): ColorProfile? =
-            if (icc == null && srgbIntent == null && gamma == null && chromaticities == null && cicp == null) null
-            else ColorProfile(icc, iccName, srgbIntent, gamma, chromaticities, cicp)
+            if (icc == null && srgbIntent == null && gamma == null && chromaticities == null && cicp == null &&
+                contentLight == null && masteringDisplay == null
+            ) {
+                null
+            } else {
+                ColorProfile(icc, iccName, srgbIntent, gamma, chromaticities, cicp, contentLight, masteringDisplay).also { it.png = true }
+            }
+    }
+
+    /** [count] big-endian 32-bit light levels from [at], capped at Int.MAX_VALUE, which no display reaches. */
+    fun lightLevels(d: ByteArray, at: Int, count: Int): IntArray =
+        IntArray(count) { u32be(d, at + 4 * it).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
+
+    /**
+     * A mastering display as PNG's `mDCv` and the ISOBMFF `mdcv` box both lay it out: red,
+     * green, blue and white x and y in 16 bits each, then two 32-bit luminances.
+     */
+    fun masteringDisplay(d: ByteArray, at: Int): IntArray {
+        val out = IntArray(10)
+        for (i in 0 until 8) out[i] = ((d[at + 2 * i].toInt() and 0xFF) shl 8) or (d[at + 2 * i + 1].toInt() and 0xFF)
+        lightLevels(d, at + 16, 2).copyInto(out, 8)
+        return out
     }
 
     /**

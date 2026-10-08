@@ -91,7 +91,7 @@ internal object ImageProbe {
                 }
                 // Pixel data begins: everything we care about is legally before it.
                 "IDAT", "fdAT", "IEND" -> break@walk
-                "iCCP", "sRGB", "gAMA", "cHRM", "cICP" -> {
+                "iCCP", "sRGB", "gAMA", "cHRM", "cICP", "cLLi", "mDCv" -> {
                     if (n > r.remaining) break@walk
                     color.take(type, r.bytes(n))
                 }

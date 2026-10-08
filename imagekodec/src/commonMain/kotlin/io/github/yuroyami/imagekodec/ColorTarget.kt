@@ -6,9 +6,14 @@ package io.github.yuroyami.imagekodec
  *
  * - [Source] keeps the samples as the file stores them, whatever colour space its
  *   [ColorProfile] declares, which is what every decode does by default.
- * - [Srgb] converts them to sRGB through the file's embedded ICC profile, for drawing on a
- *   screen that shows sRGB, as browsers convert. A file that declares nothing, or declares
- *   sRGB, comes back as [Source] would give it.
+ * - [Srgb] converts them to sRGB through what the file declares, for drawing on a screen
+ *   that shows sRGB, as browsers convert: its ICC profile, its H.273 code points (PNG's
+ *   `cICP`, an AVIF's `nclx`), or PNG's `gAMA` and `cHRM`, in the order [ColorProfile] gives.
+ *   HDR (PQ or HLG) is tone-mapped to SDR as mpv's libplacebo maps it: BT.2408's 203 cd/m²
+ *   diffuse white becomes sRGB white, highlights roll off by BT.2390's curve from the content's
+ *   peak, and a colour sRGB cannot show desaturates toward its own luminance. Samples deeper
+ *   than 8 bits convert at their own precision before an 8-bit decode narrows them. A file
+ *   that declares nothing, or declares sRGB, comes back as [Source] would give it.
  */
 public sealed class ColorTarget {
     /** The samples as the file stores them. */

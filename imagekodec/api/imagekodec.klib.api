@@ -94,12 +94,14 @@ final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuro
 }
 
 final class io.github.yuroyami.imagekodec/ColorProfile { // io.github.yuroyami.imagekodec/ColorProfile|null[0]
-    constructor <init>(kotlin/ByteArray? = ..., kotlin/String? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/IntArray? = ..., kotlin/IntArray? = ...) // io.github.yuroyami.imagekodec/ColorProfile.<init>|<init>(kotlin.ByteArray?;kotlin.String?;kotlin.Int?;kotlin.Int?;kotlin.IntArray?;kotlin.IntArray?){}[0]
+    constructor <init>(kotlin/ByteArray? = ..., kotlin/String? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/IntArray? = ..., kotlin/IntArray? = ..., kotlin/IntArray? = ..., kotlin/IntArray? = ...) // io.github.yuroyami.imagekodec/ColorProfile.<init>|<init>(kotlin.ByteArray?;kotlin.String?;kotlin.Int?;kotlin.Int?;kotlin.IntArray?;kotlin.IntArray?;kotlin.IntArray?;kotlin.IntArray?){}[0]
 
     final val chromaticities // io.github.yuroyami.imagekodec/ColorProfile.chromaticities|{}chromaticities[0]
         final fun <get-chromaticities>(): kotlin/IntArray? // io.github.yuroyami.imagekodec/ColorProfile.chromaticities.<get-chromaticities>|<get-chromaticities>(){}[0]
     final val cicp // io.github.yuroyami.imagekodec/ColorProfile.cicp|{}cicp[0]
         final fun <get-cicp>(): kotlin/IntArray? // io.github.yuroyami.imagekodec/ColorProfile.cicp.<get-cicp>|<get-cicp>(){}[0]
+    final val contentLight // io.github.yuroyami.imagekodec/ColorProfile.contentLight|{}contentLight[0]
+        final fun <get-contentLight>(): kotlin/IntArray? // io.github.yuroyami.imagekodec/ColorProfile.contentLight.<get-contentLight>|<get-contentLight>(){}[0]
     final val gamma // io.github.yuroyami.imagekodec/ColorProfile.gamma|{}gamma[0]
         final fun <get-gamma>(): kotlin/Int? // io.github.yuroyami.imagekodec/ColorProfile.gamma.<get-gamma>|<get-gamma>(){}[0]
     final val icc // io.github.yuroyami.imagekodec/ColorProfile.icc|{}icc[0]
@@ -110,6 +112,8 @@ final class io.github.yuroyami.imagekodec/ColorProfile { // io.github.yuroyami.i
         final fun <get-iccDescription>(): kotlin/String? // io.github.yuroyami.imagekodec/ColorProfile.iccDescription.<get-iccDescription>|<get-iccDescription>(){}[0]
     final val iccName // io.github.yuroyami.imagekodec/ColorProfile.iccName|{}iccName[0]
         final fun <get-iccName>(): kotlin/String? // io.github.yuroyami.imagekodec/ColorProfile.iccName.<get-iccName>|<get-iccName>(){}[0]
+    final val masteringDisplay // io.github.yuroyami.imagekodec/ColorProfile.masteringDisplay|{}masteringDisplay[0]
+        final fun <get-masteringDisplay>(): kotlin/IntArray? // io.github.yuroyami.imagekodec/ColorProfile.masteringDisplay.<get-masteringDisplay>|<get-masteringDisplay>(){}[0]
     final val srgbIntent // io.github.yuroyami.imagekodec/ColorProfile.srgbIntent|{}srgbIntent[0]
         final fun <get-srgbIntent>(): kotlin/Int? // io.github.yuroyami.imagekodec/ColorProfile.srgbIntent.<get-srgbIntent>|<get-srgbIntent>(){}[0]
 

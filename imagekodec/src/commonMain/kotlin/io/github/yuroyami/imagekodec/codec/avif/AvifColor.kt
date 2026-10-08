@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
 import io.github.yuroyami.imagekodec.UnsupportedImageException
+import io.github.yuroyami.imagekodec.internal.color.Cicp
 
 /**
  * Planes of YUV samples, or of one gray plane: luma [width] by [height] at [depth] bits,
@@ -47,18 +48,10 @@ internal object AvifColor {
         else -> null
     }
 
+    /** Primaries [code] as [Cicp.primaries] gives them, with CIE XYZ's, and BT.709's, as libavif assumes, for any it lacks. */
     private fun primaries(code: Int): DoubleArray = when (code) {
-        4 -> doubleArrayOf(0.67, 0.33, 0.21, 0.71, 0.14, 0.08, 0.310, 0.316)
-        5 -> doubleArrayOf(0.64, 0.33, 0.29, 0.60, 0.15, 0.06, 0.3127, 0.3290)
-        6, 7 -> doubleArrayOf(0.630, 0.340, 0.310, 0.595, 0.155, 0.070, 0.3127, 0.3290)
-        8 -> doubleArrayOf(0.681, 0.319, 0.243, 0.692, 0.145, 0.049, 0.310, 0.316)
-        9 -> doubleArrayOf(0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290)
         10 -> doubleArrayOf(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0 / 3, 1.0 / 3)
-        11 -> doubleArrayOf(0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.314, 0.351)
-        12 -> doubleArrayOf(0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290)
-        22 -> doubleArrayOf(0.630, 0.340, 0.295, 0.605, 0.155, 0.077, 0.3127, 0.3290)
-        // BT.709, and what libavif assumes for unspecified or unknown primaries.
-        else -> doubleArrayOf(0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290)
+        else -> Cicp.primaries(code) ?: Cicp.primaries(1)!!
     }
 
     /** Kr and Kb of [cicp]'s matrix (H.273 table 4, or equations 32 and 33 for 12); BT.601 when unspecified. */

@@ -5,6 +5,8 @@
  *
  *   cc -O2 -o icc_lcms tools/icc_lcms.c -llcms2 -lm
  *   ./icc_lcms make KIND > profile.icc
+ *   ./icc_lcms make-rgb RX RY GX GY BX BY WX WY GAMMA > profile.icc
+ *   ./icc_lcms convert-rgb RX RY GX GY BX BY WX WY GAMMA INTENT BYTES < samples > rgb
  *   ./icc_lcms convert profile.icc INTENT CHANNELS [BYTES] < samples > rgb
  *
  * make writes a profile of KIND:
@@ -176,6 +178,18 @@ static cmsHPROFILE lutProfile(cmsColorSpaceSignature space, cmsProfileClassSigna
     return h;
 }
 
+/* Writes [h] to stdout and closes it. */
+static int emit(cmsHPROFILE h) {
+    cmsUInt32Number size = 0;
+    cmsSaveProfileToMem(h, NULL, &size);
+    unsigned char *mem = malloc(size);
+    cmsSaveProfileToMem(h, mem, &size);
+    fwrite(mem, 1, size, stdout);
+    free(mem);
+    cmsCloseProfile(h);
+    return 0;
+}
+
 static int make(const char *kind) {
     cmsHPROFILE h = NULL;
     if (!strcmp(kind, "p3-v4")) {
@@ -232,19 +246,10 @@ static int make(const char *kind) {
         fprintf(stderr, "unknown profile kind %s\n", kind);
         return 2;
     }
-    cmsUInt32Number size = 0;
-    cmsSaveProfileToMem(h, NULL, &size);
-    unsigned char *mem = malloc(size);
-    cmsSaveProfileToMem(h, mem, &size);
-    fwrite(mem, 1, size, stdout);
-    free(mem);
-    cmsCloseProfile(h);
-    return 0;
+    return emit(h);
 }
 
-static int convert(const char *path, int intent, int channels, int bytes) {
-    cmsHPROFILE in = cmsOpenProfileFromFile(path, "r");
-    if (in == NULL) return 3;
+static int convertWith(cmsHPROFILE in, int intent, int channels, int bytes) {
     cmsHPROFILE out = cmsCreate_sRGBProfile();
     cmsUInt32Number format = bytes == 2
         ? (channels == 1 ? TYPE_GRAY_16 : channels == 3 ? TYPE_RGB_16 : TYPE_CMYK_16)
@@ -263,13 +268,35 @@ static int convert(const char *path, int intent, int channels, int bytes) {
     return 0;
 }
 
+static int convert(const char *path, int intent, int channels, int bytes) {
+    cmsHPROFILE in = cmsOpenProfileFromFile(path, "r");
+    if (in == NULL) return 3;
+    return convertWith(in, intent, channels, bytes);
+}
+
+/* A v4 RGB profile of the primaries and white, and a power curve, or sRGB's curve for a gamma of 0. */
+static cmsHPROFILE rgbOf(char **v) {
+    double p[6];
+    for (int i = 0; i < 6; i++) p[i] = atof(v[i]);
+    double gamma = atof(v[8]);
+    // cmsBuildGamma's curve is saved as a curv of one u8Fixed8 entry, 2.19998 becoming 2.19922;
+    // lcms2's parametric type 1, ICC's para function 0, keeps the power as s15Fixed16.
+    cmsToneCurve *curve = gamma == 0
+        ? para(4, 2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045, 0, 0)
+        : para(1, gamma, 0, 0, 0, 0, 0, 0);
+    return rgb(atof(v[6]), atof(v[7]), p, curve, 4.3);
+}
+
 int main(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "make")) return make(argv[2]);
+    if (argc == 11 && !strcmp(argv[1], "make-rgb")) return emit(rgbOf(argv + 2));
+    // Saving a profile rounds its colorants to s15Fixed16, so this converts through it unsaved.
+    if (argc == 13 && !strcmp(argv[1], "convert-rgb")) return convertWith(rgbOf(argv + 2), atoi(argv[11]), 3, atoi(argv[12]));
     if ((argc == 5 || argc == 6) && !strcmp(argv[1], "convert")) {
         int bytes = argc == 6 ? atoi(argv[5]) : 1;
         if (bytes != 1 && bytes != 2) return 2;
         return convert(argv[2], atoi(argv[3]), atoi(argv[4]), bytes);
     }
-    fprintf(stderr, "usage: %s make KIND | convert PROFILE INTENT CHANNELS [BYTES]\n", argv[0]);
+    fprintf(stderr, "usage: %s make KIND | make-rgb RX RY GX GY BX BY WX WY GAMMA | convert-rgb ... GAMMA INTENT BYTES | convert PROFILE INTENT CHANNELS [BYTES]\n", argv[0]);
     return 2;
 }

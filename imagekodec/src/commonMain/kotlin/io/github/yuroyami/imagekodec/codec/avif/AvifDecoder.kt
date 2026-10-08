@@ -59,6 +59,8 @@ internal object AvifDecoder {
         val icc: ByteArray?,
         val cicp: AvifCicp?,
         val unsupported: String?,
+        val contentLight: IntArray? = null,
+        val masteringDisplay: IntArray? = null,
     )
 
     fun probe(data: ByteArray): ImageInfo {
@@ -74,7 +76,14 @@ internal object AvifDecoder {
             orientation = p.orientation,
             isDecodable = p.unsupported == null,
             unsupportedReason = p.unsupported,
-            colorProfile = if (p.icc != null || p.cicp != null) ColorProfile(icc = p.icc, cicp = p.cicp?.toIntArray()) else null,
+            colorProfile = if (p.icc != null || p.cicp != null || p.contentLight != null || p.masteringDisplay != null) {
+                ColorProfile(
+                    icc = p.icc, cicp = p.cicp?.toIntArray(),
+                    contentLight = p.contentLight, masteringDisplay = p.masteringDisplay,
+                )
+            } else {
+                null
+            },
         )
     }
 
@@ -253,6 +262,8 @@ internal object AvifDecoder {
             c, item, null, alpha, null, premultiplied, size.first, size.second, itemDepth(c, item, 0), crop,
             orientation(item.property(), item.property()),
             frameCount = 1, loopCount = 1, icc = itemIcc(c, item, 0), cicp = cicp, unsupported = reason,
+            contentLight = itemProperty<AvifProperty.ContentLight>(c, item)?.let { intArrayOf(it.maxContent * 10000, it.maxFrameAverage * 10000) },
+            masteringDisplay = itemProperty<AvifProperty.MasteringDisplay>(c, item)?.values,
         )
     }
 
@@ -287,6 +298,9 @@ internal object AvifDecoder {
             frameCount = track.sizes.size, loopCount = track.playCount,
             icc = (track.properties.firstOrNull { it is AvifProperty.Icc } as AvifProperty.Icc?)?.profile,
             cicp = cicp, unsupported = reason,
+            contentLight = (track.properties.firstOrNull { it is AvifProperty.ContentLight } as AvifProperty.ContentLight?)
+                ?.let { intArrayOf(it.maxContent * 10000, it.maxFrameAverage * 10000) },
+            masteringDisplay = (track.properties.firstOrNull { it is AvifProperty.MasteringDisplay } as AvifProperty.MasteringDisplay?)?.values,
         )
     }
 
@@ -348,6 +362,17 @@ internal object AvifDecoder {
         }
         val first = c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] } ?: return null
         return itemCicp(c, first, depth + 1)
+    }
+
+    /** [item]'s property of type [T], or that of the first image a derived image is made from. */
+    private inline fun <reified T : AvifProperty> itemProperty(c: AvifContainer, item: AvifItem): T? {
+        var at = item
+        repeat(MAX_DEPTH + 1) {
+            at.property<T>()?.let { return it }
+            if (at.type == AV01) return null
+            at = c.referencesFrom(at.id, DIMG).firstOrNull()?.let { c.items[it] } ?: return null
+        }
+        return null
     }
 
     private fun itemIcc(c: AvifContainer, item: AvifItem, depth: Int): ByteArray? {

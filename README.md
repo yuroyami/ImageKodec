@@ -137,9 +137,17 @@ as CMYK printer profiles and many camera profiles are. The conversion is percept
 default, as browsers and lcms2's tools convert, with black point compensation where
 lcms2 applies it. A CMYK or YCCK JPEG and a CMYK TIFF convert from their ink through
 their profile, where a decode without a target draws ink with the usual naive formula.
-A file that declares nothing, declares sRGB, or carries a profile for another colour
-space than its own comes back untouched, as browsers leave it. PNG's `gAMA`, `cHRM`
-and `cICP` chunks are not converted yet (#108).
+PNG's own chunks convert too, in the third edition's order: `cICP`, then `iCCP`, then
+`sRGB`, then `gAMA` with `cHRM`, which mean sRGB's primaries or curve when either stands
+alone, as Chrome reads them. An AVIF's `nclx` code points convert after its profile. HDR
+pictures (PQ or HLG) are tone-mapped to SDR as mpv's libplacebo maps them: 203 cd/m²
+diffuse white (BT.2408) becomes sRGB white, highlights roll off with BT.2390's curve from
+the content's peak (`cLLi` or `clli`, else the mastering display's, else 1000 cd/m²), HLG
+goes through BT.2100's OOTF for a 1000 cd/m² display, and a colour sRGB cannot show
+desaturates toward its own luminance instead of clipping. A file deeper than 8 bits
+converts at full precision before an 8-bit decode narrows it. A file that declares
+nothing, declares sRGB, or carries a profile for another colour space than its own comes
+back untouched, as browsers leave it.
 
 ### Decode a still
 

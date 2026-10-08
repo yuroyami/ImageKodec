@@ -26,6 +26,15 @@ reviewable in the diff.
   CMYK ink from elsewhere, such as a PDF's ICCBased image. A profile for another colour
   space than the image's is ignored, as browsers ignore it.
 
+- PNG's `cICP`, `gAMA` and `cHRM` and an AVIF's `nclx` convert to sRGB too, in the
+  PNG third edition's order (`cICP`, `iCCP`, `sRGB`, `gAMA` with `cHRM`) and AVIF's
+  (profile, then code points), with `cICP`'s narrow range. HDR pictures, PQ and HLG,
+  tone-map to SDR as libplacebo does: BT.2408's 203 cd/m² white, BT.2390's EETF from
+  the content's peak, BT.2100's OOTF for HLG, and gamut mapping toward luminance.
+  `ColorProfile` reports PNG's `cLLi` and `mDCv` and AVIF's `clli` and `mdcv` as
+  `contentLight` and `masteringDisplay`. A file deeper than 8 bits converts at full
+  precision before an 8-bit decode narrows it.
+
 - CMYK TIFF (photometric 5, InkSet 1) decodes at 8 and 16 bits, chunky or in planes,
   with alpha. Without a profile it draws as libtiff's RGBA interface draws it, exactly;
   `decode16` keeps all 16 bits. Other ink sets are named refusals.

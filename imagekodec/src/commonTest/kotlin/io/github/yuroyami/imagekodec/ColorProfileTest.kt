@@ -41,7 +41,7 @@ class ColorProfileTest {
         return header + be32(1) + "desc".encodeToByteArray() + be32(tagAt) + be32(text.size) + text
     }
 
-    private fun be32(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
+    internal fun be32(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
 
     private val sample = KiteBitmap(6, 4, IntArray(24) { argb(0xFF, it * 10, 255 - it * 10, it * 3) })
 
@@ -56,7 +56,7 @@ class ColorProfileTest {
 
     // --- PNG ------------------------------------------------------------------------
 
-    private fun chunk(type: String, body: ByteArray): ByteArray {
+    internal fun chunk(type: String, body: ByteArray): ByteArray {
         val crc = Crc32()
         crc.update(type.encodeToByteArray())
         crc.update(body)
@@ -64,7 +64,7 @@ class ColorProfileTest {
     }
 
     /** [png] with [chunks] put right after its IHDR. */
-    private fun withChunks(png: ByteArray, vararg chunks: ByteArray): ByteArray {
+    internal fun withChunks(png: ByteArray, vararg chunks: ByteArray): ByteArray {
         val ihdrEnd = 8 + 8 + 13 + 4
         return png.copyOf(ihdrEnd) + chunks.fold(ByteArray(0)) { a, b -> a + b } + png.copyOfRange(ihdrEnd, png.size)
     }

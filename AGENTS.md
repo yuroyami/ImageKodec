@@ -110,3 +110,9 @@ being true.
 - lcms2 writes a `lut16Type` whose header gives the first curve's length and then each curve
   at its own, and a gamma of 1 is two entries long, so curves of different kinds make a
   broken file. `tools/icc_lcms.c` tabulates every curve at one length (#108).
+- lcms2 rounds a profile's colorants to s15Fixed16 when it saves one, which moves a dark
+  channel beside a bright one by a dozen 16-bit levels, and saves `cmsBuildGamma` as a
+  `curv` of one u8Fixed8 exponent, 2.19998 becoming 2.19922. Hold an exact conversion to
+  an unsaved profile with parametric curves (`icc_lcms convert-rgb`) (#108).
+- zimg (`zscale`) applies HLG's OOTF to each channel alone, where BT.2100 weighs a pixel by
+  its luminance, so the two agree on grays only (#108).

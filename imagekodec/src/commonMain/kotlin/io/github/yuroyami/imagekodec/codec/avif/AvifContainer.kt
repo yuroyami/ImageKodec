@@ -2,6 +2,7 @@ package io.github.yuroyami.imagekodec.codec.avif
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.UnsupportedImageException
+import io.github.yuroyami.imagekodec.codec.ColorChunks
 
 /** An item property of a HEIF file (ISO/IEC 23008-12 section 6.5) that AVIF reading needs. */
 internal sealed class AvifProperty {
@@ -26,6 +27,12 @@ internal sealed class AvifProperty {
 
     /** `colr` of type `nclx`: the coding-independent code points of ITU-T H.273. */
     class Nclx(val primaries: Int, val transfer: Int, val matrix: Int, val fullRange: Boolean) : AvifProperty()
+
+    /** `clli`: the maximum content and frame-average light levels, in cd/m². */
+    class ContentLight(val maxContent: Int, val maxFrameAverage: Int) : AvifProperty()
+
+    /** `mdcv`: the mastering display, as [io.github.yuroyami.imagekodec.ColorProfile.masteringDisplay] holds it. */
+    class MasteringDisplay(val values: IntArray) : AvifProperty()
 
     /** `colr` of type `prof` or `rICC`: an ICC profile. */
     class Icc(val profile: ByteArray) : AvifProperty()
@@ -232,7 +239,7 @@ internal class AvifContainer(
 
         /** The descriptive properties whose meaning a reader that shows the image may leave aside. */
         private val KNOWN_DESCRIPTIVE = setOf(
-            "pasp", "clli", "mdcv", "cclv", "amve", "a1lx", "rloc", "udes", "altt", "ccst", "reve", "ndwt",
+            "pasp", "cclv", "amve", "a1lx", "rloc", "udes", "altt", "ccst", "reve", "ndwt",
         ).map { fourcc(it) }.toSet()
 
         fun parse(data: ByteArray): AvifContainer {
@@ -439,6 +446,13 @@ internal class AvifContainer(
                     }
                     "prof", "rICC" -> AvifProperty.Icc(r.bytes(r.remaining))
                     else -> AvifProperty.Other(box.type, known = true)
+                }
+                // Descriptive only: a damaged one is set aside rather than failing the image.
+                "clli" -> if (r.remaining < 4) AvifProperty.Other(box.type, known = true) else AvifProperty.ContentLight(r.u16(), r.u16())
+                "mdcv" -> if (r.remaining < 24) {
+                    AvifProperty.Other(box.type, known = true)
+                } else {
+                    AvifProperty.MasteringDisplay(ColorChunks.masteringDisplay(r.bytes(24), 0))
                 }
                 "auxC" -> {
                     r.fullBox()

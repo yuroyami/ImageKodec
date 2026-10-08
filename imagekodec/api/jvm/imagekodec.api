@@ -1,14 +1,16 @@
 public final class io/github/yuroyami/imagekodec/ColorProfile {
 	public fun <init> ()V
-	public fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[I)V
-	public synthetic fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[I[I[I)V
+	public synthetic fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[I[I[IILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getChromaticities ()[I
 	public final fun getCicp ()[I
+	public final fun getContentLight ()[I
 	public final fun getGamma ()Ljava/lang/Integer;
 	public final fun getIcc ()[B
 	public final fun getIccColorSpace ()Ljava/lang/String;
 	public final fun getIccDescription ()Ljava/lang/String;
 	public final fun getIccName ()Ljava/lang/String;
+	public final fun getMasteringDisplay ()[I
 	public final fun getSrgbIntent ()Ljava/lang/Integer;
 	public fun toString ()Ljava/lang/String;
 }

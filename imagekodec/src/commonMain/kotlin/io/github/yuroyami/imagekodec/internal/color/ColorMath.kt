@@ -50,21 +50,25 @@ internal object ColorMath {
     /**
      * The matrix taking linear RGB of [primaries] (red, green and blue x and y) and white
      * [white] (x and y) to XYZ adapted to D50, as lcms2's cmsCreateRGBProfile builds its
-     * colorants (_cmsBuildRGB2XYZtransferMatrix).
+     * colorants (_cmsBuildRGB2XYZtransferMatrix), or null for chromaticities that make none:
+     * a y of zero, or primaries in a line.
      */
-    fun rgbToD50(primaries: DoubleArray, white: DoubleArray): DoubleArray {
+    fun rgbToD50(primaries: DoubleArray, white: DoubleArray): DoubleArray? {
+        if (primaries.any { !it.isFinite() } || white.any { !it.isFinite() }) return null
+        if (primaries[1] <= 0 || primaries[3] <= 0 || primaries[5] <= 0 || white[1] <= 0) return null
         val r = xyYToXyz(primaries[0], primaries[1])
         val g = xyYToXyz(primaries[2], primaries[3])
         val b = xyYToXyz(primaries[4], primaries[5])
         val p = doubleArrayOf(r[0], g[0], b[0], r[1], g[1], b[1], r[2], g[2], b[2])
         val w = xyYToXyz(white[0], white[1])
-        val s = apply(invert(p)!!, w)
+        val s = apply(invert(p) ?: return null, w)
         val m = multiply(p, diagonal(s[0], s[1], s[2]))
-        return multiply(bradford(w, D50), m)
+        val adapted = multiply(bradford(w, D50), m)
+        return adapted.takeIf { a -> a.all { it.isFinite() } && invert(a) != null }
     }
 
     /** sRGB's linear RGB to D50 XYZ, as lcms2's built-in sRGB profile holds it, and back. */
-    val SRGB_TO_D50: DoubleArray = rgbToD50(doubleArrayOf(0.64, 0.33, 0.30, 0.60, 0.15, 0.06), doubleArrayOf(0.3127, 0.3290))
+    val SRGB_TO_D50: DoubleArray = rgbToD50(doubleArrayOf(0.64, 0.33, 0.30, 0.60, 0.15, 0.06), doubleArrayOf(0.3127, 0.3290))!!
     val D50_TO_SRGB: DoubleArray = invert(SRGB_TO_D50)!!
 
     /** The sRGB curve inverted: linear light to the encoded value, unclamped. */

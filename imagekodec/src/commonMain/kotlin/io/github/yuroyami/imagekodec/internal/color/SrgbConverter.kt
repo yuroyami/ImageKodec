@@ -14,6 +14,9 @@ import io.github.yuroyami.imagekodec.RenderingIntent
  * which only [convertInk] takes. A matrix/TRC source keeps its [curves] and [matrix] apart, so
  * an 8-bit conversion runs as three table lookups, one matrix and one table lookup a sample;
  * any other goes through [toPcs] for each colour, remembered in a small cache.
+ *
+ * With [narrow], the samples are in the narrow range of H.273's video, black at 16 and white
+ * at 235 for 8 bits, at 4096 and 60160 for 16, and are stretched to full range first.
  */
 internal class SrgbConverter private constructor(
     val channels: Int,
@@ -22,7 +25,14 @@ internal class SrgbConverter private constructor(
     private val toPcs: ((DoubleArray) -> DoubleArray)?,
     pcsMatrix: DoubleArray,
     pcsOffset: DoubleArray,
+    private val narrow: Boolean = false,
 ) {
+    /** An 8-bit sample as a device value, 0 to 1 over the sample's range. */
+    private fun in8(v: Int): Double = if (narrow) (v - 16) / 219.0 else v / 255.0
+
+    /** A 16-bit sample as a device value. */
+    private fun in16(v: Int): Double = if (narrow) (v - 4096) / 56064.0 else v / 65535.0
+
     /** D50 XYZ to linear sRGB, after the intent's scaling. */
     private val toLinear = ColorMath.multiply(ColorMath.D50_TO_SRGB, pcsMatrix)
     private val offset = ColorMath.apply(ColorMath.D50_TO_SRGB, pcsOffset)
@@ -66,7 +76,7 @@ internal class SrgbConverter private constructor(
         if (toPcs == null) {
             // Per-channel tables of the 256 inputs, one matrix, and the sRGB curve as a table.
             val c = curves!!
-            val lin = Array(channels) { k -> DoubleArray(256) { c[k].eval(it / 255.0) } }
+            val lin = Array(channels) { k -> DoubleArray(256) { c[k].eval(in8(it)) } }
             val m = if (channels == 1) {
                 val d = ColorMath.D50
                 ColorMath.multiply(toLinear, doubleArrayOf(d[0], 0.0, 0.0, d[1], 0.0, 0.0, d[2], 0.0, 0.0))
@@ -86,10 +96,10 @@ internal class SrgbConverter private constructor(
         } else {
             val device = DoubleArray(channels)
             val cache = Cache(out.size) { rgb ->
-                device[0] = ((rgb ushr 16) and 0xFF) / 255.0
+                device[0] = in8((rgb ushr 16) and 0xFF)
                 if (channels == 3) {
-                    device[1] = ((rgb ushr 8) and 0xFF) / 255.0
-                    device[2] = (rgb and 0xFF) / 255.0
+                    device[1] = in8((rgb ushr 8) and 0xFF)
+                    device[2] = in8(rgb and 0xFF)
                 }
                 packed(device)
             }
@@ -151,7 +161,7 @@ internal class SrgbConverter private constructor(
         val device = DoubleArray(channels)
         for (i in 0 until bitmap.width * bitmap.height) {
             val s = i * n
-            fun at(k: Int) = (bitmap.samples[s + k].toInt() and 0xFFFF) / 65535.0
+            fun at(k: Int) = in16(bitmap.samples[s + k].toInt() and 0xFFFF)
             device[0] = at(0)
             if (channels == 3) {
                 if (n <= 2) {
@@ -238,7 +248,7 @@ internal class SrgbConverter private constructor(
 
         /**
          * The conversion of [profile] to sRGB with [intent], or null when the profile is not one
-         * this reads or already is sRGB to within a tenth of a level, which then stays untouched.
+         * this reads.
          */
         fun of(profile: IccProfile, intent: RenderingIntent): SrgbConverter? {
             if (profile.deviceClass == "link" || profile.deviceClass == "abst" || profile.deviceClass == "nmcl") return null
@@ -280,12 +290,33 @@ internal class SrgbConverter private constructor(
                 pcsMatrix = identity
                 pcsOffset = doubleArrayOf(0.0, 0.0, 0.0)
             }
-            val converter = if (shaper != null) {
+            return if (shaper != null) {
                 SrgbConverter(channels, shaper.first, shaper.second, null, pcsMatrix, pcsOffset)
             } else {
                 SrgbConverter(channels, null, null, function, pcsMatrix, pcsOffset)
             }
-            return if (converter.isNearlySrgb()) null else converter
+        }
+
+        private val IDENTITY = ColorMath.diagonal(1.0, 1.0, 1.0)
+
+        /**
+         * Samples on [curve] with [primaries] (red, green, blue and white x and y), or gray
+         * when there are none, as an ICC v4 matrix/TRC profile lcms2 makes of them
+         * (cmsCreateRGBProfile) converts; null for chromaticities that make no matrix.
+         */
+        fun shaper(curve: IccCurve, primaries: DoubleArray?, narrow: Boolean): SrgbConverter? {
+            if (primaries == null) return SrgbConverter(1, arrayOf(curve), null, null, IDENTITY, DoubleArray(3), narrow)
+            val matrix = ColorMath.rgbToD50(primaries.copyOf(6), primaries.copyOfRange(6, 8)) ?: return null
+            return SrgbConverter(3, arrayOf(curve, curve, curve), matrix, null, IDENTITY, DoubleArray(3), narrow)
+        }
+
+        /** Samples that [toLinearSrgb] takes, as RGB from 0 to 1, to linear sRGB; gray ones as R, G and B alike. */
+        fun function(channels: Int, toLinearSrgb: (DoubleArray) -> DoubleArray, narrow: Boolean): SrgbConverter {
+            val pcs: (DoubleArray) -> DoubleArray = { device ->
+                val rgb = if (channels == 1) doubleArrayOf(device[0], device[0], device[0]) else device
+                ColorMath.apply(ColorMath.SRGB_TO_D50, toLinearSrgb(rgb))
+            }
+            return SrgbConverter(channels, null, null, pcs, IDENTITY, DoubleArray(3), narrow)
         }
 
         /**
@@ -309,8 +340,8 @@ internal class SrgbConverter private constructor(
     }
 
     /** Whether every 8-bit value of every channel, and every mix tried, comes back within a tenth of a level. */
-    private fun isNearlySrgb(): Boolean {
-        if (channels != 3) return false
+    fun isNearlySrgb(): Boolean {
+        if (channels != 3 || narrow) return false
         val probe = DoubleArray(3)
         for (v in 0..255 step 5) for (k in 0 until 4) {
             probe.fill(0.0)

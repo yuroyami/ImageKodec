@@ -371,8 +371,10 @@ public object ImageKodec {
     /**
      * [bitmap] converted to sRGB through [profile] with [intent], as [decode] converts with
      * [ColorTarget.Srgb]: for a bitmap decoded before, or one whose profile came from elsewhere,
-     * such as a PDF's ICCBased colour space. A gray profile reads the red channel. A profile
-     * this does not read, one that already is sRGB, a CMYK profile (whose ink
+     * such as a PDF's ICCBased colour space. Every declaration of [profile] counts, in the
+     * order [ColorProfile] gives: an ICC profile, H.273 code points (HDR ones tone-mapped to
+     * SDR), and a PNG's `sRGB`, `gAMA` and `cHRM`. A gray profile reads the red channel.
+     * A profile this does not read, one that already is sRGB, a CMYK profile (whose ink
      * [convertCmykToSrgb] takes), or a gray one with a bitmap that is not gray gives [bitmap]
      * back.
      */
@@ -468,31 +470,53 @@ public object ImageKodec {
      * after [raw].
      */
     private inline fun inColor(data: ByteArray, page: Int, colorTarget: ColorTarget, reduction: Int = 1, raw: () -> KiteBitmap): KiteBitmap {
-        val converter = converter(data, page, colorTarget) ?: return raw()
+        val conversion = conversion(data, page, colorTarget) ?: return raw()
+        val converter = conversion.converter
         if (converter.channels == 4) return inkOf(data, page, reduction, wide = false)?.let { converter.convertInk(it) } ?: raw()
+        // Samples deeper than 8 bits convert at their own precision and narrow after, so a steep
+        // curve, PQ's above all, does not stretch the steps of their high byte into bands.
+        if (reduction == 1 && conversion.bitDepth > 8) {
+            raw16(data, page)?.let { wide -> applied(converter, wide)?.let { return it.toBitmap() } }
+        }
         val bitmap = raw()
         return applied(converter, bitmap) ?: bitmap
     }
 
+    /** Page [page] of [data] at 16 bits, as [decode16] reads it before any conversion, or null for a format it widens. */
+    private fun raw16(data: ByteArray, page: Int): KiteBitmap16? = when (detect(data)) {
+        ImageFormat.TIFF -> TiffDecoder.decode16(data, page)
+        ImageFormat.PNG -> PngDecoder.decode16(data)
+        ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data)
+        ImageFormat.AVIF -> AvifDecoder.decode16(data)
+        ImageFormat.JPEG -> JpegDecoder.decode16(data)
+        ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { raw16(it, 0) }
+        else -> null
+    }
+
     /** [inColor] at 16 bits a sample. */
     private inline fun inColor16(data: ByteArray, page: Int, colorTarget: ColorTarget, raw: () -> KiteBitmap16): KiteBitmap16 {
-        val converter = converter(data, page, colorTarget) ?: return raw()
+        val converter = conversion(data, page, colorTarget)?.converter ?: return raw()
         if (converter.channels == 4) return inkOf(data, page, 1, wide = true)?.let { converter.convertInk16(it) } ?: raw()
         val bitmap = raw()
         return applied(converter, bitmap) ?: bitmap
     }
 
     /** The conversion [colorTarget] asks of page [page] of [data], or null for none. */
-    private fun converter(data: ByteArray, page: Int, colorTarget: ColorTarget): SrgbConverter? {
+    /** A page's conversion, and how deep its samples are. */
+    private class Conversion(val converter: SrgbConverter, val bitDepth: Int)
+
+    private fun conversion(data: ByteArray, page: Int, colorTarget: ColorTarget): Conversion? {
         if (colorTarget !is ColorTarget.Srgb) return null
         val info = try {
             if (detect(data) == ImageFormat.TIFF) ImageProbe.tiff(data, page) else ImageProbe.probe(data)
         } catch (_: ImageDecodeException) {
             null
         } ?: return null
-        val converter = ColorManagement.converter(info.colorProfile ?: return null, colorTarget.intent) ?: return null
+        val channels = if (info.colorChannels == 1) 1 else 3
+        val converter = ColorManagement.converter(info.colorProfile ?: return null, colorTarget.intent, channels) ?: return null
         // A profile of another space than the image's fits nothing, and browsers ignore it.
-        return converter.takeIf { info.colorChannels == 0 || info.colorChannels == converter.channels }
+        if (info.colorChannels != 0 && info.colorChannels != converter.channels) return null
+        return Conversion(converter, info.bitDepth)
     }
 
     private fun decodeRaw(data: ByteArray): KiteBitmap = when (detect(data)) {
@@ -705,7 +729,7 @@ public object ImageKodec {
                 ).let { if (applyOrientation) it.oriented(probeOrNull(data)?.orientation ?: Orientation.Normal) else it }
             }
         }.let { decoded ->
-            val converter = converter(data, 0, colorTarget) ?: return@let decoded
+            val converter = conversion(data, 0, colorTarget)?.converter ?: return@let decoded
             KiteAnimation(
                 decoded.width, decoded.height,
                 decoded.frames.map { KiteFrame(applied(converter, it.bitmap) ?: it.bitmap, it.delayMillis, it.delayRawCentiseconds) },

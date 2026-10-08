@@ -106,6 +106,8 @@ class FuzzTest {
         *ColorProfileTest().seeds().toTypedArray(),
         "tiff-cmyk-icc" to CmykTiffs.tiff(3, 2, IntArray(24) { it * 10 }, icc = ColorConversionTest().cmykV2),
         "jpeg-ycck-icc" to ColorProfileTest().withIcc(JpegCmykFixtures.blocksAdobeYcck, ColorConversionTest().cmykV4),
+        "png-pq" to PngColorFiles.png(4, 3, 3, 16, IntArray(36) { it * 1800 }, PngColorFiles.cicp(9, 16), PngColorFiles.clli(4000.0, 400.0), PngColorFiles.mdcv(1000.0, 0.005)),
+        "png-gama-chrm" to PngColorFiles.png(4, 3, 1, 8, IntArray(12) { it * 20 }, PngColorFiles.gama(45455), PngColorFiles.chrm(0.3127, 0.3290, 0.64, 0.33, 0.30, 0.60, 0.15, 0.06)),
         "tiff-pages-be" to TiffPagesTest().let {
             it.tiff(listOf(TiffPagesTest.Page(3, 2, 40), TiffPagesTest.Page(2, 5, 90, orientation = 6)), littleEndian = false)
         },
@@ -312,8 +314,9 @@ class FuzzTest {
         if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF) {
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
         }
-        // A file with a profile converts through it when asked, so the profile's tables take the damage too.
-        if (ImageKodec.probeOrNull(bytes)?.colorProfile?.icc != null) {
+        // A file that declares its colour converts through it when asked, so a profile's tables
+        // and the chunks' values take the damage too.
+        if (ImageKodec.probeOrNull(bytes)?.colorProfile != null) {
             mustFailCleanly("$label decode to sRGB") { ImageKodec.decode(bytes, colorTarget = ColorTarget.Srgb()) }
             if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.JPEG) {
                 mustFailCleanly("$label decode16 to sRGB") { ImageKodec.decode16(bytes, colorTarget = ColorTarget.Srgb()) }

@@ -1,5 +1,6 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.imagekodec.internal.color.Cicp
 import org.junit.Assume.assumeTrue
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -264,6 +265,135 @@ class IccOracleTest {
                     assertContentEquals(ImageKodec.decode(plain).argb, ImageKodec.decode(jpeg).argb)
                 }
             }
+        }
+    }
+
+    /** One of PNG's SDR declarations and the lcms2 profile of its primaries and curve. */
+    private class Declared(val name: String, val chunks: List<ByteArray>, val primaries: DoubleArray, val gamma: Double)
+
+    /**
+     * PNG's `gAMA`, `cHRM` and SDR `cICP` against lcms2 converting through a v4 profile it
+     * builds of the same primaries, white and curve (cmsCreateRGBProfile), at 8 and 16 bits,
+     * unsaved: saving rounds its colorants to s15Fixed16, which moves a dark channel next to a
+     * bright one by a dozen 16-bit levels. A `gAMA` is the inverse of its exponent times
+     * 100000, so the profile takes the exponent the chunk holds.
+     */
+    @Test
+    fun pngColorChunksConvertAsLcms2ProfilesOfThem() {
+        assumeTrue("cc or lcms2 is not installed", Tools.hasAll("cc") && oracle != null)
+        val bt709 = doubleArrayOf(0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290)
+        val cases = listOf(
+            Declared("gAMA 1/2.2", listOf(PngColorFiles.gama(45455)), bt709, 100_000.0 / 45455),
+            Declared("gAMA 1", listOf(PngColorFiles.gama(100_000)), bt709, 1.0),
+            Declared("cHRM Adobe RGB", listOf(PngColorFiles.chrm(0.3127, 0.3290, 0.64, 0.33, 0.21, 0.71, 0.15, 0.06)),
+                doubleArrayOf(0.64, 0.33, 0.21, 0.71, 0.15, 0.06, 0.3127, 0.3290), 0.0),
+            Declared("gAMA and cHRM ProPhoto", listOf(PngColorFiles.gama(55556), PngColorFiles.chrm(0.3457, 0.3585, 0.7347, 0.2653, 0.1596, 0.8404, 0.0366, 0.0001)),
+                doubleArrayOf(0.7347, 0.2653, 0.1596, 0.8404, 0.0366, 0.0001, 0.3457, 0.3585), 100_000.0 / 55556),
+            Declared("cICP Display P3", listOf(PngColorFiles.cicp(12, 13)), doubleArrayOf(0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290), 0.0),
+            Declared("cICP BT.2020 with BT.1886", listOf(PngColorFiles.cicp(9, 1)), doubleArrayOf(0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290), 2.4),
+            Declared("cICP BT.470 M, gamma 2.2", listOf(PngColorFiles.cicp(4, 4)), doubleArrayOf(0.67, 0.33, 0.21, 0.71, 0.14, 0.08, 0.310, 0.316), 2.2),
+            Declared("cICP EBU 3213, gamma 2.8", listOf(PngColorFiles.cicp(22, 5)), doubleArrayOf(0.630, 0.340, 0.295, 0.605, 0.155, 0.077, 0.3127, 0.3290), 2.8),
+            Declared("cICP BT.709, linear", listOf(PngColorFiles.cicp(1, 8)), bt709, 1.0),
+        )
+        val samples = samples(3)
+        val count = samples.size / 3
+        val random = Random(9)
+        val wide = ShortArray(count * 3) { random.nextInt(65536).toShort() }
+        fun lcmsRgb(case: Declared, bytes: Int, input: ByteArray): FloatArray {
+            val args = case.primaries.map { "%.10f".format(it) } + "%.10f".format(case.gamma)
+            val out = run(oracle!!.path, "convert-rgb", *args.toTypedArray(), "1", "$bytes", input = input)
+            val buffer = ByteBuffer.wrap(out).order(ByteOrder.nativeOrder()).asFloatBuffer()
+            return FloatArray(buffer.remaining()).also { buffer.get(it) }
+        }
+        val wideBytes = ByteBuffer.allocate(wide.size * 2).order(ByteOrder.nativeOrder()).also { b -> wide.forEach { b.putShort(it) } }.array()
+        run {
+            for (case in cases) {
+                val png = PngColorFiles.png(count, 1, 3, 8, IntArray(samples.size) { samples[it].toInt() and 0xFF }, *case.chunks.toTypedArray())
+                val ours = ImageKodec.decode(png, colorTarget = ColorTarget.Srgb())
+                val worst = worst8(ours.argb, lcmsRgb(case, 1, samples))
+                assertTrue(worst <= 1, "${case.name}: an 8-bit sample is $worst levels from lcms2's")
+                val png16 = PngColorFiles.png(count, 1, 3, 16, IntArray(wide.size) { wide[it].toInt() and 0xFFFF }, *case.chunks.toTypedArray())
+                val reference16 = lcmsRgb(case, 2, wideBytes)
+                val ours16 = ImageKodec.decode16(png16, colorTarget = ColorTarget.Srgb())
+                val worst16 = worst16(ours16, reference16)
+                assertTrue(worst16 <= 4, "${case.name}: a 16-bit sample is $worst16 levels from lcms2's")
+                // An 8-bit decode of the 16-bit file converts at 16 bits, then narrows.
+                assertContentEquals(ours16.toBitmap().argb, ImageKodec.decode(png16, colorTarget = ColorTarget.Srgb()).argb, case.name)
+            }
+        }
+    }
+
+    /**
+     * The light PQ and HLG put out, against zimg (ffmpeg's `zscale` to linear light): PQ's EOTF
+     * over 10000 cd/m², colour by colour, and HLG through BT.2100's OOTF over its 1000 cd/m²
+     * display. zimg raises each HLG channel to 1.2 on its own, where BT.2100 and libplacebo
+     * weigh the pixel by its luminance, so the two agree on grays only, which is what HLG is
+     * checked on here; `PngColorChunksTest` holds its colours to BT.2100's equation.
+     */
+    @Test
+    fun hdrTransfersMatchZimg() {
+        assumeTrue("ffmpeg is not installed", Tools.hasAll("ffmpeg"))
+        val random = Random(2100)
+        val n = 4096 + 2048
+        val coded = Array(n) { i -> if (i < 4096) DoubleArray(3) { (i * 16 + 8) / 65535.0 } else DoubleArray(3) { random.nextInt(65536) / 65535.0 } }
+        val bt2020 = Cicp.primaries(9)!!
+        for ((name, transfer, scale) in listOf<Triple<String, Cicp.Transfer, Double>>(
+            Triple("smpte2084", Cicp.Transfer.Pq, 10000.0),
+            Triple("arib-std-b67", Cicp.Transfer.Hlg, 1000.0),
+        )) {
+            // gbrp planes: green, blue, red.
+            val planes = ByteBuffer.allocate(n * 6).order(ByteOrder.LITTLE_ENDIAN)
+            for (plane in intArrayOf(1, 2, 0)) for (v in coded) planes.putShort(Math.round(v[plane] * 65535).toInt().toShort())
+            val out = run(
+                Tools.require("ffmpeg").path, "-v", "error", "-f", "rawvideo", "-pix_fmt", "gbrp16le", "-s", "${n}x1", "-i", "-",
+                "-vf", "zscale=transferin=$name:transfer=linear:primariesin=2020:primaries=2020:rangein=full:range=full:npl=${scale.toInt()},format=gbrpf32le",
+                "-f", "rawvideo", "-", input = planes.array(),
+            )
+            val floats = ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+            assertEquals(n * 3, floats.remaining(), name)
+            val light = Cicp.light(bt2020, transfer)
+            var worst = 0.0
+            for (i in 0 until if (transfer == Cicp.Transfer.Hlg) 4096 else n) {
+                val ours = light(coded[i])
+                for ((k, plane) in intArrayOf(1, 2, 0).withIndex()) {
+                    val theirs = floats.get(k * n + i).toDouble()
+                    worst = maxOf(worst, abs(ours[plane] / scale - theirs) / maxOf(theirs, 1e-3))
+                }
+            }
+            assertTrue(worst < 2e-3, "$name: light is ${worst * 100}% from zimg's")
+        }
+    }
+
+    /**
+     * An HDR AVIF from avifenc: its `nclx` PQ code points and `clli` light levels reach the
+     * probe, and a decode to sRGB tone-maps them exactly as [ImageKodec.convertToSrgb] does the
+     * same samples with the probe's profile, which `PngColorChunksTest` holds to BT.2100.
+     */
+    @Test
+    fun anHdrAvifToneMapsThroughItsCodePointsAndLightLevels() {
+        assumeTrue("avifenc is not installed", Tools.hasAll("avifenc"))
+        val random = Random(2390)
+        val w = 32
+        val h = 16
+        val samples = IntArray(w * h * 3) { random.nextInt(65536) }
+        val dir = kotlin.io.path.createTempDirectory("imagekodec-hdr").toFile()
+        try {
+            val png = File(dir, "in.png").apply { writeBytes(PngColorFiles.png(w, h, 3, 16, samples)) }
+            val avif = File(dir, "out.avif")
+            run(Tools.require("avifenc").path, "-l", "-d", "10", "--cicp", "9/16/0", "-r", "full", "--clli", "4000,400", png.path, avif.path)
+            val bytes = avif.readBytes()
+            val profile = ImageKodec.probe(bytes).colorProfile!!
+            assertContentEquals(intArrayOf(9, 16, 0, 1), profile.cicp)
+            assertContentEquals(intArrayOf(40_000_000, 4_000_000), profile.contentLight)
+            val stored = ImageKodec.decode16(bytes)
+            val converted = ImageKodec.decode16(bytes, colorTarget = ColorTarget.Srgb())
+            assertContentEquals(ImageKodec.convertToSrgb(stored, profile).samples, converted.samples)
+            assertTrue(!converted.samples.contentEquals(stored.samples), "PQ came back unconverted")
+            // A brighter declared peak compresses highlights harder.
+            val dimmer = ImageKodec.convertToSrgb(stored, ColorProfile(cicp = profile.cicp, contentLight = intArrayOf(10_000_000, 0)))
+            assertTrue(!dimmer.samples.contentEquals(converted.samples), "the content light level changed nothing")
+        } finally {
+            dir.deleteRecursively()
         }
     }
 

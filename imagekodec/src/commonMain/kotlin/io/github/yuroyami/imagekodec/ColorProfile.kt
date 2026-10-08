@@ -16,9 +16,20 @@ package io.github.yuroyami.imagekodec
  *   relative colorimetric, 2 saturation, 3 absolute colorimetric), `gAMA`'s gamma
  *   times 100000 (45455 for the usual 1/2.2), `cHRM`'s white point, red, green and
  *   blue x and y times 100000, and `cICP`'s color primaries, transfer function,
- *   matrix coefficients and full-range flag (ITU-T H.273 code points).
+ *   matrix coefficients and full-range flag (ITU-T H.273 code points). An AVIF's
+ *   `nclx` colour box, or its AV1 sequence header, gives [cicp] too.
+ * - [contentLight] and [masteringDisplay] describe HDR content: PNG's `cLLi` and
+ *   `mDCv` chunks, or an AVIF's `clli` and `mdcv` boxes. [contentLight] holds the
+ *   maximum content light level and the maximum frame-average light level in
+ *   0.0001 cd/m², and [masteringDisplay] the mastering display's red, green and
+ *   blue x and y and its white x and y in 0.00002, then its maximum and minimum
+ *   luminance in 0.0001 cd/m², as both formats store them.
  *
  * Every field is null when the file does not hold it.
+ *
+ * A conversion reads them in the order the format sets. A PNG's `cICP` comes first,
+ * then `iCCP`, `sRGB`, and `gAMA` with `cHRM`, as the PNG third edition orders them;
+ * elsewhere the ICC profile comes before [cicp], as AVIF orders them.
  */
 public class ColorProfile(
     public val icc: ByteArray? = null,
@@ -27,7 +38,15 @@ public class ColorProfile(
     public val gamma: Int? = null,
     public val chromaticities: IntArray? = null,
     public val cicp: IntArray? = null,
+    public val contentLight: IntArray? = null,
+    public val masteringDisplay: IntArray? = null,
 ) {
+    /**
+     * Whether these are a PNG's chunks, whose `cICP` comes before its profile and whose
+     * full-range flag applies to the RGB samples themselves.
+     */
+    internal var png: Boolean = false
+
     /**
      * The data color space the profile's header names, trimmed: "RGB", "GRAY",
      * "CMYK", "Lab" and so on; null without a profile or with a header too short.
@@ -56,6 +75,8 @@ public class ColorProfile(
         gamma?.let { parts += "gamma $it" }
         chromaticities?.let { parts += "cHRM ${it.toList()}" }
         cicp?.let { parts += "cICP ${it.toList()}" }
+        contentLight?.let { parts += "content light ${it.toList()}" }
+        masteringDisplay?.let { parts += "mastering display ${it.toList()}" }
         append(parts.joinToString(", "))
         append(")")
     }
