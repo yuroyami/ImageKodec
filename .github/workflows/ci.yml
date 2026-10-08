@@ -13,62 +13,81 @@ concurrency:
 env:
   GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false
 
+# How this workflow is shaped, and why.
+#
+# Each job compiles one thing once and then runs everything that needs it, so no two jobs
+# compile the same target. The jobs share nothing, so they all start with the push.
+#
+# The fuzz suite is most of the test time on every target, and one process runs it on one
+# core. After a job compiles its test program, tools/run-shards.sh runs the program as several
+# processes at once, each with its own share of the mutants (FuzzShard.kt), so the suite uses
+# every core of the runner. The JVM job does the same with Gradle's test forks.
+#
+# A native test program is linked optimised here (-PoptimizedNativeTests): the link takes
+# about a minute longer and the fuzz suite runs about eight times faster.
+#
+# GitHub runs at most five macOS jobs of one account at a time, so there are five.
 jobs:
-  # The JVM, JS, wasm and Linux/Windows native targets. This is the job that
-  # runs the full test suite: the codecs are pure computation, so a pass here
-  # covers the decoders everywhere. The stb_image oracle needs no tool (its
-  # vectors are committed); the OpenJPEG, libwebp, libtiff, libjpeg (headers too, for tools/arith_jpeg.c), jbig2enc, ffmpeg, libavif, libheif and libjxl suites
-  # skip themselves when their binary is missing on a contributor's machine, and
+  # The JVM suite is the one that holds the decoders to the reference codecs. The OpenJPEG,
+  # libwebp, libtiff, libjpeg, jbig2enc, ffmpeg, libavif, libheif and libjxl suites skip
+  # themselves when their binary is missing on a contributor's machine, and
   # IMAGEKODEC_REQUIRE_ORACLES turns that skip into a failure here.
-  linux:
-    name: JVM / JS / wasm / native (Linux)
+  jvm:
+    name: JVM tests on Java 21 and 11
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       IMAGEKODEC_REQUIRE_ORACLES: '1'
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: ./.github/actions/setup
         with:
-          distribution: temurin
           java-version: |
             11
             21
 
-      # The oracle suites skip themselves when their tool is missing, and a
-      # skipped test reads exactly like a passing one, so these are installed
-      # rather than left to chance, and a missing one fails this step. The tests
-      # find them on PATH. Ubuntu's ImageMagick is version 6, whose command is
-      # `convert`; the tests fall back to it when there is no `magick`.
+      # Two oracle tools have no package and are built from source. The build takes most of
+      # a minute, so the binaries are kept until this file or the patch changes.
+      - name: Restore the oracle tools built from source
+        id: built-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/oracle-tools
+          key: oracle-tools-${{ runner.os }}-${{ hashFiles('tools/t81-libjpeg.patch', '.github/workflows/ci.yml') }}
+
       # The T.81 reference software (Thomas Richter's libjpeg, GPL-3.0, run as a tool and
       # never linked) writes lossless JPEG at every precision and arithmetic coding, which
       # nothing packaged does. Release 1.70: later commits cannot write lossless files.
       # The patch lets the tests choose its predictor and point transform.
-      - name: Build the T.81 reference codec
+      # libjpeg-turbo 3.1 writes and reads 12-bit JPEG; the packaged 2.1 does not.
+      - name: Build the oracle tools that have no package
+        if: steps.built-tools.outputs.cache-hit != 'true'
         run: |
+          mkdir -p ~/oracle-tools
           git clone --quiet https://github.com/thorfdbg/libjpeg.git /tmp/t81
           git -C /tmp/t81 checkout --quiet c719010
           git -C /tmp/t81 apply "$GITHUB_WORKSPACE/tools/t81-libjpeg.patch"
           (cd /tmp/t81 && ./configure > /dev/null && make -j"$(nproc)" > /dev/null)
-          sudo install -m 755 /tmp/t81/jpeg /usr/local/bin/t81jpeg
-          command -v t81jpeg || { echo "::error::t81jpeg did not build"; exit 1; }
-
-      # libjpeg-turbo 3.1 writes and reads 12-bit JPEG; the packaged 2.1 does not.
-      - name: Build libjpeg-turbo 3.1
-        run: |
+          install -m 755 /tmp/t81/jpeg ~/oracle-tools/t81jpeg
           git clone --quiet --depth 1 --branch 3.1.0 https://github.com/libjpeg-turbo/libjpeg-turbo.git /tmp/ljt3
           cmake -S /tmp/ljt3 -B /tmp/ljt3/build -DENABLE_SHARED=0 -DWITH_SIMD=0 > /dev/null
           make -C /tmp/ljt3/build -j"$(nproc)" cjpeg-static djpeg-static > /dev/null
-          sudo install -m 755 /tmp/ljt3/build/cjpeg-static /usr/local/bin/cjpeg3
-          sudo install -m 755 /tmp/ljt3/build/djpeg-static /usr/local/bin/djpeg3
-          cjpeg3 -version
+          install -m 755 /tmp/ljt3/build/cjpeg-static ~/oracle-tools/cjpeg3
+          install -m 755 /tmp/ljt3/build/djpeg-static ~/oracle-tools/djpeg3
 
-      - name: Install codec oracles
+      # A skipped oracle test reads exactly like a passing one, so the tools are installed
+      # rather than left to chance, and a missing one fails this step. The tests find them on
+      # PATH. Ubuntu's ImageMagick is version 6, whose command is `convert`; the tests fall
+      # back to it when there is no `magick`.
+      - name: Install the oracle tools
         run: |
+          echo "$HOME/oracle-tools" >> "$GITHUB_PATH"
+          export PATH="$HOME/oracle-tools:$PATH"
           sudo apt-get update
           sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools
           missing=0
-          for t in cwebp dwebp tiffcp opj_compress opj_decompress cjpeg djpeg jpegtran tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert cc cjxl djxl; do
+          for t in cwebp dwebp tiffcp opj_compress opj_decompress cjpeg djpeg jpegtran tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert cc cjxl djxl t81jpeg cjpeg3 djpeg3; do
             command -v "$t" >/dev/null || { echo "::error::oracle tool $t not on PATH"; missing=1; }
           done
           command -v magick >/dev/null || command -v convert >/dev/null || { echo "::error::ImageMagick not on PATH"; missing=1; }
@@ -79,91 +98,126 @@ jobs:
           python3 -c "import PIL" || { echo "::error::Pillow missing"; missing=1; }
           exit $missing
 
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Core tests (JVM)
-        run: ./gradlew :imagekodec:jvmTest --stacktrace
-
-      - name: Core tests (JS + wasm)
-        run: ./gradlew :imagekodec:jsNodeTest :imagekodec:wasmJsNodeTest :imagekodec:wasmWasiNodeTest --stacktrace
-
-      - name: Core tests (native)
-        run: ./gradlew :imagekodec:linuxX64Test --stacktrace
-
-      - name: Compose and Coil tests
-        run: ./gradlew :imagekodec-compose:jvmTest :imagekodec-coil:jvmTest --stacktrace
-
-      - name: Core and bindings on Java 11
-        run: ./gradlew :imagekodec:jvmJava11Test :imagekodec-compose:jvmJava11Test :imagekodec-coil:jvmJava11Test --stacktrace
-
-      - name: Public API check
-        run: ./gradlew checkLegacyAbi --stacktrace
+      # One compile serves both Java versions and all three modules. Each test class runs in
+      # one of three JVMs.
+      - name: Core, Compose and Coil tests on Java 21, then on Java 11
+        run: >
+          ./gradlew
+          :imagekodec:jvmTest :imagekodec-compose:jvmTest :imagekodec-coil:jvmTest
+          :imagekodec:jvmJava11Test :imagekodec-compose:jvmJava11Test :imagekodec-coil:jvmJava11Test
+          -PtestForks=3 --continue --stacktrace
 
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports-linux
+          name: test-reports-jvm
           path: '**/build/reports/tests/**'
 
-  # Apple targets can only be built on a Mac, and they are the reason this
-  # library exists in the first place, so they get their own job rather than
-  # riding along as a compile-only check.
-  apple:
-    name: Apple targets (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Native tests
-        run: ./gradlew :imagekodec:macosArm64Test :imagekodec:iosSimulatorArm64Test --stacktrace
-
-      - name: Compose and Coil compile for every target
-        run: ./gradlew :imagekodec-compose:assemble :imagekodec-coil:assemble --stacktrace
-
-      - name: Upload test reports
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-reports-apple
-          path: '**/build/reports/tests/**'
-
-  # The Android variants build through AGP, which neither job above exercises.
-  android:
-    name: Android library
+  js:
+    name: JS tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: ./.github/actions/setup
+
+      - name: Compile the tests
+        run: ./gradlew :imagekodec:jsTestTestDevelopmentExecutableCompileSync kotlinNodeJsSetup kotlinNpmInstall --stacktrace
+
+      # The command Gradle's jsNodeTest runs, four times at once.
+      - name: Run the tests
+        working-directory: build/js/packages/ImageKodec-KMP-imagekodec-test
+        run: |
+          node=$(find ~/.gradle/nodejs -maxdepth 3 -path '*/bin/node' | sort -V | tail -n 1)
+          modules="$GITHUB_WORKSPACE/build/js/node_modules"
+          "$GITHUB_WORKSPACE/tools/run-shards.sh" 4 "$node" \
+            --require "$modules/source-map-support/register.js" \
+            "$modules/mocha/bin/mocha.js" kotlin/ImageKodec-KMP-imagekodec-test.js \
+            --timeout 600s --reporter dot
+
+  wasm:
+    name: wasmJs and wasmWasi tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - name: Compile the tests
+        run: >
+          ./gradlew
+          :imagekodec:wasmJsTestTestDevelopmentExecutableCompileSync
+          :imagekodec:compileTestDevelopmentExecutableKotlinWasmWasi
+          kotlinWasmNodeJsSetup --stacktrace
+
+      # What Gradle's wasmJsNodeTest and wasmWasiNodeTest run: Node loads the module and
+      # calls startUnitTests. Each target runs as two processes, so four run at once.
+      - name: Run the tests
+        run: |
+          node=$(find ~/.gradle/nodejs -maxdepth 3 -path '*/bin/node' | sort -V | tail -n 1)
+          start='import { pathToFileURL } from "node:url"; const tests = await import(pathToFileURL(process.argv[1]).href); tests.startUnitTests();'
+          tools/run-shards.sh 2 "$node" --input-type=module --eval "$start" \
+            "$PWD/build/wasm/packages/ImageKodec-KMP-imagekodec-test/kotlin/ImageKodec-KMP-imagekodec-test.mjs" \
+            > wasm-js.log 2>&1 &
+          wasm_js=$!
+          tools/run-shards.sh 2 "$node" --input-type=module --eval "$start" \
+            "$PWD/imagekodec/build/compileSync/wasmWasi/test/testDevelopmentExecutable/kotlin/ImageKodec-KMP-imagekodec-test.mjs" \
+            > wasm-wasi.log 2>&1 &
+          wasm_wasi=$!
+          failed=0
+          wait "$wasm_js" || { echo "::error::wasmJs tests failed"; failed=1; }
+          echo "===== wasmJs ====="; cat wasm-js.log
+          wait "$wasm_wasi" || { echo "::error::wasmWasi tests failed"; failed=1; }
+          echo "===== wasmWasi ====="; cat wasm-wasi.log
+          exit $failed
+
+  linux:
+    name: linuxX64 tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
         with:
-          distribution: temurin
-          java-version: '21'
+          konan-cache: linuxX64
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Link the tests
+        run: ./gradlew :imagekodec:linkDebugTestLinuxX64 -PoptimizedNativeTests --stacktrace
 
-      - name: Assemble Android variants
-        run: ./gradlew :imagekodec:assemble :imagekodec-compose:assemble :imagekodec-coil:assemble --stacktrace
+      - name: Run the tests
+        run: tools/run-shards.sh 4 imagekodec/build/bin/linuxX64/debugTest/test.kexe
+
+  # Every target that a Linux machine builds: Android, JVM, JS, wasm, the Linux, Windows and
+  # Android native libraries, the Apple libraries (without a link), and the sample app.
+  # The public API check reads what this build compiles.
+  build:
+    name: Build every target, check the public API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+        with:
+          konan-cache: libraries
+
+      - name: Assemble every module and check the public API
+        run: ./gradlew assemble checkLegacyAbi --stacktrace
 
   docs:
     name: API documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: ./.github/actions/setup
         with:
-          distribution: temurin
-          java-version: '21'
-
-      - uses: gradle/actions/setup-gradle@v4
+          konan-cache: libraries
 
       - name: Build the Dokka site
         run: ./gradlew dokkaGenerate --stacktrace
@@ -172,3 +226,80 @@ jobs:
         with:
           name: api-docs
           path: build/dokka/html
+
+  # Apple programs link only on a Mac, and Apple targets are the reason this library exists,
+  # so its tests run on two of them.
+  apple-tests:
+    name: ${{ matrix.target }} tests
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macosArm64
+            link: linkDebugTestMacosArm64
+          - target: iosSimulatorArm64
+            link: linkDebugTestIosSimulatorArm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+        with:
+          konan-cache: apple-tests
+
+      - name: Link the tests
+        run: ./gradlew :imagekodec:${{ matrix.link }} -PoptimizedNativeTests --stacktrace
+
+      - name: Run the tests
+        run: |
+          program=imagekodec/build/bin/${{ matrix.target }}/debugTest/test.kexe
+          if [ "${{ matrix.target }}" = iosSimulatorArm64 ]; then
+            # What Gradle's iosSimulatorArm64Test runs: the program inside a simulator that is not booted.
+            device=$(xcrun simctl list devices available | grep -oE 'iPhone [^(]*\([0-9A-F-]{36}\)' | head -n 1 | grep -oE '[0-9A-F-]{36}')
+            [ -n "$device" ] || { echo "::error::no iPhone simulator on this runner"; exit 1; }
+            tools/run-shards.sh 3 xcrun simctl spawn --standalone "$device" "$program"
+          else
+            tools/run-shards.sh 3 "$program"
+          fi
+
+  # The Compose and Coil modules link four frameworks for each iOS target. A release link
+  # optimises the whole program and takes minutes, so each target has its own job.
+  apple-frameworks:
+    name: ${{ matrix.target }} frameworks
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [IosArm64, IosSimulatorArm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+        with:
+          konan-cache: frameworks-${{ matrix.target }}
+
+      - name: Link the Compose and Coil frameworks
+        run: >
+          ./gradlew
+          :imagekodec-compose:linkDebugFramework${{ matrix.target }}
+          :imagekodec-compose:linkReleaseFramework${{ matrix.target }}
+          :imagekodec-coil:linkDebugFramework${{ matrix.target }}
+          :imagekodec-coil:linkReleaseFramework${{ matrix.target }}
+          --stacktrace
+
+  # A Mac compiles each Apple target against the SDK of its Xcode, as the release does.
+  apple-libraries:
+    name: Apple libraries
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+        with:
+          konan-cache: apple-libraries
+
+      - name: Compile every Apple target of every module
+        run: ./gradlew compileAppleTargets --stacktrace

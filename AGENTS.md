@@ -49,6 +49,15 @@ being true.
   A `cjpeg` stream wrapped in a strip reaches the other subsamplings (#8).
 - `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh
   clone, because `kotlin-js-store/` is ignored and yarn has no lockfile to work from.
+- A Kotlin/Wasm test program that Node runs exits with 0 when a test fails, and reports
+  the failure as a TeamCity `testFailed` line. CI runs the test programs without Gradle,
+  so `tools/run-shards.sh` reads their output for that line.
+- The wasm compiler fails with "Key ic#... is missing in the map" when a test starts to
+  use a standard library function that no test used before, because its incremental
+  cache is stale. Run the compile task again with `--rerun`. A fresh clone is not affected.
+- GitHub keeps 10 GB of caches for a repository and drops the oldest past that. A cache
+  key with the commit in it adds an entry on every push, so the Kotlin/Native caches of
+  CI are keyed on `gradle/libs.versions.toml` alone.
 - `opj_compress -POC` writes only the packets its first change reaches and leaves
   the rest of the tile out, so both decoders agree on a file that holds half the
   image. `JpxFeatureOracleTest` builds POC files by reordering the packets of an

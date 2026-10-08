@@ -32,6 +32,25 @@ On a Mac, add the Apple targets:
 ./gradlew :imagekodec:macosArm64Test :imagekodec:iosSimulatorArm64Test
 ```
 
+### How CI runs the same suites faster
+
+The fuzz suite (`FuzzTest`) is most of the test time on every target, and one process
+runs it on one core. CI compiles each test program once and then runs it as several
+processes at once. Each process takes its own share of the mutants, and the shares
+together run every mutant once. You can do the same on a native target:
+
+```sh
+./gradlew :imagekodec:linkDebugTestMacosArm64 -PoptimizedNativeTests
+tools/run-shards.sh 4 imagekodec/build/bin/macosArm64/debugTest/test.kexe
+```
+
+- `-PoptimizedNativeTests` links the native test program optimised. The link takes
+  about a minute longer and the fuzz suite runs about eight times faster.
+- `tools/run-shards.sh 4 <command>` runs the command four times at once and sets
+  `IMAGEKODEC_FUZZ_SHARD` to `0/4`, `1/4`, `2/4` and `3/4`. Without that variable a
+  run takes every mutant, so the Gradle test tasks above still run the whole suite.
+- `-PtestForks=3` gives each JVM test class one of three JVMs.
+
 `tools/ThrowsContract.swift` checks the exported API from a Swift caller:
 checked API operations, including exact downscaling, must return recoverable
 `NSError`s.

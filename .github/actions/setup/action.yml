@@ -1,0 +1,33 @@
+name: Set up the build
+description: >
+  Installs Java, restores the Gradle cache, and restores the Kotlin/Native compiler when the job
+  names a cache for it. Run actions/checkout first.
+
+inputs:
+  java-version:
+    description: The Java versions to install. Gradle runs on the last one.
+    default: '21'
+  konan-cache:
+    description: >
+      A name for the Kotlin/Native cache of this job. Jobs that link the same targets share one
+      name. Leave it empty in a job that does not use Kotlin/Native.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    - uses: gradle/actions/setup-gradle@v4
+
+    # The Kotlin/Native compiler, its LLVM and the caches it builds for each dependency are
+    # more than a gigabyte, and a download and a rebuild of them cost minutes. The key has
+    # no commit in it, so each name holds one entry until a version in the catalog changes.
+    - if: inputs.konan-cache != ''
+      uses: actions/cache@v4
+      with:
+        path: ~/.konan
+        key: konan-${{ runner.os }}-${{ inputs.konan-cache }}-${{ hashFiles('gradle/libs.versions.toml') }}
