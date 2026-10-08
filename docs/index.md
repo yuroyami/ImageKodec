@@ -3,7 +3,7 @@
 # ImageKodec
 
 Image codecs written in Kotlin, for Kotlin Multiplatform. Decode PNG, JPEG, GIF,
-BMP, TIFF, JPEG 2000, WebP and AVIF from a `ByteArray`. The same code runs on
+BMP, TIFF, JPEG 2000, WebP, AVIF and JPEG XL from a `ByteArray`. The same code runs on
 Android, iOS, desktop, native, the browser and Wasm.
 
 <div class="kite-hero-actions" markdown>
@@ -56,7 +56,7 @@ val bitmap = ImageKodec.decode(bytes)   // format sniffed from the magic bytes
 val pixel = bitmap[10, 20]             // 0xAARRGGBB
 ```
 
-One type covers GIF, APNG, animated WebP and animated AVIF, already composited. Playback is
+One type covers GIF, APNG, animated WebP, animated AVIF and animated JPEG XL, already composited. Playback is
 therefore "draw frame N, wait delay N":
 
 ```kotlin
@@ -87,7 +87,7 @@ decode, rather than throwing later.
 **WebP decodes, lossy and lossless, but does not encode.** Lossy files decode to
 the pixels libwebp's `dwebp` writes. There is no WebP encoder.
 
-PNG, TIFF, JPEG 2000, AVIF and JPEG (12-bit or lossless) read files deeper than 8 bits. `decode` keeps the high
+PNG, TIFF, JPEG 2000, AVIF, JPEG XL and JPEG (12-bit or lossless) read files deeper than 8 bits. `decode` keeps the high
 byte of each sample, and `decode16` keeps all of it, in a `KiteBitmap16`.
 
 The README's Limits section has the full list.

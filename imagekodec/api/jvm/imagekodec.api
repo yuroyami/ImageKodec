@@ -48,6 +48,7 @@ public final class io/github/yuroyami/imagekodec/ImageFormat : java/lang/Enum {
 	public static final field GIF Lio/github/yuroyami/imagekodec/ImageFormat;
 	public static final field JP2 Lio/github/yuroyami/imagekodec/ImageFormat;
 	public static final field JPEG Lio/github/yuroyami/imagekodec/ImageFormat;
+	public static final field JXL Lio/github/yuroyami/imagekodec/ImageFormat;
 	public static final field PNG Lio/github/yuroyami/imagekodec/ImageFormat;
 	public static final field TIFF Lio/github/yuroyami/imagekodec/ImageFormat;
 	public static final field WEBP Lio/github/yuroyami/imagekodec/ImageFormat;

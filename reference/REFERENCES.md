@@ -9,7 +9,7 @@ must retain its applicable copyright and license notice, and identify alteration
 > AV1/HEVC decoders are orders of magnitude beyond a realistic pure-Kotlin port, and
 > libde265/x265 carry HEVC patent baggage on top. Both formats are permanently out of
 > scope for the core (a platform-backed decode could someday live in a separate opt-in
-> module, never here). Same story for JPEG XL for now: revisit if demand appears.
+> module, never here).
 
 | ImageKodec target | Reference tree | Key files | License |
 |---|---|---|---|
@@ -78,6 +78,8 @@ Expansion-budget policy was checked against libwebp's [vp8l_dec.c](https://githu
 | CRC-32 / Adler-32 and zlib framing | Vendored from ArchiveKodec; RFC 1950/1951 and zlib references | Apache-2.0 Kotlin implementation; zlib reference license |
 | Lossy WebP (`Vp8Decoder`, `Vp8Tables`) | Ported from [libwebp v1.3.2](https://github.com/webmproject/libwebp/tree/v1.3.2)'s `src/dec` (VP8 headers, tokens, reconstruction and loop filter), `src/dsp/dec.c`, `src/utils/bit_reader*` and its output path (`upsampling.c`, `yuv.h`, `io_dec.c`), with the ALPH rules of `alpha_dec.c` and `filters.c`; RFC 6386 defines the format. The tables are generated from libwebp's source by `tools/vp8_tables.py`, which records each file's SHA-256 and each table's CRC-32 for `Vp8TablesTest`. `WebpLossyOracleTest` checks every pixel against `dwebp` and `anim_dump` | [BSD-3-Clause](https://github.com/webmproject/libwebp/blob/v1.3.2/COPYING), Google; notice retained in the altered Kotlin sources and reproduced in NOTICE |
 
+| JPEG XL (`codec/jxl`) | Ported from [libjxl v0.11.1](https://github.com/libjxl/libjxl/tree/v0.11.1)'s decoder in `lib/jxl`: the fields and headers, the entropy coder, the ICC codec, the Modular mode with its transforms, VarDCT with its transforms and quantization tables, patches, splines, noise, the render pipeline's filters, upsampling and blending, and the conversion from XYB. Each file names the sources it follows. The container reader and the frame loop were written from ISO/IEC 18181-1 and 18181-2. Checked against libjxl's `djxl` (`JxlOracleTest`), and on every target against committed files that `tools/jxl_fixtures.py` writes with `cjxl` and `jxl_from_tree` (`JxlDecoderTest`) | BSD-3-Clause, the JPEG XL Project Authors; libjxl also carries a patent grant in its `PATENTS` file. Each file retains the notice, and NOTICE holds the license |
+
 The four image/fax decoders above entered this repository in
 [the absorption commit](https://github.com/yuroyami/ImageKodec/commit/24bee5954a0e44f09f606400b05446a8380f416c).
 KitePDF's LICENSE is Apache-2.0, and its NOTICE identifies software developed by
@@ -112,6 +114,10 @@ JPEG 2000 probe and decode share the COD/COC and QCD/QCC parameter readers. `Jp2
 cd reference
 for d in stb lodepng commons-imaging; do (cd "$d" && git pull --depth 1); done
 ```
+
+`libjxl` stays at the tag v0.11.1, the version the JPEG XL decoder follows. Its
+conformance files (`jxl-conformance`, BSD-3-Clause) and test files (`jxl-testdata`,
+CC BY 4.0) were read while the decoder was written. None of them is committed.
 
 JPEG 2000 singleton reconstruction follows [ITU-T T.800 section F.3.6](https://www.fit.vut.cz/person/ibarina/public/tmp/20_T-REC-T_1_.800-200208-I__PDF-E.pdf) for both filters. `Jp2SingletonTest` contains native FFmpeg codestreams with 16×16 tiles and committed OpenJPEG reference pixels for horizontal, vertical and corner singleton cases, plus reversible and ordinary OpenJPEG controls. The source gray ramp is `x*181/(width-1) + y*71/(height-1)` with integer divisions. FFmpeg is used only as an encoder oracle; no source is copied. `Jp2SingletonOracleTest` independently checks full output and all public reduction factors against OpenJPEG.
 

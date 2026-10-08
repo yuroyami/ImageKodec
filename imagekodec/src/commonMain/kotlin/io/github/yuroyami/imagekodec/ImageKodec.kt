@@ -15,6 +15,7 @@ import io.github.yuroyami.imagekodec.codec.TiffEncoder
 import io.github.yuroyami.imagekodec.codec.WebpDecoder
 import io.github.yuroyami.imagekodec.codec.WebpEncoder
 import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
+import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
 import io.github.yuroyami.imagekodec.internal.color.ColorManagement
 import io.github.yuroyami.imagekodec.internal.color.Ink
 import io.github.yuroyami.imagekodec.internal.color.SrgbConverter
@@ -154,9 +155,10 @@ public object ImageKodec {
      * including a TIFF palette's 16-bit ColorMap, every bit of a JPEG 2000 component
      * up to 16 bits deep, through its palette, channel definitions and colour space, and
      * every bit of a 12-bit JPEG or a lossless one of 9 to 16 bits, converted at that
-     * precision. The
-     * channels are those the file stores once a palette is looked up (gray, gray and alpha,
-     * RGB or RGBA), so a gray depth map stays one sample a pixel. Narrower samples
+     * precision. A JPEG XL image keeps up to 16 bits a sample; a deeper or a float
+     * sample is rounded to 16 bits. The channels are those the file stores once a
+     * palette is looked up (gray, gray and alpha, RGB or RGBA), so a gray depth map
+     * stays one sample a pixel. Narrower samples
      * replicate up (an 8-bit `v` becomes `v * 257`, a 12-bit one `v shl 4 or (v shr 8)`, a
      * 1-bit one 0 or 65535), and every other format decodes as [decode] does and widens
      * the same way, as RGB, or RGBA when the file declares transparency.
@@ -183,7 +185,7 @@ public object ImageKodec {
             throw IllegalArgumentException("page $page asked of a one-page $format image")
         }
         when (format) {
-            ImageFormat.TIFF, ImageFormat.PNG, ImageFormat.JP2, ImageFormat.AVIF, ImageFormat.JPEG -> {}
+            ImageFormat.TIFF, ImageFormat.PNG, ImageFormat.JP2, ImageFormat.AVIF, ImageFormat.JPEG, ImageFormat.JXL -> {}
             // A BMP that holds a PNG keeps that PNG's precision.
             ImageFormat.BMP -> return BmpDecoder.embedded(data)?.let { decode16(it, 0, applyOrientation, colorTarget) }
                 ?: widened(data, applyOrientation, colorTarget)
@@ -195,6 +197,7 @@ public object ImageKodec {
                 ImageFormat.PNG -> PngDecoder.decode16(data)
                 ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data)
                 ImageFormat.AVIF -> AvifDecoder.decode16(data)
+                ImageFormat.JXL -> JxlDecoder.decode16(data)
                 else -> JpegDecoder.decode16(data)
             }
         }
@@ -489,6 +492,7 @@ public object ImageKodec {
         ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data)
         ImageFormat.AVIF -> AvifDecoder.decode16(data)
         ImageFormat.JPEG -> JpegDecoder.decode16(data)
+        ImageFormat.JXL -> JxlDecoder.decode16(data)
         ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { raw16(it, 0) }
         else -> null
     }
@@ -528,6 +532,7 @@ public object ImageKodec {
         ImageFormat.WEBP -> WebpDecoder.decode(data)
         ImageFormat.TIFF -> TiffDecoder.decode(data)
         ImageFormat.AVIF -> AvifDecoder.decode(data)
+        ImageFormat.JXL -> JxlDecoder.decode(data)
         null -> throw ImageDecodeException(
             "unrecognised image format (${data.size} bytes${
                 if (data.size >= 4) {
@@ -682,8 +687,8 @@ public object ImageKodec {
     }
 
     /**
-     * Decode [data] as an animation. GIF, APNG, animated WebP and AVIF image
-     * sequences return every composited frame with delays and the loop count;
+     * Decode [data] as an animation. GIF, APNG, animated WebP, AVIF image sequences
+     * and animated JPEG XL return every composited frame with delays and the loop count;
      * static formats return a single zero-delay frame, so this is safe to call on
      * anything [decode] accepts.
      *
@@ -718,6 +723,7 @@ public object ImageKodec {
             ImageFormat.PNG -> PngDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             ImageFormat.WEBP -> WebpDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             ImageFormat.AVIF -> AvifDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
+            ImageFormat.JXL -> JxlDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             else -> {
                 // A still converts as decode converts it, CMYK ink included.
                 val single = decode(data, colorTarget = colorTarget)

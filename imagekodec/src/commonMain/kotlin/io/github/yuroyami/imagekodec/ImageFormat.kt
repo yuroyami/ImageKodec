@@ -19,6 +19,9 @@ public enum class ImageFormat {
 
     /** AV1 Image File Format: an ISO base media file whose `ftyp` names the `avif` or `avis` brand. */
     AVIF,
+
+    /** JPEG XL: a bare codestream that starts `FF 0A`, or its container, which starts with a `JXL ` box. */
+    JXL,
     ;
 
     public companion object {
@@ -58,6 +61,13 @@ public enum class ImageFormat {
                 at(0) == 0x00 && at(1) == 0x00 && at(2) == 0x00 && at(3) == 0x0C &&
                     at(4) == 'j'.code && at(5) == 'P'.code && at(6) == ' '.code && at(7) == ' '.code -> JP2
                 at(0) == 0xFF && at(1) == 0x4F -> JP2
+
+                // JPEG XL: a bare codestream's marker FF 0A, or the container's signature box
+                // (length 12, type "JXL ", then 0D 0A 87 0A).
+                at(0) == 0xFF && at(1) == 0x0A -> JXL
+                at(0) == 0x00 && at(1) == 0x00 && at(2) == 0x00 && at(3) == 0x0C &&
+                    at(4) == 'J'.code && at(5) == 'X'.code && at(6) == 'L'.code && at(7) == ' '.code &&
+                    at(8) == 0x0D && at(9) == 0x0A && at(10) == 0x87 && at(11) == 0x0A -> JXL
 
                 // An 'ftyp' box naming the avif or avis brand, as libavif checks.
                 at(4) == 'f'.code && at(5) == 't'.code && at(6) == 'y'.code && at(7) == 'p'.code &&

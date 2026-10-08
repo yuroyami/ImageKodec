@@ -14,6 +14,23 @@ reviewable in the diff.
 
 ### Added
 
+- JPEG XL decodes on every target, through `decode`, `decode16`, `decodeAnimation`
+  and `probe`, from the bare codestream and from the container, whose codestream
+  may be split over several boxes. The decoder is a pure-Kotlin port of the decoder
+  of libjxl 0.11.1. It reads both coding modes: lossy VarDCT with every transform
+  size, and Modular, lossless or lossy, with its palette, colour and squeeze
+  transforms. It reads progressive passes, LF frames, patches, splines, noise, the
+  Gaborish and edge-preserving filters, upsampling by 2, 4 and 8, samples of up to
+  16 bits and float samples, alpha straight or premultiplied, extra channels and
+  spot colours. A recompressed JPEG decodes to its pixels. Layers are blended with
+  every blend mode, and an animation gives every frame with its duration and the
+  loop count. XYB colour converts to the encoding the header names, with the sRGB,
+  linear, gamma, BT.709, DCI, PQ or HLG curve. A lossless file reads exactly as
+  libjxl's `djxl` reads it. A lossy file gives the 8-bit level nearest to djxl's
+  sample, and a 16-bit file stays within 48 of 65535 of it. The orientation, the
+  ICC profile and the code points of the colour encoding are reported by `probe`
+  (#42).
+
 - Colour conversion to sRGB (#108): every decode entry point takes
   `colorTarget = ColorTarget.Srgb(intent)` and converts through the file's embedded ICC
   profile, and `ImageKodec.convertToSrgb` converts a bitmap through a profile from

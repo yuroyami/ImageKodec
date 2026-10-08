@@ -31,7 +31,8 @@ import okio.use
  *
  * The factory uses `ImageKodec.probe` and a complete WebP chunk-header walk to
  * decide whether this build can decode the bytes. It claims PNG and APNG, JPEG,
- * GIF, BMP, lossy and lossless WebP (including animations), TIFF and JP2.
+ * GIF, BMP, lossy and lossless WebP (including animations), TIFF, JP2, AVIF
+ * and JPEG XL.
  * Unsupported formats such as SVG, CgBI PNGs and lossless/arithmetic JPEGs fall
  * through to Coil's platform decoders.
  *

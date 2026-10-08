@@ -183,6 +183,49 @@ class KiteImageFactoryClaimTest {
         } finally { stock.shutdown(); registered.shutdown() }
     }
 
+    private fun hex(s: String) = ByteArray(s.length / 2) { s.substring(2 * it, 2 * it + 2).toInt(16).toByte() }
+    private fun be32(v: Long) = ByteArray(4) { (v ushr (24 - 8 * it)).toByte() }
+    private fun box(type: String, body: ByteArray) = be32(8L + body.size) + type.encodeToByteArray() + body
+
+    // libjxl's jxl_from_tree wrote both JPEG XL files: a 20 by 12 still, and a 16 by 12 animation of three frames.
+    private val jxlStill = hex("ff0a58002600480806010048004b2832767994935c8980e7988a041708001a")
+    private val jxlAnimation = hex(
+        "ff0a5830c100d4040818208a000044004b3841bced472503ef4fafe404b54282010898206000040c22917802003c004b386998c88b48" +
+            "0e090780fb23c1000898143000040c55b3040000040034004b28328e2d9202cacc39408201",
+    )
+
+    @Test
+    fun aJpegXlWhoseMetadataRunsPastThePeekIsClaimed() {
+        assertNotNull(claim(jxlStill))
+        assertNotNull(claim(jxlAnimation))
+        // libjxl writes the start of the codestream in a first box, then the metadata, then the rest of the codestream.
+        val boxed = hex("0000000c4a584c200d0a870a") +
+            box("ftyp", "jxl ".encodeToByteArray() + ByteArray(4) + "jxl ".encodeToByteArray()) +
+            box("jxlp", be32(0) + jxlStill.copyOf(12)) + box("Exif", ByteArray(70_000)) +
+            box("jxlp", be32(0x80000001L) + jxlStill.copyOfRange(12, jxlStill.size))
+        assertNotNull(claim(boxed))
+        assertContentEquals(ImageKodec.decode(jxlStill).argb, ImageKodec.decode(boxed).argb)
+        // The signature alone is not a file this build can show.
+        assertNull(claim(jxlStill.copyOf(2)))
+    }
+
+    @Test
+    fun aJpegXlDecodesThroughThePipelineStillAndAnimated() {
+        val loader = ImageLoader.Builder(context).components { add(KiteImageDecoder.Factory()) }.build()
+        try {
+            fun load(bytes: ByteArray) = assertIs<SuccessResult>(runBlocking {
+                loader.execute(ImageRequest.Builder(context).data(bytes).build())
+            }).image
+            val still = assertIs<BitmapImage>(load(jxlStill))
+            val want = ImageKodec.decode(jxlStill)
+            assertEquals(20 to 12, still.width to still.height)
+            for ((x, y) in listOf(0 to 0, 7 to 3, 19 to 11)) assertEquals(want[x, y], still.bitmap.getColor(x, y), "pixel $x, $y")
+            val moving = assertIs<KiteAnimationImage>(load(jxlAnimation))
+            assertEquals(16 to 12, moving.width to moving.height)
+            assertEquals(listOf(40, 120, 300), moving.animation.frames.map { it.delayMillis })
+        } finally { loader.shutdown() }
+    }
+
     @Test
     fun aRealLosslessAnimationWithLateFramesKeepsItsAnimation() {
         val mixed = realMixedAnimation()

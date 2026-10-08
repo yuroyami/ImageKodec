@@ -17,7 +17,7 @@ public class KiteFrame(
 )
 
 /**
- * A decoded animation: GIF, APNG, animated WebP and animated AVIF all arrive in this shape.
+ * A decoded animation: GIF, APNG, animated WebP, animated AVIF and animated JPEG XL all arrive in this shape.
  * Static images decode as a single frame, so [ImageKodec.decodeAnimation] is total
  * over every supported format.
  *

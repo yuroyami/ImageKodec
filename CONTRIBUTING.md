@@ -78,14 +78,15 @@ Every codec's tests compare its output against an independent implementation:
 | APNG encode | Pillow (`python3` with `PIL`) and ffmpeg's APNG decoder read our output back, frames, delays and loop count |
 | AV1 | dav1d through ffmpeg, sample for sample, on stills and sequences from libaom, SVT-AV1 and rav1e |
 | AVIF | libavif's float conversion through `tools/avif_rgb.c`, and libheif's `heif-convert` for crops, rotations and mirrors |
+| JPEG XL | libjxl (`cjxl` writes the files and `djxl` reads them), with libjpeg-turbo's `cjpeg` for the JPEGs that cjxl recompresses. The bounds are for libjxl 0.11 or newer; an older one gets the plain cases with looser bounds |
 
 The suites that need a binary `assumeTrue`-skip when it is missing, and a
 skipped test reports as a pass. If you touch those codecs, install the tools and
 check the skip count, not only whether the run passed:
 
 ```sh
-brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif pillow little-cms2     # macOS
-sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free   # Debian/Ubuntu
+brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif pillow little-cms2 jpeg-xl     # macOS
+sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools   # Debian/Ubuntu
 ```
 
 The lossless and hierarchical JPEG suites also need `t81jpeg`, the `jpeg` tool of the T.81 reference software, built

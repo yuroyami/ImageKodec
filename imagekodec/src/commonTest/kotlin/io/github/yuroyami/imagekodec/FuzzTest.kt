@@ -160,6 +160,9 @@ class FuzzTest {
         "jp2-ppm" to Jp2FeatureFixtures.ppm,
         // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
         *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
+        // JPEG XL from libjxl: both coding modes, the container, an ICC profile, passes, an LF frame, patches,
+        // splines, noise, upsampling, a recompressed JPEG, float samples and a blended animation (#42).
+        *JxlFixtures.all.map { (name, data) -> "jxl-$name" to data }.toTypedArray(),
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
@@ -311,7 +314,7 @@ class FuzzTest {
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
         // The 16-bit paths read their own samples; the others widen what decode gives.
         val format = ImageFormat.sniff(bytes)
-        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF) {
+        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.JXL) {
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
         }
         // A file that declares its colour converts through it when asked, so a profile's tables

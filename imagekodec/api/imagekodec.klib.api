@@ -12,6 +12,7 @@ final enum class io.github.yuroyami.imagekodec/ImageFormat : kotlin/Enum<io.gith
     enum entry GIF // io.github.yuroyami.imagekodec/ImageFormat.GIF|null[0]
     enum entry JP2 // io.github.yuroyami.imagekodec/ImageFormat.JP2|null[0]
     enum entry JPEG // io.github.yuroyami.imagekodec/ImageFormat.JPEG|null[0]
+    enum entry JXL // io.github.yuroyami.imagekodec/ImageFormat.JXL|null[0]
     enum entry PNG // io.github.yuroyami.imagekodec/ImageFormat.PNG|null[0]
     enum entry TIFF // io.github.yuroyami.imagekodec/ImageFormat.TIFF|null[0]
     enum entry WEBP // io.github.yuroyami.imagekodec/ImageFormat.WEBP|null[0]

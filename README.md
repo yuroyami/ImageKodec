@@ -1,8 +1,8 @@
 # ImageKodec
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
-BMP, TIFF, JPEG 2000, WebP and AVIF from a `ByteArray`, with the same code on every
-target.
+BMP, TIFF, JPEG 2000, WebP, AVIF and JPEG XL from a `ByteArray`, with the same code
+on every target.
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/imagekodec)](https://central.sonatype.com/artifact/io.github.yuroyami/imagekodec)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuroyami/ImageKodec/ci.yml?branch=main&label=CI)](https://github.com/yuroyami/ImageKodec/actions/workflows/ci.yml)
@@ -43,7 +43,7 @@ println("${info.width}x${info.height}, ${info.frameCount} frame(s)")
 val bitmap: KiteBitmap = ImageKodec.decode(bytes)
 val pixel = bitmap[10, 20]                       // 0xAARRGGBB
 
-// GIF, APNG, animated WebP and animated AVIF all arrive in this shape, fully composited.
+// GIF, APNG, animated WebP, animated AVIF and animated JPEG XL all arrive in this shape, fully composited.
 val anim = ImageKodec.decodeAnimation(bytes)
 for (frame in anim.frames) draw(frame.bitmap, frame.delayMillis)
 
@@ -176,6 +176,7 @@ at a lower resolution than brightness.
 | TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/5/6 including subsampled YCbCr and CMYK, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
 | JPEG 2000 | JP2 container and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN) |
 | AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
+| JPEG XL | the bare codestream and the container, both coding modes: lossy VarDCT with every transform size, and Modular, lossless or lossy. Progressive passes, LF frames, patches, splines, noise, both smoothing filters, upsampling, samples of up to 16 bits and float samples, alpha straight or premultiplied, extra channels, spot colours, recompressed JPEGs, layers with every blend mode, animations |
 
 A TIFF can hold any number of pages. `decode` returns the first,
 `probe(bytes).pageCount` says how many there are, and `decodePage` and
@@ -202,9 +203,19 @@ applies them; the clean aperture always crops. An image sequence plays through
 `decodeAnimation`, every frame with the duration its track gives and the loop
 count its edit list gives, alpha track included; `decode` shows its first frame.
 
+JPEG XL decodes with a port of the decoder of libjxl 0.11. A lossless file reads
+exactly as libjxl's `djxl` reads it. A lossy file gives the 8-bit level nearest to
+djxl's own sample, and a 16-bit file stays within a few 65535ths of it. djxl dithers
+its 8-bit output and this decoder does not, so the two can differ by one level there.
+Layers are blended into one image. The orientation is reported as
+`ImageInfo.orientation`, and `applyOrientation` applies it. An animation plays
+through `decodeAnimation` with each frame's duration and the file's loop count;
+`decode` shows its first frame. A recompressed JPEG decodes to its pixels; the
+data that rebuilds the original JPEG file is passed over.
+
 `ImageFormat.sniff` (and `ImageKodec.detect`) recognize PNG, JPEG, GIF, BMP, WEBP,
-TIFF, JP2 and AVIF. Sniffing is deliberately wider than decoding, which is why `probe`
-is worth calling.
+TIFF, JP2, AVIF and JXL. Sniffing is deliberately wider than decoding, which is why
+`probe` is worth calling.
 
 `Jbig2Decoder` and `CcittFax` are public as well. Neither format carries magic
 bytes or dimensions of its own. Both therefore take their parameters explicitly,
@@ -212,7 +223,7 @@ and both return packed 1-bit rows instead of using `decode`.
 
 ### Play an animation
 
-One type covers GIF, APNG, animated WebP and animated AVIF. Frames are full composited canvases,
+One type covers GIF, APNG, animated WebP, animated AVIF and animated JPEG XL. Frames are full composited canvases,
 with disposal, blending and frame offsets already applied. Playback is therefore
 "draw frame N, wait delay N".
 
@@ -236,10 +247,10 @@ than changing them. APNG preserves its full four-byte play field, including
 counts above the PNG Third Edition integer limit as a compatibility extension
 for deployed writers such as Pillow.
 
-GIF, APNG, WebP and AVIF delays of 10 ms and under are reported as 100 ms, which matches
-browser behavior. An APNG `fcTL` with `delay_num = 0` therefore gives a 100 ms frame.
-`KiteFrame.delayRawCentiseconds` is the exact figure a GIF stated. For APNG, WebP and
-AVIF it is derived from the stated delay, because none of them stores centiseconds.
+GIF, APNG, WebP, AVIF and JPEG XL delays of 10 ms and under are reported as 100 ms, which
+matches browser behavior. An APNG `fcTL` with `delay_num = 0` therefore gives a 100 ms frame.
+`KiteFrame.delayRawCentiseconds` is the exact figure a GIF stated. For APNG, WebP, AVIF
+and JPEG XL it is derived from the stated delay, because none of them stores centiseconds.
 
 ### Keep 16-bit samples
 
@@ -248,7 +259,8 @@ or a graded photograph, `decode16` keeps every bit a 16-bit PNG or TIFF stores,
 every bit of a JPEG 2000 component up to 16 bits deep, and every bit of a 12-bit
 JPEG or a lossless one of 9 to 16 bits, as medical images carry them, in the channels the file has
 once a palette is looked up: gray, gray and alpha, RGB or RGBA. A 10- or 12-bit
-AVIF converts to RGB at 16 bits.
+AVIF converts to RGB at 16 bits. A JPEG XL image keeps up to 16 bits a sample; a
+deeper sample or a float sample is rounded to 16 bits.
 
 ```kotlin
 val wide = ImageKodec.decode16(bytes)
@@ -458,11 +470,11 @@ web project that runs under Node should not use them.
 ## Limits
 
 - **`decode` keeps only the high byte of a 16-bit sample**, because `KiteBitmap`
-  is 8 bits a channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000
-  and 12-bit or lossless JPEG, and converts AVIF at 16 bits; other formats come through it at
-  8 bits, widened.
+  is 8 bits a channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000,
+  JPEG XL and 12-bit or lossless JPEG, and converts AVIF at 16 bits; other formats
+  come through it at 8 bits, widened.
 - **ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF and lossless WebP.** There
-  is no encoder for lossy WebP, JPEG 2000 or AVIF.
+  is no encoder for lossy WebP, JPEG 2000, AVIF or JPEG XL.
 - **The PNG encoder writes 8-bit RGB or RGBA only**, with no interlace, no
   palette and no 16-bit output. It picks a filter per row, which is a compression
   choice, not a format capability.
@@ -484,6 +496,28 @@ web project that runs under Node should not use them.
   missing loops for ever, as browsers play it; a frame coded at another size than
   the first, which AV1 allows, is scaled to the first frame's size. Large scale tile
   lists, which no image uses, are refused.
+- **JPEG XL colour defaults to the header's colour encoding.** A lossy file stores its
+  colour in the XYB space. It converts to the encoding its header names: the white
+  point, the primaries and the sRGB, linear, gamma, BT.709, DCI, PQ or HLG curve. A
+  header that has only an ICC profile gives sRGB, and `probe` reports sRGB, where
+  libjxl converts to the profile with a colour engine. A file that is not XYB
+  keeps the samples it stores, and its ICC profile is reported, not applied. No
+  tone mapping runs by default. With `colorTarget = ColorTarget.Srgb()`, the shared
+  colour conversion applies supported profiles or code points and tone-maps HDR.
+  A sample outside the range of 0 to 1, which a float file can
+  hold, is clipped. A black channel of a CMYK file is read and not applied.
+- **JPEG XL bounds the work of a file more tightly than libjxl.** Splines may
+  cover 64 times the area of the image plus 2^27 pixels, by libjxl's own estimate,
+  and patches may cover 16 times the area of the image plus 2^20 pixels. An image
+  may hold 2^30 samples over all of its channels, which is colour and alpha at the
+  shared ceiling of 2^28 pixels, so an image of more extra channels has to be
+  smaller. A lossy frame is padded to whole blocks of 8 pixels, and the padded
+  frame may be 2^29 pixels at most. A file past any of these bounds throws
+  `ImageDecodeException`. libjxl limits how many splines and patches a frame has,
+  which lets a small file ask for a very long decode.
+- **JPEG XL shows the frames a viewer shows.** A preview frame is passed over.
+  `decode` gives the first shown frame with the layers before it blended in. Every
+  frame decodes whole, with all of its passes; there is no early, coarser picture.
 - **JPEG 2000 colour comes from the JP2 header, without a colour engine.** The
   palette, channel definitions and colour specification apply as T.800 Annex I
   orders them. sRGB, greyscale, bi-level, sYCC, e-sYCC, CMYK and CMY convert to
@@ -532,10 +566,11 @@ expectations:
 | JPEG 2000 | OpenJPEG | exact for reversible 5/3, within 1/255 and a mean of 0.05 for irreversible 9/7, 16-bit included |
 | TIFF | libtiff and ImageMagick | exact, except 16-bit which allows 1, and JPEG strips, which allow the last bits of a JPEG decoder |
 | JBIG2 | jbig2enc's streams: generic regions against the source page, symbol mode against jbig2dec | exact |
+| JPEG XL | libjxl `cjxl` and `djxl`, and committed files with djxl's own pixels, which every target checks | exact for lossless; for lossy the 8-bit level nearest to djxl's sample, and 48 of 65535 at 16 bits |
 
 The committed stb vectors and ImageIO tests need no external binary. The
-libjpeg-turbo, libwebp, OpenJPEG, libtiff/ImageMagick and JBIG2 oracle tests run
-when their binaries are installed, and skip when they are not. A skipped test
+libjpeg-turbo, libwebp, OpenJPEG, libtiff/ImageMagick, JBIG2 and libjxl oracle tests
+run when their binaries are installed, and skip when they are not. A skipped test
 reports as a pass, so read the skip count and not only the pass result. CI sets
 `IMAGEKODEC_REQUIRE_ORACLES=1`, which turns a missing tool into a failure.
 

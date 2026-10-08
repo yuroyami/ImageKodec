@@ -9,7 +9,7 @@ Format support and known limits: the Limits section of [README.md](README.md).
 Things that already cost someone time. One line each. Delete a line when it stops
 being true.
 
-- The OpenJPEG, libtiff, libwebp, libjpeg, jbig2enc, ffmpeg, libavif and libheif suites
+- The OpenJPEG, libtiff, libwebp, libjpeg, jbig2enc, ffmpeg, libavif, libheif and libjxl suites
   skip themselves when their binary is missing, and a skipped test reports as a pass,
   so read the skip count and not only the green run. CI sets
   `IMAGEKODEC_REQUIRE_ORACLES=1` to fail instead; set it locally to check the same (#14).
@@ -116,3 +116,23 @@ being true.
   an unsaved profile with parametric curves (`icc_lcms convert-rgb`) (#108).
 - zimg (`zscale`) applies HLG's OOTF to each channel alone, where BT.2100 weighs a pixel by
   its luminance, so the two agree on grays only (#108).
+- djxl dithers every 8-bit picture it writes, so a lossy file, or a frame blended by
+  its alpha, sits one level away in about a sixth of its samples. Ask it for
+  `--bits_per_sample=16` and a PNG; it ignores that option for PNM and PAM output (#42).
+- djxl gives a premultiplied file's colour as stored, with no option to divide it, and
+  `cjxl --premultiply=1` marks the alpha without multiplying the colour. Compare the
+  colour multiplied by its alpha, and only where it does not pass the alpha (#42).
+- djxl converts a lossy file that has only an ICC profile to that profile. This decoder
+  gives sRGB there, so the reference needs `--color_space=RGB_D65_SRG_Rel_SRG` (#42).
+- Ubuntu 24.04 has libjxl 0.7.0: no `jxl_from_tree`, `--photon_noise` where 0.11 has
+  `--photon_noise_iso`, and other rounding. `JxlOracleTest` gives it the plain cases at
+  a bound of two levels, so the tight bounds run only where libjxl is 0.11 or newer,
+  which CI is not (#42).
+- cjxl keeps neither a GIF's nor an APNG's play count, and `jxl_from_tree` writes none,
+  so `JxlDecoderTest` rewrites a header to test a loop count (#42).
+- `jxl_from_tree` gives `Alpha` the size set before it, and every frame of an
+  animation with `Alpha` has to have the first frame's size. With `Upsample`, set the
+  full size, then `Alpha`, then the stored size (#42).
+- A JPEG decoder clips Y, Cb and Cr after the inverse transform, and libjxl clips only
+  the RGB they give. A recompressed JPEG therefore reads up to 94 levels away from the
+  JPEG decoder's picture at a hard edge, and 1 on average, in djxl as well (#42).
