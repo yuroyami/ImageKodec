@@ -226,7 +226,7 @@ class Av1DecoderTest {
             val w = if (p == 0) picture.width else (picture.width + picture.subX) shr picture.subX
             val rows = if (p == 0) picture.height else (picture.height + picture.subY) shr picture.subY
             for (y in 0 until rows) for (x in 0 until w) {
-                val v = picture.planes[p][y * picture.strides[p] + x]
+                val v = picture.planes[p][y * picture.strides[p] + x].toInt()
                 h = (h xor (v and 255).toLong()) * 0x100000001b3L
                 h = (h xor (v ushr 8).toLong()) * 0x100000001b3L
             }

@@ -27,7 +27,7 @@ internal object Av1Intra {
         val bitDepth = d.bitDepth
         val aboveRow = IntArray(2 * (w + h) + 2 * EDGE)
         val leftCol = IntArray(2 * (w + h) + 2 * EDGE)
-        fun at(px: Int, py: Int) = buf[py * stride + px]
+        fun at(px: Int, py: Int) = buf[py * stride + px].toInt()
 
         if (!haveAbove && haveLeft) {
             val v = at(x - 1, y)
@@ -68,7 +68,7 @@ internal object Av1Intra {
         }
         for (i in 0 until h) {
             val row = (y + i) * stride + x
-            for (j in 0 until w) buf[row + j] = pred[i * w + j]
+            for (j in 0 until w) buf[row + j] = pred[i * w + j].toShort()
         }
     }
 
@@ -378,7 +378,7 @@ internal object Av1Intra {
         val buf = d.frame[plane]
         val stride = d.planeWidth[plane]
         for (i in 0 until h) for (j in 0 until w) {
-            buf[(startY + i) * stride + startX + j] = palette[map[(y * 4 + i) * 64 + x * 4 + j]]
+            buf[(startY + i) * stride + startX + j] = palette[map[(y * 4 + i) * 64 + x * 4 + j]].toShort()
         }
     }
 
@@ -397,7 +397,7 @@ internal object Av1Intra {
             for (j in 0 until w) {
                 val lumaX = minOf((startX + j) shl subX, d.maxLumaW - (1 shl subX))
                 var t = 0
-                for (dy in 0..subY) for (dx in 0..subX) t += luma[(lumaY + dy) * lumaStride + lumaX + dx]
+                for (dy in 0..subY) for (dx in 0..subX) t += luma[(lumaY + dy) * lumaStride + lumaX + dx].toInt()
                 val v = t shl (3 - subX - subY)
                 l[i * w + j] = v
                 lumaAvg += v
@@ -410,7 +410,7 @@ internal object Av1Intra {
         for (i in 0 until h) for (j in 0 until w) {
             val at = (startY + i) * stride + startX + j
             val scaledLuma = Av1.round2Signed(alpha * (l[i * w + j] - lumaAvg), 6)
-            buf[at] = (buf[at] + scaledLuma).coerceIn(0, max)
+            buf[at] = (buf[at] + scaledLuma).coerceIn(0, max).toShort()
         }
     }
 }

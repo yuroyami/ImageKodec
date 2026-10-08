@@ -27,7 +27,9 @@ reviewable in the diff.
   sequence header's matrix and range, as libavif's float path does, within one level
   and mostly exactly. The clean aperture crops; rotation and mirroring are reported
   as `ImageInfo.orientation` and applied with `applyOrientation`. The ICC profile
-  and the code points are reported in `ImageInfo.colorProfile` (#41).
+  and the code points are reported in `ImageInfo.colorProfile`. Samples are kept at
+  16 bits and every post filter works in place, so a 12-megapixel AVIF decodes in a
+  96 MB heap, its 45 MB result included (#41).
 
 - `ImageKodec.decode16` keeps every bit of a JPEG 2000 component up to 16 bits
   deep, replicated up to 16 bits, through the palette, channel definitions, sYCC

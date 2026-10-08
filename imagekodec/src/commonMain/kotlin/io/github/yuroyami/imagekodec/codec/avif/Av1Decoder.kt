@@ -14,7 +14,7 @@ internal class Av1Picture(
     val bitDepth: Int,
     val subX: Int,
     val subY: Int,
-    val planes: Array<IntArray>,
+    val planes: Array<ShortArray>,
     val strides: IntArray,
     val seq: Av1SequenceHeader,
 ) {
@@ -42,13 +42,16 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
     private var frameSpatialId = 0
     private var headersOnly = false
     private var unsupported: String? = null
-    private val shown = ArrayList<Pair<Av1Picture, Int>>()
+    private val shown = ArrayList<Shown>()
+
+    /** A shown frame: its picture without grain, its spatial layer, and the grain to add when handed out. */
+    private class Shown(val picture: Av1Picture, val spatialId: Int, val grain: Av1FilmGrain?)
     private var lastSize: Pair<Int, Int>? = null
 
     /** The first frame [data]'s OBUs show; [data] may start with a sequence header or rely on an earlier one. */
     fun decode(data: ByteArray): Av1Picture {
         run(data)
-        return shown.firstOrNull()?.first ?: throw ImageDecodeException("AV1: the data holds no shown frame")
+        return handOut(shown.firstOrNull() ?: throw ImageDecodeException("AV1: the data holds no shown frame"))
     }
 
     /**
@@ -58,9 +61,25 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
     fun decodeStill(config: ByteArray?, data: ByteArray, layer: Int): Av1Picture {
         if (config != null && config.isNotEmpty()) configure(config)
         run(data)
-        val frames = if (layer == 0xFFFF) shown else shown.filter { it.second == layer }
-        return frames.lastOrNull()?.first
-            ?: throw ImageDecodeException(if (layer == 0xFFFF) "AV1: the data holds no shown frame" else "AV1: no frame of spatial layer $layer is shown")
+        val frames = if (layer == 0xFFFF) shown else shown.filter { it.spatialId == layer }
+        return handOut(
+            frames.lastOrNull()
+                ?: throw ImageDecodeException(if (layer == 0xFFFF) "AV1: the data holds no shown frame" else "AV1: no frame of spatial layer $layer is shown"),
+        )
+    }
+
+    /**
+     * [s]'s picture with its film grain, which the output process adds to the frame it outputs and
+     * not to the one kept for reference. A decoder hands out one picture when its data is read, so
+     * the grain goes on in place.
+     */
+    private fun handOut(s: Shown): Av1Picture {
+        val p = s.picture
+        if (s.grain != null) {
+            Av1GrainSynthesis(s.grain, p.bitDepth, p.subX, p.subY, p.planes.size, p.seq.matrixCoefficients == 0)
+                .apply(p.planes, p.strides, p.width, p.height)
+        }
+        return p
     }
 
     /** Reads the OBUs of [data] for their sequence header only, as an `av1C` box carries one. */
@@ -277,15 +296,10 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
         store[to] = store[from]
     }
 
-    /** The output process: grain goes on the shown copy, never on the frame kept for reference. */
+    /** The output process, with the film grain parameters kept for when the picture is handed out. */
     private fun output(fh: Av1FrameHeader, picture: Av1Picture) {
-        val s = picture.seq
-        var planes = picture.planes
-        if (s.filmGrainParamsPresent && fh.filmGrain.applyGrain) {
-            val grain = Av1GrainSynthesis(fh.filmGrain, picture.bitDepth, picture.subX, picture.subY, planes.size, s.matrixCoefficients == 0)
-            planes = grain.apply(planes, picture.strides, picture.width, picture.height)
-        }
-        shown += Av1Picture(picture.width, picture.height, picture.bitDepth, picture.subX, picture.subY, planes, picture.strides, s) to frameSpatialId
+        val grain = if (picture.seq.filmGrainParamsPresent && fh.filmGrain.applyGrain) Av1FilmGrain().also { it.copyFrom(fh.filmGrain) } else null
+        shown += Shown(picture, frameSpatialId, grain)
     }
 
     companion object {

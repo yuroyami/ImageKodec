@@ -342,7 +342,7 @@ internal object AvifDecoder {
     private fun fullRangeAlpha(p: AvifPlanes): AvifPlanes {
         if (p.fullRange) return p
         val plane = p.planes[0]
-        val out = IntArray(plane.size) { AvifColor.limitedToFull(p.depth, plane[it]) }
+        val out = ShortArray(plane.size) { AvifColor.limitedToFull(p.depth, plane[it].toInt() and 0xFFFF).toShort() }
         return AvifPlanes(p.width, p.height, p.depth, p.subX, p.subY, arrayOf(out), p.strides.copyOf(1), true)
     }
 

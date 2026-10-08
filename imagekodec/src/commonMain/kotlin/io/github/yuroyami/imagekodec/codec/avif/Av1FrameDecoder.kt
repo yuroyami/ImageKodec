@@ -29,10 +29,10 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     val miRowsAligned = ((miRows + sbSize4 - 1) / sbSize4) * sbSize4
     private val miCount = miStride * miRowsAligned
 
-    /** CurrFrame: one plane of samples each, at the superblock-aligned size. */
+    /** CurrFrame: one plane of samples each, at the superblock-aligned size, 16 bits a sample. */
     val planeWidth = IntArray(3)
     val planeHeight = IntArray(3)
-    val frame: Array<IntArray>
+    val frame: Array<ShortArray>
 
     init {
         if (miCount.toLong() * 16 > (1L shl 28)) throw UnsupportedImageException("AV1 frame of ${fh.frameWidth} by ${fh.frameHeight}")
@@ -41,37 +41,57 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             val sy = if (p > 0) subY else 0
             planeWidth[p] = (miStride * 4) shr sx
             planeHeight[p] = (miRowsAligned * 4) shr sy
-            IntArray(planeWidth[p] * planeHeight[p])
+            ShortArray(planeWidth[p] * planeHeight[p])
         }
     }
 
     /** The frame after its filters, when they produced new planes; [frame] otherwise. */
-    var output: Array<IntArray>? = null
+    var output: Array<ShortArray>? = null
     var outputStride: IntArray? = null
 
-    fun outputPlanes(): Array<IntArray> = output ?: frame
+    fun outputPlanes(): Array<ShortArray> = output ?: frame
     fun outputStrides(): IntArray = outputStride ?: planeWidth.copyOf(numPlanes)
 
     // ---- per-4x4 mode information ----------------------------------------------------
-    val yModes = IntArray(miCount)
-    val uvModes = IntArray(miCount)
-    val refFrames0 = IntArray(miCount)
-    val refFrames1 = IntArray(miCount) { -1 }
+    // A byte or a short each: a 12-megapixel frame has three quarters of a million 4x4 blocks.
+    val yModes = ByteGrid(miCount)
+    val uvModes = ByteGrid(miCount)
+    val refFrames0 = ByteGrid(miCount)
+    val refFrames1 = ByteGrid(miCount, -1)
     val isInters = BooleanArray(miCount)
-    val skipModes = IntArray(miCount)
-    val skips = IntArray(miCount)
-    val txSizes = IntArray(miCount)
-    val interTxSizes = IntArray(miCount)
-    val miSizes = IntArray(miCount)
-    val segmentIds = IntArray(miCount)
-    val prevSegmentIds = IntArray(miCount)
-    val paletteSizes = Array(2) { IntArray(miCount) }
-    val paletteColors = Array(2) { IntArray(miCount * 8) }
-    val deltaLfs = IntArray(miCount * 4)
-    val txTypes = IntArray(miCount)
-    val mvs = IntArray(miCount * 4)
-    val loopfilterTxSizes = Array(3) { IntArray(miCount) }
-    val cdefIdx = IntArray(miCount) { -1 }
+    val skipModes = ByteGrid(miCount)
+    val skips = ByteGrid(miCount)
+    val txSizes = ByteGrid(miCount)
+    val interTxSizes = ByteGrid(miCount)
+    val miSizes = ByteGrid(miCount)
+    val segmentIds = ByteGrid(miCount)
+    val paletteSizes = Array(2) { ByteGrid(miCount) }
+    val deltaLfs = ByteGrid(miCount * 4)
+    val txTypes = ByteGrid(miCount)
+    val mvs = ShortGrid(miCount * 4)
+    val loopfilterTxSizes = Array(3) { ByteGrid(miCount) }
+    val cdefIdx = ByteGrid(miCount, -1)
+
+    /**
+     * PaletteColors[ ][ row ][ col ]: for each 4x4 block of a block with a palette, one more
+     * than the index of its colours in [paletteStore], and 0 otherwise. A palette is rare
+     * outside screen content, so the colours are kept once per block, not once per 4x4.
+     */
+    val paletteIndex = Array(2) { IntArray(miCount) }
+    private val paletteStore = Array(2) { ShortArray(64) }
+    private val paletteCount = IntArray(2)
+
+    /** Keeps [n] colours of [colors] for plane type [plane] and returns their index plus one. */
+    private fun storePalette(plane: Int, colors: IntArray, n: Int): Int {
+        val at = paletteCount[plane]
+        if ((at + 1) * 8 > paletteStore[plane].size) paletteStore[plane] = paletteStore[plane].copyOf(paletteStore[plane].size * 2)
+        for (i in 0 until n) paletteStore[plane][at * 8 + i] = colors[i].toShort()
+        paletteCount[plane] = at + 1
+        return at + 1
+    }
+
+    /** Colour [i] of the palette of the block at [m] for plane type [plane]. */
+    fun paletteColor(plane: Int, m: Int, i: Int): Int = paletteStore[plane][(paletteIndex[plane][m] - 1) * 8 + i].toInt()
 
     fun mi(row: Int, col: Int): Int = row * miStride + col
 
@@ -430,6 +450,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         }
         computePrediction()
         residual()
+        val paletteY = if (paletteSizeY > 0) storePalette(0, paletteColorsY, paletteSizeY) else 0
+        val paletteUV = if (paletteSizeUV > 0) storePalette(1, paletteColorsU, paletteSizeUV) else 0
         for (y in 0 until bh4) for (x in 0 until bw4) {
             val m = mi(r + y, c + x)
             isInters[m] = isInter
@@ -440,8 +462,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             segmentIds[m] = segmentId
             paletteSizes[0][m] = paletteSizeY
             paletteSizes[1][m] = paletteSizeUV
-            for (i in 0 until paletteSizeY) paletteColors[0][m * 8 + i] = paletteColorsY[i]
-            for (i in 0 until paletteSizeUV) paletteColors[1][m * 8 + i] = paletteColorsU[i]
+            paletteIndex[0][m] = paletteY
+            paletteIndex[1][m] = paletteUV
             for (i in 0 until 4) deltaLfs[m * 4 + i] = deltaLf[i]
         }
     }
@@ -755,12 +777,11 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         var aboveIdx = 0
         var leftIdx = 0
         var n = 0
-        val aboveBase = if (aboveN > 0) mi(miRow - 1, miCol) * 8 else 0
-        val leftBase = if (leftN > 0) mi(miRow, miCol - 1) * 8 else 0
-        val colors = paletteColors[plane]
+        val above = mi(miRow - 1, miCol)
+        val left = mi(miRow, miCol - 1)
         while (aboveIdx < aboveN && leftIdx < leftN) {
-            val aboveC = colors[aboveBase + aboveIdx]
-            val leftC = colors[leftBase + leftIdx]
+            val aboveC = paletteColor(plane, above, aboveIdx)
+            val leftC = paletteColor(plane, left, leftIdx)
             if (leftC < aboveC) {
                 if (n == 0 || leftC != paletteCache[n - 1]) paletteCache[n++] = leftC
                 leftIdx++
@@ -771,11 +792,11 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             }
         }
         while (aboveIdx < aboveN) {
-            val v = colors[aboveBase + aboveIdx++]
+            val v = paletteColor(plane, above, aboveIdx++)
             if (n == 0 || v != paletteCache[n - 1]) paletteCache[n++] = v
         }
         while (leftIdx < leftN) {
-            val v = colors[leftBase + leftIdx++]
+            val v = paletteColor(plane, left, leftIdx++)
             if (n == 0 || v != paletteCache[n - 1]) paletteCache[n++] = v
         }
         return n

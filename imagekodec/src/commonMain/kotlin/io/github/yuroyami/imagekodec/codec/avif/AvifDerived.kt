@@ -58,7 +58,7 @@ internal class AvifGrid(val rows: Int, val columns: Int, val width: Int, val hei
                 val canvas = out ?: AvifPlanes(
                     grid.width, grid.height, f.depth, f.subX, f.subY,
                     Array(f.planes.size) { p ->
-                        IntArray(planeWidth(grid.width, if (p > 0) f.subX else 0) * planeWidth(grid.height, if (p > 0) f.subY else 0))
+                        ShortArray(planeWidth(grid.width, if (p > 0) f.subX else 0) * planeWidth(grid.height, if (p > 0) f.subY else 0))
                     },
                     IntArray(f.planes.size) { p -> planeWidth(grid.width, if (p > 0) f.subX else 0) },
                     f.fullRange,
@@ -188,7 +188,7 @@ internal object AvifSampleTransform {
             val luma = p == 0 || f.planes.size == 1
             val lo = if (fullRange) 0L else (16L shl (depth - 8))
             val hi = if (fullRange) (1L shl depth) - 1 else ((if (luma) 235L else 240L) shl (depth - 8))
-            val out = IntArray(w * h)
+            val out = ShortArray(w * h)
             for (y in 0 until h) for (x in 0 until w) {
                 var top = 0
                 for (k in e.tokens.indices) {
@@ -197,7 +197,7 @@ internal object AvifSampleTransform {
                         t == 0 -> stack[top++] = e.constants[k]
                         t <= 32 -> {
                             val input = inputs[t - 1]
-                            stack[top++] = input.planes[p][y * input.strides[p] + x].toLong()
+                            stack[top++] = input.sample(p, y * input.strides[p] + x).toLong()
                         }
                         t < 128 -> {
                             val l = stack[top - 1]
@@ -215,7 +215,7 @@ internal object AvifSampleTransform {
                         }
                     }
                 }
-                out[y * w + x] = stack[0].coerceIn(lo, hi).toInt()
+                out[y * w + x] = stack[0].coerceIn(lo, hi).toInt().toShort()
             }
             out
         }

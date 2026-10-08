@@ -156,8 +156,8 @@ class AvifDecoderTest {
                     bytes += (t as Int).toByte()
                 }
             }
-            val plane = AvifPlanes(1, 1, 8, 0, 0, arrayOf(intArrayOf(input)), intArrayOf(1), true)
-            return AvifSampleTransform.apply(bytes.toByteArray(), listOf(plane), depth, true).planes[0][0]
+            val plane = AvifPlanes(1, 1, 8, 0, 0, arrayOf(shortArrayOf(input.toShort())), intArrayOf(1), true)
+            return AvifSampleTransform.apply(bytes.toByteArray(), listOf(plane), depth, true).sample(0, 0)
         }
         assertEquals(100 * 257, eval(32, 1, 257L, 130))
         // 16-bit arithmetic stops at 32767, and the output at its own range.

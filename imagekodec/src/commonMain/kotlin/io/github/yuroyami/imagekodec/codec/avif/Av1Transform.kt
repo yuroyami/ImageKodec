@@ -296,7 +296,7 @@ internal class Av1Transform {
             val xx = if (flipLR) w - j - 1 else j
             val yy = if (flipUD) h - i - 1 else i
             val at = (y + yy) * stride + x + xx
-            buf[at] = (buf[at] + residualBuf[i * w + j]).coerceIn(0, max.toLong()).toInt()
+            buf[at] = (buf[at] + residualBuf[i * w + j]).coerceIn(0, max.toLong()).toInt().toShort()
         }
     }
 

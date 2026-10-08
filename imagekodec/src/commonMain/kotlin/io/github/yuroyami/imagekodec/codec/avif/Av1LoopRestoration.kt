@@ -8,6 +8,10 @@ package io.github.yuroyami.imagekodec.codec.avif
  * The specification walks 4x4 blocks, and notes that larger blocks give the same samples as
  * long as each lies in one restoration unit. Restoration units are whole stripes high, so
  * this filters one rectangle per stripe and unit, which lets the box sums be shared.
+ *
+ * It works in place: a stripe reads no row of another stripe's CDEF output, only the deblocked
+ * rows around it, which [savedRows] keeps before CDEF runs, so each stripe is filtered from a
+ * copy of its own rows into the frame.
  */
 internal object Av1LoopRestoration {
     private const val FILTER_BITS = 7
@@ -18,26 +22,43 @@ internal object Av1LoopRestoration {
     private const val SGRPROJ_SGR_BITS = 8
 
     /**
-     * LrFrame from [curr] and [cdef], both with rows [strides] apart: a copy of [cdef] with
-     * every restored unit filtered.
+     * The deblocked rows of each plane that loop restoration reads from outside a stripe: two
+     * above and two below every boundary between stripes, by row, at the frame's coded width.
      */
-    fun apply(f: Av1FrameDecoder, curr: Array<IntArray>, cdef: Array<IntArray>, strides: IntArray): Array<IntArray> {
+    fun savedRows(f: Av1FrameDecoder): Array<HashMap<Int, ShortArray>> = Array(f.numPlanes) { plane ->
+        val rows = HashMap<Int, ShortArray>()
+        if (f.fh.frameRestorationType[plane] != Av1FrameHeader.RESTORE_NONE) {
+            val subY = if (plane > 0) f.subY else 0
+            val planeEndY = Av1.round2(f.fh.frameHeight, subY) - 1
+            val stride = f.planeWidth[plane]
+            var stripe = 1
+            while (true) {
+                val boundary = (-8 + stripe * 64) shr subY
+                if (boundary - 2 > planeEndY) break
+                for (y in boundary - 2..boundary + 1) {
+                    if (y in 0..planeEndY && y !in rows) rows[y] = f.frame[plane].copyOfRange(y * stride, (y + 1) * stride)
+                }
+                stripe++
+            }
+        }
+        rows
+    }
+
+    /** Restores every unit of [planes], rows [strides] apart, in place; [saved] are the rows [savedRows] kept. */
+    fun apply(f: Av1FrameDecoder, planes: Array<ShortArray>, strides: IntArray, saved: Array<HashMap<Int, ShortArray>>) {
         val fh = f.fh
-        val lr = Array(f.numPlanes) { cdef[it].copyOf() }
-        if (!fh.usesLr) return lr
+        if (!fh.usesLr) return
         for (plane in 0 until f.numPlanes) {
             if (fh.frameRestorationType[plane] == Av1FrameHeader.RESTORE_NONE) continue
-            Plane(f, plane, curr[plane], cdef[plane], lr[plane], strides[plane]).run()
+            Plane(f, plane, planes[plane], saved[plane], strides[plane]).run()
         }
-        return lr
     }
 
     private class Plane(
         val f: Av1FrameDecoder,
         val plane: Int,
-        val curr: IntArray,
-        val cdef: IntArray,
-        val out: IntArray,
+        val out: ShortArray,
+        val saved: Map<Int, ShortArray>,
         val stride: Int,
     ) {
         val subX = if (plane > 0) f.subX else 0
@@ -49,9 +70,13 @@ internal object Av1LoopRestoration {
         var stripeStartY = 0
         var stripeEndY = 0
 
+        /** The stripe's own rows before restoration, from row [stripeTop] on: UpscaledCdefFrame for this stripe. */
+        private var cdef = ShortArray(0)
+        private var stripeTop = 0
+
         // The rows and columns get_source_sample reads for the rectangle being filtered,
         // three beyond each side: which frame and where in it.
-        private var rowFrom = arrayOfNulls<IntArray>(0)
+        private var rowFrom = arrayOfNulls<ShortArray>(0)
         private var rowAt = IntArray(0)
         private var colAt = IntArray(0)
 
@@ -66,6 +91,10 @@ internal object Av1LoopRestoration {
                 stripeEndY = stripeStartY + (64 shr subY) - 1
                 val y0 = maxOf(0, stripeStartY)
                 val y1 = minOf(planeEndY, stripeEndY)
+                val n = (y1 - y0 + 1) * stride
+                if (cdef.size < n) cdef = ShortArray(n)
+                out.copyInto(cdef, 0, y0 * stride, (y1 + 1) * stride)
+                stripeTop = y0
                 // The unit row of every 4x4 block in the stripe, from its first.
                 val lumaY = maxOf(0, stripeNum * 64 - 8)
                 val unitRow = minOf(unitRows - 1, ((lumaY + 8) shr subY) / unitSize)
@@ -99,22 +128,20 @@ internal object Av1LoopRestoration {
             if (colAt.size < w + 6) colAt = IntArray(w + 6)
             for (r in 0 until h + 6) {
                 var yy = (y + r - 3).coerceIn(0, planeEndY)
-                if (yy < stripeStartY) {
-                    yy = maxOf(stripeStartY - 2, yy)
-                    rowFrom[r] = curr
-                } else if (yy > stripeEndY) {
-                    yy = minOf(stripeEndY + 2, yy)
-                    rowFrom[r] = curr
+                if (yy < stripeStartY || yy > stripeEndY) {
+                    yy = if (yy < stripeStartY) maxOf(stripeStartY - 2, yy) else minOf(stripeEndY + 2, yy)
+                    rowFrom[r] = saved[yy] ?: error("AV1 loop restoration: row $yy was not kept")
+                    rowAt[r] = 0
                 } else {
                     rowFrom[r] = cdef
+                    rowAt[r] = (yy - stripeTop) * stride
                 }
-                rowAt[r] = yy * stride
             }
             for (c in 0 until w + 6) colAt[c] = (x + c - 3).coerceIn(0, planeEndX)
         }
 
         /** get_source_sample at ([c] - 3, [r] - 3) from the rectangle's corner. */
-        private fun source(r: Int, c: Int): Int = rowFrom[r]!![rowAt[r] + colAt[c]]
+        private fun source(r: Int, c: Int): Int = rowFrom[r]!![rowAt[r] + colAt[c]].toInt()
 
         private fun wiener(u: Int, x: Int, y: Int, w: Int, h: Int) {
             val coeffs = f.lrWiener[plane]!!
@@ -137,7 +164,7 @@ internal object Av1LoopRestoration {
                 for (c in 0 until w) {
                     var s = 0
                     for (t in 0 until 7) s += vfilter[t] * intermediate[(r + t) * w + c]
-                    out[row + c] = Av1.round2(s, round1).coerceIn(0, maxValue)
+                    out[row + c] = Av1.round2(s, round1).coerceIn(0, maxValue).toShort()
                 }
             }
         }
@@ -168,12 +195,13 @@ internal object Av1LoopRestoration {
             val flt1 = if (r1 != 0) boxFilter(x, y, w, h, set, 1) else null
             for (i in 0 until h) {
                 val row = (y + i) * stride + x
+                val source = (y + i - stripeTop) * stride + x
                 for (j in 0 until w) {
-                    val uu = cdef[row + j] shl SGRPROJ_RST_BITS
+                    val uu = cdef[source + j].toInt() shl SGRPROJ_RST_BITS
                     var v = w1 * uu
                     v += if (flt0 != null) w0 * flt0[i * w + j] else w0 * uu
                     v += if (flt1 != null) w2 * flt1[i * w + j] else w2 * uu
-                    out[row + j] = Av1.round2(v, SGRPROJ_RST_BITS + SGRPROJ_PRJ_BITS).coerceIn(0, maxValue)
+                    out[row + j] = Av1.round2(v, SGRPROJ_RST_BITS + SGRPROJ_PRJ_BITS).coerceIn(0, maxValue).toShort()
                 }
             }
         }
@@ -238,7 +266,7 @@ internal object Av1LoopRestoration {
             for (i in 0 until h) {
                 val odd = (i and 1) != 0
                 val shift = if (pass == 0 && odd) 4 else 5
-                val row = (y + i) * stride + x
+                val row = (y + i - stripeTop) * stride + x
                 val up = i * aw
                 val mid = (i + 1) * aw
                 val down = (i + 2) * aw
@@ -262,7 +290,7 @@ internal object Av1LoopRestoration {
                         b = 4 * (boxB[mid + c] + boxB[up + c] + boxB[down + c] + boxB[mid + c - 1] + boxB[mid + c + 1]) +
                             3 * (boxB[up + c - 1] + boxB[up + c + 1] + boxB[down + c - 1] + boxB[down + c + 1])
                     }
-                    val v = a * cdef[row + j] + b
+                    val v = a * cdef[row + j].toInt() + b
                     out[i * w + j] = Av1.round2(v, SGRPROJ_SGR_BITS + shift - SGRPROJ_RST_BITS)
                 }
             }

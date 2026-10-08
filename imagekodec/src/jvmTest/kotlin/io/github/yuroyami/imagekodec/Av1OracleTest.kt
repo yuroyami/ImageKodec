@@ -123,7 +123,7 @@ class Av1OracleTest {
             for (y in 0 until h) for (x in 0 until w) {
                 val expected = if (wide) (ref[at].toInt() and 255) or ((ref[at + 1].toInt() and 255) shl 8) else ref[at].toInt() and 255
                 at += if (wide) 2 else 1
-                val got = picture.planes[p][y * picture.strides[p] + x]
+                val got = picture.planes[p][y * picture.strides[p] + x].toInt()
                 if (got != expected) throw AssertionError("${c.name}: plane $p ($x, $y) is $got, dav1d has $expected")
             }
         }

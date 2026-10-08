@@ -115,7 +115,7 @@ internal object Av1LoopFilter {
         val stride = f.planeWidth[plane]
         val step = dy * stride + dx
         val at = y * stride + x
-        fun s(k: Int) = buf[at + k * step]
+        fun s(k: Int) = buf[at + k * step].toInt()
         val bitDepth = f.bitDepth
         val q0 = s(0)
         val q1 = s(1)
@@ -169,15 +169,15 @@ internal object Av1LoopFilter {
         }
     }
 
-    private fun narrow(buf: IntArray, at: Int, step: Int, hevMask: Boolean, bitDepth: Int) {
+    private fun narrow(buf: ShortArray, at: Int, step: Int, hevMask: Boolean, bitDepth: Int) {
         val lo = -(1 shl (bitDepth - 1))
         val hi = (1 shl (bitDepth - 1)) - 1
         fun c(v: Int) = v.coerceIn(lo, hi)
         val off = 0x80 shl (bitDepth - 8)
-        val q0 = buf[at]
-        val q1 = buf[at + step]
-        val p0 = buf[at - step]
-        val p1 = buf[at - 2 * step]
+        val q0 = buf[at].toInt()
+        val q1 = buf[at + step].toInt()
+        val p0 = buf[at - step].toInt()
+        val p1 = buf[at - 2 * step].toInt()
         val ps1 = p1 - off
         val ps0 = p0 - off
         val qs0 = q0 - off
@@ -186,16 +186,16 @@ internal object Av1LoopFilter {
         filter = c(filter + 3 * (qs0 - ps0))
         val filter1 = c(filter + 4) shr 3
         val filter2 = c(filter + 3) shr 3
-        buf[at] = c(qs0 - filter1) + off
-        buf[at - step] = c(ps0 + filter2) + off
+        buf[at] = (c(qs0 - filter1) + off).toShort()
+        buf[at - step] = (c(ps0 + filter2) + off).toShort()
         if (!hevMask) {
             filter = Av1.round2(filter1, 1)
-            buf[at + step] = c(qs1 - filter) + off
-            buf[at - 2 * step] = c(ps1 + filter) + off
+            buf[at + step] = (c(qs1 - filter) + off).toShort()
+            buf[at - 2 * step] = (c(ps1 + filter) + off).toShort()
         }
     }
 
-    private fun wide(buf: IntArray, at: Int, step: Int, plane: Int, log2Size: Int) {
+    private fun wide(buf: ShortArray, at: Int, step: Int, plane: Int, log2Size: Int) {
         val n = if (log2Size == 4) 6 else if (plane == 0) 3 else 2
         val n2 = if (log2Size == 3 && plane == 0) 0 else 1
         val out = IntArray(2 * n)
@@ -204,10 +204,10 @@ internal object Av1LoopFilter {
             for (j in -n..n) {
                 val p = (i + j).coerceIn(-(n + 1), n)
                 val tap = if (kotlin.math.abs(j) <= n2) 2 else 1
-                t += buf[at + p * step] * tap
+                t += buf[at + p * step].toInt() * tap
             }
             out[i + n] = Av1.round2(t, log2Size)
         }
-        for (i in -n until n) buf[at + i * step] = out[i + n]
+        for (i in -n until n) buf[at + i * step] = out[i + n].toShort()
     }
 }

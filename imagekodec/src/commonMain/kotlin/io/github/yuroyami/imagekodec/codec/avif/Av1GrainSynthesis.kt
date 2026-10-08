@@ -1,8 +1,8 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
 /**
- * The AV1 film grain synthesis process (specification section 7.18.3), on a copy of the
- * output planes so the frame a later frame predicts from stays without grain.
+ * The AV1 film grain synthesis process (specification section 7.18.3). It goes on the frame a
+ * decoder hands out, once it no longer predicts from it, so it works on the planes in place.
  *
  * The specification builds the noise for the whole frame first; this builds it one stripe
  * of 32 luma rows at a time, keeping the stripe before for the vertical overlap, and blends
@@ -27,14 +27,13 @@ internal class Av1GrainSynthesis(
     private val crGrain = IntArray(chromaW * chromaH)
     private val scalingLut = Array(3) { IntArray(256) }
 
-    /** [planes] of a [w] by [h] frame, rows [strides] apart, with the grain added. */
-    fun apply(planes: Array<IntArray>, strides: IntArray, w: Int, h: Int): Array<IntArray> {
-        val out = Array(planes.size) { planes[it].copyOf() }
+    /** Adds the grain to [planes] of a [w] by [h] frame, rows [strides] apart, in place. */
+    fun apply(planes: Array<ShortArray>, strides: IntArray, w: Int, h: Int) {
+        val out = planes
         random = g.grainSeed
         generateGrain()
         initialiseScaling()
         addNoise(out, strides, w, h)
-        return out
     }
 
     private fun randomNumber(bits: Int): Int {
@@ -147,7 +146,7 @@ internal class Av1GrainSynthesis(
         return start + Av1.round2((end - start) * rem, shift)
     }
 
-    private fun addNoise(out: Array<IntArray>, strides: IntArray, w: Int, h: Int) {
+    private fun addNoise(out: Array<ShortArray>, strides: IntArray, w: Int, h: Int) {
         val stripeW = w + 34
         var stripe = Array(numPlanes) { IntArray(34 * stripeW) }
         var previous = Array(numPlanes) { IntArray(34 * stripeW) }
@@ -182,26 +181,26 @@ internal class Av1GrainSynthesis(
                     for (x in 0 until chromaWidth) {
                         val lumaX = x shl subX
                         val lumaNextX = minOf(lumaX + 1, w - 1)
-                        val averageLuma = if (subX != 0) Av1.round2(out[0][lumaRow + lumaX] + out[0][lumaRow + lumaNextX], 1) else out[0][lumaRow + lumaX]
+                        val averageLuma = if (subX != 0) Av1.round2(out[0][lumaRow + lumaX] + out[0][lumaRow + lumaNextX], 1) else out[0][lumaRow + lumaX].toInt()
                         if (g.numCbPoints > 0 || g.chromaScalingFromLuma) {
                             val at = cy * strides[1] + x
-                            val orig = out[1][at]
+                            val orig = out[1][at].toInt()
                             val merged = if (g.chromaScalingFromLuma) averageLuma else {
                                 val combined = averageLuma * (g.cbLumaMult - 128) + orig * (g.cbMult - 128)
                                 ((combined shr 6) + ((g.cbOffset - 256) shl (bitDepth - 8))).coerceIn(0, maxSample)
                             }
                             val noise = Av1.round2(scaleLut(1, merged) * noiseRow[1][x], scalingShift)
-                            out[1][at] = (orig + noise).coerceIn(minValue, maxChroma)
+                            out[1][at] = (orig + noise).coerceIn(minValue, maxChroma).toShort()
                         }
                         if (g.numCrPoints > 0 || g.chromaScalingFromLuma) {
                             val at = cy * strides[2] + x
-                            val orig = out[2][at]
+                            val orig = out[2][at].toInt()
                             val merged = if (g.chromaScalingFromLuma) averageLuma else {
                                 val combined = averageLuma * (g.crLumaMult - 128) + orig * (g.crMult - 128)
                                 ((combined shr 6) + ((g.crOffset - 256) shl (bitDepth - 8))).coerceIn(0, maxSample)
                             }
                             val noise = Av1.round2(scaleLut(2, merged) * noiseRow[2][x], scalingShift)
-                            out[2][at] = (orig + noise).coerceIn(minValue, maxChroma)
+                            out[2][at] = (orig + noise).coerceIn(minValue, maxChroma).toShort()
                         }
                     }
                 }
@@ -212,9 +211,9 @@ internal class Av1GrainSynthesis(
                     noiseImageRow(noiseRow[0], stripe, previous, 0, ly - firstLuma, lumaNum, w, 0)
                     val row = ly * strides[0]
                     for (x in 0 until w) {
-                        val orig = out[0][row + x]
+                        val orig = out[0][row + x].toInt()
                         val noise = Av1.round2(scaleLut(0, orig) * noiseRow[0][x], scalingShift)
-                        out[0][row + x] = (orig + noise).coerceIn(minValue, maxLuma)
+                        out[0][row + x] = (orig + noise).coerceIn(minValue, maxLuma).toShort()
                     }
                 }
             }

@@ -337,7 +337,7 @@ internal object Av1IntraBlockCopy {
             for (c in 0 until w) {
                 var s = 0
                 for (t in 0 until 8) s += filters[fy + t] * intermediate[(r + t) * w + c]
-                ref[out + c] = Av1.round2(s, round1).coerceIn(0, maxValue)
+                ref[out + c] = Av1.round2(s, round1).coerceIn(0, maxValue).toShort()
             }
         }
     }

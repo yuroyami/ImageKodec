@@ -5,7 +5,8 @@ import io.github.yuroyami.imagekodec.UnsupportedImageException
 /**
  * Planes of YUV samples, or of one gray plane: luma [width] by [height] at [depth] bits,
  * chroma subsampled by [subX] and [subY], each plane's rows [strides] apart, in full range or,
- * when [fullRange] is false, in the limited range of studio video.
+ * when [fullRange] is false, in the limited range of studio video. Samples are 16 bits wide,
+ * unsigned.
  */
 internal class AvifPlanes(
     val width: Int,
@@ -13,10 +14,12 @@ internal class AvifPlanes(
     val depth: Int,
     val subX: Int,
     val subY: Int,
-    val planes: Array<IntArray>,
+    val planes: Array<ShortArray>,
     val strides: IntArray,
     val fullRange: Boolean,
 ) {
+    /** The sample of [plane] at [index], read unsigned: a sample transform can fill all 16 bits. */
+    fun sample(plane: Int, index: Int): Int = planes[plane][index].toInt() and 0xFFFF
     val monochrome: Boolean get() = planes.size == 1
 }
 
@@ -140,7 +143,7 @@ internal object AvifColor {
                 else -> uvJ - 1
             }
             for (i in 0 until w) {
-                val yy = tableY[minOf(y0[j * sy + i], max)]
+                val yy = tableY[minOf(y0[j * sy + i].toInt() and 0xFFFF, max)]
                 var r: Double
                 var g: Double
                 var b: Double
@@ -149,8 +152,8 @@ internal object AvifColor {
                     val cb: Double
                     val cr: Double
                     if (!subsampled) {
-                        cb = tableUV[minOf(u0!![uvJ * suv + uvI], max)]
-                        cr = tableUV[minOf(v0!![uvJ * suv + uvI], max)]
+                        cb = tableUV[minOf(u0!![uvJ * suv + uvI].toInt() and 0xFFFF, max)]
+                        cr = tableUV[minOf(v0!![uvJ * suv + uvI].toInt() and 0xFFFF, max)]
                     } else {
                         val adjCol = when {
                             i == 0 || (i == w - 1 && i % 2 != 0) -> uvI
@@ -161,10 +164,10 @@ internal object AvifColor {
                         val c = uvJ * suv + adjCol
                         val rr = adjRow * suv + uvI
                         val d = adjRow * suv + adjCol
-                        cb = tableUV[minOf(u0!![a], max)] * (9.0 / 16) + tableUV[minOf(u0[c], max)] * (3.0 / 16) +
-                            tableUV[minOf(u0[rr], max)] * (3.0 / 16) + tableUV[minOf(u0[d], max)] * (1.0 / 16)
-                        cr = tableUV[minOf(v0!![a], max)] * (9.0 / 16) + tableUV[minOf(v0[c], max)] * (3.0 / 16) +
-                            tableUV[minOf(v0[rr], max)] * (3.0 / 16) + tableUV[minOf(v0[d], max)] * (1.0 / 16)
+                        cb = tableUV[minOf(u0!![a].toInt() and 0xFFFF, max)] * (9.0 / 16) + tableUV[minOf(u0[c].toInt() and 0xFFFF, max)] * (3.0 / 16) +
+                            tableUV[minOf(u0[rr].toInt() and 0xFFFF, max)] * (3.0 / 16) + tableUV[minOf(u0[d].toInt() and 0xFFFF, max)] * (1.0 / 16)
+                        cr = tableUV[minOf(v0!![a].toInt() and 0xFFFF, max)] * (9.0 / 16) + tableUV[minOf(v0[c].toInt() and 0xFFFF, max)] * (3.0 / 16) +
+                            tableUV[minOf(v0[rr].toInt() and 0xFFFF, max)] * (3.0 / 16) + tableUV[minOf(v0[d].toInt() and 0xFFFF, max)] * (1.0 / 16)
                     }
                     if (identity) {
                         g = yy
@@ -190,7 +193,7 @@ internal object AvifColor {
                 b = b.coerceIn(0.0, 1.0)
                 var a = 1.0
                 if (alphaPlane != null) {
-                    a = (alphaPlane[j * alphaStride + i] / alphaMax).coerceIn(0.0, 1.0)
+                    a = ((alphaPlane[j * alphaStride + i].toInt() and 0xFFFF) / alphaMax).coerceIn(0.0, 1.0)
                     if (premultiplied) {
                         if (a == 0.0) {
                             r = 0.0
