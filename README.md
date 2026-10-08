@@ -52,12 +52,6 @@ val png: ByteArray = ImageKodec.encodePng(bitmap)
 
 ## Install
 
-The coordinates below describe the next 0.3.0 release. They are not yet on
-Maven Central. The published 0.2.0 artifacts are `io.github.yuroyami:kiteimagecodec`,
-`kiteimagecodec-compose` and `kiteimagecodec-coil`, all at version `0.2.0`.
-Their Kotlin package is `io.github.yuroyami.kiteimagecodec`; this repository's
-examples use the next release's names.
-
 ```kotlin
 commonMain.dependencies {
     implementation("io.github.yuroyami:imagekodec:0.3.0")
@@ -77,8 +71,9 @@ Gradle can raise an application's Compose version to that alpha during dependenc
 resolution. Android consumers of those bindings need `compileSdk` 37.1 or newer;
 the core does not impose that Compose dependency.
 
-Versions before 0.3.0 use older coordinates. 0.2.0 is `io.github.yuroyami:kiteimagecodec`,
-and 0.1.0 is `io.github.yuroyami:kiteimage`.
+Versions before 0.3.0 use older coordinates and an older Kotlin package. 0.2.0 is
+`io.github.yuroyami:kiteimagecodec`, with the package `io.github.yuroyami.kiteimagecodec`.
+0.1.0 is `io.github.yuroyami:kiteimage`.
 
 ## What it does
 

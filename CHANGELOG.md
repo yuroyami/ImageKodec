@@ -12,6 +12,8 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
 ### Added
 
 - JPEG XL decodes on every target, through `decode`, `decode16`, `decodeAnimation`
