@@ -58,6 +58,11 @@ being true.
 - GitHub keeps 10 GB of caches for a repository and drops the oldest past that. A cache
   key with the commit in it adds an entry on every push, so the Kotlin/Native caches of
   CI are keyed on `gradle/libs.versions.toml` alone.
+- Two release framework links at once do not fit in the 7 GB of a macOS runner and take
+  three times as long, so CI links them with `--max-workers=1`.
+- Kotlin/JS does 64-bit arithmetic in software, and the AV1 inverse transform uses it for
+  every sample, so the slowest `FuzzTest` mutant (`avif-oriented byte@348`) takes over a
+  minute on JS. More than two JS test processes on one runner push it past the deadline.
 - `opj_compress -POC` writes only the packets its first change reaches and leaves
   the rest of the tile out, so both decoders agree on a file that holds half the
   image. `JpxFeatureOracleTest` builds POC files by reordering the packets of an

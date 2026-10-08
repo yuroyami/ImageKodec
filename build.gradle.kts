@@ -1,8 +1,8 @@
 import org.gradle.api.attributes.java.TargetJvmVersion
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 
 plugins {
@@ -44,15 +44,6 @@ configure(listOf(project(":imagekodec"), project(":imagekodec-compose"), project
             targetCompatibility = "11"
             options.release.set(11)
         }
-        // CI runs this on a Mac, where each Apple target compiles against the SDK of Xcode, as it
-        // does for a release. No built-in task names the Apple targets and leaves the others out.
-        val appleTargets = extensions.getByType<KotlinMultiplatformExtension>().targets
-            .withType<KotlinNativeTarget>().matching { it.konanTarget.family.isAppleFamily }
-        tasks.register("compileAppleTargets") {
-            description = "Compiles the main source of every Apple target."
-            group = "build"
-            dependsOn(provider { appleTargets.map { it.compilations.getByName("main").compileTaskProvider } })
-        }
         tasks.register<Test>("jvmJava11Test") {
             description = "Runs the JVM test suite on the minimum supported Java runtime."
             group = "verification"
@@ -64,6 +55,14 @@ configure(listOf(project(":imagekodec"), project(":imagekodec-compose"), project
                 languageVersion.set(JavaLanguageVersion.of(11))
             })
         }
+    }
+}
+
+// A failed test prints its message and stack trace in the build log, so a CI failure can be read
+// there without the HTML report.
+allprojects {
+    tasks.withType<AbstractTestTask>().configureEach {
+        testLogging { exceptionFormat = TestExceptionFormat.FULL }
     }
 }
 

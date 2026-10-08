@@ -1,17 +1,29 @@
 name: Set up the build
 description: >
-  Installs Java, restores the Gradle cache, and restores the Kotlin/Native compiler when the job
-  names a cache for it. Run actions/checkout first.
+  Installs Java and restores the Gradle cache. Restores the Kotlin/Native cache too when the job
+  asks for it. Run actions/checkout first.
 
 inputs:
   java-version:
     description: The Java versions to install. Gradle runs on the last one.
     default: '21'
-  konan-cache:
+  kotlin-native:
+    description: Set it to true in a job that compiles or links a native target.
+    default: 'false'
+  saves-caches:
     description: >
-      A name for the Kotlin/Native cache of this job. Jobs that link the same targets share one
-      name. Leave it empty in a job that does not use Kotlin/Native.
-    default: ''
+      Set it to true in one job for each operating system: the job that resolves the most
+      dependencies. That job saves the Gradle cache. It also saves the Kotlin/Native cache,
+      with actions/cache/save as its last step. Every other job only restores them.
+    default: 'false'
+
+outputs:
+  kotlin-native-key:
+    description: The key of the Kotlin/Native cache.
+    value: ${{ steps.konan.outputs.cache-primary-key }}
+  kotlin-native-hit:
+    description: The word true when the Kotlin/Native cache was restored.
+    value: ${{ steps.konan.outputs.cache-hit }}
 
 runs:
   using: composite
@@ -21,13 +33,20 @@ runs:
         distribution: temurin
         java-version: ${{ inputs.java-version }}
 
+    # GitHub keeps 10 GB of caches for a repository, and a Gradle cache from each job passes
+    # that. A job that does not save restores the newest cache of its operating system and
+    # downloads the few files that cache lacks.
     - uses: gradle/actions/setup-gradle@v4
+      with:
+        cache-read-only: ${{ inputs.saves-caches != 'true' || github.ref_name != github.event.repository.default_branch }}
 
     # The Kotlin/Native compiler, its LLVM and the caches it builds for each dependency are
-    # more than a gigabyte, and a download and a rebuild of them cost minutes. The key has
-    # no commit in it, so each name holds one entry until a version in the catalog changes.
-    - if: inputs.konan-cache != ''
-      uses: actions/cache@v4
+    # more than a gigabyte, and a download and a rebuild of them cost minutes. Every job of
+    # an operating system uses the same files, so they share one cache. The key has no commit
+    # in it, so the cache stays until a version in the catalog changes.
+    - if: inputs.kotlin-native == 'true'
+      id: konan
+      uses: actions/cache/restore@v4
       with:
         path: ~/.konan
-        key: konan-${{ runner.os }}-${{ inputs.konan-cache }}-${{ hashFiles('gradle/libs.versions.toml') }}
+        key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}

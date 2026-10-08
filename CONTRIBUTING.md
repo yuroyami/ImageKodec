@@ -49,6 +49,8 @@ tools/run-shards.sh 4 imagekodec/build/bin/macosArm64/debugTest/test.kexe
 - `tools/run-shards.sh 4 <command>` runs the command four times at once and sets
   `IMAGEKODEC_FUZZ_SHARD` to `0/4`, `1/4`, `2/4` and `3/4`. Without that variable a
   run takes every mutant, so the Gradle test tasks above still run the whole suite.
+- `tools/run-shards.sh 2-3/8 <command>` runs shards 2 and 3 of 8 here, for a suite that
+  several machines split.
 - `-PtestForks=3` gives each JVM test class one of three JVMs.
 
 `tools/ThrowsContract.swift` checks the exported API from a Swift caller:
