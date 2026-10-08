@@ -74,7 +74,7 @@ internal object JxlDecoder {
             isDecodable = reason == null,
             unsupportedReason = reason,
             colorProfile = colorProfile(h, s.icc),
-        )
+        ).also { it.colorChannels = if (h.color.isGray) 1 else 3 }
     }
 
     /** The first frame a viewer shows, as 8-bit ARGB. */

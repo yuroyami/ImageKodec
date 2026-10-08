@@ -17,7 +17,8 @@ package io.github.yuroyami.imagekodec
  *   times 100000 (45455 for the usual 1/2.2), `cHRM`'s white point, red, green and
  *   blue x and y times 100000, and `cICP`'s color primaries, transfer function,
  *   matrix coefficients and full-range flag (ITU-T H.273 code points). An AVIF's
- *   `nclx` colour box, or its AV1 sequence header, gives [cicp] too.
+ *   `nclx` colour box, or its AV1 sequence header, gives [cicp] too, and so does the
+ *   colour encoding a JPEG XL header names.
  * - [contentLight] and [masteringDisplay] describe HDR content: PNG's `cLLi` and
  *   `mDCv` chunks, or an AVIF's `clli` and `mdcv` boxes. [contentLight] holds the
  *   maximum content light level and the maximum frame-average light level in

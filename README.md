@@ -139,7 +139,8 @@ lcms2 applies it. A CMYK or YCCK JPEG and a CMYK TIFF convert from their ink thr
 their profile, where a decode without a target draws ink with the usual naive formula.
 PNG's own chunks convert too, in the third edition's order: `cICP`, then `iCCP`, then
 `sRGB`, then `gAMA` with `cHRM`, which mean sRGB's primaries or curve when either stands
-alone, as Chrome reads them. An AVIF's `nclx` code points convert after its profile. HDR
+alone, as Chrome reads them. An AVIF's `nclx` code points convert after its profile, and
+a JPEG XL file converts through its profile or the colour encoding its header names. HDR
 pictures (PQ or HLG) are tone-mapped to SDR as mpv's libplacebo maps them: 203 cd/m²
 diffuse white (BT.2408) becomes sRGB white, highlights roll off with BT.2390's curve from
 the content's peak (`cLLi` or `clli`, else the mastering display's, else 1000 cd/m²), HLG
@@ -504,6 +505,10 @@ web project that runs under Node should not use them.
   keeps the samples it stores, and its ICC profile is reported, not applied. No
   tone mapping runs by default. With `colorTarget = ColorTarget.Srgb()`, the shared
   colour conversion applies supported profiles or code points and tone-maps HDR.
+  It takes the peak of an HDR file as 1000 cd/m², not from the header's intensity
+  target, which libjxl sets to 10000 when the encoder was told nothing. A header
+  with primaries of its own, or a gamma other than 2.2 or 2.8, has no code points
+  and converts as sRGB.
   A sample outside the range of 0 to 1, which a float file can
   hold, is clipped. A black channel of a CMYK file is read and not applied.
 - **JPEG XL bounds the work of a file more tightly than libjxl.** Splines may

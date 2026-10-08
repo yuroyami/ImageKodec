@@ -8,7 +8,8 @@ package io.github.yuroyami.imagekodec
  *   [ColorProfile] declares, which is what every decode does by default.
  * - [Srgb] converts them to sRGB through what the file declares, for drawing on a screen
  *   that shows sRGB, as browsers convert: its ICC profile, its H.273 code points (PNG's
- *   `cICP`, an AVIF's `nclx`), or PNG's `gAMA` and `cHRM`, in the order [ColorProfile] gives.
+ *   `cICP`, an AVIF's `nclx`, a JPEG XL header's colour encoding), or PNG's `gAMA` and
+ *   `cHRM`, in the order [ColorProfile] gives.
  *   HDR (PQ or HLG) is tone-mapped to SDR as mpv's libplacebo maps it: BT.2408's 203 cd/m²
  *   diffuse white becomes sRGB white, highlights roll off by BT.2390's curve from the content's
  *   peak, and a colour sRGB cannot show desaturates toward its own luminance. Samples deeper

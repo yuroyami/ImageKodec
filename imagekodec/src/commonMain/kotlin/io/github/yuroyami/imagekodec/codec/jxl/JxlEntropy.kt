@@ -346,7 +346,11 @@ internal class JxlCode private constructor(
     }
 
     private fun readPrefixCodes(br: JxlBitReader) {
-        val sizes = IntArray(numClusters) { varLenUint16(br) + 1 }
+        val sizes = IntArray(numClusters) {
+            val size = varLenUint16(br) + 1
+            if (size > 1 shl PREFIX_MAX_BITS) jxlFail("prefix code of $size symbols")
+            size
+        }
         huffman = Array(numClusters) { c ->
             if (sizes[c] > 1) readPrefixCode(br, sizes[c]) else IntArray(1 shl HUFFMAN_TABLE_BITS)
         }
