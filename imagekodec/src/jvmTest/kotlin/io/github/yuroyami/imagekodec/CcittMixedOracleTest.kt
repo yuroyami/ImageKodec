@@ -14,6 +14,10 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class CcittMixedOracleTest {
+    // A table, because the C2 compiler of JDK 11 on x64 vectorises a loop that reverses the bits of
+    // each byte of an array in place, and the vector code gives wrong bytes.
+    private val reversedBits = ByteArray(256) { (Integer.reverse(it) ushr 24).toByte() }
+
     private fun temp(ext: String) = File.createTempFile("imagekodec-mixed-fax", ext).apply { deleteOnExit() }
     private fun run(vararg args: String) {
         val log = temp(".log")
@@ -100,12 +104,7 @@ class CcittMixedOracleTest {
                     val rows = minOf(rowsPerStrip, source.height - firstRow)
                     val at = offsets.getAsLong(strip).toInt()
                     val data = bytes.copyOfRange(at, at + counts.getAsLong(strip).toInt())
-                    if (fillOrder == 2) for (i in data.indices) {
-                        var value = data[i].toInt() and 255
-                        var reversed = 0
-                        repeat(8) { reversed = (reversed shl 1) or (value and 1); value = value ushr 1 }
-                        data[i] = reversed.toByte()
-                    }
+                    if (fillOrder == 2) for (i in data.indices) data[i] = reversedBits[data[i].toInt() and 255]
                     for (k in listOf(1, 2, 4)) {
                         val packed = CcittFax.decode(data, k, CcittOptions(source.width, rows, false, true, false, true))
                         assertEquals(rows * rowBytes, packed.size)
