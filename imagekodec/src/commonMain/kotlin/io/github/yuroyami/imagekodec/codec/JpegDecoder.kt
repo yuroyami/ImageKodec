@@ -33,9 +33,14 @@ import kotlin.math.sqrt
  *  - progressive (SOF2): spectral selection + successive approximation, EOB
  *    runs, DC/AC refinement scans, deferred dequantize+IDCT at EOI
  *
- * Arithmetic coding, hierarchical and lossless JPEG are rejected like stb
- * rejects them (nobody writes them). EXIF orientation is metadata and
- * deliberately not applied.
+ *  - arithmetic coding (SOF9, SOF10), with the conditioning of DAC: T.81's QM
+ *    decoder and models as libjpeg's jdarith.c reads them, into the same
+ *    coefficients, IDCT and upsampling as the Huffman paths, so an arithmetic
+ *    file decodes to exactly the pixels of the Huffman file with its coefficients
+ *
+ * Hierarchical JPEG is refused: libjpeg, libjpeg-turbo and ffmpeg refuse it too,
+ * so no file reaches a user and no oracle exists to hold a decoder to (#19).
+ * EXIF orientation is metadata and deliberately not applied.
  */
 internal object JpegDecoder {
 
@@ -75,6 +80,37 @@ internal object JpegDecoder {
     private val JBIAS = intArrayOf(
         0, -1, -3, -7, -15, -31, -63, -127, -255, -511, -1023, -2047, -4095, -8191, -16383, -32767,
     )
+
+    /**
+     * The QM coder's probability estimation of T.81 Table D.2, one entry a state as libjpeg's
+     * jaricom.c packs it: Qe in the top 16 bits, Next_Index_MPS in the next 8, then Switch_MPS in
+     * bit 7 above Next_Index_LPS. Entry 113 is the fixed even estimate of the sign and refinement
+     * bits, which never moves.
+     */
+    private val ARITAB = intArrayOf(
+        0x5a1d0181, 0x2586020e, 0x11140310, 0x080b0412, 0x03d80514, 0x01da0617,
+        0x00e50719, 0x006f081c, 0x0036091e, 0x001a0a21, 0x000d0b23, 0x00060c09,
+        0x00030d0a, 0x00010d0c, 0x5a7f0f8f, 0x3f251024, 0x2cf21126, 0x207c1227,
+        0x17b91328, 0x1182142a, 0x0cef152b, 0x09a1162d, 0x072f172e, 0x055c1830,
+        0x04061931, 0x03031a33, 0x02401b34, 0x01b11c36, 0x01441d38, 0x00f51e39,
+        0x00b71f3b, 0x008a203c, 0x0068213e, 0x004e223f, 0x003b2320, 0x002c0921,
+        0x5ae125a5, 0x484c2640, 0x3a0d2741, 0x2ef12843, 0x261f2944, 0x1f332a45,
+        0x19a82b46, 0x15182c48, 0x11772d49, 0x0e742e4a, 0x0bfb2f4b, 0x09f8304d,
+        0x0861314e, 0x0706324f, 0x05cd3330, 0x04de3432, 0x040f3532, 0x03633633,
+        0x02d43734, 0x025c3835, 0x01f83936, 0x01a43a37, 0x01603b38, 0x01253c39,
+        0x00f63d3a, 0x00cb3e3b, 0x00ab3f3d, 0x008f203d, 0x5b1241c1, 0x4d044250,
+        0x412c4351, 0x37d84452, 0x2fe84553, 0x293c4654, 0x23794756, 0x1edf4857,
+        0x1aa94957, 0x174e4a48, 0x14244b48, 0x119c4c4a, 0x0f6b4d4a, 0x0d514e4b,
+        0x0bb64f4d, 0x0a40304d, 0x583251d0, 0x4d1c5258, 0x438e5359, 0x3bdd545a,
+        0x34ee555b, 0x2eae565c, 0x299a575d, 0x25164756, 0x557059d8, 0x4ca95a5f,
+        0x44d95b60, 0x3e225c61, 0x38245d63, 0x32b45e63, 0x2e17565d, 0x56a860df,
+        0x4f466165, 0x47e56266, 0x41cf6367, 0x3c3d6468, 0x375e5d63, 0x52316669,
+        0x4c0f676a, 0x4639686b, 0x415e6367, 0x56276ae9, 0x50e76b6c, 0x4b85676d,
+        0x55976d6e, 0x504f6b6f, 0x5a106fee, 0x55226d70, 0x59eb6ff0, 0x5a1d7171,
+    )
+
+    /** The fixed statistics bin of [ARITAB] entry 113. */
+    private const val FIXED_BIN = 113
 
     private fun err(msg: String): Nothing = throw ImageDecodeException("JPEG: $msg")
 
@@ -154,6 +190,10 @@ internal object JpegDecoder {
         var quantization: IntArray? = null
         var hd = 0; var ha = 0
         var dcPred = 0
+        // arithmetic only: the conditioning category of the last DC difference (T.81 F.1.4.4.1.2)
+        var dcContext = 0
+        // arithmetic sequential only: whether a scan has coded this component, so a repeat is passed over
+        var coded = false
         var x = 0; var y = 0
         var w2 = 0; var h2 = 0
         // The plane in [data] when the decode is reduced: its stride and its rows of image.
@@ -213,6 +253,21 @@ internal object JpegDecoder {
         var eobRun = 0
         // The scan breaks its band's progression, so its data is passed over (#67).
         var skipScan = false
+
+        // Arithmetic coding (SOF9, SOF10): the conditioning of DAC, each table's statistics bins,
+        // and the QM decoder's registers as libjpeg's jdarith.c keeps them.
+        var arithmetic = false
+        val dcL = IntArray(16)
+        val dcU = IntArray(16) { 1 }
+        val acK = IntArray(16) { 5 }
+        val dcStats = Array(4) { ByteArray(64) }
+        val acStats = Array(4) { ByteArray(256) }
+        val fixedBin = byteArrayOf(FIXED_BIN.toByte())
+        var arC = 0
+        var arA = 0
+        var arCt = 0
+        // A code that cannot be valid stops the decode until the next restart, as libjpeg's ct = -1 does.
+        var arBroken = false
 
         // header reads: truncation is a decode error
         fun u8(): Int {
@@ -925,6 +980,25 @@ internal object JpegDecoder {
                 if (l != 0) err("bad DHT len")
             }
 
+            m == 0xCC -> {   // DAC, libjpeg's get_dac
+                var l = j.u16be() - 2
+                while (l > 0) {
+                    val index = j.u8()
+                    val v = j.u8()
+                    l -= 2
+                    when {
+                        index >= 32 -> err("bad DAC table $index")
+                        index >= 16 -> j.acK[index - 16] = v
+                        else -> {
+                            if ((v and 15) > (v shr 4)) err("bad DAC conditioning $v")
+                            j.dcL[index] = v and 15
+                            j.dcU[index] = v shr 4
+                        }
+                    }
+                }
+                if (l != 0) err("bad DAC len")
+            }
+
             m == 0xFE || m in 0xE0..0xEF -> {   // COM / APPn
                 var l = j.u16be()
                 if (l < 2) err(if (m == 0xFE) "bad COM len" else "bad APP len")
@@ -965,10 +1039,9 @@ internal object JpegDecoder {
      */
     internal fun unsupportedFrame(marker: Int, precision: Int, height: Int, factors: IntArray): String? {
         when (marker) {
-            0xC0, 0xC1, 0xC2 -> {}
-            0xC3, 0xC7, 0xCB, 0xCF -> return "lossless JPEG"
-            0xC5, 0xC6 -> return "hierarchical/differential JPEG"
-            0xC9, 0xCA, 0xCD, 0xCE -> return "arithmetic-coded JPEG"
+            0xC0, 0xC1, 0xC2, 0xC9, 0xCA -> {}
+            0xC3, 0xCB -> return "lossless JPEG"
+            0xC5, 0xC6, 0xC7, 0xCD, 0xCE, 0xCF -> return "hierarchical/differential JPEG"
             else -> return "JPEG SOF marker 0x${marker.toString(16)}"
         }
         if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
@@ -1116,6 +1189,9 @@ internal object JpegDecoder {
                 val record = j.comp[j.order[i]].approximation
                 for (k in j.specStart..j.specEnd) {
                     if (j.succHigh != 0 && record[k] != j.succHigh) j.skipScan = true
+                    // An arithmetic-coded scan costs a pass over the band even with no data, so a
+                    // first scan of a band that already had one is passed over as well.
+                    if (j.arithmetic && j.succHigh == 0 && record[k] != -1) j.skipScan = true
                 }
             }
             if (!j.skipScan) {
@@ -1125,6 +1201,12 @@ internal object JpegDecoder {
             if (j.specStart != 0) err("bad SOS")
             if (j.succHigh != 0 || j.succLow != 0) err("bad SOS")
             j.specEnd = 63
+            // A sequential frame codes each component in one scan (T.81 B.2.3). An arithmetic-coded
+            // scan costs a pass over its components even with no data, so a second one is passed over.
+            if (j.arithmetic) {
+                for (i in 0 until j.scanN) if (j.comp[j.order[i]].coded) j.skipScan = true
+                if (!j.skipScan) for (i in 0 until j.scanN) j.comp[j.order[i]].coded = true
+            }
         }
         // T.81 permits reusing a slot between components. Like libjpeg-turbo's
         // latch_quant_tables, keep the table from each component's first scan.
@@ -1139,6 +1221,10 @@ internal object JpegDecoder {
 
     // stbi__parse_entropy_coded_data
     private fun parseEntropyCodedData(j: State) {
+        if (j.arithmetic) {
+            parseArithmeticScan(j)
+            return
+        }
         reset(j)
         if (j.progressive) {
             parseProgressiveScan(j)
@@ -1272,6 +1358,288 @@ internal object JpegDecoder {
                         block[k] = (coeff[ofs + k] * dq[k]).toShort()
                     }
                     idctInto(j, comp, i, jj, block, tmp)
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // arithmetic entropy decoding: T.81 Annex D's QM decoder with the models of F.2.4 and G.2,
+    // laid out as libjpeg's jdarith.c lays them out
+
+    // jdarith.c arith_decode: one binary decision, its estimate held in st[at]
+    private fun arithDecode(j: State, st: ByteArray, at: Int): Int {
+        // Renormalization and data input (T.81 D.2.6). A marker ends the data and the decoder reads
+        // zeros from there on, which is how an arithmetic-coded segment may legally end.
+        while (j.arA < 0x8000) {
+            if (--j.arCt < 0) {
+                var data = 0
+                if (!j.nomore) {
+                    if (j.eof) {
+                        j.nomore = true
+                    } else {
+                        data = j.u8e()
+                        if (data == 0xFF) {
+                            var next = j.u8e()
+                            while (next == 0xFF) next = j.u8e()
+                            if (next == 0) {
+                                data = 0xFF   // a stuffed zero
+                            } else {
+                                j.marker = next
+                                j.nomore = true
+                                data = 0
+                            }
+                        }
+                    }
+                }
+                j.arC = (j.arC shl 8) or data
+                j.arCt += 8
+                // The first two bytes fill C, and A then starts at 0x10000.
+                if (j.arCt < 0 && ++j.arCt == 0) j.arA = 0x8000
+            }
+            j.arA = j.arA shl 1
+        }
+        val sv = st[at].toInt() and 0xFF
+        val entry = ARITAB[sv and 0x7F]
+        val qe = entry ushr 16
+        val nextMps = (entry ushr 8) and 0xFF
+        val nextLps = entry and 0xFF
+        var temp = j.arA - qe
+        j.arA = temp
+        temp = temp shl j.arCt
+        // The decision, with the conditional exchanges of T.81 D.2.4 and D.2.5.
+        if (j.arC >= temp) {
+            j.arC -= temp
+            if (j.arA < qe) {
+                j.arA = qe
+                st[at] = ((sv and 0x80) xor nextMps).toByte()
+                return sv shr 7
+            }
+            j.arA = qe
+            st[at] = ((sv and 0x80) xor nextLps).toByte()
+            return (sv shr 7) xor 1
+        }
+        if (j.arA < 0x8000) {
+            if (j.arA < qe) {
+                st[at] = ((sv and 0x80) xor nextLps).toByte()
+                return (sv shr 7) xor 1
+            }
+            st[at] = ((sv and 0x80) xor nextMps).toByte()
+        }
+        return sv shr 7
+    }
+
+    // jdarith.c start_pass and process_restart: fresh statistics for what the scan codes, fresh
+    // predictions, and a decoder that reads its first two bytes again
+    private fun arithReset(j: State) {
+        for (i in 0 until j.scanN) {
+            val comp = j.comp[j.order[i]]
+            if (!j.progressive || (j.specStart == 0 && j.succHigh == 0)) {
+                j.dcStats[comp.hd].fill(0)
+                comp.dcPred = 0
+                comp.dcContext = 0
+            }
+            if (!j.progressive || j.specStart != 0) j.acStats[comp.ha].fill(0)
+        }
+        j.arC = 0
+        j.arA = 0
+        j.arCt = -16
+        j.arBroken = false
+        j.nomore = false
+        j.marker = MARKER_NONE
+        j.todo = if (j.restartInterval != 0) j.restartInterval else Int.MAX_VALUE
+    }
+
+    /** The end of a restart interval: its RSTn marker and a fresh start, or false to end the scan. */
+    private fun arithRestart(j: State): Boolean {
+        if (--j.todo > 0) return true
+        if (j.marker == MARKER_NONE) j.marker = skipJunkAtEnd(j)
+        if (!isRestart(j.marker)) return false
+        arithReset(j)
+        return true
+    }
+
+    // T.81 F.2.4.1 (Figures F.19 and F.21 to F.24): the next DC difference of [comp], added to its
+    // prediction, which wraps at 16 bits as libjpeg's last_dc_val does
+    private fun arithDc(j: State, comp: Component) {
+        val tbl = comp.hd
+        val stats = j.dcStats[tbl]
+        var st = comp.dcContext
+        if (arithDecode(j, stats, st) == 0) {
+            comp.dcContext = 0
+            return
+        }
+        val sign = arithDecode(j, stats, st + 1)
+        st += 2 + sign
+        var m = arithDecode(j, stats, st)
+        if (m != 0) {
+            st = 20
+            while (arithDecode(j, stats, st) != 0) {
+                m = m shl 1
+                if (m == 0x8000) {
+                    j.arBroken = true
+                    return
+                }
+                st++
+            }
+        }
+        // The conditioning category of F.1.4.4.1.2, from the bounds of DAC.
+        comp.dcContext = when {
+            m < (1 shl j.dcL[tbl]) shr 1 -> 0
+            m > (1 shl j.dcU[tbl]) shr 1 -> 12 + sign * 4
+            else -> 4 + sign * 4
+        }
+        var v = m
+        st += 14
+        while (true) {
+            m = m shr 1
+            if (m == 0) break
+            if (arithDecode(j, stats, st) != 0) v = v or m
+        }
+        v += 1
+        if (sign != 0) v = -v
+        comp.dcPred = (comp.dcPred + v) and 0xFFFF
+    }
+
+    // T.81 F.2.4.2 (Figure F.20): coefficients [start] to [end] of the block at [ofs], each times
+    // 2^[shift], as jdarith.c's decode_mcu and decode_mcu_AC_first read them
+    private fun arithAc(j: State, comp: Component, data: ShortArray, ofs: Int, start: Int, end: Int, shift: Int) {
+        val tbl = comp.ha
+        val stats = j.acStats[tbl]
+        var k = start
+        while (k <= end) {
+            var st = 3 * (k - 1)
+            if (arithDecode(j, stats, st) != 0) break   // end of block
+            while (arithDecode(j, stats, st + 1) == 0) {
+                st += 3
+                if (++k > end) {
+                    j.arBroken = true
+                    return
+                }
+            }
+            val sign = arithDecode(j, j.fixedBin, 0)
+            st += 2
+            var m = arithDecode(j, stats, st)
+            if (m != 0 && arithDecode(j, stats, st) != 0) {
+                m = m shl 1
+                st = if (k <= j.acK[tbl]) 189 else 217
+                while (arithDecode(j, stats, st) != 0) {
+                    m = m shl 1
+                    if (m == 0x8000) {
+                        j.arBroken = true
+                        return
+                    }
+                    st++
+                }
+            }
+            var v = m
+            st += 14
+            while (true) {
+                m = m shr 1
+                if (m == 0) break
+                if (arithDecode(j, stats, st) != 0) v = v or m
+            }
+            v += 1
+            if (sign != 0) v = -v
+            data[ofs + DEZIGZAG[k]] = (v shl shift).toShort()
+            k++
+        }
+    }
+
+    // jdarith.c decode_mcu_AC_refine (T.81 G.2): one more bit of every coefficient in the band
+    private fun arithAcRefine(j: State, comp: Component, data: ShortArray, ofs: Int) {
+        val stats = j.acStats[comp.ha]
+        val p1 = 1 shl j.succLow
+        val m1 = -1 shl j.succLow
+        // The end of block of the scans before this one: past it, a coefficient can only be new.
+        var kex = j.specEnd
+        while (kex > 0 && data[ofs + DEZIGZAG[kex]].toInt() == 0) kex--
+        var k = j.specStart
+        while (k <= j.specEnd) {
+            var st = 3 * (k - 1)
+            if (k > kex && arithDecode(j, stats, st) != 0) break   // end of block
+            while (true) {
+                val p = ofs + DEZIGZAG[k]
+                val coefficient = data[p].toInt()
+                if (coefficient != 0) {
+                    if (arithDecode(j, stats, st + 2) != 0) data[p] = (coefficient + if (coefficient < 0) m1 else p1).toShort()
+                    break
+                }
+                if (arithDecode(j, stats, st + 1) != 0) {
+                    data[p] = (if (arithDecode(j, j.fixedBin, 0) != 0) m1 else p1).toShort()
+                    break
+                }
+                st += 3
+                if (++k > j.specEnd) {
+                    j.arBroken = true
+                    return
+                }
+            }
+            k++
+        }
+    }
+
+    /**
+     * One arithmetic-coded block of [comp] at block ([bx], [by]): a sequential one decoded,
+     * dequantized and through the IDCT as [decodeBlock] and [idctInto] take a Huffman one, a
+     * progressive one into the coefficients [finishProgressive] takes. After a code that cannot be
+     * valid, the blocks up to the next restart keep what they hold, as in libjpeg.
+     */
+    private fun arithBlock(j: State, comp: Component, bx: Int, by: Int, data: ShortArray, tmp: IntArray) {
+        if (!j.progressive) {
+            data.fill(0)
+            if (!j.arBroken) arithDc(j, comp)
+            if (!j.arBroken) {
+                data[0] = comp.dcPred.toShort()
+                arithAc(j, comp, data, 0, 1, 63, 0)
+            }
+            val dequant = comp.quantization!!
+            for (z in 0 until 64) if (data[z].toInt() != 0) data[z] = (data[z] * dequant[z]).toShort()
+            idctInto(j, comp, bx, by, data, tmp)
+            return
+        }
+        val coeff = comp.coeff!!
+        val ofs = 64 * (bx + by * comp.coeffW)
+        when {
+            j.specStart == 0 && j.succHigh == 0 -> if (!j.arBroken) {
+                arithDc(j, comp)
+                if (!j.arBroken) coeff[ofs] = (comp.dcPred shl j.succLow).toShort()
+            }
+            // jdarith.c decode_mcu_DC_refine: the next bit of the two's complement DC value
+            j.specStart == 0 -> if (arithDecode(j, j.fixedBin, 0) != 0) {
+                coeff[ofs] = (coeff[ofs].toInt() or (1 shl j.succLow)).toShort()
+            }
+            j.succHigh == 0 -> if (!j.arBroken) arithAc(j, comp, coeff, ofs, j.specStart, j.specEnd, j.succLow)
+            else -> if (!j.arBroken) arithAcRefine(j, comp, coeff, ofs)
+        }
+    }
+
+    // The MCU loop of an arithmetic-coded scan, over the blocks and MCUs of a Huffman one.
+    private fun parseArithmeticScan(j: State) {
+        if (j.progressive && j.specStart != 0 && j.scanN != 1) err("an AC scan codes one component, not ${j.scanN}")
+        arithReset(j)
+        val data = ShortArray(64)
+        val tmp = IntArray(IDCT_SCRATCH)
+        if (j.scanN == 1) {
+            val comp = j.comp[j.order[0]]
+            val w = (comp.x + 7) shr 3
+            val h = (comp.y + 7) shr 3
+            for (by in 0 until h) {
+                for (bx in 0 until w) {
+                    arithBlock(j, comp, bx, by, data, tmp)
+                    if (!arithRestart(j)) return
+                }
+            }
+        } else {
+            for (my in 0 until j.mcuY) {
+                for (mx in 0 until j.mcuX) {
+                    for (k in 0 until j.scanN) {
+                        val comp = j.comp[j.order[k]]
+                        for (y in 0 until comp.v) {
+                            for (x in 0 until comp.h) arithBlock(j, comp, mx * comp.h + x, my * comp.v + y, data, tmp)
+                        }
+                    }
+                    if (!arithRestart(j)) return
                 }
             }
         }
@@ -1557,7 +1925,8 @@ internal object JpegDecoder {
                 }
             }
         }
-        j.progressive = m == 0xC2
+        j.progressive = m == 0xC2 || m == 0xCA
+        j.arithmetic = m == 0xC9 || m == 0xCA
         processFrameHeader(j, m)
 
         // stbi__decode_jpeg_image: scans until EOI

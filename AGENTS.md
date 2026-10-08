@@ -80,3 +80,7 @@ being true.
 - A segmentation map can be kept or predicted from an earlier frame only by an encoder
   that segments: libaom with `aq-mode=1` keeps it, and realtime libaom with `aq-mode=3`
   predicts it. Neither is on by default (#41).
+- `jpegtran -arithmetic` and `cjpeg -arithmetic` always write the default DAC
+  conditioning (L 0, U 1, K 5), so a decoder that ignores DAC passes every file they
+  write. `tools/arith_jpeg.c` sets other bounds through libjpeg's `arith_dc_L`,
+  `arith_dc_U` and `arith_ac_K` (#19).

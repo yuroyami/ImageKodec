@@ -30,7 +30,9 @@ class JpegRefusalTest {
         "12-bit JPEG (8-bit samples only)" to frame(listOf(0x11), precision = 12),
         "lossless JPEG" to frame(listOf(0x11), marker = 0xC3),
         "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xC5),
-        "arithmetic-coded JPEG" to frame(listOf(0x11), marker = 0xC9),
+        "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xC7),
+        "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xCD),
+        "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xCF),
     )
 
     @Test

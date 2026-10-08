@@ -136,6 +136,8 @@ class FuzzTest {
         "tiff-libtiff-tiled-lzw16" to hex(TIFF_LIBTIFF_TILED_LZW16),
         "jpeg-422" to JpegSamplingFixtures.all.first { it.first == "2x1" }.second,
         "jpeg-ycck" to JpegCmykFixtures.blocksAdobeYcck,
+        "jpeg-arithmetic" to JpegArithmeticTest().sequential,
+        "jpeg-arithmetic-progressive" to JpegArithmeticTest().progressive,
         "jp2-rpcl" to Jp2ProgressionTest().rpcl,
         "jp2-cprl" to Jp2ProgressionTest().cprl,
         "jp2-palette" to Jp2ColorFixtures.palette,

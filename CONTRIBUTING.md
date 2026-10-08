@@ -67,6 +67,7 @@ Every codec's tests compare its output against an independent implementation:
 | WebP lossless | libwebp (`cwebp` and `dwebp`), bit-identical |
 | TIFF | libtiff (`tiffcp`, `tiff2rgba`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
 | JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
+| JPEG arithmetic decode | libjpeg-turbo's `jpegtran -arithmetic`, and `tools/arith_jpeg.c` for the DAC conditioning, re-encode a `cjpeg` file's coefficients: the arithmetic file must decode to exactly the pixels of the Huffman one |
 | JBIG2 | jbig2enc (`jbig2`) writes the streams: generic regions must decode to the source page, symbol mode must match jbig2dec |
 | WebP lossless encode | `dwebp` reads our output back pixel for pixel, and it must be smaller than our PNG |
 | TIFF encode | libtiff (`tiffinfo`, `tiff2rgba`) and ImageMagick read our output back, every page, at 8 and 16 bits |
@@ -80,7 +81,7 @@ check the skip count, not only whether the run passed:
 
 ```sh
 brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif pillow     # macOS
-sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil   # Debian/Ubuntu
+sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev   # Debian/Ubuntu
 ```
 
 CI sets `IMAGEKODEC_REQUIRE_ORACLES=1`, which makes a missing tool fail the test

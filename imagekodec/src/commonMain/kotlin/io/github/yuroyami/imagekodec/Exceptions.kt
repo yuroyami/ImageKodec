@@ -12,7 +12,7 @@ public open class ImageDecodeException(
 
 /**
  * The input is a well-formed image in a format, or a format feature, ImageKodec
- * doesn't decode: lossy WebP, an arithmetic-coded JPEG, a CgBI PNG. The message
+ * doesn't decode: a 12-bit JPEG, a CgBI PNG. The message
  * always names the specific feature, and `ImageKodec.probe` reports the same
  * thing up front through [ImageInfo.unsupportedReason], so a caller can route
  * the file elsewhere instead of catching this.

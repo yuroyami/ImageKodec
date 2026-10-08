@@ -14,6 +14,13 @@ reviewable in the diff.
 
 ### Added
 
+- Arithmetic-coded JPEG decodes: sequential (SOF9) and progressive (SOF10)
+  frames, with restart intervals and the conditioning of the DAC marker, through
+  T.81's QM decoder laid out as libjpeg's `jdarith.c` lays it out. The
+  coefficients go through the same IDCT, reduced decode and upsampling as a
+  Huffman file's, so a file `jpegtran -arithmetic` re-encodes decodes to exactly
+  the pixels of its original, and `probe` calls it decodable (#19).
+
 - `ImageKodec.encodeWebp` writes a lossless WebP. The image is tried as a palette
   when it has 256 colours or fewer, alone or with the predictor over its indices,
   and through the subtract-green, predictor and cross-colour transforms, each

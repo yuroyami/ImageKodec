@@ -8,11 +8,12 @@ internal fun jpegSegment(marker: Int, body: ByteArray): ByteArray =
  * A baseline gray JPEG, [side] by [side], built by hand: one quantization table, one DC and one AC
  * Huffman table that each hold a single one-bit code, and [scans] copies of a scan with no data.
  * A comment segment of [padding] bytes lets a file with few scans pass the input-size budget too.
+ * With [frameMarker] 0xC9 the frame is arithmetic coded, and the Huffman tables go unused.
  */
-internal fun emptyScanJpeg(side: Int, scans: Int, padding: Int = 0): ByteArray {
+internal fun emptyScanJpeg(side: Int, scans: Int, padding: Int = 0, frameMarker: Int = 0xC0): ByteArray {
     val quantization = jpegSegment(0xDB, byteArrayOf(0) + ByteArray(64) { 1 })
     val frame = jpegSegment(
-        0xC0,
+        frameMarker,
         byteArrayOf(8, (side ushr 8).toByte(), side.toByte(), (side ushr 8).toByte(), side.toByte(), 1, 1, 0x11, 0),
     )
     val tables = jpegSegment(0xC4, byteArrayOf(0x00, 1) + ByteArray(15) + byteArrayOf(0)) +   // DC 0: category 0
@@ -80,6 +81,24 @@ internal fun eobRunJpeg(side: Int, scans: List<Pair<Int, Int>>): ByteArray {
         add(jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 1, 63, ((ah shl 4) or al).toByte())))
         add(data.toByteArray())
     }
+    add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
+    return out.toByteArray()
+}
+
+/**
+ * An arithmetic-coded progressive gray JPEG, [side] by [side], whose scans hold no data: a DC
+ * first scan, then one scan over the band 1 to 63 for each Ah and Al pair of [acScans]. A comment
+ * segment of [padding] bytes keeps a file with few scans within the input-size budget.
+ */
+internal fun emptyArithmeticProgressiveJpeg(side: Int, acScans: List<Pair<Int, Int>>, padding: Int = 0): ByteArray {
+    val out = ArrayList<Byte>()
+    fun add(b: ByteArray) = b.forEach { out.add(it) }
+    add(byteArrayOf(0xFF.toByte(), 0xD8.toByte()))
+    if (padding > 0) add(jpegSegment(0xFE, ByteArray(padding)))
+    add(jpegSegment(0xDB, byteArrayOf(0) + ByteArray(64) { 1 }))
+    add(jpegSegment(0xCA, byteArrayOf(8, (side ushr 8).toByte(), side.toByte(), (side ushr 8).toByte(), side.toByte(), 1, 1, 0x11, 0)))
+    add(jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 0, 0, 0)))
+    for ((ah, al) in acScans) add(jpegSegment(0xDA, byteArrayOf(1, 1, 0x00, 1, 63, ((ah shl 4) or al).toByte())))
     add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
     return out.toByteArray()
 }
