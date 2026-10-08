@@ -74,7 +74,7 @@ public functions, such as `KiteImage` or `KiteAnimatedImage`.
 
 The optional bindings depend on Compose Multiplatform `1.13.0-alpha02`.
 Gradle can raise an application's Compose version to that alpha during dependency
-resolution. Android consumers of those bindings need `compileSdk` 37 or newer;
+resolution. Android consumers of those bindings need `compileSdk` 37.1 or newer;
 the core does not impose that Compose dependency.
 
 Versions before 0.3.0 use older coordinates. 0.2.0 is `io.github.yuroyami:kiteimagecodec`,
