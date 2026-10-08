@@ -11,6 +11,7 @@ import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.codec.PngDecoder
 import io.github.yuroyami.imagekodec.codec.PngEncoder
 import io.github.yuroyami.imagekodec.codec.TiffDecoder
+import io.github.yuroyami.imagekodec.codec.TiffEncoder
 import io.github.yuroyami.imagekodec.codec.WebpDecoder
 import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
 
@@ -359,6 +360,43 @@ public object ImageKodec {
      */
     @Throws(IllegalArgumentException::class)
     public fun encodePng(animation: KiteAnimation): ByteArray = PngEncoder.encode(animation)
+
+    /**
+     * Encode [bitmap] as a TIFF: 8-bit gray when every pixel is gray, RGB otherwise, with
+     * an unassociated alpha sample when any pixel carries alpha. Lossless: decoding the
+     * result returns the exact same pixels.
+     *
+     * The file is little endian, in strips of about 8 KiB compressed with Deflate after
+     * the horizontal differencing predictor, as libtiff writes with `-c zip -p 2`. It
+     * does not write tiles, CMYK, palettes or JPEG compression, which the decoder reads.
+     */
+    public fun encodeTiff(bitmap: KiteBitmap): ByteArray = TiffEncoder.encode(listOf(bitmap))
+
+    /**
+     * Encode [pages] as one multi-page TIFF, a directory a page in order, each written as
+     * [encodeTiff] writes a single bitmap and marked with its page number.
+     * [probe] reports their count as `pageCount`, and [decodePage] reads each back.
+     *
+     * @throws IllegalArgumentException if [pages] is empty
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiff(pages: List<KiteBitmap>): ByteArray = TiffEncoder.encode(pages)
+
+    /**
+     * Encode [bitmap] as a 16-bit TIFF, keeping every bit [decode16] gives: gray for one or
+     * two channels, RGB for three or four, the second or fourth an unassociated alpha
+     * sample. Otherwise written as [encodeTiff] writes an 8-bit bitmap, and lossless:
+     * [decode16] returns the same samples.
+     */
+    public fun encodeTiff16(bitmap: KiteBitmap16): ByteArray = TiffEncoder.encode16(listOf(bitmap))
+
+    /**
+     * Encode [pages] as one multi-page 16-bit TIFF, each page as [encodeTiff16] writes one.
+     *
+     * @throws IllegalArgumentException if [pages] is empty
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiff16(pages: List<KiteBitmap16>): ByteArray = TiffEncoder.encode16(pages)
 
     /**
      * Encode [bitmap] as a baseline JPEG at [quality] 1..100 (default 90).

@@ -237,9 +237,12 @@ ImageKodec.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg,
 ImageKodec.encodeGif(anim)                      // animated, delays and loop count preserved
 ImageKodec.encodePng(anim)                      // APNG: lossless frames, alpha, delays and loop count
 ImageKodec.encodeBmp(bitmap)                    // 24-bit BI_RGB, or 32-bit V4 BITFIELDS with alpha
+ImageKodec.encodeTiff(bitmap)                   // gray or RGB, alpha when present, Deflate with the predictor
+ImageKodec.encodeTiff(pages)                    // one page a bitmap, read back with decodePage
+ImageKodec.encodeTiff16(bitmap16)               // the same at 16 bits, read back with decode16
 ```
 
-There is no WebP, TIFF or JPEG 2000 encoder.
+There is no WebP or JPEG 2000 encoder.
 
 ### Rotate, crop and scale
 

@@ -36,5 +36,11 @@ internal class ByteArrayBuilder(initialCapacity: Int = 64) {
     }
 
     /** Snapshot the written bytes into a right-sized array. */
+    /** Overwrites a byte already appended, as a writer does to fill in an offset it learns later. */
+    operator fun set(index: Int, value: Byte) {
+        require(index in 0 until len) { "byte $index of $len" }
+        buf[index] = value
+    }
+
     fun toByteArray(): ByteArray = buf.copyOf(len)
 }

@@ -14,6 +14,13 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.encodeTiff` writes a TIFF of one page or of many, and
+  `encodeTiff16` the same at 16 bits from `KiteBitmap16`: gray when every pixel is,
+  RGB otherwise, with an unassociated alpha sample when there is alpha, in strips
+  of about 8 KiB compressed with Deflate after the horizontal predictor, each page
+  of a multi-page file marked with its page number. `decode`, `decodePage` and
+  `decode16` read it back exactly, and so do libtiff and ImageMagick (#9).
+
 - `ImageKodec.encodePng(animation)` writes an animated PNG, so an animation keeps
   full colour and partial alpha where a GIF would quantise it: 8-bit RGB, or RGBA
   when any frame has alpha, each frame's delay to the millisecond and the loop

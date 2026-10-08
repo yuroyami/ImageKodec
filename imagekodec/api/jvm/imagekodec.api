@@ -85,6 +85,10 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun encodeJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteAnimation;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
+	public final fun encodeTiff (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
+	public final fun encodeTiff (Ljava/util/List;)[B
+	public final fun encodeTiff16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;)[B
+	public final fun encodeTiff16 (Ljava/util/List;)[B
 	public final fun probe ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probeOrNull ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probePage ([BI)Lio/github/yuroyami/imagekodec/ImageInfo;
