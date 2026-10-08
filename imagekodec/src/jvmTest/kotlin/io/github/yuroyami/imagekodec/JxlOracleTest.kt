@@ -393,6 +393,34 @@ class JxlOracleTest {
         check("16-bit premultiplied", premultiplied, 3 * 257, premultiplied = true)
     }
 
+    /** A PNM file of random blocks and ramps whose samples run to [max]: gray, or RGB with [colour]. */
+    private fun shallow(w: Int, h: Int, max: Int, colour: Boolean): File {
+        val random = kotlin.random.Random(max)
+        val raw = ByteArrayOutputStream()
+        raw.write("${if (colour) "P6" else "P5"}\n$w $h\n$max\n".toByteArray())
+        for (y in 0 until h) for (x in 0 until w) repeat(if (colour) 3 else 1) { c ->
+            val v = if (x / 16 % 2 == 0) (x + y * (c + 1)) * max / (w + h * 3) else random.nextInt(max + 1)
+            if (max > 255) raw.write(v ushr 8)
+            raw.write(v)
+        }
+        return temp(if (colour) ".ppm" else ".pgm").apply { writeBytes(raw.toByteArray()) }
+    }
+
+    @Test
+    fun samplesOfOtherDepthsReadAsDjxlReadsThem() {
+        // cjxl before 0.11 reads a PNM file wrong when its samples are not of 8 or 16 bits.
+        assumeTrue(tools() && current)
+        for ((bits, colour) in listOf(1 to false, 2 to false, 5 to true, 7 to false, 10 to true, 12 to false)) {
+            val source = shallow(120, 90, (1 shl bits) - 1, colour)
+            val name = "$bits-bit ${if (colour) "rgb" else "gray"}"
+            // A file of 8 bits or fewer is read at 8 bits, so a level that 8 bits cannot hold is half a level
+            // away. Above 8 bits a sample repeats its high bits below, which is within 2 of djxl's scaling.
+            val lossless = if (bits > 8) 2 else if (255 % ((1 shl bits) - 1) == 0) 0 else 128
+            check("$name lossless", encode(source, listOf("-d", "0"))!!, lossless)
+            check("$name lossy", encode(source, listOf("-d", "1"))!!, lossyBound(bits) + lossless)
+        }
+    }
+
     @Test
     fun recompressedJpegsReadAsDjxlReadsThem() {
         assumeTrue(tools())

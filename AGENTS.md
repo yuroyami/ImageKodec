@@ -128,6 +128,8 @@ being true.
   `--photon_noise_iso`, other rounding, and a PNG writer that refuses a 16-bit picture
   with alpha. `JxlOracleTest` gives it the plain cases at a bound of two levels, so the
   tight bounds run only where libjxl is 0.11 or newer, which CI is not (#42).
+- cjxl 0.7.0 reads a PNM file wrong when its samples are not of 8 or 16 bits, so the
+  oracle cases for other depths run only where libjxl is 0.11 or newer (#42).
 - cjxl keeps neither a GIF's nor an APNG's play count, and `jxl_from_tree` writes none,
   so `JxlDecoderTest` rewrites a header to test a loop count (#42).
 - `jxl_from_tree` gives `Alpha` the size set before it, and every frame of an
