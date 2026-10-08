@@ -278,6 +278,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun encodeTiff(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap>){}[0]
     final fun encodeTiff16(io.github.yuroyami.imagekodec/KiteBitmap16): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(io.github.yuroyami.imagekodec.KiteBitmap16){}[0]
     final fun encodeTiff16(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap16>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap16>){}[0]
+    final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun probe(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probe|probe(kotlin.ByteArray){}[0]
     final fun probeOrNull(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo? // io.github.yuroyami.imagekodec/ImageKodec.probeOrNull|probeOrNull(kotlin.ByteArray){}[0]
     final fun probePage(kotlin/ByteArray, kotlin/Int): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probePage|probePage(kotlin.ByteArray;kotlin.Int){}[0]

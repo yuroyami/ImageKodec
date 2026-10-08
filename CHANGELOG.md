@@ -14,6 +14,15 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.encodeWebp` writes a lossless WebP. The image is tried as a palette
+  when it has 256 colours or fewer, alone or with the predictor over its indices,
+  and through the subtract-green, predictor and cross-colour transforms, each
+  tile's predictor and colour transform chosen by the bits it adds; then LZ77
+  with VP8L's two-dimensional distance codes, a colour cache sized by what it
+  saves, and an entropy image whose regions get prefix codes of their own,
+  clustered by k-means. Every candidate is written and the smallest kept. dwebp
+  reads every file back exactly, and each is smaller than the PNG (#12).
+
 - `ImageKodec.encodeTiff` writes a TIFF of one page or of many, and
   `encodeTiff16` the same at 16 bits from `KiteBitmap16`: gray when every pixel is,
   RGB otherwise, with an unassociated alpha sample when there is alpha, in strips

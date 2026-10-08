@@ -89,6 +89,7 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeTiff (Ljava/util/List;)[B
 	public final fun encodeTiff16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;)[B
 	public final fun encodeTiff16 (Ljava/util/List;)[B
+	public final fun encodeWebp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun probe ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probeOrNull ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probePage ([BI)Lio/github/yuroyami/imagekodec/ImageInfo;

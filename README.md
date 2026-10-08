@@ -240,9 +240,10 @@ ImageKodec.encodeBmp(bitmap)                    // 24-bit BI_RGB, or 32-bit V4 B
 ImageKodec.encodeTiff(bitmap)                   // gray or RGB, alpha when present, Deflate with the predictor
 ImageKodec.encodeTiff(pages)                    // one page a bitmap, read back with decodePage
 ImageKodec.encodeTiff16(bitmap16)               // the same at 16 bits, read back with decode16
+ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than the PNG
 ```
 
-There is no WebP or JPEG 2000 encoder.
+There is no lossy WebP or JPEG 2000 encoder.
 
 ### Rotate, crop and scale
 

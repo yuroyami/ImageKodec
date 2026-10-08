@@ -56,6 +56,7 @@ class ThrowsContractTest {
         declares(ImageKodec::class.java, "encodePng", ex, KiteAnimation::class.java)
         declares(ImageKodec::class.java, "encodeTiff", ex, List::class.java)
         declares(ImageKodec::class.java, "encodeTiff16", ex, List::class.java)
+        declares(ImageKodec::class.java, "encodeWebp", ex, KiteBitmap::class.java)
         declares(ImageKodec::class.java, "encodeJpeg", ex, KiteBitmap::class.java, int)
         declares(JpxDecoder::class.java, "decode", ex, bytes, int)
         declares(KiteBitmap::class.java, "get", ex, int, int)

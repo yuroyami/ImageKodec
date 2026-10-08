@@ -13,6 +13,7 @@ import io.github.yuroyami.imagekodec.codec.PngEncoder
 import io.github.yuroyami.imagekodec.codec.TiffDecoder
 import io.github.yuroyami.imagekodec.codec.TiffEncoder
 import io.github.yuroyami.imagekodec.codec.WebpDecoder
+import io.github.yuroyami.imagekodec.codec.WebpEncoder
 import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
 
 /**
@@ -397,6 +398,19 @@ public object ImageKodec {
      */
     @Throws(IllegalArgumentException::class)
     public fun encodeTiff16(pages: List<KiteBitmap16>): ByteArray = TiffEncoder.encode16(pages)
+
+    /**
+     * Encode [bitmap] as a lossless WebP: decoding the result returns the exact same
+     * pixels, alpha included. It is tried as a palette when it has 256 colours or fewer,
+     * and through the subtract-green, predictor and cross-colour transforms, with LZ77
+     * and a colour cache, and the smallest of the results is kept. Lossy WebP is not
+     * written.
+     *
+     * @throws IllegalArgumentException if a side of [bitmap] is larger than 16384, which a
+     *   WebP cannot store
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeWebp(bitmap: KiteBitmap): ByteArray = WebpEncoder.encode(bitmap)
 
     /**
      * Encode [bitmap] as a baseline JPEG at [quality] 1..100 (default 90).

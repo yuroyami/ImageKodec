@@ -68,6 +68,7 @@ Every codec's tests compare its output against an independent implementation:
 | TIFF | libtiff (`tiffcp`, `tiff2rgba`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
 | JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
 | JBIG2 | jbig2enc (`jbig2`) writes the streams: generic regions must decode to the source page, symbol mode must match jbig2dec |
+| WebP lossless encode | `dwebp` reads our output back pixel for pixel, and it must be smaller than our PNG |
 | TIFF encode | libtiff (`tiffinfo`, `tiff2rgba`) and ImageMagick read our output back, every page, at 8 and 16 bits |
 | APNG encode | Pillow (`python3` with `PIL`) and ffmpeg's APNG decoder read our output back, frames, delays and loop count |
 | AV1 | dav1d through ffmpeg, sample for sample, on stills and sequences from libaom, SVT-AV1 and rav1e |
