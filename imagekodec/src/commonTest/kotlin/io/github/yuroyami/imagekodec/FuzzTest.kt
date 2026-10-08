@@ -140,6 +140,8 @@ class FuzzTest {
         "jpeg-arithmetic-progressive" to JpegArithmeticTest().progressive,
         "jpeg-lossless" to losslessJpeg(IntArray(48) { it * 5 }, 4, 4, 3, 8, predictor = 7, restartInterval = 8),
         "jpeg-lossless-arithmetic" to JpegLosslessTest().gray12,
+        "jpeg-hierarchical-lossless" to hierarchicalLosslessJpeg(IntArray(7 * 5 * 3) { it * 11 % 256 }, 7, 5, 3, 8, levels = 2, refinements = 1),
+        "jpeg-hierarchical-dct" to JpegHierarchicalTest().dctRgbProgressive,
         "jp2-rpcl" to Jp2ProgressionTest().rpcl,
         "jp2-cprl" to Jp2ProgressionTest().cprl,
         "jp2-palette" to Jp2ColorFixtures.palette,

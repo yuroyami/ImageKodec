@@ -89,6 +89,12 @@ being true.
   says 2^(P-Pt-1), in its encoder and decoder alike. ffmpeg and libjpeg-turbo follow
   T.81, so such a file round-trips through it and decodes to something else elsewhere.
   The test writer `losslessJpeg` makes conformant ones (#19).
+- thorfdbg/libjpeg keeps a hierarchical image's samples in fixed point from frame to frame,
+  where T.81 hands on integer samples, so its decode of its own pyramid differs from
+  T.81's by a level or so, and its "lossless" pyramids do not decode to their source by
+  either reading. It cannot read back its own lossless pyramids at 10 or 16 bits, and
+  writes Huffman ones only with `-h`. Hold a hierarchical decode to it within bounds, and
+  to the test writer `hierarchicalLosslessJpeg` exactly (#19).
 - ffmpeg 6 misreads the lossless difference -32768 (category 16, no extra bits) and
   reads a three-component 4:4:4 lossless file as RGB; its `ljpeg` encoder writes BGR
   through a private 9-bit transform no other decoder knows (#19).

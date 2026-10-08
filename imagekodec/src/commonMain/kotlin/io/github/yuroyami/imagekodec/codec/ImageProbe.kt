@@ -131,6 +131,8 @@ internal object ImageProbe {
 
     private fun jpeg(data: ByteArray): ImageInfo {
         val r = ByteReader(data, pos = 2)
+        // A hierarchical image's DHP segment gives its full size; its first frame may be smaller.
+        var hierarchy: ByteArray? = null
         while (true) {
             var marker = r.u8()
             if (marker != 0xFF) throw ImageDecodeException("JPEG: expected a marker at ${r.pos - 1}")
@@ -145,10 +147,11 @@ internal object ImageProbe {
             if (len < 2) throw ImageDecodeException("JPEG: segment length $len")
             val payload = r.bytes(len - 2)
 
+            if (marker == 0xDE) hierarchy = payload
             val isSof = marker in 0xC0..0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC
             if (!isSof) continue
 
-            val f = ByteReader(payload)
+            val f = ByteReader(hierarchy ?: payload)
             val precision = f.u8()
             val height = f.u16be()
             val width = f.u16be()

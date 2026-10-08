@@ -15,14 +15,102 @@ internal fun losslessJpeg(
 ): ByteArray {
     require(restartInterval % width == 0) { "a lossless restart interval holds whole rows" }
     val out = ArrayList<Byte>()
+    out.addAll(byteArrayOf(0xFF.toByte(), 0xD8.toByte()).toList())
+    out.addAll(losslessFrame(0xC3, samples, width, height, channels, precision, predictor, pointTransform, restartInterval).toList())
+    out.addAll(byteArrayOf(0xFF.toByte(), 0xD9.toByte()).toList())
+    return out.toByteArray()
+}
+
+/**
+ * A lossless hierarchical JPEG (T.81 Annex J) of [samples]: a DHP segment, a lossless frame of the
+ * image halved [levels] times, then a differential lossless frame for each doubling, each the
+ * difference between the image at that size and the frame before it doubled by the EXP segment
+ * as J.1.1.2 doubles it. [vertical] false halves and doubles across only. [refinements]
+ * differential frames at full size with no EXP follow, each coding a zero difference.
+ */
+internal fun hierarchicalLosslessJpeg(
+    samples: IntArray, width: Int, height: Int, channels: Int, precision: Int,
+    levels: Int, vertical: Boolean = true, refinements: Int = 0,
+): ByteArray {
+    // The pyramid, full size last: each level keeps every other sample of the one above it.
+    val sizes = ArrayList<Pair<Int, Int>>()
+    val images = ArrayList<IntArray>()
+    sizes.add(width to height)
+    images.add(samples)
+    repeat(levels) {
+        val (w, h) = sizes.last()
+        val nw = (w + 1) / 2
+        val nh = if (vertical) (h + 1) / 2 else h
+        val src = images.last()
+        images.add(IntArray(nw * nh * channels) { i ->
+            val c = i % channels
+            val x = (i / channels) % nw
+            val y = (i / channels) / nw
+            src[((if (vertical) 2 * y else y) * w + 2 * x) * channels + c]
+        })
+        sizes.add(nw to nh)
+    }
+    sizes.reverse()
+    images.reverse()
+
+    val out = ArrayList<Byte>()
     fun add(b: ByteArray) = b.forEach { out.add(it) }
     add(byteArrayOf(0xFF.toByte(), 0xD8.toByte()))
+    add(jpegSegment(0xDE, frameHeader(width, height, channels, precision)))
+    add(losslessFrame(0xC3, images[0], sizes[0].first, sizes[0].second, channels, precision, 1, 0, 0))
+    var reference = images[0]
+    for (k in 1..levels) {
+        val (rw, rh) = sizes[k - 1]
+        val (w, h) = sizes[k]
+        add(jpegSegment(0xDF, byteArrayOf((0x10 or (if (vertical) 1 else 0)).toByte())))
+        val up = upsampleT81(reference, rw, rh, channels, vertical, w, h)
+        val diff = IntArray(up.size) { (images[k][it] - up[it]) and 0xFFFF }
+        add(losslessFrame(0xC7, diff, w, h, channels, precision, 0, 0, 0))
+        reference = images[k]
+    }
+    repeat(refinements) { add(losslessFrame(0xC7, IntArray(samples.size), width, height, channels, precision, 0, 0, 0)) }
+    add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
+    return out.toByteArray()
+}
+
+/** [reference], [rw] by [rh], doubled across and, with [vertical], down, as T.81 J.1.1.2 asks, cut to [w] by [h]. */
+private fun upsampleT81(reference: IntArray, rw: Int, rh: Int, channels: Int, vertical: Boolean, w: Int, h: Int): IntArray {
+    fun at(x: Int, y: Int, c: Int) = reference[(y * rw + x) * channels + c]
+    fun across(x: Int, y: Int, c: Int): Int =
+        if (x % 2 == 0) at(x / 2, y, c) else (at(x / 2, y, c) + at(minOf(x / 2 + 1, rw - 1), y, c)) shr 1
+    return IntArray(w * h * channels) { i ->
+        val c = i % channels
+        val x = (i / channels) % w
+        val y = (i / channels) / w
+        when {
+            !vertical -> across(x, y, c)
+            y % 2 == 0 -> across(x, y / 2, c)
+            else -> (across(x, y / 2, c) + across(x, minOf(y / 2 + 1, rh - 1), c)) shr 1
+        }
+    }
+}
+
+private fun frameHeader(width: Int, height: Int, channels: Int, precision: Int): ByteArray {
     val ids = if (channels == 3) listOf('R'.code, 'G'.code, 'B'.code) else (1..channels).toList()
-    add(jpegSegment(0xC3, byteArrayOf(precision.toByte(), (height ushr 8).toByte(), height.toByte(), (width ushr 8).toByte(), width.toByte(), channels.toByte()) +
-        ids.flatMap { listOf(it.toByte(), 0x11, 0) }.toByteArray()))
+    return byteArrayOf(precision.toByte(), (height ushr 8).toByte(), height.toByte(), (width ushr 8).toByte(), width.toByte(), channels.toByte()) +
+        ids.flatMap { listOf(it.toByte(), 0x11, 0) }.toByteArray()
+}
+
+/**
+ * One lossless frame of type [marker] with its table and scan. Predictor 0 codes each sample as
+ * it is, as a differential frame does; any other predicts it from the samples before it.
+ */
+private fun losslessFrame(
+    marker: Int, samples: IntArray, width: Int, height: Int, channels: Int, precision: Int,
+    predictor: Int, pointTransform: Int, restartInterval: Int,
+): ByteArray {
+    val out = ArrayList<Byte>()
+    fun add(b: ByteArray) = b.forEach { out.add(it) }
+    val ids = if (channels == 3) listOf('R'.code, 'G'.code, 'B'.code) else (1..channels).toList()
+    add(jpegSegment(marker, frameHeader(width, height, channels, precision)))
     val counts = ByteArray(16).also { it[4] = 17 }
     add(jpegSegment(0xC4, byteArrayOf(0x00) + counts + ByteArray(17) { it.toByte() }))
-    if (restartInterval > 0) add(jpegSegment(0xDD, byteArrayOf((restartInterval ushr 8).toByte(), restartInterval.toByte())))
+    add(jpegSegment(0xDD, byteArrayOf((restartInterval ushr 8).toByte(), restartInterval.toByte())))
     add(jpegSegment(0xDA, byteArrayOf(channels.toByte()) + ids.flatMap { listOf(it.toByte(), 0x00) }.toByteArray() +
         byteArrayOf(predictor.toByte(), 0, pointTransform.toByte())))
 
@@ -51,6 +139,7 @@ internal fun losslessJpeg(
             for (c in 0 until channels) {
                 fun at(xx: Int, yy: Int) = x[(yy * width + xx) * channels + c]
                 val prediction = when {
+                    predictor == 0 -> 0
                     row == firstRow -> if (col == 0) 1 shl (precision - pointTransform - 1) else at(col - 1, row)
                     col == 0 -> at(col, row - 1)
                     else -> {
@@ -84,6 +173,5 @@ internal fun losslessJpeg(
         }
     }
     flush()
-    add(byteArrayOf(0xFF.toByte(), 0xD9.toByte()))
     return out.toByteArray()
 }

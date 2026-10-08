@@ -28,10 +28,6 @@ class JpegRefusalTest {
         "JPEG with 3 components sampled 3x1, 2x1, 2x1 (factors must divide the largest)" to frame(listOf(0x31, 0x21, 0x21)),
         "JPEG with 3 components sampled 1x4, 1x3, 1x1 (factors must divide the largest)" to frame(listOf(0x14, 0x13, 0x11)),
         "12-bit JPEG (8-bit samples only)" to frame(listOf(0x11), precision = 12),
-        "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xC5),
-        "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xC7),
-        "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xCD),
-        "hierarchical/differential JPEG" to frame(listOf(0x11), marker = 0xCF),
     )
 
     @Test
@@ -56,6 +52,15 @@ class JpegRefusalTest {
         for (factors in listOf(listOf(0x41, 0x21, 0x11), listOf(0x22, 0x12, 0x21), listOf(0x11))) {
             val info = ImageKodec.probe(frame(factors))
             assertTrue(info.isDecodable, "$factors: ${info.unsupportedReason}")
+        }
+    }
+
+    @Test
+    fun aDifferentialFrameOutsideAHierarchyIsAFaultNotAFeature() {
+        // T.81 Annex J: a differential frame refines a reference, which only a DHP and a frame before it give.
+        for (marker in listOf(0xC5, 0xC6, 0xC7, 0xCD, 0xCE, 0xCF)) {
+            val e = assertFailsWith<ImageDecodeException> { ImageKodec.decode(frame(listOf(0x11), marker = marker)) }
+            assertFalse(e is UnsupportedImageException, "0x${marker.toString(16)}: ${e.message}")
         }
     }
 

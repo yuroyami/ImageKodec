@@ -137,7 +137,7 @@ at a lower resolution than brightness.
 | --- | --- |
 | PNG | color types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and color-key, Adam7 interlace |
 | APNG | dispose none/background/previous, blend source/over, frame rects, loop count |
-| JPEG | baseline SOF0, extended sequential SOF1, progressive SOF2, arithmetic coding SOF9 and SOF10 with DAC conditioning, lossless SOF3 and SOF11 at 2 to 16 bits with every predictor and point transform, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
+| JPEG | baseline SOF0, extended sequential SOF1, progressive SOF2, arithmetic coding SOF9 and SOF10 with DAC conditioning, lossless SOF3 and SOF11 at 2 to 16 bits with every predictor and point transform, hierarchical SOF5 to SOF7 and SOF13 to SOF15 over any of them, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |

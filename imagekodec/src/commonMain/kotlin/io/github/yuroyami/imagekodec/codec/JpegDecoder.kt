@@ -46,8 +46,12 @@ import kotlin.math.sqrt
  *    upsampling and colour conversion; deeper, [decode16] keeps them, converted
  *    with the same filters and fixed point at their own precision
  *
- * Hierarchical JPEG is not read yet (#19). EXIF orientation is metadata and
- * deliberately not applied.
+ *  - hierarchical (T.81 Annex J): a DHP, then frames of any of the above and
+ *    differential frames (SOF5 to SOF7, SOF13 to SOF15), each adding its samples to
+ *    its references doubled as the EXP before it asks, integer samples handed
+ *    from frame to frame as T.81 describes
+ *
+ * EXIF orientation is metadata and deliberately not applied.
  */
 internal object JpegDecoder {
 
@@ -59,6 +63,15 @@ internal object JpegDecoder {
      * progressive file ten to twenty. Each scan walks the whole image, so the count has to be bounded.
      */
     private const val MAX_SCANS = 512
+
+    /**
+     * Most frames a hierarchical image may hold, and the most area they may cover together, in
+     * images. Each frame refines its components at twice the resolution of the frame before, or
+     * at the same one for a last refinement, so a real pyramid covers 4/3 of the image and one
+     * more for that refinement. Each costs a pass over its area even with no data.
+     */
+    private const val MAX_FRAMES = 32
+    private const val MAX_FRAME_AREA = 8
 
     /** The scratch an IDCT takes: 64 for the full one, 8 rows of up to 8 and a column of 8 for [reducedIdctRect]. */
     private const val IDCT_SCRATCH = 72
@@ -206,6 +219,8 @@ internal object JpegDecoder {
         var samples: ShortArray? = null
         var categories: ByteArray? = null
         var pointTransform = 0
+        // differential DCT frames only: the inverse DCT's output, signed, with no level shift, in rows of ws
+        var difference: IntArray? = null
         var x = 0; var y = 0
         var w2 = 0; var h2 = 0
         // The plane in [data] when the decode is reduced: its stride and its rows of image.
@@ -289,6 +304,11 @@ internal object JpegDecoder {
         var lastCategory = 0
         // The reduction asked of a lossless frame, which has no DCT to reduce inside: its pixels are averaged.
         var reduceAfter = 0
+
+        // Hierarchical (T.81 Annex J): the frame refines a reference, so its DC, or its lossless
+        // sample, is coded with no prediction and its inverse DCT has no level shift.
+        var differential = false
+        var scans = 0
 
         // header reads: truncation is a decode error
         fun u8(): Int {
@@ -420,7 +440,8 @@ internal object JpegDecoder {
         val diff = if (t != 0) extendReceive(j, t) else 0
         val dc = j.comp[b].dcPred + diff
         if (dc < -32768 * 256 || dc > 32767 * 256) err("bad delta")
-        j.comp[b].dcPred = dc
+        // A differential frame codes its DC directly (T.81 J.2.3.1).
+        j.comp[b].dcPred = if (j.differential) 0 else dc
         val dcVal = dc * dequant[0]
         if (dcVal < Short.MIN_VALUE.toInt() || dcVal > Short.MAX_VALUE.toInt()) err("can't merge dc and ac")
         data[0] = dcVal.toShort()
@@ -467,7 +488,7 @@ internal object JpegDecoder {
             if (t < 0 || t > 15) err("can't merge dc and ac")
             val diff = if (t != 0) extendReceive(j, t) else 0
             val dc = j.comp[b].dcPred + diff
-            j.comp[b].dcPred = dc
+            j.comp[b].dcPred = if (j.differential) 0 else dc
             val v = dc * (1 shl j.succLow)
             if (v < Short.MIN_VALUE.toInt() || v > Short.MAX_VALUE.toInt()) err("can't merge dc and ac")
             data[dataOfs] = v.toShort()
@@ -599,6 +620,7 @@ internal object JpegDecoder {
         val nv = 8 shr comp.scaleV
         val at = comp.ws * by * nv + bx * nh
         when {
+            j.differential -> idctDifference(comp.difference!!, at, comp.ws, data, tmp)
             nh == 8 && nv == 8 -> idctBlock(comp.data, at, comp.ws, data, tmp)
             nh == nv -> reducedIdct(comp.data, at, comp.ws, data, nh, tmp)
             else -> reducedIdctRect(comp.data, at, comp.ws, data, nh, nv, tmp)
@@ -876,6 +898,48 @@ internal object JpegDecoder {
         }
     }
 
+    /**
+     * [idctBlock] for a differential frame (T.81 J.2.3.1): the same transform with no level shift
+     * and no clamp, since its output is a signed difference to add to the upsampled reference.
+     */
+    private fun idctDifference(out: IntArray, outOfs: Int, outStride: Int, data: ShortArray, tmp: IntArray) {
+        for (i in 0 until 8) {
+            idct1d(
+                data[i].toInt(), data[i + 8].toInt(), data[i + 16].toInt(), data[i + 24].toInt(),
+                data[i + 32].toInt(), data[i + 40].toInt(), data[i + 48].toInt(), data[i + 56].toInt(),
+            ) { x0, x1, x2, x3, t0, t1, t2, t3 ->
+                val y0 = x0 + 512; val y1 = x1 + 512; val y2 = x2 + 512; val y3 = x3 + 512
+                tmp[i] = (y0 + t3) shr 10
+                tmp[i + 56] = (y0 - t3) shr 10
+                tmp[i + 8] = (y1 + t2) shr 10
+                tmp[i + 48] = (y1 - t2) shr 10
+                tmp[i + 16] = (y2 + t1) shr 10
+                tmp[i + 40] = (y2 - t1) shr 10
+                tmp[i + 24] = (y3 + t0) shr 10
+                tmp[i + 32] = (y3 - t0) shr 10
+            }
+        }
+        var o = outOfs
+        var v = 0
+        for (i in 0 until 8) {
+            idct1d(
+                tmp[v], tmp[v + 1], tmp[v + 2], tmp[v + 3], tmp[v + 4], tmp[v + 5], tmp[v + 6], tmp[v + 7],
+            ) { x0, x1, x2, x3, t0, t1, t2, t3 ->
+                val y0 = x0 + 65536; val y1 = x1 + 65536; val y2 = x2 + 65536; val y3 = x3 + 65536
+                out[o] = (y0 + t3) shr 17
+                out[o + 7] = (y0 - t3) shr 17
+                out[o + 1] = (y1 + t2) shr 17
+                out[o + 6] = (y1 - t2) shr 17
+                out[o + 2] = (y2 + t1) shr 17
+                out[o + 5] = (y2 - t1) shr 17
+                out[o + 3] = (y3 + t0) shr 17
+                out[o + 4] = (y3 - t0) shr 17
+            }
+            v += 8
+            o += outStride
+        }
+    }
+
     // STBI__IDCT_1D
     private inline fun idct1d(
         s0: Int, s1: Int, s2: Int, s3: Int, s4: Int, s5: Int, s6: Int, s7: Int,
@@ -1063,7 +1127,9 @@ internal object JpegDecoder {
             0xC0, 0xC1, 0xC2, 0xC9, 0xCA -> if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
             // Any precision from 2 to 16; [processFrameHeader] reports another as a fault.
             0xC3, 0xCB -> {}
-            0xC5, 0xC6, 0xC7, 0xCD, 0xCE, 0xCF -> return "hierarchical/differential JPEG"
+            // Differential frames, read inside a hierarchical image; [decodeFrame] faults one outside it.
+            0xC5, 0xC6, 0xCD, 0xCE -> if (precision != 8) return "$precision-bit JPEG (8-bit samples only)"
+            0xC7, 0xCF -> {}
             else -> return "JPEG SOF marker 0x${marker.toString(16)}"
         }
         if (height == 0) return "JPEG with its height deferred to a DNL marker"
@@ -1109,6 +1175,8 @@ internal object JpegDecoder {
             err("${j.imgX}x${j.imgY} cannot come from ${j.input.size} bytes")
         }
         j.imgN = c
+        // A hierarchical image's frames each describe their own components.
+        for (i in 0 until 4) j.comp[i] = Component()
 
         j.rgb = 0
         val rgbIds = intArrayOf('R'.code, 'G'.code, 'B'.code)
@@ -1167,6 +1235,8 @@ internal object JpegDecoder {
             comp.ys = (comp.y + (1 shl comp.scaleV) - 1) shr comp.scaleV
             // A block the file never reaches stays mid-gray, as in libjpeg, not black.
             comp.data = ByteArray(comp.ws * (comp.h2 shr comp.scaleV)).also { it.fill(0x80.toByte()) }
+            // A differential block the file never reaches adds nothing to its reference.
+            if (j.differential) comp.difference = IntArray(comp.ws * comp.h2)
             if (j.progressive) {
                 // w2/h2 are multiples of 8; one 64-short block per 8x8 tile
                 comp.coeffW = comp.w2 / 8
@@ -1204,8 +1274,9 @@ internal object JpegDecoder {
         j.succLow = aa and 15
         j.skipScan = false
         if (j.lossless) {
-            // T.81 H.1.2.1 and A.4: Ss selects the predictor and Al is the point transform.
-            if (j.specStart !in 1..7 || j.succHigh != 0 || j.succLow >= j.precision) {
+            // T.81 H.1.2.1 and A.4: Ss selects the predictor and Al is the point transform. A
+            // differential frame predicts nothing, and its Ss is 0 (J.1.3.2).
+            if (j.specStart !in (if (j.differential) 0..0 else 1..7) || j.succHigh != 0 || j.succLow >= j.precision) {
                 err("bad lossless SOS: predictor ${j.specStart}, Ah ${j.succHigh}, point transform ${j.succLow}")
             }
             // A lossless frame codes each component in one scan. A second one is passed over, as a
@@ -1519,6 +1590,8 @@ internal object JpegDecoder {
         var st = comp.dcContext
         if (arithDecode(j, stats, st) == 0) {
             comp.dcContext = 0
+            // A differential frame codes its DC directly (T.81 J.2.3.1).
+            if (j.differential) comp.dcPred = 0
             return
         }
         val sign = arithDecode(j, stats, st + 1)
@@ -1550,7 +1623,7 @@ internal object JpegDecoder {
         }
         v += 1
         if (sign != 0) v = -v
-        comp.dcPred = (comp.dcPred + v) and 0xFFFF
+        comp.dcPred = ((if (j.differential) 0 else comp.dcPred) + v) and 0xFFFF
     }
 
     // T.81 F.2.4.2 (Figure F.20): coefficients [start] to [end] of the block at [ofs], each times
@@ -1829,6 +1902,7 @@ internal object JpegDecoder {
                                 else -> losslessHuffmanDiff(j, comp)
                             }
                             val prediction = when {
+                                j.differential -> 0
                                 top -> if (sx == 0) initial else s[i - 1].toInt() and 0xFFFF
                                 sx == 0 -> s[i - stride].toInt() and 0xFFFF
                                 else -> {
@@ -2348,6 +2422,17 @@ internal object JpegDecoder {
     /** A side of [size] pixels reduced by 2^[scale], rounded up. */
     private fun outSize(size: Int, scale: Int): Int = (size + (1 shl scale) - 1) shr scale
 
+    private fun isFrame(m: Int) = m in 0xC0..0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC
+
+    private fun isDifferential(m: Int) = m in 0xC5..0xC7 || m in 0xCD..0xCF
+
+    private fun setFrameType(j: State, m: Int) {
+        j.progressive = m == 0xC2 || m == 0xC6 || m == 0xCA || m == 0xCE
+        j.arithmetic = m >= 0xC9
+        j.lossless = m == 0xC3 || m == 0xC7 || m == 0xCB || m == 0xCF
+        j.differential = isDifferential(m)
+    }
+
     // stbi__decode_jpeg_header and stbi__decode_jpeg_image: every scan entropy-decoded and through
     // the IDCT, each component's plane at its own reduction.
     private fun decodeFrame(input: ByteArray, scale: Int): State {
@@ -2357,32 +2442,48 @@ internal object JpegDecoder {
         // stbi__decode_jpeg_header: SOI, then markers until SOF
         if (j.u8() != 0xFF || j.u8() != 0xD8) err("no SOI")
         var m = getMarker(j)
-        while (true) {
+        var hierarchy: ByteArray? = null
+        while (!isFrame(m)) {
             when (m) {
-                // SOF0 baseline, SOF1 extended sequential, SOF2 progressive, and the frame types
-                // processFrameHeader refuses by name
-                0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF -> break
                 MARKER_NONE -> err("expected marker")
-                else -> {
-                    processMarker(j, m)
-                    m = getMarker(j)
-                }
+                0xDE -> hierarchy = segment(j)   // DHP: a hierarchical image follows (T.81 B.3.2)
+                else -> processMarker(j, m)
             }
+            m = getMarker(j)
         }
-        j.progressive = m == 0xC2 || m == 0xCA
-        j.arithmetic = m == 0xC9 || m == 0xCA || m == 0xCB
-        j.lossless = m == 0xC3 || m == 0xCB
+        if (hierarchy != null) return decodeHierarchy(j, hierarchy, m, scale)
+        if (isDifferential(m)) err("a differential frame outside a hierarchical image")
+        setFrameType(j, m)
         if (j.lossless) j.reduceAfter = scale else j.scale = scale
         processFrameHeader(j, m)
+        m = decodeScans(j)
+        if (m != 0xD9) err("a second frame outside a hierarchical image")
+        if (j.progressive) finishProgressive(j)
+        if (j.lossless) finishLossless(j)
 
-        // stbi__decode_jpeg_image: scans until EOI
-        m = getMarker(j)
+        return j
+    }
+
+    /** The body of the marker segment just met, its length read. */
+    private fun segment(j: State): ByteArray {
+        val length = j.u16be()
+        if (length < 2) err("bad segment length $length")
+        val start = j.pos
+        j.skip(length - 2)
+        return j.input.copyOfRange(start, j.pos)
+    }
+
+    /**
+     * The scans of the frame [j] holds, through the markers between them, up to the marker that
+     * ends them: EOI, or in a hierarchical image the next frame's SOF or EXP, which it returns.
+     */
+    private fun decodeScans(j: State): Int {
+        var m = getMarker(j)
         var sawScan = false
-        var scans = 0
-        while (m != 0xD9) {   // EOI
+        while (m != 0xD9 && m != 0xDF && !isFrame(m)) {   // EOI, EXP, SOF
             when {
                 m == 0xDA -> {   // SOS
-                    if (++scans > MAX_SCANS) err("more than $MAX_SCANS scans")
+                    if (++j.scans > MAX_SCANS) err("more than $MAX_SCANS scans")
                     processScanHeader(j)
                     if (j.skipScan) skipScanData(j) else parseEntropyCodedData(j)
                     sawScan = true
@@ -2404,10 +2505,194 @@ internal object JpegDecoder {
                 }
             }
         }
-        if (!sawScan) err("no SOS scan before EOI")
-        if (j.progressive) finishProgressive(j)
-        if (j.lossless) finishLossless(j)
+        if (!sawScan) err("no SOS scan before ${if (m == 0xD9) "EOI" else "the next frame"}")
+        return m
+    }
 
+    /** A hierarchical image's reference for one component: [width] by [height] samples, row by row. */
+    private class Reference(val samples: IntArray, val width: Int, val height: Int)
+
+    /**
+     * [reference] doubled across when [across] and down when [down], as T.81 J.1.1.2 asks: each new
+     * sample the truncated mean of its two neighbours, the last column and row replicated, across
+     * first. Then cut to [width] by [height], which a frame of odd size leaves smaller.
+     */
+    private fun upsampled(reference: Reference, across: Boolean, down: Boolean, width: Int, height: Int): IntArray {
+        var w = reference.width
+        var h = reference.height
+        var a = reference.samples
+        if (across) {
+            val b = IntArray(2 * w * h)
+            for (y in 0 until h) {
+                val row = y * w
+                for (x in 0 until w) {
+                    val left = a[row + x]
+                    b[2 * row + 2 * x] = left
+                    b[2 * row + 2 * x + 1] = (left + a[row + minOf(x + 1, w - 1)]) shr 1
+                }
+            }
+            a = b
+            w *= 2
+        }
+        if (down) {
+            val b = IntArray(2 * w * h)
+            for (y in 0 until h) {
+                val below = minOf(y + 1, h - 1)
+                for (x in 0 until w) {
+                    val top = a[y * w + x]
+                    b[2 * y * w + x] = top
+                    b[(2 * y + 1) * w + x] = (top + a[below * w + x]) shr 1
+                }
+            }
+            a = b
+            h *= 2
+        }
+        if (width > w || height > h) err("a differential frame of ${width}x$height refines a reference of ${w}x$h")
+        if (width == w) return if (height == h) a else a.copyOf(width * height)
+        return IntArray(width * height) { a[(it / width) * w + it % width] }
+    }
+
+    /**
+     * What the frame [j] holds for [comp]: its samples, through the point transform for a lossless
+     * frame, or the inverse DCT's signed differences for a differential DCT frame.
+     */
+    private fun frameSamples(j: State, comp: Component): IntArray {
+        val out = IntArray(comp.x * comp.y)
+        for (y in 0 until comp.y) for (x in 0 until comp.x) {
+            out[y * comp.x + x] = when {
+                j.lossless -> ((comp.samples!![y * comp.w2 + x].toInt() and 0xFFFF) shl comp.pointTransform) and 0xFFFF
+                j.differential -> comp.difference!![y * comp.ws + x]
+                else -> comp.data[y * comp.ws + x].toInt() and 0xFF
+            }
+        }
+        return out
+    }
+
+    /**
+     * A hierarchical image (T.81 Annex J): the DHP segment [hierarchy] gives the image's size and
+     * components, and the frames that follow, the first of type [first], each code a set of
+     * components. A non-differential frame sets their references, and each differential one adds
+     * its samples, modulo 2^16, to its references doubled as the EXP before it asks. The last
+     * references are the image, which goes through the usual upsampling and colour conversion.
+     *
+     * A lossless image keeps its references unsigned, as T.81 asks of 16-bit samples, and a
+     * DCT-based one signed, since a difference may take a sample below zero on its way to the last
+     * frame, which is clamped to the precision's range at the end.
+     */
+    private fun decodeHierarchy(j: State, hierarchy: ByteArray, first: Int, scale: Int): State {
+        if (hierarchy.size < 6) err("bad DHP len")
+        val precision = hierarchy[0].toInt() and 0xFF
+        val height = ((hierarchy[1].toInt() and 0xFF) shl 8) or (hierarchy[2].toInt() and 0xFF)
+        val width = ((hierarchy[3].toInt() and 0xFF) shl 8) or (hierarchy[4].toInt() and 0xFF)
+        val n = hierarchy[5].toInt() and 0xFF
+        if (hierarchy.size != 6 + 3 * n) err("bad DHP len")
+        val ids = IntArray(n) { hierarchy[6 + 3 * it].toInt() and 0xFF }
+        val factors = IntArray(n) { hierarchy[7 + 3 * it].toInt() and 0xFF }
+        if (isDifferential(first)) err("a hierarchical image starting with a differential frame")
+        unsupportedFrame(first, precision, height, factors)?.let { throw UnsupportedImageException("$it is not supported") }
+        if (width == 0) err("zero width")
+        if (!Budget.fits(width, height, j.input.size)) err("${width}x$height cannot come from ${j.input.size} bytes")
+        if (factors.any { (it shr 4) !in 1..4 || (it and 15) !in 1..4 }) err("bad DHP sampling factors")
+        val lossless = first == 0xC3 || first == 0xCB
+        val max = (1 shl precision) - 1
+        // A reduced decode averages the image: the frames have no common DCT to reduce inside.
+        j.reduceAfter = scale
+
+        val references = HashMap<Int, Reference>()
+        var m = first
+        var across = false
+        var down = false
+        var frames = 0
+        var area = 0L
+        while (true) {
+            if (++frames > MAX_FRAMES) err("more than $MAX_FRAMES frames")
+            setFrameType(j, m)
+            if (lossless && !j.lossless) err("a DCT frame in a lossless hierarchical image")
+            processFrameHeader(j, m)
+            area += j.imgX.toLong() * j.imgY
+            if (area > MAX_FRAME_AREA.toLong() * width * height) err("frames covering more than $MAX_FRAME_AREA times the image")
+            if (j.precision != precision) err("a ${j.precision}-bit frame in a $precision-bit hierarchical image")
+            m = decodeScans(j)
+            if (j.progressive) finishProgressive(j)
+            for (i in 0 until j.imgN) {
+                val comp = j.comp[i]
+                if (comp.id !in ids) err("frame component ${comp.id} is not one of the image's")
+                val samples = frameSamples(j, comp)
+                if (j.differential) {
+                    val reference = references[comp.id] ?: err("a differential frame refines component ${comp.id}, which no frame coded")
+                    val base = upsampled(reference, across, down, comp.x, comp.y)
+                    for (k in samples.indices) {
+                        val sum = (base[k] + samples[k]) and 0xFFFF
+                        samples[k] = if (lossless || sum < 0x8000) sum else sum - 0x10000
+                    }
+                }
+                references[comp.id] = Reference(samples, comp.x, comp.y)
+            }
+            across = false
+            down = false
+            while (m != 0xD9 && !isFrame(m)) {
+                when (m) {
+                    0xDF -> {   // EXP (T.81 B.3.3): which way the next frame's references double
+                        if (j.u16be() != 3) err("bad EXP len")
+                        val e = j.u8()
+                        if ((e shr 4) > 1 || (e and 15) > 1) err("bad EXP expansion $e")
+                        across = (e shr 4) == 1
+                        down = (e and 15) == 1
+                    }
+                    MARKER_NONE -> err("ran out of data before EOI")
+                    else -> processMarker(j, m)
+                }
+                m = getMarker(j)
+            }
+            if (m == 0xD9) break
+        }
+
+        // The image, at the size and sampling the DHP gives, for the paths every other frame takes.
+        j.precision = precision
+        j.lossless = lossless
+        j.differential = false
+        j.progressive = false
+        j.scale = 0
+        j.imgX = width
+        j.imgY = height
+        j.imgN = n
+        j.hMax = factors.maxOf { it shr 4 }
+        j.vMax = factors.maxOf { it and 15 }
+        j.rgb = 0
+        for (k in 0 until n) {
+            val comp = Component()
+            j.comp[k] = comp
+            comp.id = ids[k]
+            if (n == 3 && comp.id == "RGB"[k].code) j.rgb++
+            comp.h = factors[k] shr 4
+            comp.v = factors[k] and 15
+            comp.x = (width * comp.h + j.hMax - 1) / j.hMax
+            comp.y = (height * comp.v + j.vMax - 1) / j.vMax
+            comp.w2 = comp.x
+            comp.h2 = comp.y
+            comp.ws = comp.x
+            comp.ys = comp.y
+            val reference = references[comp.id]
+            val values = IntArray(comp.x * comp.y) { i ->
+                if (reference == null) return@IntArray 1 shl (precision - 1)
+                // The last frame should match the image's size; a smaller one is extended by its edges.
+                val x = minOf(i % comp.x, reference.width - 1)
+                val y = minOf(i / comp.x, reference.height - 1)
+                val v = reference.samples[y * reference.width + x]
+                // Below 16 bits a sample past either end of the range is clamped, the lossless
+                // ones read as signed, as the reference software reads them.
+                when {
+                    lossless && precision == 16 -> v and 0xFFFF
+                    lossless -> (if (v >= 0x8000) v - 0x10000 else v).coerceIn(0, max)
+                    else -> v.coerceIn(0, max)
+                }
+            }
+            if (precision <= 8) {
+                comp.data = ByteArray(values.size) { to8(values[it], precision).toByte() }
+            } else {
+                comp.samples = ShortArray(values.size) { values[it].toShort() }
+            }
+        }
         return j
     }
 

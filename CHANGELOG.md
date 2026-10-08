@@ -28,6 +28,12 @@ reviewable in the diff.
   reference software and ffmpeg's `ljpeg` encoder write the test files, and each
   decodes to its source (#19).
 
+- Hierarchical JPEG decodes: a DHP segment, then frames of any process (DCT
+  sequential or progressive, lossless, Huffman or arithmetic) refined by
+  differential frames, each reference doubled as its EXP segment asks. A lossless
+  pyramid decodes to its source exactly, and `probe` reports the full size from
+  the DHP segment rather than the first, smaller frame's (#19).
+
 - `ImageKodec.encodeWebp` writes a lossless WebP. The image is tried as a palette
   when it has 256 colours or fewer, alone or with the predictor over its indices,
   and through the subtract-green, predictor and cross-colour transforms, each

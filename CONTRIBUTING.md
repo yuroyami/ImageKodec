@@ -68,6 +68,7 @@ Every codec's tests compare its output against an independent implementation:
 | TIFF | libtiff (`tiffcp`, `tiff2rgba`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
 | JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
 | JPEG lossless decode | The T.81 reference software (`t81jpeg`, below) writes every precision from 2 to 16 bits, Huffman and arithmetic, and ffmpeg's `ljpeg` encoder writes subsampled YCbCr: each must decode to its source. ffmpeg's decoder reads the files with a point transform, and the files a small Annex H writer in the tests makes |
+| JPEG hierarchical decode | `t81jpeg` writes pyramids of every kind, which must match its own decode within the bounds `JpegHierarchicalOracleTest` explains, and lossless pyramids written to the letter of T.81 Annex J by the tests must decode to their source |
 | JPEG arithmetic decode | libjpeg-turbo's `jpegtran -arithmetic`, and `tools/arith_jpeg.c` for the DAC conditioning, re-encode a `cjpeg` file's coefficients: the arithmetic file must decode to exactly the pixels of the Huffman one |
 | JBIG2 | jbig2enc (`jbig2`) writes the streams: generic regions must decode to the source page, symbol mode must match jbig2dec |
 | WebP lossless encode | `dwebp` reads our output back pixel for pixel, and it must be smaller than our PNG |
