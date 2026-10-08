@@ -61,7 +61,8 @@ class WebpEncoderOracleTest {
         check("fractal", source("mandelbrot=s=400x300"))
         check("test pattern", source("testsrc2=s=320x240"))
         check("colour bars, a palette", source("smptebars=s=200x120"))
-        check("gradient", source("gradients=s=300x200:c0=red:c1=blue"))
+        // Without a seed ffmpeg places the gradient at random, so the picture changes on every run.
+        check("gradient", source("gradients=s=300x200:c0=red:c1=blue:seed=1"))
         check("translucent", source("mandelbrot=s=257x131,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='X'"))
         check("odd size", source("testsrc=s=203x117"))
     }

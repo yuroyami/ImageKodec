@@ -29,8 +29,11 @@ import kotlin.test.fail
 class FuzzTest {
 
     private companion object {
-        /** Far past what any mutant needs, so only a loop or a runaway allocation reaches it. */
-        const val DEADLINE_MILLIS = 30_000L
+        /**
+         * Far past what any mutant needs, so only a loop or a runaway allocation reaches it. The
+         * slowest mutant, an AVIF with a large picture, takes 36 s in a debug binary on a CI runner.
+         */
+        const val DEADLINE_MILLIS = 120_000L
     }
 
     /** xorshift32: tiny, deterministic, and identical on every Kotlin target. */
