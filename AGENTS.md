@@ -125,9 +125,9 @@ being true.
 - djxl converts a lossy file that has only an ICC profile to that profile. This decoder
   gives sRGB there, so the reference needs `--color_space=RGB_D65_SRG_Rel_SRG` (#42).
 - Ubuntu 24.04 has libjxl 0.7.0: no `jxl_from_tree`, `--photon_noise` where 0.11 has
-  `--photon_noise_iso`, and other rounding. `JxlOracleTest` gives it the plain cases at
-  a bound of two levels, so the tight bounds run only where libjxl is 0.11 or newer,
-  which CI is not (#42).
+  `--photon_noise_iso`, other rounding, and a PNG writer that refuses a 16-bit picture
+  with alpha. `JxlOracleTest` gives it the plain cases at a bound of two levels, so the
+  tight bounds run only where libjxl is 0.11 or newer, which CI is not (#42).
 - cjxl keeps neither a GIF's nor an APNG's play count, and `jxl_from_tree` writes none,
   so `JxlDecoderTest` rewrites a header to test a loop count (#42).
 - `jxl_from_tree` gives `Alpha` the size set before it, and every frame of an

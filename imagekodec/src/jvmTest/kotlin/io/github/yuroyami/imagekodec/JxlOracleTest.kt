@@ -25,7 +25,8 @@ import kotlin.test.assertTrue
  *
  * The decoder follows libjxl 0.11, and those bounds are for that djxl. An older one, such as
  * the 0.7.0 of Ubuntu 24.04, has other command-line options and other rounding, so it is
- * given only the plain cases, at 8 bits, with a bound of two levels.
+ * given only the plain cases, at 8 bits, with a bound of two levels, and no 16-bit file
+ * with alpha, which its PNG writer refuses.
  * Skips cleanly without cjxl, djxl and cjpeg.
  */
 class JxlOracleTest {
@@ -379,11 +380,13 @@ class JxlOracleTest {
         )
         var ran = 0
         for ((label, channels) in listOf("rgb" to 3, "rgba" to 4, "gray" to 1, "gray with alpha" to 2)) {
+            // djxl before 0.11 cannot write a 16-bit picture with alpha to PNG.
+            if (!current && channels % 2 == 0) continue
             val source = deep(if (channels == 2) 130 else 300, if (channels == 2) 90 else 270, channels)
             ran += runCases("16-bit $label", source, emptyList(), exact, 0, checkTools = false)
             ran += runCases("16-bit $label", source, emptyList(), lossy, lossyBound(16), checkTools = channels == 3)
         }
-        assertTrue(ran >= if (current) 4 * 24 else 4 * 6, "only $ran 16-bit cases ran")
+        assertTrue(ran >= if (current) 4 * 24 else 2 * 6, "only $ran 16-bit cases ran")
         if (!current) return
         // cjxl marks the alpha as premultiplied and stores the colour as it is given.
         val premultiplied = encode(deep(300, 270, 4), listOf("-d", "1", "--premultiply=1"))!!
