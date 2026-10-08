@@ -2,9 +2,10 @@ package io.github.yuroyami.imagekodec
 
 /**
  * What a file declares about the color space of its samples, as it declares it:
- * [ImageInfo.colorProfile] reports it and nothing converts it. Nearly every image
- * is sRGB and says so or says nothing; the rest, such as a Display P3 photo or an
- * Adobe RGB scan, draw with the wrong colors unless a color pipeline applies this.
+ * [ImageInfo.colorProfile] reports it, and a decode with [ColorTarget.Srgb] or
+ * [ImageKodec.convertToSrgb] converts through it. Nearly every image is sRGB and
+ * says so or says nothing; the rest, such as a Display P3 photo or an Adobe RGB
+ * scan, draw with the wrong colors unless they are converted.
  *
  * - [icc] is the embedded ICC profile, byte for byte as the file holds it once
  *   decompressed or reassembled: PNG `iCCP`, JPEG `APP2` `ICC_PROFILE` segments in

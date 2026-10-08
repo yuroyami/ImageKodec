@@ -66,7 +66,7 @@ jobs:
       - name: Install codec oracles
         run: |
           sudo apt-get update
-          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev
+          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free
           missing=0
           for t in cwebp dwebp tiffcp opj_compress opj_decompress cjpeg djpeg jpegtran tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert cc; do
             command -v "$t" >/dev/null || { echo "::error::oracle tool $t not on PATH"; missing=1; }
@@ -74,6 +74,8 @@ jobs:
           command -v magick >/dev/null || command -v convert >/dev/null || { echo "::error::ImageMagick not on PATH"; missing=1; }
           [ -f /usr/include/avif/avif.h ] || { echo "::error::libavif headers missing"; missing=1; }
           [ -f /usr/include/jpeglib.h ] || { echo "::error::libjpeg headers missing"; missing=1; }
+          [ -f /usr/include/lcms2.h ] || { echo "::error::lcms2 headers missing"; missing=1; }
+          [ -f /usr/share/color/icc/sRGB.icc ] || { echo "::error::icc-profiles-free missing"; missing=1; }
           python3 -c "import PIL" || { echo "::error::Pillow missing"; missing=1; }
           exit $missing
 

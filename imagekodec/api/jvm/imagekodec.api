@@ -13,6 +13,27 @@ public final class io/github/yuroyami/imagekodec/ColorProfile {
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract class io/github/yuroyami/imagekodec/ColorTarget {
+}
+
+public final class io/github/yuroyami/imagekodec/ColorTarget$Source : io/github/yuroyami/imagekodec/ColorTarget {
+	public static final field INSTANCE Lio/github/yuroyami/imagekodec/ColorTarget$Source;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/ColorTarget$Srgb : io/github/yuroyami/imagekodec/ColorTarget {
+	public fun <init> ()V
+	public fun <init> (Lio/github/yuroyami/imagekodec/RenderingIntent;)V
+	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/RenderingIntent;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/yuroyami/imagekodec/RenderingIntent;
+	public final fun copy (Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/ColorTarget$Srgb;
+	public static synthetic fun copy$default (Lio/github/yuroyami/imagekodec/ColorTarget$Srgb;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/ColorTarget$Srgb;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIntent ()Lio/github/yuroyami/imagekodec/RenderingIntent;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public class io/github/yuroyami/imagekodec/ImageDecodeException : java/lang/Exception {
 	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -60,21 +81,26 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 
 public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/ImageKodec;
-	public final fun decode ([BZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decode16 ([BIZ)Lio/github/yuroyami/imagekodec/KiteBitmap16;
-	public static synthetic fun decode16$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
-	public final fun decodeAnimation ([BZILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
-	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
-	public final fun decodeDownscaledTo ([BIIZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun convertToSrgb (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public final fun convertToSrgb (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun convertToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public static synthetic fun convertToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decode ([BZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decode16 ([BIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public static synthetic fun decode16$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public final fun decodeAnimation ([BZILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
+	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
+	public final fun decodeDownscaledTo ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeJpegComponents ([BI)Lio/github/yuroyami/imagekodec/JpegComponents;
 	public static synthetic fun decodeJpegComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpegComponents;
-	public final fun decodePage ([BIZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decodePage$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decodeReduced ([BI)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decodeScaled ([BIIZ)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decodeScaled$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodePage ([BIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodePage$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeReduced ([BILio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodeReduced$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeScaled ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodeScaled$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun detect ([B)Lio/github/yuroyami/imagekodec/ImageFormat;
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteAnimation;Z)[B
@@ -165,6 +191,16 @@ public final class io/github/yuroyami/imagekodec/Orientation : java/lang/Enum {
 
 public final class io/github/yuroyami/imagekodec/Orientation$Companion {
 	public final fun fromExif (I)Lio/github/yuroyami/imagekodec/Orientation;
+}
+
+public final class io/github/yuroyami/imagekodec/RenderingIntent : java/lang/Enum {
+	public static final field AbsoluteColorimetric Lio/github/yuroyami/imagekodec/RenderingIntent;
+	public static final field Perceptual Lio/github/yuroyami/imagekodec/RenderingIntent;
+	public static final field RelativeColorimetric Lio/github/yuroyami/imagekodec/RenderingIntent;
+	public static final field Saturation Lio/github/yuroyami/imagekodec/RenderingIntent;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/RenderingIntent;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/RenderingIntent;
 }
 
 public final class io/github/yuroyami/imagekodec/ScalingKt {

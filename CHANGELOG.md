@@ -14,6 +14,13 @@ reviewable in the diff.
 
 ### Added
 
+- Colour conversion to sRGB (#108): every decode entry point takes
+  `colorTarget = ColorTarget.Srgb(intent)` and converts through the file's embedded ICC
+  profile, and `ImageKodec.convertToSrgb` converts a bitmap through a profile from
+  elsewhere. Matrix/TRC profiles (v2 and v4, `curv` gammas and tables, all five `para`
+  types) and gray profiles convert in each rendering intent as lcms2 converts them to
+  its built-in sRGB, within one level at 8 bits; `decode16` converts at full precision.
+
 - Arithmetic-coded JPEG decodes: sequential (SOF9) and progressive (SOF10)
   frames, with restart intervals and the conditioning of the DAC marker, through
   T.81's QM decoder laid out as libjpeg's `jdarith.c` lays it out. The
@@ -215,6 +222,11 @@ reviewable in the diff.
   frame's timing and the play count (#15).
 
 ### Changed
+
+- `decode`, `decodePage`, `decode16`, `decodeReduced`, `decodeScaled`,
+  `decodeDownscaledTo` and `decodeAnimation` gained a `colorTarget` parameter, before
+  `decodeAnimation`'s `cancellationCheck`. Source calls compile as before; code compiled
+  against an earlier version must be recompiled (#108).
 
 - `ImageFormat` has a new entry, `AVIF`, which `sniff` and `detect` return for an
   ISO base media file whose `ftyp` names the `avif` or `avis` brand. A `when` over

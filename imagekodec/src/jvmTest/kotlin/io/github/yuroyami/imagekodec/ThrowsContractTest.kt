@@ -17,6 +17,7 @@ class ThrowsContractTest {
     private val bytes = ByteArray::class.java
     private val int = Int::class.javaPrimitiveType!!
     private val boolean = Boolean::class.javaPrimitiveType!!
+    private val target = ColorTarget::class.java
 
     private fun declares(owner: Class<*>, name: String, expected: Class<out Throwable>, vararg params: Class<*>) {
         val declared = owner.getMethod(name, *params).exceptionTypes.toList()
@@ -27,15 +28,15 @@ class ThrowsContractTest {
     fun theDecodeEntryPointsDeclareImageDecodeException() {
         val ex = ImageDecodeException::class.java
         declares(ImageKodec::class.java, "probe", ex, bytes)
-        declares(ImageKodec::class.java, "decode", ex, bytes, boolean)
+        declares(ImageKodec::class.java, "decode", ex, bytes, boolean, target)
         declares(ImageKodec::class.java, "probePage", ex, bytes, int)
-        declares(ImageKodec::class.java, "decodePage", ex, bytes, int, boolean)
-        declares(ImageKodec::class.java, "decode16", ex, bytes, int, boolean)
-        declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
-        declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
-        declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)
+        declares(ImageKodec::class.java, "decodePage", ex, bytes, int, boolean, target)
+        declares(ImageKodec::class.java, "decode16", ex, bytes, int, boolean, target)
+        declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int, target)
+        declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean, target)
+        declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean, target)
         declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
-        declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, int, Function0::class.java)
+        declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, int, target, Function0::class.java)
         declares(CcittFax::class.java, "decode", ex, bytes, int, CcittOptions::class.java)
     }
 
@@ -43,13 +44,13 @@ class ThrowsContractTest {
     fun theEntryPointsThatRefuseAnArgumentDeclareIllegalArgumentException() {
         val ex = IllegalArgumentException::class.java
         declares(ImageKodec::class.java, "probePage", ex, bytes, int)
-        declares(ImageKodec::class.java, "decodePage", ex, bytes, int, boolean)
-        declares(ImageKodec::class.java, "decode16", ex, bytes, int, boolean)
-        declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int)
-        declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean)
-        declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean)
+        declares(ImageKodec::class.java, "decodePage", ex, bytes, int, boolean, target)
+        declares(ImageKodec::class.java, "decode16", ex, bytes, int, boolean, target)
+        declares(ImageKodec::class.java, "decodeReduced", ex, bytes, int, target)
+        declares(ImageKodec::class.java, "decodeScaled", ex, bytes, int, int, boolean, target)
+        declares(ImageKodec::class.java, "decodeDownscaledTo", ex, bytes, int, int, boolean, target)
         declares(ImageKodec::class.java, "decodeJpegComponents", ex, bytes, int)
-        declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, int, Function0::class.java)
+        declares(ImageKodec::class.java, "decodeAnimation", ex, bytes, boolean, int, target, Function0::class.java)
         declares(KiteBitmap16::class.java, "get", ex, int, int, int)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteBitmap::class.java, boolean)
         declares(ImageKodec::class.java, "encodeGif", ex, KiteAnimation::class.java, boolean)

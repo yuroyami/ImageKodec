@@ -109,13 +109,32 @@ not decodable. Until that chunk, nothing says which codec the image uses.
 `colorProfile` reports what the file declares about its color space: the embedded
 ICC profile in any format, byte for byte, and PNG's `sRGB`, `gAMA`, `cHRM` and
 `cICP` chunks. It is null when the file declares nothing, which for nearly every
-image means sRGB. ImageKodec does not convert samples to sRGB, so a color pipeline
-of your own can use the profile.
+image means sRGB.
 
 ```kotlin
 info.colorProfile?.iccDescription    // "Display P3", "Adobe RGB (1998)", ...
 info.colorProfile?.icc               // the profile's bytes
 ```
+
+### Convert colours to sRGB
+
+A decode gives the samples as the file stores them. A Display P3 photo or an Adobe RGB
+scan then draws dull on a screen that shows sRGB, unless something converts it, as a
+browser does. Ask for sRGB and every decode converts through the file's embedded ICC
+profile:
+
+```kotlin
+val bitmap = ImageKodec.decode(bytes, colorTarget = ColorTarget.Srgb())
+val exact = ImageKodec.decode16(bytes, colorTarget = ColorTarget.Srgb(RenderingIntent.RelativeColorimetric))
+val again = ImageKodec.convertToSrgb(bitmap, profile)   // a profile from elsewhere, such as a PDF
+```
+
+Matrix and TRC profiles, v2 and v4, with every curve type, and gray profiles convert as
+lcms2 converts them, to within one level: perceptual by default, as browsers and lcms2's
+tools convert, with black point compensation where lcms2 applies it. A file that declares
+nothing, or declares sRGB, comes back untouched. Profiles built from lookup tables, as
+CMYK and printer profiles are, and PNG's `gAMA`, `cHRM` and `cICP` chunks are not
+converted yet (#108).
 
 ### Decode a still
 
