@@ -5,6 +5,7 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Decoder
 import io.github.yuroyami.imagekodec.codec.avif.Av1FrameHeader
 import io.github.yuroyami.imagekodec.codec.avif.Av1RefSlots
 import io.github.yuroyami.imagekodec.codec.avif.Av1SequenceHeader
+import io.github.yuroyami.imagekodec.codec.avif.Av1ToolUse
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -14,11 +15,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The AV1 decoder (#41) against dav1d, through ffmpeg: still pictures from libaom, SVT-AV1 and
- * rav1e with each coding tool turned on in turn, and every sample of every plane compared, as
- * the decoding process leaves no room for rounding. Each case also reads its own frame header
- * and checks that the encoder did use the tool it is there for, so an encoder that changes its
- * mind cannot leave a tool untested. Skips cleanly without ffmpeg or one of its AV1 libraries.
+ * The AV1 decoder (#41) against dav1d, through ffmpeg: still pictures and short sequences from
+ * libaom, SVT-AV1 and rav1e with each coding tool turned on in turn, and every sample of every
+ * plane of every frame compared, as the decoding process leaves no room for rounding. Each case
+ * also checks that the encoder did use the tool it is there for, from its frame header or from
+ * what its blocks did, so an encoder that changes its mind cannot leave a tool untested. Skips
+ * cleanly without ffmpeg or one of its AV1 libraries.
  */
 class Av1OracleTest {
 
@@ -212,5 +214,91 @@ class Av1OracleTest {
                 f.tileCols * f.tileRows > 1
             },
         ).forEach(::check)
+    }
+
+    /** A sequence: [frames] frames of [source] from [encoder] with [args], which must use every tool of [uses]. */
+    private class Sequence(val name: String, val source: String, val frames: Int, val pixFmt: String, val encoder: String, val args: List<String>, val uses: List<String>)
+
+    private fun checkSequence(c: Sequence) {
+        val out = temp(".obu")
+        val ffmpeg = Tools.require("ffmpeg").path
+        val (code, _) = run(
+            *(listOf(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", c.source, "-frames:v", "${c.frames}", "-c:v", c.encoder) +
+                c.args + listOf("-pix_fmt", c.pixFmt, "-f", "obu", "-y", out.path)).toTypedArray(),
+        )
+        assertEquals(0, code, "${c.name}: ffmpeg could not encode")
+        val data = out.readBytes()
+        val use = Av1ToolUse()
+        val pictures = Av1Decoder().also { it.toolUse = use }.decodeAll(data)
+        // Each frame at its own size: ffmpeg would otherwise scale every frame to the first one's.
+        val (refCode, ref) = run(ffmpeg, "-hide_banner", "-loglevel", "error", "-c:v", "libdav1d", "-i", out.path, "-autoscale", "0", "-f", "rawvideo", "-pix_fmt", c.pixFmt, "-")
+        assertEquals(0, refCode, "${c.name}: dav1d could not decode")
+        var at = 0
+        for ((n, picture) in pictures.withIndex()) {
+            val wide = picture.bitDepth > 8
+            for (p in picture.planes.indices) {
+                val w = if (p == 0) picture.width else (picture.width + picture.subX) shr picture.subX
+                val h = if (p == 0) picture.height else (picture.height + picture.subY) shr picture.subY
+                for (y in 0 until h) for (x in 0 until w) {
+                    if (at >= ref.size) throw AssertionError("${c.name}: dav1d shows fewer frames than ${pictures.size}")
+                    val expected = if (wide) (ref[at].toInt() and 255) or ((ref[at + 1].toInt() and 255) shl 8) else ref[at].toInt() and 255
+                    at += if (wide) 2 else 1
+                    val got = picture.planes[p][y * picture.strides[p] + x].toInt()
+                    if (got != expected) throw AssertionError("${c.name}: frame $n plane $p ($x, $y) is $got, dav1d has $expected")
+                }
+            }
+        }
+        assertEquals(ref.size, at, "${c.name}: dav1d shows another number of frames or sizes")
+        assertTrue(use["inter frame"] > 0, "${c.name}: the encoder wrote no inter frame")
+        for (tool in c.uses) assertTrue(use[tool] > 0, "${c.name}: the encoder did not use $tool")
+    }
+
+    private val allInterTools = listOf(
+        "-aom-params",
+        "enable-obmc=1:enable-warped-motion=1:enable-global-motion=1:enable-interintra-comp=1:enable-masked-comp=1:" +
+            "enable-dist-wtd-comp=1:enable-dual-filter=1:enable-ref-frame-mvs=1:enable-smooth-interintra=1:enable-interintra-wedge=1:" +
+            "enable-interinter-wedge=1:enable-diff-wtd-comp=1:enable-onesided-comp=1",
+    )
+    private val rotating = "testsrc2=s=352x288:r=25,rotate=a=t*0.15:c=gray"
+    private val panning = "testsrc2=s=640x360:r=25,crop=352:288:x=t*40:y=t*20"
+    private val zooming = "mandelbrot=s=352x288:r=25"
+    private val fast = "testsrc2=s=1280x720:r=25,crop=640:360:x=t*400:y=t*150"
+    private val small = "testsrc2=s=640x360:r=25,crop=203:117:x=t*30:y=t*10"
+
+    @Test
+    fun interPrediction() {
+        assumeTrue("ffmpeg with dav1d, libaom, SVT-AV1 and rav1e not installed", tools())
+        val aom = { crf: Int, speed: Int -> listOf("-crf", "$crf", "-cpu-used", "$speed") }
+        listOf(
+            Sequence(
+                "libaom with every inter tool", rotating, 16, "yuv420p", "libaom-av1", aom(32, 1) + allInterTools,
+                listOf(
+                    "averaged compound", "distance weighted compound", "difference weighted compound", "wedge compound", "unidirectional compound",
+                    "smooth interintra", "wedge interintra", "obmc", "local warp", "dual filter", "skip mode", "temporal candidate",
+                    "palette in inter frame", "intra block in inter frame", "show existing frame", "hidden frame",
+                ),
+            ),
+            Sequence("libaom zooming at 10 bits", zooming, 16, "yuv420p10le", "libaom-av1", aom(28, 2) + allInterTools, listOf("global warp", "global mode")),
+            Sequence("libaom 4:4:4 at 12 bits", rotating, 10, "yuv444p12le", "libaom-av1", aom(30, 3) + allInterTools, listOf("local warp", "obmc")),
+            Sequence("libaom 4:2:2 at 10 bits", panning, 10, "yuv422p10le", "libaom-av1", aom(30, 3) + allInterTools, listOf("obmc", "global warp")),
+            Sequence("libaom monochrome", panning, 10, "gray", "libaom-av1", aom(30, 3) + allInterTools, listOf("obmc", "local warp")),
+            Sequence("libaom segmentation", panning, 16, "yuv420p", "libaom-av1", aom(34, 3) + listOf("-aom-params", "aq-mode=1"), listOf("segmentation map kept")),
+            Sequence(
+                "libaom cyclic refresh", panning, 16, "yuv420p", "libaom-av1",
+                listOf("-b:v", "200k", "-cpu-used", "8", "-usage", "realtime", "-aom-params", "aq-mode=3"), listOf("segmentation temporal update"),
+            ),
+            Sequence("libaom error resilience", panning, 12, "yuv420p", "libaom-av1", aom(34, 4) + listOf("-error-resilience", "default"), listOf("error resilient inter frame", "frame ids")),
+            Sequence("libaom tiles in 128x128 superblocks", fast, 12, "yuv420p", "libaom-av1", aom(36, 5) + listOf("-tiles", "2x2", "-aom-params", "sb-size=128"), listOf("tiles", "128x128 superblocks")),
+            Sequence("libaom lossless at an odd size", small, 8, "yuv420p", "libaom-av1", listOf("-cpu-used", "5", "-aom-params", "lossless=1"), listOf("intra block in inter frame")),
+            Sequence("SVT-AV1 resizing every frame", panning, 20, "yuv420p", "libsvtav1", listOf("-crf", "40", "-preset", "4", "-svtav1-params", "resize-mode=2"), listOf("scaled reference")),
+            Sequence(
+                "SVT-AV1 superres", panning, 16, "yuv420p", "libsvtav1", listOf("-crf", "40", "-preset", "4", "-svtav1-params", "superres-mode=1:superres-denom=12"),
+                listOf("superres inter frame", "scaled reference"),
+            ),
+            Sequence("SVT-AV1 film grain at 10 bits", panning, 16, "yuv420p10le", "libsvtav1", listOf("-crf", "40", "-preset", "4", "-svtav1-params", "film-grain=10"), listOf("film grain inter frame")),
+            Sequence("SVT-AV1 at an odd size", small, 12, "yuv420p10le", "libsvtav1", listOf("-crf", "35", "-preset", "6"), listOf("obmc")),
+            Sequence("rav1e", rotating, 16, "yuv420p", "librav1e", listOf("-qp", "90", "-speed", "2"), listOf("averaged compound", "segmentation in inter frame")),
+            Sequence("rav1e in tiles", fast, 12, "yuv420p", "librav1e", listOf("-qp", "120", "-speed", "9", "-tiles", "4"), listOf("tiles")),
+        ).forEach(::checkSequence)
     }
 }

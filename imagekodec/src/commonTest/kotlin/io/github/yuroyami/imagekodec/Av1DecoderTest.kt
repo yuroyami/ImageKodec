@@ -2,9 +2,13 @@ package io.github.yuroyami.imagekodec
 
 import io.github.yuroyami.imagekodec.codec.avif.Av1Decoder
 import io.github.yuroyami.imagekodec.codec.avif.Av1Picture
+import io.github.yuroyami.imagekodec.codec.avif.Av1ToolUse
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer
+import io.github.yuroyami.imagekodec.codec.avif.AvifProperty
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * One AV1 stream in low overhead format: its picture's size, bit depth, subsampling and plane
@@ -243,6 +247,25 @@ class Av1DecoderTest {
             assertEquals(f.subX to f.subY, picture.subX to picture.subY, f.name)
             assertEquals(f.planes, picture.planes.size, f.name)
             assertEquals(f.hash, fnv(picture), "${f.name} differs from dav1d")
+        }
+    }
+
+    @Test
+    fun interFramesDecodeToDav1dsSamples() {
+        val c = AvifContainer.parse(AvifFixtures.moving)
+        val track = c.tracks.single()
+        val decoder = Av1Decoder()
+        val config = track.properties.firstNotNullOf { it as? AvifProperty.Av1Config }
+        decoder.configure(config.configObus)
+        val use = Av1ToolUse()
+        decoder.toolUse = use
+        val hashes = List(track.sizes.size) { fnv(decoder.decodeTemporalUnit(c.sampleData(track, it))!!) }
+        assertEquals(AvifFixtures.movingPlanes, hashes, "the frames differ from dav1d's")
+        for (tool in listOf(
+            "averaged compound", "distance weighted compound", "difference weighted compound", "wedge compound",
+            "smooth interintra", "wedge interintra", "obmc", "local warp", "dual filter", "temporal candidate", "show existing frame",
+        )) {
+            assertTrue(use[tool] > 0, "the fixture no longer uses $tool")
         }
     }
 

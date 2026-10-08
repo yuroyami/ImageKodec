@@ -2,10 +2,6 @@ package io.github.yuroyami.imagekodec.codec.avif
 
 /** The AV1 loop filter process (specification section 7.14), on the frame's planes in place. */
 internal object Av1LoopFilter {
-    private const val NEARESTMV = 14
-    private const val GLOBALMV = 16
-    private const val GLOBAL_GLOBALMV = 23
-
     fun apply(f: Av1FrameDecoder) {
         val fh = f.fh
         for (plane in 0 until f.numPlanes) {
@@ -82,7 +78,7 @@ internal object Av1LoopFilter {
         val segment = f.segmentIds[m]
         val ref = f.refFrames0[m]
         val mode = f.yModes[m]
-        val modeType = if (mode >= NEARESTMV && mode != GLOBALMV && mode != GLOBAL_GLOBALMV) 1 else 0
+        val modeType = if (mode >= Av1.NEARESTMV && mode != Av1.GLOBALMV && mode != Av1.GLOBAL_GLOBALMV) 1 else 0
         val deltaLF = if (!fh.deltaLfMulti) f.deltaLfs[m * 4] else f.deltaLfs[m * 4 + (if (plane == 0) pass else plane + 1)]
         // The adaptive filter strength selection process.
         val i = if (plane == 0) pass else plane + 1

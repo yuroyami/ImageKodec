@@ -113,6 +113,61 @@ internal object Av1 {
     // Reference frames.
     const val NONE = -1
     const val INTRA_FRAME = 0
+    const val LAST_FRAME = 1
+    const val LAST2_FRAME = 2
+    const val LAST3_FRAME = 3
+    const val GOLDEN_FRAME = 4
+    const val BWDREF_FRAME = 5
+    const val ALTREF2_FRAME = 6
+    const val ALTREF_FRAME = 7
+
+    // Inter modes, which follow the intra modes in YMode.
+    const val NEARESTMV = 14
+    const val NEARMV = 15
+    const val GLOBALMV = 16
+    const val NEWMV = 17
+    const val NEAREST_NEARESTMV = 18
+    const val NEAR_NEARMV = 19
+    const val NEAREST_NEWMV = 20
+    const val NEW_NEARESTMV = 21
+    const val NEAR_NEWMV = 22
+    const val NEW_NEARMV = 23
+    const val GLOBAL_GLOBALMV = 24
+    const val NEW_NEWMV = 25
+
+    // motion_mode
+    const val SIMPLE = 0
+    const val OBMC = 1
+    const val LOCALWARP = 2
+
+    // compound_type
+    const val COMPOUND_WEDGE = 0
+    const val COMPOUND_DIFFWTD = 1
+    const val COMPOUND_AVERAGE = 2
+    const val COMPOUND_INTRA = 3
+    const val COMPOUND_DISTANCE = 4
+
+    // interintra_mode
+    const val II_DC_PRED = 0
+    const val II_V_PRED = 1
+    const val II_H_PRED = 2
+    const val II_SMOOTH_PRED = 3
+
+    // interp_filter
+    const val EIGHTTAP = 0
+    const val EIGHTTAP_SMOOTH = 1
+    const val EIGHTTAP_SHARP = 2
+    const val BILINEAR = 3
+
+    // Global motion types.
+    const val IDENTITY = 0
+    const val TRANSLATION = 1
+    const val ROTZOOM = 2
+    const val AFFINE = 3
+    const val WARPEDMODEL_PREC_BITS = 16
+
+    const val MAX_FRAME_DISTANCE = 31
+    const val MAX_REF_MV_STACK_SIZE = 8
 
     private val t = Av1Tables
 

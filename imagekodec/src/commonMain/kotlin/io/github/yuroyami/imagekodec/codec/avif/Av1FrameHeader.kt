@@ -1,7 +1,6 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
-import io.github.yuroyami.imagekodec.UnsupportedImageException
 
 /** Film grain synthesis parameters (specification section 5.9.30); all zero means no grain. */
 internal class Av1FilmGrain {
@@ -77,6 +76,46 @@ internal class Av1RefSlots {
     val grain = Array(8) { Av1FilmGrain() }
     /** The saved order hints of each slot's own references, for motion field estimation. */
     val savedOrderHints = Array(8) { IntArray(8) }
+    /** FrameStore: each slot's frame after its post filters, at UpscaledWidth by FrameHeight. */
+    val pictures = arrayOfNulls<Av1Picture>(8)
+    /**
+     * SavedRefFrames and SavedMvs at the odd rows and columns, the only ones motion field
+     * estimation reads: one entry for each 8x8, MiCols >> 1 to a row, and null for an intra
+     * frame, which saves none.
+     */
+    val savedRefFrames = arrayOfNulls<ByteArray>(8)
+    val savedMvs = arrayOfNulls<ShortArray>(8)
+    /** SavedSegmentIds, MiCols to a row. */
+    val savedSegmentIds = arrayOfNulls<ByteArray>(8)
+
+    /** Slot [to] made a copy of slot [from], as the reference frame loading and update processes leave it. */
+    fun copy(from: Int, to: Int) {
+        valid[to] = valid[from]
+        frameId[to] = frameId[from]
+        frameType[to] = frameType[from]
+        orderHint[to] = orderHint[from]
+        upscaledWidth[to] = upscaledWidth[from]
+        frameWidth[to] = frameWidth[from]
+        frameHeight[to] = frameHeight[from]
+        renderWidth[to] = renderWidth[from]
+        renderHeight[to] = renderHeight[from]
+        miCols[to] = miCols[from]
+        miRows[to] = miRows[from]
+        cdfs[to] = cdfs[from]?.copy()
+        loopFilterRefDeltas[from].copyInto(loopFilterRefDeltas[to])
+        loopFilterModeDeltas[from].copyInto(loopFilterModeDeltas[to])
+        for (seg in 0 until 8) {
+            featureEnabled[from][seg].copyInto(featureEnabled[to][seg])
+            featureData[from][seg].copyInto(featureData[to][seg])
+        }
+        for (ref in 0 until 8) gmParams[from][ref].copyInto(gmParams[to][ref])
+        grain[to].copyFrom(grain[from])
+        savedOrderHints[from].copyInto(savedOrderHints[to])
+        pictures[to] = pictures[from]
+        savedRefFrames[to] = savedRefFrames[from]
+        savedMvs[to] = savedMvs[from]
+        savedSegmentIds[to] = savedSegmentIds[from]
+    }
 }
 
 /** An AV1 uncompressed frame header (specification section 5.9) and the variables it derives. */
@@ -362,9 +401,9 @@ internal class Av1FrameHeader(val seq: Av1SequenceHeader) {
             if (seq.enableOrderHint) {
                 shortSignaling = r.flag()
                 if (shortSignaling) {
-                    r.f(3) // last_frame_idx
-                    r.f(3) // gold_frame_idx
-                    throw UnsupportedImageException("AV1 frame reference short signalling")
+                    val lastFrameIdx = r.f(3)
+                    val goldFrameIdx = r.f(3)
+                    setFrameRefs(refs, lastFrameIdx, goldFrameIdx)
                 }
             }
             for (i in 0 until 7) {
@@ -439,6 +478,94 @@ internal class Av1FrameHeader(val seq: Av1SequenceHeader) {
         reducedTxSet = r.flag()
         globalMotionParams(r)
         filmGrainParams(r, refs)
+    }
+
+    /** The set frame refs process: ref_frame_idx from the two slots short signalling names and the order hints. */
+    private fun setFrameRefs(refs: Av1RefSlots, lastFrameIdx: Int, goldFrameIdx: Int) {
+        refFrameIdx.fill(-1)
+        refFrameIdx[LAST_FRAME - LAST_FRAME] = lastFrameIdx
+        refFrameIdx[GOLDEN_FRAME - LAST_FRAME] = goldFrameIdx
+        val usedFrame = BooleanArray(8)
+        usedFrame[lastFrameIdx] = true
+        usedFrame[goldFrameIdx] = true
+        val curFrameHint = 1 shl (seq.orderHintBits - 1)
+        val shiftedOrderHints = IntArray(8) { curFrameHint + relativeDist(refs.orderHint[it], orderHint) }
+        val lastOrderHint = shiftedOrderHints[lastFrameIdx]
+        val goldOrderHint = shiftedOrderHints[goldFrameIdx]
+        if (lastOrderHint >= curFrameHint || goldOrderHint >= curFrameHint) {
+            throw ImageDecodeException("AV1: short signalling names a reference that is not in the past")
+        }
+        fun latestBackward(): Int {
+            var ref = -1
+            var latest = 0
+            for (i in 0 until 8) {
+                val hint = shiftedOrderHints[i]
+                if (!usedFrame[i] && hint >= curFrameHint && (ref < 0 || hint >= latest)) {
+                    ref = i
+                    latest = hint
+                }
+            }
+            return ref
+        }
+        fun earliestBackward(): Int {
+            var ref = -1
+            var earliest = 0
+            for (i in 0 until 8) {
+                val hint = shiftedOrderHints[i]
+                if (!usedFrame[i] && hint >= curFrameHint && (ref < 0 || hint < earliest)) {
+                    ref = i
+                    earliest = hint
+                }
+            }
+            return ref
+        }
+        fun latestForward(): Int {
+            var ref = -1
+            var latest = 0
+            for (i in 0 until 8) {
+                val hint = shiftedOrderHints[i]
+                if (!usedFrame[i] && hint < curFrameHint && (ref < 0 || hint >= latest)) {
+                    ref = i
+                    latest = hint
+                }
+            }
+            return ref
+        }
+        var ref = latestBackward()
+        if (ref >= 0) {
+            refFrameIdx[ALTREF_FRAME - LAST_FRAME] = ref
+            usedFrame[ref] = true
+        }
+        ref = earliestBackward()
+        if (ref >= 0) {
+            refFrameIdx[BWDREF_FRAME - LAST_FRAME] = ref
+            usedFrame[ref] = true
+        }
+        ref = earliestBackward()
+        if (ref >= 0) {
+            refFrameIdx[ALTREF2_FRAME - LAST_FRAME] = ref
+            usedFrame[ref] = true
+        }
+        for (i in 0 until 7 - 2) {
+            val refFrame = Av1Tables.refFrameList[i]
+            if (refFrameIdx[refFrame - LAST_FRAME] < 0) {
+                ref = latestForward()
+                if (ref >= 0) {
+                    refFrameIdx[refFrame - LAST_FRAME] = ref
+                    usedFrame[ref] = true
+                }
+            }
+        }
+        ref = -1
+        var earliest = 0
+        for (i in 0 until 8) {
+            val hint = shiftedOrderHints[i]
+            if (ref < 0 || hint < earliest) {
+                ref = i
+                earliest = hint
+            }
+        }
+        for (i in 0 until 7) if (refFrameIdx[i] < 0) refFrameIdx[i] = ref
     }
 
     fun relativeDist(a: Int, b: Int): Int {

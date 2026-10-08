@@ -4,10 +4,13 @@ import io.github.yuroyami.imagekodec.ColorProfile
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.ImageInfo
+import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteBitmap16
+import io.github.yuroyami.imagekodec.KiteFrame
 import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.UnsupportedImageException
+import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALPHA_URN
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALPHA_URN_HEVC
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALTR
@@ -78,6 +81,95 @@ internal object AvifDecoder {
     fun decode(data: ByteArray): KiteBitmap = render(plan(data, probing = false), wide = false).bitmap
 
     fun decode16(data: ByteArray): KiteBitmap16 = render(plan(data, probing = false), wide = true).wide!!
+
+    /**
+     * Every frame of an AV1 image sequence with its duration, or a still image as one frame. The
+     * frames decode in order from the first sample, as each predicts from the ones before it, and
+     * the alpha track decodes beside them sample by sample. A frame coded at another size than
+     * the first, which AV1 allows mid-sequence, is scaled to the first frame's size, as a player
+     * shows every frame in one window.
+     */
+    fun decodeAnimation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation {
+        val p = plan(data, probing = false)
+        val track = p.track
+        if (track == null) {
+            val still = render(p, wide = false).bitmap
+            return KiteAnimation(still.width, still.height, listOf(KiteFrame(still, delayMillis = 0, delayRawCentiseconds = 0)), loopCount = 1)
+        }
+        p.unsupported?.let { throw UnsupportedImageException(it) }
+        val c = p.c
+        val count = minOf(track.sizes.size, maxFrames)
+        val width = p.crop?.get(2) ?: p.width
+        val height = p.crop?.get(3) ?: p.height
+        if (!Budget.framesFitAbsolute(width, height, count)) {
+            throw ImageDecodeException("AVIF: $count frames of ${width}x$height exceed the output safety limit")
+        }
+        val color = sequenceDecoder(track)
+        val alphaTrack = p.alphaTrack
+        val alpha = alphaTrack?.let { sequenceDecoder(it) }
+        val frames = ArrayList<KiteFrame>(count)
+        for (i in 0 until count) {
+            val colorPlanes = sample(color, c, track, i)
+            val alphaPlanes = if (alphaTrack != null && alpha != null) {
+                if (i >= alphaTrack.sizes.size) throw ImageDecodeException("AVIF: the alpha track has ${alphaTrack.sizes.size} samples for ${track.sizes.size} frames")
+                sample(alpha, c, alphaTrack, i)
+            } else null
+            var bitmap = convert(colorPlanes, alphaPlanes, p.premultiplied, p.cicp ?: AvifCicp(2, 2, 2, colorPlanes.fullRange), wide = false).bitmap
+            if (bitmap.width != p.width || bitmap.height != p.height) bitmap = resampled(bitmap, p.width, p.height)
+            p.crop?.let { bitmap = cropped(bitmap, it) }
+            val timescale = if (track.timescale > 0) track.timescale else 1L
+            val duration = if (i < track.durations.size) track.durations[i] else 0L
+            val millis = ((duration * 1000 + timescale / 2) / timescale).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            frames += KiteFrame(
+                bitmap,
+                // A duration of 0 means as fast as possible; clamp it as browsers do.
+                delayMillis = if (millis <= 10) 100 else millis,
+                delayRawCentiseconds = ((duration * 100 + timescale / 2) / timescale).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            )
+            if (i + 1 < count) cancellationCheck?.invoke()
+        }
+        return KiteAnimation(width, height, frames, p.loopCount)
+    }
+
+    /** An AV1 decoder for the samples of [track], configured by its `av1C`. */
+    private fun sequenceDecoder(track: AvifTrack): Av1Decoder {
+        val config = track.properties.firstOrNull { it is AvifProperty.Av1Config } as AvifProperty.Av1Config?
+        return Av1Decoder().also { d -> config?.configObus?.takeIf { it.isNotEmpty() }?.let { d.configure(it) } }
+    }
+
+    /** The planes of the frame sample [index] of [track] shows. */
+    private fun sample(decoder: Av1Decoder, c: AvifContainer, track: AvifTrack, index: Int): AvifPlanes {
+        val pic = decoder.decodeTemporalUnit(c.sampleData(track, index))
+            ?: throw ImageDecodeException("AVIF: sample $index of track ${track.id} shows no frame")
+        return AvifPlanes(pic.width, pic.height, pic.bitDepth, pic.subX, pic.subY, pic.planes, pic.strides, pic.seq.colorRange)
+    }
+
+    /** [b] resampled to [w] by [h], bilinearly, with the sample centres aligned. */
+    private fun resampled(b: KiteBitmap, w: Int, h: Int): KiteBitmap {
+        val out = IntArray(w * h)
+        val src = b.argb
+        for (y in 0 until h) {
+            val fy = ((y + 0.5) * b.height / h - 0.5).coerceIn(0.0, (b.height - 1).toDouble())
+            val y0 = fy.toInt()
+            val y1 = minOf(y0 + 1, b.height - 1)
+            val wy = fy - y0
+            for (x in 0 until w) {
+                val fx = ((x + 0.5) * b.width / w - 0.5).coerceIn(0.0, (b.width - 1).toDouble())
+                val x0 = fx.toInt()
+                val x1 = minOf(x0 + 1, b.width - 1)
+                val wx = fx - x0
+                var argb = 0
+                for (shift in intArrayOf(24, 16, 8, 0)) {
+                    fun ch(px: Int) = (src[px] ushr shift) and 255
+                    val top = ch(y0 * b.width + x0) * (1 - wx) + ch(y0 * b.width + x1) * wx
+                    val bottom = ch(y1 * b.width + x0) * (1 - wx) + ch(y1 * b.width + x1) * wx
+                    argb = argb or ((top * (1 - wy) + bottom * wy + 0.5).toInt().coerceIn(0, 255) shl shift)
+                }
+                out[y * w + x] = argb
+            }
+        }
+        return KiteBitmap(w, h, out)
+    }
 
     // ---- choosing what to show ------------------------------------------------------
 
@@ -192,7 +284,7 @@ internal object AvifDecoder {
                 track.properties.firstOrNull { it is AvifProperty.Rotation } as AvifProperty.Rotation?,
                 track.properties.firstOrNull { it is AvifProperty.Mirror } as AvifProperty.Mirror?,
             ),
-            frameCount = track.sizes.size, loopCount = if (track.loops) 0 else 1,
+            frameCount = track.sizes.size, loopCount = track.playCount,
             icc = (track.properties.firstOrNull { it is AvifProperty.Icc } as AvifProperty.Icc?)?.profile,
             cicp = cicp, unsupported = reason,
         )

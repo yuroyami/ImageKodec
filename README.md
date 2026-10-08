@@ -43,7 +43,7 @@ println("${info.width}x${info.height}, ${info.frameCount} frame(s)")
 val bitmap: KiteBitmap = ImageKodec.decode(bytes)
 val pixel = bitmap[10, 20]                       // 0xAARRGGBB
 
-// GIF, APNG and animated WebP all arrive in this shape, fully composited.
+// GIF, APNG, animated WebP and animated AVIF all arrive in this shape, fully composited.
 val anim = ImageKodec.decodeAnimation(bytes)
 for (frame in anim.frames) draw(frame.bitmap, frame.delayMillis)
 
@@ -143,7 +143,7 @@ at a lower resolution than brightness.
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
 | TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/6 including subsampled YCbCr, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
 | JPEG 2000 | JP2 container and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN) |
-| AVIF | still images and the first frame of image sequences: every AV1 intra coding tool with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
+| AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
 
 A TIFF can hold any number of pages. `decode` returns the first,
 `probe(bytes).pageCount` says how many there are, and `decodePage` and
@@ -166,8 +166,9 @@ matrix and range the `colr` box or the AV1 sequence header gives, chroma upsampl
 bilinearly, as libavif's own float path does; the result matches it to within one
 level, and mostly exactly. Rotation and mirroring are reported as
 `ImageInfo.orientation`, as EXIF orientation is for a JPEG, and `applyOrientation`
-applies them; the clean aperture always crops. An image sequence decodes its first
-frame for now, and `frameCount` says how many there are.
+applies them; the clean aperture always crops. An image sequence plays through
+`decodeAnimation`, every frame with the duration its track gives and the loop
+count its edit list gives, alpha track included; `decode` shows its first frame.
 
 `ImageFormat.sniff` (and `ImageKodec.detect`) recognize PNG, JPEG, GIF, BMP, WEBP,
 TIFF, JP2 and AVIF. Sniffing is deliberately wider than decoding, which is why `probe`
@@ -179,7 +180,7 @@ and both return packed 1-bit rows instead of using `decode`.
 
 ### Play an animation
 
-One type covers GIF, APNG and animated WebP. Frames are full composited canvases,
+One type covers GIF, APNG, animated WebP and animated AVIF. Frames are full composited canvases,
 with disposal, blending and frame offsets already applied. Playback is therefore
 "draw frame N, wait delay N".
 
@@ -203,10 +204,10 @@ than changing them. APNG preserves its full four-byte play field, including
 counts above the PNG Third Edition integer limit as a compatibility extension
 for deployed writers such as Pillow.
 
-GIF, APNG and WebP delays of 10 ms and under are reported as 100 ms, which matches
+GIF, APNG, WebP and AVIF delays of 10 ms and under are reported as 100 ms, which matches
 browser behavior. An APNG `fcTL` with `delay_num = 0` therefore gives a 100 ms frame.
-`KiteFrame.delayRawCentiseconds` is the exact figure a GIF stated. For APNG and WebP
-it is derived from the stated delay, because neither format stores centiseconds.
+`KiteFrame.delayRawCentiseconds` is the exact figure a GIF stated. For APNG, WebP and
+AVIF it is derived from the stated delay, because none of them stores centiseconds.
 
 ### Keep 16-bit samples
 
@@ -438,12 +439,13 @@ web project that runs under Node should not use them.
   headers name the marker, field and byte position. The public nullable
   `JpxDecoder.decode` overloads still return null on failure; `probe` names
   unsupported features in main and tile-part headers.
-- **An animated AVIF shows its first frame.** Frames after the first need AV1 inter
-  prediction, which is not written yet, so `decodeAnimation` returns the first frame
-  of an image sequence and `probe` reports its real `frameCount`. AV1 matrices that
-  are not linear, BT.2020 and chromaticity-derived constant luminance, SMPTE ST 2085
-  and ICtCp, throw `UnsupportedImageException`, as libavif refuses them. An ICC
-  profile or a transfer function is reported, not applied.
+- **AVIF colour stops at the matrix.** AV1 matrices that are not linear, BT.2020
+  and chromaticity-derived constant luminance, SMPTE ST 2085 and ICtCp, throw
+  `UnsupportedImageException`, as libavif refuses them. An ICC profile or a
+  transfer function is reported, not applied. An image sequence whose edit list is
+  missing loops for ever, as browsers play it; a frame coded at another size than
+  the first, which AV1 allows, is scaled to the first frame's size. Large scale tile
+  lists, which no image uses, are refused.
 - **JPEG 2000 colour comes from the JP2 header, without a colour engine.** The
   palette, channel definitions and colour specification apply as T.800 Annex I
   orders them. sRGB, greyscale, bi-level, sYCC, e-sYCC, CMYK and CMY convert to

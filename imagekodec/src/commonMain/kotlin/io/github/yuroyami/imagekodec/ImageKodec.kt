@@ -413,9 +413,10 @@ public object ImageKodec {
     }
 
     /**
-     * Decode [data] as an animation. GIF returns every composited frame with
-     * delays and the loop count; static formats return a single zero-delay frame,
-     * so this is safe to call on anything [decode] accepts.
+     * Decode [data] as an animation. GIF, APNG, animated WebP and AVIF image
+     * sequences return every composited frame with delays and the loop count;
+     * static formats return a single zero-delay frame, so this is safe to call on
+     * anything [decode] accepts.
      *
      * [maxFrames] stops the decode after that many frames, and nothing past them
      * is read, so a damaged later frame does not fail it. `1` gives the first
@@ -446,6 +447,7 @@ public object ImageKodec {
             ImageFormat.GIF -> GifDecoder.decode(data, maxFrames, cancellationCheck)
             ImageFormat.PNG -> PngDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             ImageFormat.WEBP -> WebpDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
+            ImageFormat.AVIF -> AvifDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             else -> {
                 val single = decodeRaw(data)
                 KiteAnimation(

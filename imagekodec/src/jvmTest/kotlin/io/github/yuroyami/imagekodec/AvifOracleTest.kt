@@ -192,6 +192,83 @@ class AvifOracleTest {
         check("sequence", encode("-y", "420", *frames.toTypedArray()), frames = 3)
     }
 
+    /** Frame [t] of a scene that moves: a gradient sliding under a square that crosses it. */
+    private fun movingFrame(width: Int, height: Int, t: Int, alpha: Boolean): File {
+        val argb = IntArray(width * height) { i ->
+            val x = i % width
+            val y = i / width
+            val inSquare = x - 4 * t in 10..40 && y - 2 * t in 8..30
+            val r = if (inSquare) 240 else ((x + 3 * t) * 255 / (width + 30)) and 255
+            val g = if (inSquare) 40 else if (((x + t) / 9 + y / 7) % 2 == 0) 200 else 30
+            val b = if (inSquare) 60 else (y * 255 / (height - 1))
+            val a = if (alpha) (if (inSquare) 255 else (x + y + 5 * t) * 255 / (width + height + 40)) else 255
+            (a shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        return temp(".png").apply { writeBytes(ImageKodec.encodePng(KiteBitmap(width, height, argb))) }
+    }
+
+    /** libavif's reading of every frame of [data]: its repetition count, timescale, and each frame's duration and samples. */
+    private class Sequence(val repetitionCount: Int, val timescale: Long, val durations: List<Long>, val frames: List<KiteBitmap16>)
+
+    private fun referenceSequence(data: ByteArray): Sequence {
+        val input = temp(".avif").apply { writeBytes(data) }
+        val out = temp(".raw")
+        val (code, text) = run(reader!!.path, input.path, "8", out.path, "all")
+        assertEquals(0, code, "libavif could not read the sequence: $text")
+        val b = out.readBytes()
+        fun u32(at: Int) = (b[at].toInt() and 255) or ((b[at + 1].toInt() and 255) shl 8) or
+            ((b[at + 2].toInt() and 255) shl 16) or ((b[at + 3].toInt() and 255) shl 24)
+        val count = u32(0)
+        var at = 12
+        val durations = ArrayList<Long>()
+        val frames = ArrayList<KiteBitmap16>()
+        repeat(count) {
+            durations += u32(at).toLong() and 0xFFFFFFFFL
+            val w = u32(at + 4)
+            val h = u32(at + 8)
+            val channels = u32(at + 12)
+            val base = at + 16
+            frames += KiteBitmap16(w, h, channels, ShortArray(w * h * channels) { i -> ((b[base + i].toInt() and 255) * 257).toShort() })
+            at = base + w * h * channels
+        }
+        return Sequence(u32(4), u32(8).toLong(), durations, frames)
+    }
+
+    private fun checkAnimation(name: String, data: ByteArray, premultiplied: Boolean = false) {
+        val ref = referenceSequence(data)
+        val animation = ImageKodec.decodeAnimation(data)
+        assertEquals(ref.frames.size, animation.frames.size, "$name frame count")
+        assertEquals(ref.frames.size, ImageKodec.probe(data).frameCount, "$name probed frame count")
+        // libavif counts repetitions after the first play, -1 for ever and -2 when the file does not say.
+        val plays = if (ref.repetitionCount < 0) 0L else ref.repetitionCount + 1L
+        assertEquals(plays, animation.loopCount, "$name loop count")
+        assertEquals(plays, ImageKodec.probe(data).loopCount, "$name probed loop count")
+        for ((i, frame) in animation.frames.withIndex()) {
+            val want = ref.frames[i]
+            assertClose("$name frame $i", widen(frame.bitmap, want.channels), want, if (premultiplied) 3 * 257 else 257, premultiplied)
+            val millis = (ref.durations[i] * 1000 + ref.timescale / 2) / ref.timescale
+            assertEquals(if (millis <= 10) 100 else millis.toInt(), frame.delayMillis, "$name frame $i delay")
+        }
+        assertContentEquals(animation.frames[0].bitmap.argb, ImageKodec.decode(data).argb, "$name: decode shows the first frame")
+        assertEquals(2, ImageKodec.decodeAnimation(data, maxFrames = 2).frames.size, "$name: maxFrames")
+    }
+
+    @Test
+    fun animations() {
+        assumeTrue("libavif, libheif or a C compiler not installed", tools())
+        val plain = List(8) { movingFrame(160, 96, it, alpha = false).path }
+        val withAlpha = List(6) { movingFrame(150, 90, it, alpha = true).path }
+        checkAnimation("4:2:0 sequence", encode("-y", "420", *plain.toTypedArray()))
+        checkAnimation(
+            "4:4:4 10-bit sequence that plays three times",
+            encode("-y", "444", "-d", "10", "--timescale", "25", "--duration", "3", "--repetition-count", "2", *plain.toTypedArray()),
+        )
+        checkAnimation("sequence with a key frame every third frame", encode("-y", "420", "-k", "3", *plain.toTypedArray()))
+        checkAnimation("sequence with alpha", encode("-y", "420", *withAlpha.toTypedArray()))
+        checkAnimation("sequence with premultiplied alpha", encode("-y", "444", "-p", *withAlpha.toTypedArray()), premultiplied = true)
+        checkAnimation("4:0:0 12-bit sequence", encode("-y", "400", "-d", "12", "--repetition-count", "0", *plain.toTypedArray()))
+    }
+
     @Test
     fun geometryAsLibheifShowsIt() {
         assumeTrue("libavif, libheif or a C compiler not installed", tools())

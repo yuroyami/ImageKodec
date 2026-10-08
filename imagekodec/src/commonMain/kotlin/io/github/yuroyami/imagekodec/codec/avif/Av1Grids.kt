@@ -31,3 +31,18 @@ internal value class ShortGrid(val a: ShortArray) {
         a[i] = v.toShort()
     }
 }
+
+/**
+ * How often the blocks of a stream used each coding tool, counted only when a test hands the
+ * decoder one, so an oracle test can tell that the tool it is there for was exercised and not
+ * just allowed.
+ */
+internal class Av1ToolUse {
+    val counts = HashMap<String, Int>()
+
+    fun add(tool: String) {
+        counts[tool] = (counts[tool] ?: 0) + 1
+    }
+
+    operator fun get(tool: String): Int = counts[tool] ?: 0
+}

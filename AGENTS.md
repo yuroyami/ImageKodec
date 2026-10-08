@@ -69,3 +69,14 @@ being true.
   premultiplied colour multiplied by its alpha (#41).
 - avifdec leaves the clean aperture, rotation and mirror to its caller; libheif's
   heif-convert applies all three, so geometry is checked against it (#41).
+- ffmpeg scales every frame it decodes to the first frame's size when a stream's size
+  changes, so a reference for an AV1 sequence that resizes needs `-autoscale 0` (#41).
+- avifenc encodes a sequence without lookahead, so its frames never use compound
+  prediction or its masks. ffmpeg's `-f avif` muxer around libaom with the inter tools
+  turned on writes an AVIF that does (#41).
+- ffmpeg's AVIF muxer writes a repeating edit list over a track duration near 2^63,
+  which libavif reads as looping for ever, since the repetition count passes
+  `Int.MAX_VALUE`. A count of the plays that does not cap it reads a huge number (#41).
+- A segmentation map can be kept or predicted from an earlier frame only by an encoder
+  that segments: libaom with `aq-mode=1` keeps it, and realtime libaom with `aq-mode=3`
+  predicts it. Neither is on by default (#41).

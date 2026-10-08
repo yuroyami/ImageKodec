@@ -38,6 +38,7 @@ class AvifDecoderTest {
             "oriented" to Expect(0x243e897f1ed7fd1L, 20, 12, 8, false, Orientation.Transpose, 1),
             "mono12" to Expect(0xb66ade456f86807L, 24, 16, 12, false, Orientation.Normal, 1),
             "seq" to Expect(0xb1227882e34c209buL.toLong(), 24, 16, 8, false, Orientation.Normal, 2),
+            "moving" to Expect(AvifFixtures.movingFrames[0], 96, 64, 8, false, Orientation.Normal, 8),
         )
         for ((name, data) in AvifFixtures.all) {
             val e = expected.getValue(name)
@@ -55,6 +56,27 @@ class AvifDecoderTest {
         }
         val oriented = ImageKodec.decode(AvifFixtures.oriented, applyOrientation = true)
         assertEquals(12 to 20, oriented.width to oriented.height)
+    }
+
+    @Test
+    fun aMovingSequencePlaysFrameByFrame() {
+        val data = AvifFixtures.moving
+        val animation = ImageKodec.decodeAnimation(data)
+        assertEquals(96 to 64, animation.width to animation.height)
+        assertEquals(0L, animation.loopCount, "ffmpeg's edit list repeats for an indefinite duration")
+        assertEquals(AvifFixtures.movingFrames, animation.frames.map { fnv(it.bitmap) })
+        assertEquals(List(8) { 100 }, animation.frames.map { it.delayMillis })
+        assertEquals(List(8) { 10 }, animation.frames.map { it.delayRawCentiseconds })
+        val info = ImageKodec.probe(data)
+        assertEquals(8, info.frameCount)
+        assertEquals(0L, info.loopCount)
+        // The still is the first frame, and a shorter decode stops early with the frames it has.
+        assertEquals(AvifFixtures.movingFrames[0], fnv(ImageKodec.decode(data)))
+        val three = ImageKodec.decodeAnimation(data, maxFrames = 3)
+        assertEquals(AvifFixtures.movingFrames.take(3), three.frames.map { fnv(it.bitmap) })
+        var checks = 0
+        ImageKodec.decodeAnimation(data, cancellationCheck = { checks++ })
+        assertEquals(7, checks, "the check runs between frames")
     }
 
     @Test

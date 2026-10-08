@@ -31,6 +31,19 @@ reviewable in the diff.
   16 bits and every post filter works in place, so a 12-megapixel AVIF decodes in a
   96 MB heap, its 45 MB result included (#41).
 
+- Animated AVIF plays through `decodeAnimation`. The AV1 decoder does inter
+  prediction with every tool of the specification: the motion vector stack with its
+  temporal candidates from projected motion fields, single and compound references
+  with averaged, distance, difference and wedge masks, inter-intra, overlapped block
+  motion compensation, local and global warps, switchable and dual interpolation
+  filters, skip mode, segmentation maps kept or predicted from earlier frames, short
+  reference signalling, and references of another size, scaled as the frame size
+  changes or under superres. Every frame of sequences from libaom, SVT-AV1 and rav1e
+  matches dav1d's sample for sample. Each frame takes its duration from the track's
+  timing and the animation its loop count from the edit list as libavif counts it;
+  the alpha track decodes beside the colour track, straight or premultiplied, and
+  `maxFrames` and the cancellation check work as for GIF, APNG and WebP (#41).
+
 - `ImageKodec.decode16` keeps every bit of a JPEG 2000 component up to 16 bits
   deep, replicated up to 16 bits, through the palette, channel definitions, sYCC
   and e-sYCC, CMYK and CMY, and straight or premultiplied opacity, in the channels

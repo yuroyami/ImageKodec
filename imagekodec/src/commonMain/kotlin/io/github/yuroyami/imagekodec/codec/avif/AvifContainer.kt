@@ -90,7 +90,13 @@ internal class AvifTrack(
     val sizes: LongArray,
     val durations: LongArray,
     val sync: Set<Int>?,
-    val loops: Boolean,
+    /**
+     * How many times the sequence plays, 0 for ever: an edit list that repeats plays as many times
+     * as its segment fits the track's duration, rounded up, and for ever past Int.MAX_VALUE plays or
+     * with an indefinite duration, as libavif counts it; one that does not repeat plays once; and
+     * with no edit list, which leaves it open, a sequence loops, as browsers play it.
+     */
+    val playCount: Long,
 )
 
 /**
@@ -462,12 +468,22 @@ internal class AvifContainer(
         private fun child(data: ByteArray, box: IsoBox?, type: String, full: Boolean = false): IsoBox? =
             box?.let { b -> IsoReader.children(data, b, full).firstOrNull { it.type == fourcc(type) } }
 
+        /** A 64-bit count, or -1 when it does not fit 63 bits, as the indefinite duration of all ones does not. */
+        private fun wide(r: IsoReader): Long {
+            val hi = r.u32()
+            val lo = r.u32()
+            return if (hi >= 0x80000000L) -1L else (hi shl 32) or lo
+        }
+
         private fun readTrack(data: ByteArray, trak: IsoBox): AvifTrack? {
             val tkhd = child(data, trak, "tkhd") ?: return null
             val tr = IsoReader(data, tkhd)
             val (tv, _) = tr.fullBox()
             tr.skip(if (tv == 1) 16 else 8)
             val id = tr.u32()
+            tr.skip(4)
+            // A duration of all ones is indefinite.
+            val trackDuration = if (tv == 1) wide(tr) else tr.u32().let { if (it == 0xFFFFFFFFL) -1L else it }
             val references = ArrayList<AvifReference>()
             child(data, trak, "tref")?.let { tref ->
                 for (ref in IsoReader.children(data, tref)) {
@@ -475,10 +491,20 @@ internal class AvifContainer(
                     references += AvifReference(ref.type, id, LongArray(rr.remaining / 4) { rr.u32() })
                 }
             }
-            var loops = false
+            var playCount = 0L
             child(data, child(data, trak, "edts"), "elst")?.let {
-                val (_, flags) = IsoReader(data, it).fullBox()
-                loops = (flags and 1) != 0
+                val er = IsoReader(data, it)
+                val (ev, flags) = er.fullBox()
+                playCount = if ((flags and 1) == 0) 1L else {
+                    val segment = if (er.remaining >= 4 + (if (ev == 1) 8 else 4)) {
+                        er.u32()
+                        if (ev == 1) wide(er) else er.u32()
+                    } else 0L
+                    // libavif reads a repetition count past Int.MAX_VALUE as for ever.
+                    val plays = if (trackDuration <= 0L || segment <= 0L) 0L
+                    else trackDuration / segment + (if (trackDuration % segment != 0L) 1 else 0)
+                    if (plays - 1 > Int.MAX_VALUE) 0L else plays
+                }
             }
             val mdia = child(data, trak, "mdia") ?: return null
             val mdhd = child(data, mdia, "mdhd") ?: return null
@@ -620,7 +646,7 @@ internal class AvifContainer(
                 if (n > r.remaining / 4) r.fail("lists $n sync samples")
                 (0 until n.toInt()).map { r.u32().toInt() - 1 }.toSet()
             }
-            return AvifTrack(id, handler, timescale, entry.type, width, height, properties, auxType, references, offsets, sizes, durations, sync, loops)
+            return AvifTrack(id, handler, timescale, entry.type, width, height, properties, auxType, references, offsets, sizes, durations, sync, playCount)
         }
     }
 }

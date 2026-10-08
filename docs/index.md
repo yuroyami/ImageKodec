@@ -56,7 +56,7 @@ val bitmap = ImageKodec.decode(bytes)   // format sniffed from the magic bytes
 val pixel = bitmap[10, 20]             // 0xAARRGGBB
 ```
 
-One type covers GIF, APNG and animated WebP, already composited. Playback is
+One type covers GIF, APNG, animated WebP and animated AVIF, already composited. Playback is
 therefore "draw frame N, wait delay N":
 
 ```kotlin
