@@ -53,9 +53,9 @@ kotlin {
 
     android {
         namespace = "io.github.yuroyami.imagekodec.compose"
-        // 37, not 36: Compose Multiplatform 1.12.x pulls androidx.compose
-        // 1.12.0-beta02, whose AAR metadata requires consumers to compile
-        // against API 37. minSdk is unaffected.
+        // 37, not 36: Compose Multiplatform 1.13.x pulls an androidx.compose whose
+        // AAR metadata requires consumers to compile against API 37. minSdk is
+        // unaffected.
         compileSdk = 37
         minSdk = 21
     }

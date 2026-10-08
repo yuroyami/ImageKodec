@@ -6,7 +6,7 @@ on every target.
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/imagekodec)](https://central.sonatype.com/artifact/io.github.yuroyami/imagekodec)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuroyami/ImageKodec/ci.yml?branch=main&label=CI)](https://github.com/yuroyami/ImageKodec/actions/workflows/ci.yml)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.21-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Targets](https://img.shields.io/badge/targets-22%20core%2C%207%20UI-blue)](#targets)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -72,8 +72,8 @@ declares `imagekodec-compose` as an implementation dependency, so it arrives
 at runtime. Declare the Compose module directly when you want to call its
 public functions, such as `KiteImage` or `KiteAnimatedImage`.
 
-The optional bindings depend on Compose Multiplatform `1.12.0-beta02`.
-Gradle can raise an application's Compose version to that beta during dependency
+The optional bindings depend on Compose Multiplatform `1.13.0-alpha02`.
+Gradle can raise an application's Compose version to that alpha during dependency
 resolution. Android consumers of those bindings need `compileSdk` 37 or newer;
 the core does not impose that Compose dependency.
 

@@ -21,14 +21,14 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-java@v4
+    - uses: actions/setup-java@v6
       with:
         distribution: temurin
         java-version: ${{ inputs.java-version }}
 
     # Each job saves its own Gradle cache. A job that only restored another job's cache had
     # to download its test libraries on every run, and one failed download failed the job.
-    - uses: gradle/actions/setup-gradle@v4
+    - uses: gradle/actions/setup-gradle@v5
 
     # The Kotlin/Native compiler, its LLVM and the caches it builds for each dependency are
     # more than a gigabyte, and a download and a rebuild of them cost minutes. Every job of
@@ -38,7 +38,7 @@ runs:
     # until a version in the catalog changes.
     - if: inputs.kotlin-native == 'true'
       id: konan
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: ~/.konan
         key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
