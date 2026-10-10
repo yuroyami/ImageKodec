@@ -12,6 +12,27 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+### Changed
+
+- The build moves from Gradle to the Kotlin Toolchain 0.13 (`./kotlin`, with
+  `project.yaml` and a `module.yaml` for each module). Kotlin stays at 2.4.21. The
+  coordinates, the targets and the klib names do not change, so libraries built
+  against 0.3.0 still link.
+- The Wasm artifacts are `<artifact>-wasmjs` and `<artifact>-wasmwasi` instead of
+  `<artifact>-wasm-js` and `<artifact>-wasm-wasi`. Gradle consumers find them through
+  the module metadata. Only a direct dependency on the old artifact ID breaks.
+- The root POM of each artifact depends on its `-jvm` artifact, so a plain Maven
+  project can use the root artifact.
+- The AAR keeps its classes in `libs/<artifact>-jvm.jar` instead of `classes.jar`,
+  and it has no `aar-metadata.properties`, where Gradle wrote `minCompileSdk`.
+- `imagekodec-compose` and `imagekodec-coil` depend at runtime on
+  `org.jetbrains.compose.components:components-resources`. The Kotlin Toolchain adds
+  it to every module with Compose turned on, and no setting removes it.
+- The javadoc jars are empty. The API reference is the documentation site.
+- The Android ABI dumps (`api/android/`) are gone. The JVM dumps (`api/jvm/`) and the
+  klib dumps (`api/*.klib.api`) still guard the public API.
+- The Android host tests now run the common test suite.
+
 ## [0.3.0] - 2026-10-08
 
 ### Added

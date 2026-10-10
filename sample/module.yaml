@@ -1,0 +1,20 @@
+# Desktop gallery: every format ImageKodec decodes, rendered through the KiteImage() composable,
+# including an animated GIF and both encoders at run time. `./kotlin run -m sample` starts it.
+product: jvm/app
+
+apply:
+  - //compose.module-template.yaml
+
+dependencies:
+  - //imagekodec
+  - //imagekodec-compose
+  - $compose.desktop.currentOs
+  - $compose.material3
+
+settings:
+  kotlin:
+    version: 2.4.21
+  jvm:
+    jdk:
+      version: 21
+    mainClass: io.github.yuroyami.imagekodec.sample.MainKt

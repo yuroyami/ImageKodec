@@ -47,19 +47,24 @@ being true.
 - ImageMagick 6 writes a JPEG TIFF with RGB photometric unless told
   `-colorspace YCbCr`, and then only at 4:4:4; `tiffcp -c jpeg` writes 4:2:0.
   A `cjpeg` stream wrapped in a strip reaches the other subsamplings (#8).
-- `jsNodeTest`, `wasmJsNodeTest` and `wasmWasiNodeTest` fail offline on a fresh
-  clone, because `kotlin-js-store/` is ignored and yarn has no lockfile to work from.
+- The Kotlin Toolchain 0.13 runs no JS or wasmWasi tests, and its wasmJs runner (Playwright in
+  headless Chrome) stops at 30 seconds, which `FuzzTest` passes. CI links each test program
+  with `./kotlin task` and runs it with Node; CONTRIBUTING.md has the commands.
+- The toolchain links no Apple framework. `tools/apple_frameworks.py` links them from the
+  klibs that `./kotlin build` writes.
+- The toolchain's plugin API gives JVM classes only, so `./kotlin check abi` checks the JVM
+  dump and nothing checks the Android API.
 - A Kotlin/Wasm test program that Node runs exits with 0 when a test fails, and reports
-  the failure as a TeamCity `testFailed` line. CI runs the test programs without Gradle,
+  the failure as a TeamCity `testFailed` line. CI runs the test programs itself,
   so `tools/run-shards.sh` reads their output for that line.
 - The wasm compiler fails with "Key ic#... is missing in the map" when a test starts to
   use a standard library function that no test used before, because its incremental
-  cache is stale. Run the compile task again with `--rerun`. A fresh clone is not affected.
+  cache is stale. Delete `build/` and build again. A fresh clone is not affected.
 - GitHub keeps 10 GB of caches for a repository and drops the oldest past that. A cache
-  key with the commit in it adds an entry on every push, so the Kotlin/Native caches of
-  CI are keyed on `gradle/libs.versions.toml` alone.
+  key with the commit in it adds an entry on every push, so the toolchain caches of CI
+  are keyed on the build files alone.
 - Two release framework links at once do not fit in the 7 GB of a macOS runner and take
-  three times as long, so CI links them with `--max-workers=1`.
+  three times as long, so `tools/apple_frameworks.py` links them one after the other.
 - Kotlin/JS does 64-bit arithmetic in software, and the AV1 inverse transform uses it for
   every sample, so the slowest `FuzzTest` mutant (`avif-oriented byte@348`) takes over a
   minute on JS. More than two JS test processes on one runner push it past the deadline.

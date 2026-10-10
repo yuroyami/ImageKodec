@@ -2,35 +2,59 @@
 
 ## Building
 
+The build uses the Kotlin Toolchain: the `./kotlin` script at the repository root.
+It downloads the toolchain, the JDKs, Kotlin/Native and Node on its first run.
+`project.yaml` lists the modules, and each module has a `module.yaml`.
+
 ```sh
-./gradlew :imagekodec:jvmTest
+./kotlin test -p jvm -m imagekodec
 ```
 
 That command is the quickest check while you work. Before you open a pull
-request, run what CI runs:
+request, run the JVM tests of all three modules and the public API check:
 
 ```sh
-./gradlew :imagekodec:jvmTest :imagekodec:jsNodeTest :imagekodec:wasmJsNodeTest \
-          :imagekodec:wasmWasiNodeTest :imagekodec:linuxX64Test \
-          :imagekodec-compose:jvmTest :imagekodec-coil:jvmTest checkLegacyAbi
+./kotlin test -p jvm
+./kotlin check abi
 ```
+
+`./kotlin build` builds every module for every platform. On Linux and Windows, give
+it a `-p` list without the Apple platforms. Android needs the Android SDK in
+`ANDROID_HOME`.
 
 The build uses JDK 21; the three JVM library variants target Java 11 and restrict
-JDK API use to that release. CI also runs their suites on a Java 11 worker:
+JDK API use to that release. CI also runs their suites on Java 11. The toolchain
+runs tests on JDK 17 or later only, so `tools/java11_tests.py` runs the compiled
+tests with JUnit on the JDK you name:
 
 ```sh
-./gradlew :imagekodec:jvmJava11Test :imagekodec-compose:jvmJava11Test \
-          :imagekodec-coil:jvmJava11Test
+./kotlin build -p jvm
+tools/java11_tests.py --java /path/to/jdk-11/bin/java
 ```
 
-Install JDK 11 alongside JDK 21 for this check. Gradle still runs on JDK 21 and
-selects JDK 11 only for these test workers.
+`./kotlin test -p android` runs the common suite as Android host tests.
 
-On a Mac, add the Apple targets:
+### JS, Wasm and native tests
+
+The toolchain does not run the JS and wasmWasi tests, and its wasmJs runner stops a
+test after 30 seconds, which the fuzz suite passes. Link the test program with
+`./kotlin task` and run it with Node instead. CI does the same.
 
 ```sh
-./gradlew :imagekodec:macosArm64Test :imagekodec:iosSimulatorArm64Test
+./kotlin task :imagekodec:linkWasmWasiTestDebug
+node --input-type=module --eval \
+  'const t = await import((await import("node:url")).pathToFileURL(process.argv[1])); t.startUnitTests();' \
+  "$PWD/build/artifacts/CompiledWebArtifact/imagekodecwasmWasiTestdebug/kotlin-output/imagekodec_test.mjs"
 ```
+
+- wasmJs: link `:imagekodec:linkWasmJsTestDebug`, and run
+  `imagekodecwasmJsTestdebug/kotlin-output/imagekodec_test.mjs` in the same way.
+- JS: link `:imagekodec:linkJsTest`. Then run mocha in
+  `build/artifacts/CompiledWebArtifact/imagekodecjsTestrelease/kotlin-output`:
+  `mocha imagekodec_test.mjs --timeout 600s`.
+- Native: `./kotlin test -p linuxX64` runs the suite. On a Mac, use `-p macosArm64`
+  and `-p iosSimulatorArm64`. Add `-v release` to test the optimised build, which
+  runs the fuzz suite about eight times faster.
 
 ### How CI runs the same suites faster
 
@@ -40,24 +64,37 @@ processes at once. Each process takes its own share of the mutants, and the shar
 together run every mutant once. You can do the same on a native target:
 
 ```sh
-./gradlew :imagekodec:linkDebugTestMacosArm64 -PoptimizedNativeTests
-tools/run-shards.sh 4 imagekodec/build/bin/macosArm64/debugTest/test.kexe
+./kotlin task :imagekodec:linkMacosArm64TestRelease
+tools/run-shards.sh 4 build/tasks/_imagekodec_linkMacosArm64TestRelease/imagekodec_test.kexe
 ```
 
-- `-PoptimizedNativeTests` links the native test program optimised. The link takes
+- The `Release` link task links the native test program optimised. The link takes
   about a minute longer and the fuzz suite runs about eight times faster.
 - `tools/run-shards.sh 4 <command>` runs the command four times at once and sets
   `IMAGEKODEC_FUZZ_SHARD` to `0/4`, `1/4`, `2/4` and `3/4`. Without that variable a
-  run takes every mutant, so the Gradle test tasks above still run the whole suite.
+  run takes every mutant, so `./kotlin test` still runs the whole suite.
 - `tools/run-shards.sh 2-3/8 <command>` runs shards 2 and 3 of 8 here, for a suite that
   several machines split.
-- `-PtestForks=3` gives each JVM test class one of three JVMs.
+
+### Apple frameworks
+
+The toolchain compiles the libraries to klibs and links no Apple framework.
+`tools/apple_frameworks.py` links them from those klibs with the toolchain's own
+Kotlin/Native compiler. It writes each framework to
+`<module>/build/bin/<platform>/<debug|release>Framework/`.
+
+```sh
+./kotlin build -p iosSimulatorArm64
+tools/apple_frameworks.py --build-type debug --no-xcframework \
+  --platforms iosSimulatorArm64 --frameworks ImageKodec
+```
 
 `tools/ThrowsContract.swift` checks the exported API from a Swift caller:
 checked API operations, including exact downscaling, must return recoverable
 `NSError`s.
-Build `:imagekodec:linkDebugFrameworkIosSimulatorArm64`, compile the source
-against that framework with the simulator SDK, and run it in a booted simulator.
+Link the debug `ImageKodec` framework for `iosSimulatorArm64` as shown above,
+compile the source against that framework with the simulator SDK, and run it in a
+booted simulator.
 This complements the JVM reflection test, which checks declarations alone.
 
 ## The one rule that matters
@@ -152,16 +189,22 @@ Match the file you are editing. Beyond that:
 
 ## Public API
 
-`explicitApi()` is on, so every public declaration needs an explicit visibility
+Explicit API mode is strict (`explicitApi: strict` in
+`library.module-template.yaml`), so every public declaration needs an explicit visibility
 and return type. Changing the public API changes the committed dumps:
 
 ```sh
-./gradlew updateLegacyAbi
+./kotlin do updateAbi
+./kotlin build
+./kotlin do updateKlibAbi
 ```
 
-Commit the resulting `api/*.api` diff with your change. `checkLegacyAbi` fails
-the build when the two disagree, so an accidental signature change never reaches
-a release.
+Commit the resulting `api/` diff with your change. `./kotlin check abi` compares
+the JVM API with `api/jvm/<module>.api`. `./kotlin check klibAbi` compares the
+native and web API with `api/<module>.klib.api`, and it reads the klibs of the last
+`./kotlin build`, so build every platform first. Each check fails when the two
+disagree, so an accidental signature change never reaches a release. Nothing
+checks the Android API, which only the Compose and Coil modules extend.
 
 ## Licensing
 

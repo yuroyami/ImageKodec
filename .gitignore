@@ -1,11 +1,8 @@
-.gradle/
 build/
 *.iml
 .idea/
 local.properties
-.kotlin/
 .DS_Store
-kotlin-js-store/
 
 # Reference source trees are for porting/study only — never distributed.
 # The origin/license catalog is tracked; third-party source trees are not.

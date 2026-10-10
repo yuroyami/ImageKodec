@@ -10,35 +10,38 @@ on:
         type: boolean
         default: true
 
+env:
+  KOTLIN_CLI_NO_WELCOME_BANNER: 1
+
 # Apple targets can only be built on a Mac, and a KMP release has to publish
 # every target from one build, so the whole release runs on macOS.
 jobs:
   publish:
     name: Publish to Maven Central
     runs-on: macos-latest
+    env:
+      KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+      KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
+      - uses: ./.github/actions/setup
 
-      - uses: gradle/actions/setup-gradle@v6
-
+      # The klib check reads the klibs of every native and web platform, which a Mac builds.
       - name: Check the public API has not drifted
-        run: ./gradlew checkLegacyAbi --stacktrace
+        run: |
+          ./kotlin build -p iosArm64 -p iosSimulatorArm64 -p iosX64 -p macosArm64 -p tvosArm64 \
+            -p tvosSimulatorArm64 -p watchosArm32 -p watchosArm64 -p watchosDeviceArm64 \
+            -p watchosSimulatorArm64 -p androidNativeArm32 -p androidNativeArm64 -p androidNativeX64 \
+            -p androidNativeX86 -p linuxX64 -p linuxArm64 -p mingwX64 -p js -p wasmJs -p wasmWasi
+          ./kotlin check abi klibAbi
 
       - name: Publish
         if: ${{ github.event_name == 'release' || !inputs.dry_run }}
-        run: ./gradlew publishToMavenCentral --no-configuration-cache --stacktrace
-        env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
-          ORG_GRADLE_PROJECT_RELEASE_SIGNING_ENABLED: 'true'
+        run: ./kotlin publish mavenCentral -m imagekodec -m imagekodec-compose -m imagekodec-coil
 
       - name: Dry run (build and sign only)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-        run: ./gradlew publishToMavenLocal --no-configuration-cache --stacktrace
+        run: ./kotlin publish mavenLocal -m imagekodec -m imagekodec-compose -m imagekodec-coil

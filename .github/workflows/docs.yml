@@ -11,7 +11,12 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - '**/*.kt'
-      - '**/build.gradle.kts'
+      - '**/Module.md'
+      - '**/module.yaml'
+      - '*.module-template.yaml'
+      - 'project.yaml'
+      - 'build-plugins/**'
+      - 'dokka-templates/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -42,17 +47,15 @@ jobs:
       - name: Build the docs site
         run: mkdocs build --site-dir site
 
-      - name: Set up JDK
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
+      - uses: ./.github/actions/setup
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-
+      # `do` is a command of the kotlin script here, not the shell keyword.
       - name: Generate the Dokka API reference
-        run: ./gradlew dokkaGenerate --no-configuration-cache
+        run: |
+          # shellcheck disable=SC1010
+          ./kotlin do dokka && ./kotlin do dokkaSite
+        env:
+          KOTLIN_CLI_NO_WELCOME_BANNER: 1
 
       - name: Merge the API reference into the site
         run: |

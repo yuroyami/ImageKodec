@@ -61,14 +61,21 @@ commonMain.dependencies {
 }
 ```
 
+A project on the Kotlin Toolchain lists the same coordinates in its `module.yaml`:
+
+```yaml
+dependencies:
+  - io.github.yuroyami:imagekodec:0.3.0
+```
+
 Read [Targets](#targets) before you add the optional two. `imagekodec-coil`
 declares `imagekodec-compose` as an implementation dependency, so it arrives
 at runtime. Declare the Compose module directly when you want to call its
 public functions, such as `KiteImage` or `KiteAnimatedImage`.
 
 The optional bindings depend on Compose Multiplatform `1.13.0-alpha02`.
-Gradle can raise an application's Compose version to that alpha during dependency
-resolution. Android consumers of those bindings need `compileSdk` 37.1 or newer;
+Dependency resolution can raise an application's Compose version to that alpha.
+Android consumers of those bindings need `compileSdk` 37.1 or newer;
 the core does not impose that Compose dependency.
 
 Versions before 0.3.0 use older coordinates and an older Kotlin package. 0.2.0 is
@@ -593,7 +600,7 @@ streams in the same way.
 
 Every unsupported feature fails at a named point, not silently.
 
-`./gradlew :sample:run` opens a desktop gallery. It plays animated GIF, APNG and
+`./kotlin run -m sample` opens a desktop gallery. It plays animated GIF, APNG and
 animated WebP, shows JPEG, JP2 and TIFF stills, and runs all four encoders at
 startup. Every tile is captioned from `probe`.
 

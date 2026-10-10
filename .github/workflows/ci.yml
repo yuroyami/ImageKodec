@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false
+  KOTLIN_CLI_NO_WELCOME_BANNER: 1
 
 # How this workflow is shaped, and why.
 #
@@ -19,18 +19,22 @@ env:
 # nothing that costs more to compile than to pass between machines, so they all start with
 # the push. The JS tests are the exception: one job compiles them and four machines run them.
 #
-# The fuzz suite is most of the test time on every target, and one process runs it on one
-# core. After a job compiles its test program, tools/run-shards.sh runs the program as several
-# processes at once, each with its own share of the mutants (FuzzShard.kt), so the suite uses
-# every core of the runner. The JVM jobs do the same with Gradle's test forks.
+# The Kotlin Toolchain (`./kotlin`) runs the JVM and Android tests itself. It does not run JS or
+# wasmWasi tests, and its wasmJs runner stops a test after 30 seconds, which the fuzz suite
+# passes. For those targets and for the native ones, a job links the test program with
+# `./kotlin task` and runs it here.
 #
-# A native test program is linked optimised here (-PoptimizedNativeTests): the link takes
-# about a minute longer and the fuzz suite runs about eight times faster.
+# The fuzz suite is most of the test time on every target, and one process runs it on one
+# core. tools/run-shards.sh runs a test program as several processes at once, each with its own
+# share of the mutants (FuzzShard.kt), so the suite uses every core of the runner.
+#
+# A native test program is linked optimised here (the Release link task): the link takes about
+# a minute longer and the fuzz suite runs about eight times faster.
 #
 # GitHub runs at most five macOS jobs of one account at a time, across all its repositories,
 # so there are five. When another repository holds some of the five, the jobs here wait.
 #
-# One job for each operating system saves the Kotlin/Native cache (`build` and
+# One job for each operating system saves the toolchain cache (`build` and
 # `link-debug-frameworks`), and the others restore it. .github/actions/setup explains why.
 jobs:
   # The JVM suite is the one that holds the decoders to the reference codecs. The OpenJPEG,
@@ -38,9 +42,9 @@ jobs:
   # themselves when their binary is missing on a contributor's machine, and
   # IMAGEKODEC_REQUIRE_ORACLES turns that skip into a failure here.
   #
-  # The suite takes more than three minutes on one Java version, so each version has its own
-  # machine. Each machine compiles the tests, which takes about a minute. Passing the
-  # compiled classes from one machine to two others would take longer than that.
+  # The libraries target Java 11, so the suite runs on Java 11 as well as on the Java 21 that
+  # builds them. The toolchain runs tests on JDK 17 or later only, so the Java 11 job compiles
+  # the tests and tools/java11_tests.py runs them on Java 11 with JUnit.
   test-jvm:
     name: JVM tests on Java ${{ matrix.java }}
     runs-on: ubuntu-latest
@@ -48,11 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - java: 21
-            tasks: :imagekodec:jvmTest :imagekodec-compose:jvmTest :imagekodec-coil:jvmTest
-          - java: 11
-            tasks: :imagekodec:jvmJava11Test :imagekodec-compose:jvmJava11Test :imagekodec-coil:jvmJava11Test
+        java: [21, 11]
     env:
       IMAGEKODEC_REQUIRE_ORACLES: '1'
       T81_COMMIT: c719010
@@ -60,12 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Gradle runs on Java 21 and starts the test JVMs of the Java 11 tasks on Java 11.
       - uses: ./.github/actions/setup
-        with:
-          java-version: |
-            11
-            21
 
       # Two oracle tools have no package and are built from source. The build takes most of
       # a minute, so the binaries are kept until a version or the patch changes.
@@ -118,20 +113,39 @@ jobs:
           python3 -c "import PIL" || { echo "::error::Pillow missing"; missing=1; }
           exit $missing
 
-      # One compile serves all three modules. Each test class runs in one of three JVMs.
       - name: Core, Compose and Coil tests
-        run: ./gradlew ${{ matrix.tasks }} -PtestForks=3 --continue --stacktrace
+        if: matrix.java == 21
+        run: ./kotlin test -p jvm
 
-      - name: Upload test reports
-        if: failure()
-        uses: actions/upload-artifact@v7
+      - uses: actions/setup-java@v6
+        if: matrix.java == 11
+        id: java11
         with:
-          name: test-reports-java-${{ matrix.java }}
-          path: '**/build/reports/tests/**'
+          distribution: temurin
+          java-version: '11'
+
+      - name: Core, Compose and Coil tests
+        if: matrix.java == 11
+        run: |
+          ./kotlin build -p jvm -m imagekodec -m imagekodec-compose -m imagekodec-coil
+          tools/java11_tests.py --java "${{ steps.java11.outputs.path }}/bin/java"
+
+  # The common suite runs on the JVM as Android host tests.
+  test-android:
+    name: Android host tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup
+
+      - name: Run the tests
+        run: ./kotlin test -p android
 
   # Kotlin/JS does 64-bit arithmetic in software, so the JS suite takes about 16 minutes of
-  # one core, and a runner has two cores. This job compiles the tests once and packs them
-  # with the Node that Kotlin downloads. The next job runs them on four machines.
+  # one core, and a runner has two cores. This job links the tests once and packs them with
+  # mocha. The next job runs them on four machines.
   test-js-compile:
     name: JS tests, compile
     runs-on: ubuntu-latest
@@ -141,17 +155,17 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      - name: Compile the tests
-        run: ./gradlew :imagekodec:jsTestTestDevelopmentExecutableCompileSync kotlinNodeJsSetup kotlinNpmInstall --stacktrace
+      - name: Link the tests
+        run: ./kotlin task :imagekodec:linkJsTest
 
       # A tar file keeps the links and the permission to run that an artifact loses.
-      - name: Pack the tests
+      - name: Pack the tests with mocha
         run: |
-          node=$(find ~/.gradle/nodejs -maxdepth 3 -path '*/bin/node' | sort -V | tail -n 1)
+          npm install --prefix "$RUNNER_TEMP/mocha" --no-save --no-package-lock mocha@11.7.5
           tar -I 'zstd -T0' -cf js-tests.tar.zst \
-            -C "$(dirname "$node")" node \
-            -C "$GITHUB_WORKSPACE/tools" run-shards.sh \
-            -C "$GITHUB_WORKSPACE/build/js" node_modules packages/ImageKodec-KMP-imagekodec-test
+            -C "$GITHUB_WORKSPACE/build/artifacts/CompiledWebArtifact/imagekodecjsTestrelease" kotlin-output \
+            -C "$RUNNER_TEMP/mocha" node_modules \
+            -C "$GITHUB_WORKSPACE/tools" run-shards.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -176,15 +190,16 @@ jobs:
         with:
           name: js-tests
 
-      # The command Gradle's jsNodeTest runs.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
       - name: Run the tests
         run: |
           tar -I zstd -xf js-tests.tar.zst
-          cd packages/ImageKodec-KMP-imagekodec-test
-          ../../run-shards.sh ${{ matrix.shards }}/8 ../../node \
-            --require ../../node_modules/source-map-support/register.js \
-            ../../node_modules/mocha/bin/mocha.js kotlin/ImageKodec-KMP-imagekodec-test.js \
-            --timeout 600s --reporter dot
+          cd kotlin-output
+          ../run-shards.sh ${{ matrix.shards }}/8 node ../node_modules/mocha/bin/mocha.js \
+            imagekodec_test.mjs --timeout 600s --reporter dot
 
   test-wasm:
     name: wasmJs and wasmWasi tests
@@ -195,25 +210,27 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      - name: Compile the tests
-        run: >
-          ./gradlew
-          :imagekodec:wasmJsTestTestDevelopmentExecutableCompileSync
-          :imagekodec:compileTestDevelopmentExecutableKotlinWasmWasi
-          kotlinWasmNodeJsSetup --stacktrace
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
 
-      # What Gradle's wasmJsNodeTest and wasmWasiNodeTest run: Node loads the module and
-      # calls startUnitTests. Each target runs as two processes, so four run at once.
+      - name: Link the tests
+        run: |
+          ./kotlin task :imagekodec:linkWasmJsTestDebug
+          ./kotlin task :imagekodec:linkWasmWasiTestDebug
+
+      # Node loads each test module and calls startUnitTests. Each target runs as two
+      # processes, so four run at once.
       - name: Run the tests
         run: |
-          node=$(find ~/.gradle/nodejs -maxdepth 3 -path '*/bin/node' | sort -V | tail -n 1)
           start='import { pathToFileURL } from "node:url"; const tests = await import(pathToFileURL(process.argv[1]).href); tests.startUnitTests();'
-          tools/run-shards.sh 2 "$node" --input-type=module --eval "$start" \
-            "$PWD/build/wasm/packages/ImageKodec-KMP-imagekodec-test/kotlin/ImageKodec-KMP-imagekodec-test.mjs" \
+          web=build/artifacts/CompiledWebArtifact
+          tools/run-shards.sh 2 node --input-type=module --eval "$start" \
+            "$PWD/$web/imagekodecwasmJsTestdebug/kotlin-output/imagekodec_test.mjs" \
             > wasm-js.log 2>&1 &
           wasm_js=$!
-          tools/run-shards.sh 2 "$node" --input-type=module --eval "$start" \
-            "$PWD/imagekodec/build/compileSync/wasmWasi/test/testDevelopmentExecutable/kotlin/ImageKodec-KMP-imagekodec-test.mjs" \
+          tools/run-shards.sh 2 node --input-type=module --eval "$start" \
+            "$PWD/$web/imagekodecwasmWasiTestdebug/kotlin-output/imagekodec_test.mjs" \
             > wasm-wasi.log 2>&1 &
           wasm_wasi=$!
           failed=0
@@ -231,21 +248,19 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup
-        with:
-          kotlin-native: 'true'
 
       - name: Link the tests
-        run: ./gradlew :imagekodec:linkDebugTestLinuxX64 -PoptimizedNativeTests --stacktrace
+        run: ./kotlin task :imagekodec:linkLinuxX64TestRelease
 
       - name: Run the tests
-        run: tools/run-shards.sh 4 imagekodec/build/bin/linuxX64/debugTest/test.kexe
+        run: tools/run-shards.sh 4 build/tasks/_imagekodec_linkLinuxX64TestRelease/imagekodec_test.kexe
 
-  # Every target that a Linux machine builds: Android, JVM, JS, wasm, the sample app, and the
-  # library of every native target, the ten Apple ones too, with the tests of each native
-  # target compiled. Only a link of an Apple program needs a Mac. The public API check reads
-  # what this build compiles.
+  # Every platform that a Linux machine builds: Android, JVM, JS, Wasm, the sample app, and the
+  # Linux, Windows and androidNative libraries, each with its tests compiled. The Apple
+  # platforms build on a Mac, in link-debug-frameworks. The JVM public API check reads the
+  # classes this build compiles; the klib check in klib-abi reads the klibs it uploads.
   build:
-    name: Build every target, check the public API
+    name: Build every non-Apple platform, check the public API
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -253,18 +268,31 @@ jobs:
 
       - uses: ./.github/actions/setup
         id: setup
+
+      - name: Build
+        run: >
+          ./kotlin build
+          -p jvm -p android -p js -p wasmJs -p wasmWasi
+          -p linuxX64 -p linuxArm64 -p mingwX64
+          -p androidNativeArm32 -p androidNativeArm64 -p androidNativeX64 -p androidNativeX86
+
+      - name: Check the JVM public API
+        run: ./kotlin check abi
+
+      - uses: actions/upload-artifact@v7
         with:
-          kotlin-native: 'true'
+          name: klibs-linux
+          path: |
+            build/tasks/_*_compile*/*.klib
+            !build/tasks/_*_compile*/*_test.klib
+          retention-days: 1
 
-      - name: Assemble every module and check the public API
-        run: ./gradlew assemble checkLegacyAbi --stacktrace
-
-      - name: Save the Kotlin/Native cache
-        if: steps.setup.outputs.kotlin-native-hit != 'true' && github.ref_name == github.event.repository.default_branch
+      - name: Save the toolchain cache
+        if: steps.setup.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v6
         with:
-          path: ~/.konan
-          key: ${{ steps.setup.outputs.kotlin-native-key }}
+          path: ~/.cache/JetBrains/Kotlin
+          key: ${{ steps.setup.outputs.cache-key }}
 
   docs:
     name: API documentation
@@ -274,11 +302,12 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup
-        with:
-          kotlin-native: 'true'
 
+      # `do` is a command of the kotlin script here, not the shell keyword.
       - name: Build the Dokka site
-        run: ./gradlew dokkaGenerate --stacktrace
+        run: |
+          # shellcheck disable=SC1010
+          ./kotlin do dokka && ./kotlin do dokkaSite
 
       - uses: actions/upload-artifact@v7
         with:
@@ -294,29 +323,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: macosArm64
-            link: linkDebugTestMacosArm64
-          - target: iosSimulatorArm64
-            link: linkDebugTestIosSimulatorArm64
+        target: [MacosArm64, IosSimulatorArm64]
     steps:
       - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup
-        with:
-          kotlin-native: 'true'
 
       - name: Link the tests
-        run: ./gradlew :imagekodec:${{ matrix.link }} -PoptimizedNativeTests --stacktrace
+        run: ./kotlin task :imagekodec:link${{ matrix.target }}TestRelease
 
       - name: Run the tests
         run: |
-          program=imagekodec/build/bin/${{ matrix.target }}/debugTest/test.kexe
-          if [ "${{ matrix.target }}" = iosSimulatorArm64 ]; then
-            # What Gradle's iosSimulatorArm64Test runs: the program inside a simulator that is not booted.
+          program=build/tasks/_imagekodec_link${{ matrix.target }}TestRelease/imagekodec_test.kexe
+          if [ "${{ matrix.target }}" = IosSimulatorArm64 ]; then
+            # The program inside a simulator that is not booted.
             device=$(xcrun simctl list devices available | grep -oE 'iPhone [^(]*\([0-9A-F-]{36}\)' | head -n 1 | grep -oE '[0-9A-F-]{36}')
             [ -n "$device" ] || { echo "::error::no iPhone simulator on this runner"; exit 1; }
-            tools/run-shards.sh 3 xcrun simctl spawn --standalone "$device" "$program"
+            tools/run-shards.sh 3 xcrun simctl spawn --standalone "$device" "$PWD/$program"
           else
             tools/run-shards.sh 3 "$program"
           fi
@@ -324,34 +347,41 @@ jobs:
   # The Compose and Coil modules each link a release framework for each iOS target. A release
   # link optimises the whole program for more than two minutes, so each target has its own
   # machine. Two release links at once do not fit in the memory of a macOS runner and take
-  # three times as long, so one Gradle worker runs them one after the other.
+  # three times as long, so tools/apple_frameworks.py links them one after the other.
   link-release-frameworks:
-    name: ${{ matrix.target }} release frameworks
+    name: ${{ matrix.platform }} release frameworks
     runs-on: macos-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        target: [IosArm64, IosSimulatorArm64]
+        include:
+          - platform: iosArm64
+            task: IosArm64
+          - platform: iosSimulatorArm64
+            task: IosSimulatorArm64
     steps:
       - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup
-        with:
-          kotlin-native: 'true'
+
+      - name: Compile the libraries
+        run: |
+          for module in imagekodec imagekodec-compose imagekodec-coil; do
+            ./kotlin task ":$module:compile${{ matrix.task }}Debug"
+          done
 
       - name: Link the Compose and Coil release frameworks
         run: >
-          ./gradlew
-          :imagekodec-compose:linkReleaseFramework${{ matrix.target }}
-          :imagekodec-coil:linkReleaseFramework${{ matrix.target }}
-          --max-workers=1 --stacktrace
+          tools/apple_frameworks.py --build-type release --no-xcframework
+          --platforms ${{ matrix.platform }} --frameworks ImageKodecCompose,ImageKodecCoil
 
-  # A debug link is quick once Kotlin/Native has compiled each dependency for the target, and
-  # the Kotlin/Native cache keeps those. This job builds them when a version in the catalog
-  # changes, which takes about ten minutes longer, so it has a longer limit.
+  # Builds every Apple platform, then links the debug frameworks. A debug link is quick once
+  # Kotlin/Native has compiled each dependency for the target, and the toolchain cache keeps
+  # those. This job builds them when a version changes, which takes about ten minutes longer,
+  # so it has a longer limit.
   link-debug-frameworks:
-    name: Debug frameworks
+    name: Apple platforms, debug frameworks
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -359,21 +389,49 @@ jobs:
 
       - uses: ./.github/actions/setup
         id: setup
-        with:
-          kotlin-native: 'true'
 
-      - name: Link the Compose and Coil debug frameworks
+      - name: Build every Apple platform
         run: >
-          ./gradlew
-          :imagekodec-compose:linkDebugFrameworkIosArm64
-          :imagekodec-compose:linkDebugFrameworkIosSimulatorArm64
-          :imagekodec-coil:linkDebugFrameworkIosArm64
-          :imagekodec-coil:linkDebugFrameworkIosSimulatorArm64
-          --stacktrace
+          ./kotlin build
+          -p iosArm64 -p iosSimulatorArm64 -p iosX64 -p macosArm64
+          -p tvosArm64 -p tvosSimulatorArm64
+          -p watchosArm32 -p watchosArm64 -p watchosDeviceArm64 -p watchosSimulatorArm64
 
-      - name: Save the Kotlin/Native cache
-        if: steps.setup.outputs.kotlin-native-hit != 'true' && github.ref_name == github.event.repository.default_branch
+      - name: Link the debug frameworks
+        run: tools/apple_frameworks.py --build-type debug --no-xcframework --platforms iosArm64,iosSimulatorArm64
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: klibs-apple
+          path: |
+            build/tasks/_*_compile*/*.klib
+            !build/tasks/_*_compile*/*_test.klib
+          retention-days: 1
+
+      - name: Save the toolchain cache
+        if: steps.setup.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch
         uses: actions/cache/save@v6
         with:
-          path: ~/.konan
-          key: ${{ steps.setup.outputs.kotlin-native-key }}
+          path: ~/Library/Caches/JetBrains/Kotlin
+          key: ${{ steps.setup.outputs.cache-key }}
+
+  # The klib public API check merges the klibs of every native and web platform into one dump.
+  # Linux builds some of them and a Mac builds the Apple ones, so this job gathers both.
+  klib-abi:
+    name: Check the klib public API
+    needs: [build, link-debug-frameworks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: klibs-*
+          path: build/tasks
+          merge-multiple: true
+
+      - name: Check the klib public API
+        run: ./kotlin check klibAbi

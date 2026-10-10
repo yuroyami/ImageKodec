@@ -1,0 +1,113 @@
+product:
+  type: kmp/lib
+  # Every target that Compose Multiplatform ships for. It publishes no Intel Apple variants.
+  platforms: [ jvm, android, iosArm64, iosSimulatorArm64, macosArm64, js, wasmJs ]
+
+# One Skiko conversion implementation, src@skiko, serves every target except Android.
+aliases:
+  - skiko: [ jvm, iosArm64, iosSimulatorArm64, macosArm64, js, wasmJs ]
+
+apply:
+  - //library.module-template.yaml
+  - //compose.module-template.yaml
+
+dependencies:
+  - //imagekodec: exported
+  # ImageLoader, Decoder and Image are in the public API.
+  - $libs.coil.core: exported
+  # KiteBitmap.toImageBitmap for the frame loop.
+  - //imagekodec-compose
+  # SingletonImageLoader is a default parameter.
+  - $libs.coil.singleton
+  # LocalPlatformContext and Image.asPainter.
+  - $libs.coil.compose.core
+  - $compose.runtime
+  - $compose.foundation
+  - $compose.ui
+
+test-dependencies@jvm:
+  # Skiko native runtimes for headless tests. YAML has no host condition, so all six are listed.
+  # Skiko loads only the one that matches the host.
+  - $libs.skiko.awt.runtime.macos.arm64
+  - $libs.skiko.awt.runtime.macos.x64
+  - $libs.skiko.awt.runtime.linux.x64
+  - $libs.skiko.awt.runtime.linux.arm64
+  - $libs.skiko.awt.runtime.windows.x64
+  - $libs.skiko.awt.runtime.windows.arm64
+
+settings:
+  android:
+    namespace: io.github.yuroyami.imagekodec.coil
+    # 37.1, not 36: Compose Multiplatform 1.13.0-alpha02 pulls androidx.compose 1.13.0-alpha03,
+    # whose AAR metadata requires consumers to compile against API 37.1.
+    compileSdk:
+      apiLevel: 37
+      minorApiLevel: 1
+    minSdk: 21
+  publishing:
+    pom:
+      name: ImageKodec Coil
+      description: >-
+        Coil interop for ImageKodec: KiteImageDecoder plugs the pure-Kotlin codecs into Coil's pipeline while network
+        and caching stay Coil's, and KiteAsyncImage() plays GIF, APNG, animated WebP, animated AVIF and animated JPEG
+        XL. Builds for the seven Compose Multiplatform targets, not the full ImageKodec core set; imagekodec-compose is
+        a runtime dependency; declare it directly to call its public API.
+
+# Gradle named the klib "io.github.yuroyami:imagekodec-coil". Keep that name, or libraries built against
+# earlier releases fail to link on Kotlin/Native. Set it per platform: on @native, it also
+# renames the klibs of shared native code, which must keep their own names.
+settings@iosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec-coil, -Xshort-module-name=imagekodec-coil ]
+
+settings@iosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec-coil, -Xshort-module-name=imagekodec-coil ]
+
+settings@macosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec-coil, -Xshort-module-name=imagekodec-coil ]
+
+settings@js:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=io.github.yuroyami:imagekodec-coil ]
+
+settings@wasmJs:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=io.github.yuroyami:imagekodec-coil ]
+
+# Tests compile into their own klib, which needs a different name. The test blocks name the
+# same platforms as the blocks above, so the toolchain applies them last.
+test-settings@iosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec-coil_test, -Xshort-module-name=imagekodec-coil_test ]
+
+test-settings@iosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec-coil_test, -Xshort-module-name=imagekodec-coil_test ]
+
+test-settings@macosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec-coil_test, -Xshort-module-name=imagekodec-coil_test ]
+
+test-settings@js:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=imagekodec-coil_test ]
+
+test-settings@wasmJs:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=imagekodec-coil_test ]
+
+plugins:
+  abi-check:
+    enabled: true
+    # `./kotlin check klibAbi` needs a `./kotlin build` of each of these platforms first.
+    klibPlatforms: [ iosArm64, iosSimulatorArm64, macosArm64, js, wasmJs ]
+  dokka:
+    enabled: true
+    moduleName: imagekodec-coil
+    includes: [ Module.md ]
+    customStyleSheets: [ ../docs/api-theme/kite.css ]
+    templatesDir: ../dokka-templates
+    footerMessage: Apache-2.0 · ImageKodec is part of the Kite family.
+    sourceLinkUrl: https://github.com/yuroyami/ImageKodec/blob/main/imagekodec-coil/src

@@ -1,0 +1,11 @@
+modules:
+  - build-plugins/abi-check
+  - build-plugins/dokka
+  - imagekodec
+  - imagekodec-coil
+  - imagekodec-compose
+  - sample
+
+plugins:
+  - //build-plugins/abi-check
+  - //build-plugins/dokka

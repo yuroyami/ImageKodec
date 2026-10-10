@@ -1,0 +1,243 @@
+product:
+  type: kmp/lib
+  platforms:
+    - jvm
+    - android
+    - iosArm64
+    - iosSimulatorArm64
+    - iosX64
+    # Apple-silicon macOS only. Kotlin 2.3 and later deprecate Intel macOS.
+    - macosArm64
+    - tvosArm64
+    - tvosSimulatorArm64
+    - watchosArm32
+    - watchosArm64
+    - watchosDeviceArm64
+    - watchosSimulatorArm64
+    - androidNativeArm32
+    - androidNativeArm64
+    - androidNativeX64
+    - androidNativeX86
+    - linuxX64
+    - linuxArm64
+    - mingwX64
+    - js
+    - wasmJs
+    - wasmWasi
+
+# The image codec core: format sniffing, the decoders and encoders, the ARGB pixel buffer and the
+# malformed-input guards. It depends on kotlin-stdlib only, so it has no dependencies section.
+
+# The JVM actuals of the test helpers in test@jvmAndAndroid also serve the Android host tests.
+aliases:
+  - jvmAndAndroid: [ jvm, android ]
+
+apply:
+  - //library.module-template.yaml
+
+settings:
+  kotlin:
+    optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi ]
+  android:
+    namespace: io.github.yuroyami.imagekodec
+    compileSdk: 36
+    minSdk: 21
+  publishing:
+    pom:
+      name: ImageKodec
+      description: >-
+        Pure-Kotlin image codec core for Kotlin Multiplatform. Decodes PNG and APNG, JPEG, GIF, BMP, TIFF, JPEG 2000,
+        WebP (lossy, lossless and animated), AVIF and JPEG XL; encodes PNG and APNG, JPEG, GIF, BMP, TIFF and lossless
+        WebP. Header-only probing, EXIF orientation, colour conversion to sRGB, geometry ops and hostile-input guards.
+        kotlin-stdlib only; 22 targets across Android, JVM, Apple, Linux, Windows, androidNative, JS and Wasm.
+
+# The decompression-bomb guards sit at about 1 GiB of decoded pixels, and the fuzz suite drives
+# malformed headers right up to them. The test JVM needs enough heap that the guard, not the
+# allocator, rejects the input.
+test-settings@jvm:
+  jvm:
+    test:
+      freeJvmArgs: [ -Xmx3g ]
+
+# Gradle named the klib "io.github.yuroyami:imagekodec". Keep that name, or libraries built against
+# earlier releases fail to link on Kotlin/Native. Set it per platform: on @native, it also
+# renames the klibs of shared native code, which must keep their own names.
+settings@iosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@iosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@iosX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@macosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@tvosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@tvosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@watchosArm32:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@watchosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@watchosDeviceArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@watchosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@androidNativeArm32:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@androidNativeArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@androidNativeX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@androidNativeX86:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@linuxX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@linuxArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@mingwX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=io.github.yuroyami:imagekodec, -Xshort-module-name=imagekodec ]
+
+settings@js:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=io.github.yuroyami:imagekodec ]
+
+settings@wasmJs:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=io.github.yuroyami:imagekodec ]
+
+settings@wasmWasi:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=io.github.yuroyami:imagekodec ]
+
+# Tests compile into their own klib, which needs a different name. The test blocks name the
+# same platforms as the blocks above, so the toolchain applies them last.
+test-settings@iosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@iosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@iosX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@macosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@tvosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@tvosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@watchosArm32:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@watchosArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@watchosDeviceArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@watchosSimulatorArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@androidNativeArm32:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@androidNativeArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@androidNativeX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@androidNativeX86:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@linuxX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@linuxArm64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@mingwX64:
+  kotlin:
+    freeCompilerArgs: [ -module-name=imagekodec_test, -Xshort-module-name=imagekodec_test ]
+
+test-settings@js:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=imagekodec_test ]
+
+test-settings@wasmJs:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=imagekodec_test ]
+
+test-settings@wasmWasi:
+  kotlin:
+    freeCompilerArgs: [ -Xir-module-name=imagekodec_test ]
+
+plugins:
+  abi-check:
+    enabled: true
+    # `./kotlin check klibAbi` needs a `./kotlin build` of each of these platforms first.
+    klibPlatforms: [ iosArm64, iosSimulatorArm64, iosX64, macosArm64, tvosArm64, tvosSimulatorArm64, watchosArm32, watchosArm64, watchosDeviceArm64, watchosSimulatorArm64, androidNativeArm32, androidNativeArm64, androidNativeX64, androidNativeX86, linuxX64, linuxArm64, mingwX64, js, wasmJs, wasmWasi ]
+  dokka:
+    enabled: true
+    moduleName: imagekodec
+    includes: [ Module.md ]
+    customStyleSheets: [ ../docs/api-theme/kite.css ]
+    templatesDir: ../dokka-templates
+    footerMessage: Apache-2.0 · ImageKodec is part of the Kite family.
+    sourceLinkUrl: https://github.com/yuroyami/ImageKodec/blob/main/imagekodec/src
+    # The merged site at build/dokka/html. `./kotlin do dokka`, then `./kotlin do dokkaSite`.
+    siteName: ImageKodec
+    siteModules: [ imagekodec, imagekodec-compose, imagekodec-coil ]
+    siteIncludes: [ ../imagekodec-compose/Module.md, ../imagekodec-coil/Module.md ]
