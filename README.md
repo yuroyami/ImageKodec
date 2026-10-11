@@ -4,6 +4,9 @@ Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
 BMP, TIFF, JPEG 2000, WebP, AVIF and JPEG XL from a `ByteArray`, with the same code
 on every target.
 
+<sub>AI tools wrote much of the code, tests and documentation in this project, under the
+direction and review of its author.</sub>
+
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.yuroyami/imagekodec)](https://central.sonatype.com/artifact/io.github.yuroyami/imagekodec)
 [![CI](https://img.shields.io/github/actions/workflow/status/yuroyami/ImageKodec/ci.yml?branch=main&label=CI)](https://github.com/yuroyami/ImageKodec/actions/workflows/ci.yml)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4.21-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
