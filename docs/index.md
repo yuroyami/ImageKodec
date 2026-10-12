@@ -2,9 +2,9 @@
 
 # ImageKodec
 
-Image codecs written in Kotlin, for Kotlin Multiplatform. Decode PNG, JPEG, GIF,
-BMP, TIFF, JPEG 2000, WebP, AVIF and JPEG XL from a `ByteArray`. The same code runs on
-Android, iOS, desktop, native, the browser and Wasm.
+Image codecs written in Kotlin, for Kotlin Multiplatform. Decode PNG, JPEG, GIF, BMP, TIFF,
+JPEG 2000, WebP, AVIF and JPEG XL from a `ByteArray`. The same code runs on Android, iOS, desktop,
+native, the browser and Wasm.
 
 <div class="kite-hero-actions" markdown>
 [Get started](#install){ .kite-primary }
@@ -14,20 +14,13 @@ Android, iOS, desktop, native, the browser and Wasm.
 
 </div>
 
-Compose Multiplatform will draw an image anywhere. Getting the *pixels* is still
-per-platform: `BitmapFactory` on Android, CoreGraphics on iOS, Skia on desktop,
-and the browser on web. If your common code needs real pixels, you must write one
-decoder per platform. A thumbnail hash, a server-side resize and the images
-inside a PDF all need this.
+Compose Multiplatform draws an image on every target, but getting the pixels still goes through
+the platform: `BitmapFactory` on Android, CoreGraphics on iOS, Skia on desktop and the browser on
+web. Common code that needs real pixels (a thumbnail hash, a server-side resize, the images inside
+a PDF) therefore has to call per-platform code.
 
-ImageKodec decodes in common Kotlin. Every format normalizes to non-premultiplied
-ARGB_8888 in a plain `IntArray`. Non-premultiplied means the red, green and blue
-channels hold the original color, not the color already multiplied by the alpha
-value. ImageKodec resolves palettes, grayscale, BGR ordering and chroma
-subsampling before it returns the pixels. Chroma subsampling means the file
-stores color at a lower resolution than brightness.
-
-The core artifact depends on `kotlin-stdlib` and nothing else.
+ImageKodec decodes in common Kotlin instead. Every format comes back as non-premultiplied ARGB_8888
+in a plain `IntArray`, and the core artifact depends on `kotlin-stdlib` and nothing else.
 
 ## Install
 
@@ -37,73 +30,69 @@ commonMain.dependencies {
 }
 ```
 
-The Compose and Coil bindings are separate, optional modules. They build for
-**7 targets. The core builds for 22.** A project that targets `iosX64`, Linux,
-Windows, tvOS, watchOS, androidNative or wasmWasi will resolve the core and then
-fail to resolve those two modules. Read the README's target table first.
+The Compose and Coil bindings are separate, optional modules that build for 7 of the 22 targets
+of the core. Read [Compose and Coil](compose-and-coil.md) before you add them.
 
 ## Decode something
 
 ```kotlin
 import io.github.yuroyami.imagekodec.ImageKodec
 
+val info = ImageKodec.probe(bytes)      // the header alone, no pixel buffer
 val bitmap = ImageKodec.decode(bytes)   // format sniffed from the magic bytes
-val pixel = bitmap[10, 20]             // 0xAARRGGBB
+val pixel = bitmap[10, 20]              // 0xAARRGGBB
 ```
 
-One type covers GIF, APNG, animated WebP, animated AVIF and animated JPEG XL, already composited. Playback is
-therefore "draw frame N, wait delay N":
+GIF, APNG, animated WebP, animated AVIF and animated JPEG XL all come back as one type, with every
+frame already composited:
 
 ```kotlin
 val anim = ImageKodec.decodeAnimation(bytes)
 for (frame in anim.frames) draw(frame.bitmap, frame.delayMillis)
 ```
 
-## Read the header before you decode
-
-`probe` reads the header and nothing else. It allocates no pixel buffer, so it
-stays cheap on a 50-megapixel file. Use it to size a layout, or to reject an
-upload by dimension before it allocates memory.
-
-```kotlin
-val info = ImageKodec.probe(bytes)
-info.width; info.height          // as stored
-info.displayWidth                // after EXIF orientation
-info.frameCount; info.hasAlpha
-info.isDecodable                 // and info.unsupportedReason when it is not
-```
-
-`isDecodable` reflects each decoder's real feature refusals. A TIFF that uses a
-compression this build does not implement therefore reports `false` before you
-decode, rather than throwing later.
-
-## Check this before you choose ImageKodec
-
-**WebP decodes, lossy and lossless, but does not encode.** Lossy files decode to
-the pixels libwebp's `dwebp` writes. There is no WebP encoder.
-
-PNG, TIFF, JPEG 2000, AVIF, JPEG XL and JPEG (12-bit or lossless) read files deeper than 8 bits. `decode` keeps the high
-byte of each sample, and `decode16` keeps all of it, in a `KiteBitmap16`.
-
-The README's Limits section has the full list.
-
-## Where to go next
+## Guides
 
 <div class="kite-cards" markdown>
 
-<a class="kite-card" href="https://github.com/yuroyami/ImageKodec#readme">
-<strong>README</strong>
-<span>Per-format support, encoders, geometry helpers, the target tables and the full limits.</span>
+<a class="kite-card" href="decoding/">
+<strong>Reading images</strong>
+<span>Probe a header, decode a still, what each format decodes, TIFF pages and 16-bit samples.</span>
+</a>
+
+<a class="kite-card" href="color/">
+<strong>Color management</strong>
+<span>Convert to sRGB through ICC profiles, PNG color chunks and HDR tone mapping.</span>
+</a>
+
+<a class="kite-card" href="animation/">
+<strong>Animation</strong>
+<span>Composited frames, play counts, frame delays and decoding only the first frame.</span>
+</a>
+
+<a class="kite-card" href="encoding/">
+<strong>Writing images</strong>
+<span>PNG, APNG, JPEG, GIF, BMP, TIFF and lossless WebP.</span>
+</a>
+
+<a class="kite-card" href="resizing/">
+<strong>Resizing and orientation</strong>
+<span>Rotate, crop and scale, or decode a JPEG straight to a smaller size.</span>
+</a>
+
+<a class="kite-card" href="compose-and-coil/">
+<strong>Compose and Coil</strong>
+<span>The KiteImage composable and the Coil 3 decoder.</span>
+</a>
+
+<a class="kite-card" href="limits/">
+<strong>Limits</strong>
+<span>What ImageKodec does not do, and the bounds it puts on hostile input.</span>
 </a>
 
 <a class="kite-card" href="api/">
 <strong>API reference</strong>
 <span>Every public type, generated from source.</span>
-</a>
-
-<a class="kite-card" href="https://github.com/yuroyami/ImageKodec/issues">
-<strong>Open issues</strong>
-<span>Known gaps and what is planned, grouped by format and by area.</span>
 </a>
 
 </div>

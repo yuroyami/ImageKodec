@@ -1,6 +1,6 @@
 site_name: ImageKodec
 site_url: https://yuroyami.github.io/ImageKodec/
-site_description: Decode and encode PNG, JPEG, GIF, BMP, WebP, TIFF and JPEG 2000 from common Kotlin, with no platform image APIs underneath.
+site_description: Image codecs written in Kotlin for Kotlin Multiplatform. Decode PNG, JPEG, GIF, BMP, TIFF, JPEG 2000, WebP, AVIF and JPEG XL from common code, with no platform image APIs underneath.
 site_author: yuroyami
 copyright: Apache-2.0
 
@@ -70,4 +70,13 @@ plugins:
 
 nav:
   - Home: index.md
-  - API reference: https://yuroyami.github.io/ImageKodec/api/
+  - Guides:
+      - Reading images: decoding.md
+      - Color management: color.md
+      - Animation: animation.md
+      - Writing images: encoding.md
+      - Resizing and orientation: resizing.md
+      - Compose and Coil: compose-and-coil.md
+  - Reference:
+      - Limits: limits.md
+      - API reference: https://yuroyami.github.io/ImageKodec/api/

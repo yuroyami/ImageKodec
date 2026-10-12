@@ -53,7 +53,7 @@ node --input-type=module --eval \
   `build/artifacts/CompiledWebArtifact/imagekodecjsTestrelease/kotlin-output`:
   `mocha imagekodec_test.mjs --timeout 600s`.
 - Native: `./kotlin test -p linuxX64` runs the suite. On a Mac, use `-p macosArm64`
-  and `-p iosSimulatorArm64`. Add `-v release` to test the optimised build, which
+  and `-p iosSimulatorArm64`. Add `-v release` to test the optimized build, which
   runs the fuzz suite about eight times faster.
 
 ### How CI runs the same suites faster
@@ -68,7 +68,7 @@ together run every mutant once. You can do the same on a native target:
 tools/run-shards.sh 4 build/tasks/_imagekodec_linkMacosArm64TestRelease/imagekodec_test.kexe
 ```
 
-- The `Release` link task links the native test program optimised. The link takes
+- The `Release` link task links the native test program optimized. The link takes
   about a minute longer and the fuzz suite runs about eight times faster.
 - `tools/run-shards.sh 4 <command>` runs the command four times at once and sets
   `IMAGEKODEC_FUZZ_SHARD` to `0/4`, `1/4`, `2/4` and `3/4`. Without that variable a
@@ -97,6 +97,12 @@ compile the source against that framework with the simulator SDK, and run it in 
 booted simulator.
 This complements the JVM reflection test, which checks declarations alone.
 
+### The sample gallery
+
+`./kotlin run -m sample` opens a desktop gallery. It plays animated GIF, APNG and
+animated WebP, shows JPEG, JP2 and TIFF stills, and runs the GIF, JPEG, PNG and BMP
+encoders at startup. The caption of every tile comes from `probe`.
+
 ## The one rule that matters
 
 **A decoder must never trust its input.** An attacker controls every field in
@@ -120,15 +126,15 @@ Every codec's tests compare its output against an independent implementation:
 | Codec | Reference used as the oracle |
 |---|---|
 | PNG, BMP, GIF, JPEG encode | ImageIO reads our output back |
-| JPEG decode | `stb_image`, bit-identical, through committed vectors that `tools/stb_dump.c` produced. Its header gives the commands, including the one-line correction of stb's 4:2:2 right-edge weight (#69) |
+| JPEG decode | `stb_image`, bit-identical, through committed vectors that `tools/stb_dump.c` produced. Its header gives the commands, including the one-line correction of stb's 4:2:2 right-edge weight |
 | JPEG 2000 | OpenJPEG (`opj_compress` and `opj_decompress`) |
 | WebP lossless | libwebp (`cwebp` and `dwebp`), bit-identical |
 | TIFF | libtiff (`tiffcp`, `tiff2rgba`) and ImageMagick (`magick`, or `convert` on ImageMagick 6) |
 | JPEG reduced decode | libjpeg-turbo (`djpeg -scale`) |
 | JPEG lossless decode | The T.81 reference software (`t81jpeg`, below) writes every precision from 2 to 16 bits, Huffman and arithmetic, and ffmpeg's `ljpeg` encoder writes subsampled YCbCr: each must decode to its source. ffmpeg's decoder reads the files with a point transform, and the files a small Annex H writer in the tests makes |
 | JPEG hierarchical decode | `t81jpeg` writes pyramids of every kind, which must match its own decode within the bounds `JpegHierarchicalOracleTest` explains, and lossless pyramids written to the letter of T.81 Annex J by the tests must decode to their source |
-| JPEG 12-bit decode | libjpeg-turbo 3.1 (`cjpeg3 -precision 12` and `djpeg3 -dct int`, below): equal samples where no colour conversion or upsampling stands between, within 2 levels where they do |
-| Colour conversion to sRGB | lcms2 through `tools/icc_lcms.c`, which builds profiles of every kind (matrix/TRC, gray, and `lut8`, `lut16` and `lutAToB` tables for RGB and CMYK) and converts 8- and 16-bit samples to its built-in sRGB in floating point: within one level at 8 bits, in every intent, and the real profiles of `icc-profiles-free` too. CMYK JPEGs convert from ImageMagick's reading of their ink, within two levels for the two decoders' rounding. PNG's `gAMA`, `cHRM` and SDR `cICP` match lcms2 converting through an unsaved profile of the same primaries and curve; PQ and HLG match zimg (`zscale`) for their light and BT.2100 and BT.2390, restated in `PngColorChunksTest`, for the tone mapping |
+| JPEG 12-bit decode | libjpeg-turbo 3.1 (`cjpeg3 -precision 12` and `djpeg3 -dct int`, below): equal samples where no color conversion or upsampling stands between, within 2 levels where they do |
+| Color conversion to sRGB | lcms2 through `tools/icc_lcms.c`, which builds profiles of every kind (matrix/TRC, gray, and `lut8`, `lut16` and `lutAToB` tables for RGB and CMYK) and converts 8- and 16-bit samples to its built-in sRGB in floating point: within one level at 8 bits, in every intent, and the real profiles of `icc-profiles-free` too. CMYK JPEGs convert from ImageMagick's reading of their ink, within two levels for the two decoders' rounding. PNG's `gAMA`, `cHRM` and SDR `cICP` match lcms2 converting through an unsaved profile of the same primaries and curve; PQ and HLG match zimg (`zscale`) for their light and BT.2100 and BT.2390, restated in `PngColorChunksTest`, for the tone mapping |
 | JPEG arithmetic decode | libjpeg-turbo's `jpegtran -arithmetic`, and `tools/arith_jpeg.c` for the DAC conditioning, re-encode a `cjpeg` file's coefficients: the arithmetic file must decode to exactly the pixels of the Huffman one |
 | JBIG2 | jbig2enc (`jbig2`) writes the streams: generic regions must decode to the source page, symbol mode must match jbig2dec |
 | WebP lossless encode | `dwebp` reads our output back pixel for pixel, and it must be smaller than our PNG |
@@ -169,8 +175,8 @@ sudo install -m 755 ljt3/build/djpeg-static /usr/local/bin/djpeg3
 CI sets `IMAGEKODEC_REQUIRE_ORACLES=1`, which makes a missing tool fail the test
 instead of skipping it. Set it yourself to check that every oracle suite ran.
 
-New format work needs a vector in `commonTest`, so that every target runs it. It
-also needs an oracle test in `jvmTest` wherever a reference tool exists.
+New format work needs a vector in the module's `test/` folder, so that every target
+runs it. It also needs an oracle test in `test@jvm/` wherever a reference tool exists.
 
 ## Style
 

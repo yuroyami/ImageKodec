@@ -15,8 +15,9 @@ Expect a first response within a week.
 
 ## What counts as a vulnerability
 
-A malformed image must fail as an `ImageDecodeException`. Anything else from a
-decoder entry point is a bug worth reporting:
+A malformed image must fail as an `ImageDecodeException` from the `ImageKodec`
+functions. The public `JpxDecoder.decode` and `Jbig2Decoder.decode` overloads return
+null instead. Anything else from a decoder entry point is a bug worth reporting:
 
 - an index, cast, arithmetic or null fault escaping the library
 - a decode that does not terminate, or that runs for a time unrelated to the
@@ -41,8 +42,9 @@ decoder entry point is a bug worth reporting:
 - **An input-relative budget**: declared dimensions are also checked against what
   the input size could plausibly produce, so a corrupt header in a small file
   cannot reserve a large buffer. An animation must fit this budget for all its
-  frames together. `CcittFax` and `Jbig2Decoder` take only the pixel ceiling,
-  because a blank scanned page needs very few bytes.
+  frames together. WebP, AVIF, JPEG XL, fax-compressed TIFF, `CcittFax` and
+  `Jbig2Decoder` take only the pixel ceiling, because a valid file of those kinds
+  can need very few bytes for a large image, as a blank scanned page does.
 - **Exact-size inflate caps** on PNG and TIFF: the expected decompressed size is
   computed from the headers and enforced during inflation, not after.
 - **Bounds-checked readers** throughout, so truncation surfaces as a decode error
