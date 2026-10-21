@@ -30,11 +30,9 @@ test-dependencies@jvm:
 settings:
   android:
     namespace: io.github.yuroyami.imagekodec.compose
-    # 37.1, not 36: Compose Multiplatform 1.13.0-alpha02 pulls androidx.compose 1.13.0-alpha03,
-    # whose AAR metadata requires consumers to compile against API 37.1.
     compileSdk:
       apiLevel: 37
-      minorApiLevel: 1
+      minorApiLevel: 2
     minSdk: 21
   publishing:
     pom:

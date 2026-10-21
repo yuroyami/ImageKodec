@@ -40,7 +40,9 @@ settings:
     optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi ]
   android:
     namespace: io.github.yuroyami.imagekodec
-    compileSdk: 36
+    compileSdk:
+      apiLevel: 37
+      minorApiLevel: 2
     minSdk: 21
   publishing:
     pom:
