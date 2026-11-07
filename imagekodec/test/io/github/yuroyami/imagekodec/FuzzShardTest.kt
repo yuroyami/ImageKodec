@@ -30,4 +30,15 @@ class FuzzShardTest {
             assertFailsWith<IllegalStateException>(value) { FuzzShard.parse(value) }
         }
     }
+
+    @Test
+    fun theSeedAndRoundsDefaultToTheFixedSetAndRefuseATypingMistake() {
+        assertEquals(0, FuzzSettings.parseSeed(null))
+        assertEquals(20261107, FuzzSettings.parseSeed("20261107"))
+        assertEquals(0x1F, FuzzSettings.parseSeed("0x1F"))
+        assertFailsWith<IllegalStateException> { FuzzSettings.parseSeed("twelve") }
+        assertEquals(1, FuzzSettings.parseRounds(null))
+        assertEquals(4, FuzzSettings.parseRounds("4"))
+        assertFailsWith<IllegalStateException> { FuzzSettings.parseRounds("0") }
+    }
 }

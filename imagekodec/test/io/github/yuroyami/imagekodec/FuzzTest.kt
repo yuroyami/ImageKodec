@@ -284,7 +284,7 @@ class FuzzTest {
         } catch (_: ImageDecodeException) {
             // The contract: malformed input is a decode error.
         } catch (t: Throwable) {
-            fail("$label leaked ${t::class.simpleName}: ${t.message}")
+            fail("$label${FuzzSettings.replay} leaked ${t::class.simpleName}: ${t.message}")
         }
     }
 
@@ -302,7 +302,7 @@ class FuzzTest {
     private val shard = FuzzShard.fromEnvironment()
 
     private fun exercise(label: String, bytes: ByteArray) {
-        if (shard.takesNext()) withDeadline(label, DEADLINE_MILLIS) { exerciseEveryPath(label, bytes) }
+        if (shard.takesNext()) withDeadline(label + FuzzSettings.replay, DEADLINE_MILLIS) { exerciseEveryPath(label, bytes) }
     }
 
     private fun exerciseEveryPath(label: String, bytes: ByteArray) {
@@ -355,7 +355,7 @@ class FuzzTest {
      */
     @Test
     fun jbig2MutantsFailOnlyByRefusal() {
-        val rng = Rng(0x7B16_2002)
+        val rng = Rng(FuzzSettings.mix(0x7B16_2002))
         val streams = listOf(
             Triple("jbig2-generic", hex(GENERIC), null),
             Triple("jbig2-generic-tpgd", hex(GENERIC_TPGD), null),
@@ -366,7 +366,7 @@ class FuzzTest {
             val (width, height) = if (name == "jbig2-mmr") 64 to 24 else Jbig2Page.WIDTH to Jbig2Page.HEIGHT
             fun run(label: String, stream: ByteArray, dictionary: ByteArray?) {
                 if (!shard.takesNext()) return
-                withDeadline(label, DEADLINE_MILLIS) {
+                withDeadline(label + FuzzSettings.replay, DEADLINE_MILLIS) {
                     mustFailCleanly(label) { Jbig2Decoder.decodeChecked(stream, dictionary, width, height) }
                 }
             }
@@ -379,8 +379,8 @@ class FuzzTest {
                     else -> repeat(1 + rng.nextInt(8)) { bytes[rng.nextInt(bytes.size)] = (rng.next() and 0xFF).toByte() }
                 }
             }
-            repeat(600) { run("$name mutant $it", damaged(data, it), globals) }
-            if (globals != null) repeat(300) { run("$name dictionary mutant $it", data, damaged(globals, it)) }
+            repeat(600 * FuzzSettings.rounds) { run("$name mutant $it", damaged(data, it), globals) }
+            if (globals != null) repeat(300 * FuzzSettings.rounds) { run("$name dictionary mutant $it", data, damaged(globals, it)) }
         }
     }
 
@@ -404,9 +404,9 @@ class FuzzTest {
 
     @Test
     fun singleByteCorruptionNeverLeaksARuntimeFault() {
-        val rng = Rng(0x5EED_1234)
+        val rng = Rng(FuzzSettings.mix(0x5EED_1234))
         for ((name, seed) in corpus()) {
-            repeat(400) {
+            repeat(400 * FuzzSettings.rounds) {
                 val bytes = seed.copyOf()
                 val at = rng.nextInt(bytes.size)
                 bytes[at] = (rng.next() and 0xFF).toByte()
@@ -417,9 +417,9 @@ class FuzzTest {
 
     @Test
     fun bitFlipsNeverLeakARuntimeFault() {
-        val rng = Rng(0x1BADB002)
+        val rng = Rng(FuzzSettings.mix(0x1BADB002))
         for ((name, seed) in corpus()) {
-            repeat(300) {
+            repeat(300 * FuzzSettings.rounds) {
                 val bytes = seed.copyOf()
                 val at = rng.nextInt(bytes.size)
                 bytes[at] = (bytes[at].toInt() xor (1 shl rng.nextInt(8))).toByte()
@@ -446,9 +446,9 @@ class FuzzTest {
 
     @Test
     fun multiByteCorruptionNeverLeaksARuntimeFault() {
-        val rng = Rng(0x0DEFACED)
+        val rng = Rng(FuzzSettings.mix(0x0DEFACED))
         for ((name, seed) in corpus()) {
-            repeat(300) {
+            repeat(300 * FuzzSettings.rounds) {
                 val bytes = seed.copyOf()
                 repeat(1 + rng.nextInt(8)) {
                     bytes[rng.nextInt(bytes.size)] = (rng.next() and 0xFF).toByte()
@@ -462,11 +462,11 @@ class FuzzTest {
     fun corruptedLengthAndDimensionFieldsNeverLeakARuntimeFault() {
         // Header fields are where a decoder is most likely to trust the file:
         // sizes, counts and offsets all live in the first bytes.
-        val rng = Rng(0x600DF00D)
+        val rng = Rng(FuzzSettings.mix(0x600DF00D))
         val nasty = intArrayOf(0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF)
         for ((name, seed) in corpus()) {
             val headerEnd = minOf(seed.size, 64)
-            repeat(400) {
+            repeat(400 * FuzzSettings.rounds) {
                 val bytes = seed.copyOf()
                 val at = rng.nextInt(headerEnd)
                 bytes[at] = nasty[rng.nextInt(nasty.size)].toByte()

@@ -35,3 +35,43 @@ internal class FuzzShard(private val index: Int, private val count: Int) {
         }
     }
 }
+
+/**
+ * What changes the mutants of [FuzzTest] from run to run. Both default to the fixed set, so a plain
+ * run, and a failure, stay reproducible (#117).
+ *
+ * - `IMAGEKODEC_FUZZ_SEED` is mixed into each test's own constant, so another value gives other
+ *   mutants. Every failure names the seed that replays it.
+ * - `IMAGEKODEC_FUZZ_ROUNDS` multiplies the mutant count of each mutation test.
+ */
+internal object FuzzSettings {
+    const val SEED_ENV = "IMAGEKODEC_FUZZ_SEED"
+    const val ROUNDS_ENV = "IMAGEKODEC_FUZZ_ROUNDS"
+
+    val seed: Int = parseSeed(environmentVariable(SEED_ENV))
+    val rounds: Int = parseRounds(environmentVariable(ROUNDS_ENV))
+
+    /** A seed in decimal or 0x hexadecimal. A value that is neither fails, so a typing mistake cannot pass as the default. */
+    fun parseSeed(value: String?): Int {
+        if (value.isNullOrEmpty()) return 0
+        val parsed = if (value.startsWith("0x") || value.startsWith("0X")) value.substring(2).toLongOrNull(16) else value.toLongOrNull()
+        return parsed?.toInt() ?: error("$SEED_ENV must be a number, such as 20261107 or 0x1F, and is \"$value\"")
+    }
+
+    fun parseRounds(value: String?): Int {
+        if (value.isNullOrEmpty()) return 1
+        val parsed = value.toIntOrNull()
+        if (parsed == null || parsed < 1) error("$ROUNDS_ENV must be a whole number of at least 1, and is \"$value\"")
+        return parsed
+    }
+
+    /** The starting state for a test whose own constant is [constant]: the constant itself under the default seed. */
+    fun mix(constant: Int): Int {
+        if (seed == 0) return constant
+        val mixed = constant xor (seed * -0x61c88647)   // the golden-ratio constant 0x9E3779B9
+        return if (mixed == 0) constant else mixed       // xorshift never leaves 0
+    }
+
+    /** How to replay a failure, for its message. Empty under the default seed. */
+    val replay: String get() = if (seed == 0) "" else " ($SEED_ENV=$seed)"
+}

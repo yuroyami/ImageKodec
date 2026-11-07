@@ -76,6 +76,16 @@ tools/run-shards.sh 4 build/tasks/_imagekodec_linkMacosArm64TestRelease/imagekod
 - `tools/run-shards.sh 2-3/8 <command>` runs shards 2 and 3 of 8 here, for a suite that
   several machines split.
 
+Every run fuzzes the same mutants, so a failure replays exactly. Two variables change
+them. `IMAGEKODEC_FUZZ_SEED` (decimal or `0x` hexadecimal) gives other mutants, and every
+failure message names the seed that replays it. `IMAGEKODEC_FUZZ_ROUNDS` multiplies the
+mutant counts. The weekly `Fuzz` workflow runs the JVM suite with a seed from the date and
+four rounds. A mutant that fails there becomes a fixed regression case.
+
+```sh
+IMAGEKODEC_FUZZ_SEED=20261107 IMAGEKODEC_FUZZ_ROUNDS=4 ./kotlin test -p jvm -m imagekodec --include-classes='*FuzzTest*'
+```
+
 ### Apple frameworks
 
 The toolchain compiles the libraries to klibs and links no Apple framework.

@@ -1,0 +1,49 @@
+name: Fuzz
+
+# The push runs of CI fuzz one fixed set of mutants, so a failure there replays exactly. Once a
+# week this run takes a seed from the date and four times the mutants, so the suite keeps finding
+# new ones (#117). A failure names its IMAGEKODEC_FUZZ_SEED; it becomes a fixed regression case.
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: IMAGEKODEC_FUZZ_SEED, empty for one from the date
+        type: string
+        default: ''
+      rounds:
+        description: IMAGEKODEC_FUZZ_ROUNDS
+        type: string
+        default: '4'
+
+permissions:
+  contents: read
+
+env:
+  KOTLIN_CLI_NO_WELCOME_BANNER: 1
+
+jobs:
+  fuzz-jvm:
+    name: JVM fuzz suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Pick the seed
+        env:
+          SEED_INPUT: ${{ inputs.seed }}
+          ROUNDS_INPUT: ${{ inputs.rounds }}
+        run: |
+          echo "IMAGEKODEC_FUZZ_SEED=${SEED_INPUT:-$(date -u +%Y%m%d)}" >> "$GITHUB_ENV"
+          echo "IMAGEKODEC_FUZZ_ROUNDS=${ROUNDS_INPUT:-4}" >> "$GITHUB_ENV"
+
+      - name: Run the fuzz suite
+        run: |
+          echo "IMAGEKODEC_FUZZ_SEED=$IMAGEKODEC_FUZZ_SEED IMAGEKODEC_FUZZ_ROUNDS=$IMAGEKODEC_FUZZ_ROUNDS"
+          ./kotlin test -p jvm -m imagekodec --include-classes='*FuzzTest*'
