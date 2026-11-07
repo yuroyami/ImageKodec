@@ -90,6 +90,20 @@ class AvifDecoderTest {
     }
 
     @Test
+    fun anIspeThatDisagreesWithTheFrameIsNotWhatProbeReports() {
+        // The 24 by 16 frame with an ispe of 65536 by 65536: probe and decode agree on the frame (#124).
+        val lying = Heif().apply { add(1, "av01", plainData, listOf(av1C(plainConfig) to true, ispe(65536, 65536))) }.build()
+        val info = ImageKodec.probe(lying)
+        val bitmap = ImageKodec.decode(lying)
+        assertEquals(24 to 16, info.width to info.height)
+        assertEquals(bitmap.width to bitmap.height, info.width to info.height)
+        // 400 megapixels passes the pixel ceiling, even where the data is not there to check.
+        val huge = Heif().apply { add(1, "av01", ByteArray(0), listOf(av1C(plainConfig) to true, ispe(20000, 20000))) }.build()
+        val probed = runCatching { ImageKodec.probe(huge) }
+        assertTrue(probed.exceptionOrNull() is ImageDecodeException || probed.getOrNull()?.isDecodable == false, "$probed")
+    }
+
+    @Test
     fun theFirstBytesOfAFileAreEnoughToProbeIt() {
         val c = AvifContainer.parse(AvifFixtures.alpha)
         // Cut inside the first item's data: the boxes are all there, the samples are not.

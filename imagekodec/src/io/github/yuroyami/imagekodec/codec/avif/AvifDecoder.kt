@@ -326,7 +326,15 @@ internal object AvifDecoder {
         }
         val ispe = item.property<AvifProperty.Extent>()
         if (ispe != null) {
-            if (ispe.width !in 1..MAX_SIDE || ispe.height !in 1..MAX_SIDE) {
+            // MIAF (ISO/IEC 23000-22, 7.3.6.3) has the ispe of a coded item match its reconstructed
+            // size. Where a damaged file disagrees, the frame is what decodes, so probe reports it (#124).
+            if (item.type == AV01) {
+                val data = c.itemDataOrNull(item)
+                val coded = data?.let { runCatching { Av1Decoder.inspect(item.property<AvifProperty.Av1Config>()?.configObus, it) }.getOrNull() }
+                if (coded != null && coded.width > 0 && coded.height > 0) return coded.width to coded.height
+            }
+            // The same ceiling as a grid or an overlay, so probe promises no size past it.
+            if (ispe.width !in 1..MAX_SIDE || ispe.height !in 1..MAX_SIDE || ispe.width * ispe.height > Budget.MAX_PIXELS) {
                 throw ImageDecodeException("AVIF: item ${item.id} is ${ispe.width} by ${ispe.height}")
             }
             return ispe.width.toInt() to ispe.height.toInt()

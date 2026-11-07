@@ -47,6 +47,9 @@ reviewable in the diff.
 - A gray JPEG 2000 image with an RGB ICC profile is left alone under
   `ColorTarget.Srgb()`, as the same image in a PNG is. The JP2 probe did not say
   whether the image decodes to gray or colour, so the profile was applied (#118).
+- `probe` of an AVIF still reports the size of its AV1 frame, which is what `decode`
+  gives, when the item's `ispe` says another size, and refuses an `ispe` past the
+  pixel ceiling as it does a grid or an overlay (#124).
 
 ## [0.3.0] - 2026-10-08
 
