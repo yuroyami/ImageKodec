@@ -33,6 +33,12 @@ reviewable in the diff.
   klib dumps (`api/*.klib.api`) still guard the public API.
 - The Android host tests now run the common test suite.
 
+### Fixed
+
+- A PNG whose inflated rows cannot fit in one array, such as 16384 by 16384 RGBA at
+  16 bits, is refused before inflate, and `probe` says so. The inflater grew its
+  buffer with an `Int` that wrapped to 0 past 1 GiB and then looped for ever (#127).
+
 ## [0.3.0] - 2026-10-08
 
 ### Added

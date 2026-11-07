@@ -205,14 +205,16 @@ internal object Inflate {
         }
 
         fun ensure(extra: Int) {
-            val needed = outcnt + extra
+            // Long arithmetic throughout: an Int capacity doubled past 2^30 wraps to
+            // Int.MIN_VALUE and then 0, and the loop below never ends (#127).
+            val needed = outcnt.toLong() + extra
             if (needed > out.size) {
-                if (needed.toLong() > maxOutput) {
+                if (needed > maxOutput || needed > MAX_ARRAY) {
                     throw InflateException(InflateError.INFLATED_DATA_TOO_LARGE)
                 }
-                var cap = if (out.size == 0) 256 else out.size
+                var cap = if (out.size == 0) 256L else out.size.toLong()
                 while (cap < needed) cap = cap shl 1
-                out = out.copyOf(minOf(cap.toLong(), maxOutput).toInt().coerceAtLeast(needed))
+                out = out.copyOf(minOf(cap, maxOutput, MAX_ARRAY).coerceAtLeast(needed).toInt())
             }
         }
 

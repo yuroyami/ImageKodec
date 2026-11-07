@@ -10,6 +10,7 @@ import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.internal.ByteReader
 import io.github.yuroyami.imagekodec.internal.sourceOver
 import io.github.yuroyami.imagekodec.internal.flate.Crc32
+import io.github.yuroyami.imagekodec.internal.flate.MAX_ARRAY
 import io.github.yuroyami.imagekodec.internal.flate.InflateException
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 
@@ -56,9 +57,14 @@ internal object PngDecoder {
         if (width > MAX_DIMENSION || height > MAX_DIMENSION || width * height > MAX_PIXELS) "PNG: ${width}x$height exceeds safety limits" else null
 
     /** Why [width] by [height] pixels of [bitsPerPixel] cannot come from [inputBytes] bytes, or null. */
-    internal fun budgetRefusal(width: Int, height: Int, bitsPerPixel: Int, inputBytes: Int): String? =
-        if (Budget.fits(width, height, inputBytes, bitsPerPixel)) null
-        else "PNG: ${width}x$height cannot come from $inputBytes bytes at $bitsPerPixel bits per pixel"
+    internal fun budgetRefusal(width: Int, height: Int, bitsPerPixel: Int, inputBytes: Int): String? = when {
+        // The inflated rows, one filter byte each, must fit in one array, or no target can
+        // decode the image at all (#127). Adam7 adds a few filter bytes; unpack checks those.
+        height.toLong() * (1 + (width.toLong() * bitsPerPixel + 7) / 8) > MAX_ARRAY ->
+            "PNG: ${width}x$height at $bitsPerPixel bits per pixel inflates past the largest array"
+        Budget.fits(width, height, inputBytes, bitsPerPixel) -> null
+        else -> "PNG: ${width}x$height cannot come from $inputBytes bytes at $bitsPerPixel bits per pixel"
+    }
     private const val MAX_TOTAL_PIXELS = 1L shl 28   // most frames an acTL may claim
 
     // APNG dispose_op / blend_op wire values (APNG spec).
@@ -495,6 +501,7 @@ internal object PngDecoder {
             }
             total
         }
+        if (expected > MAX_ARRAY) throw ImageDecodeException("PNG: $expected inflated bytes do not fit in one array")
         val inflated = try {
             Zlib.decompress(compressed, maximumSize = expected)
         } catch (e: InflateException) {

@@ -27,11 +27,13 @@ internal class ByteArrayBuilder(initialCapacity: Int = 64) {
     }
 
     private fun ensure(extra: Int) {
-        val needed = len + extra
+        // Long arithmetic: an Int capacity doubled past 2^30 wraps to 0 and never grows (#127).
+        val needed = len.toLong() + extra
         if (needed > buf.size) {
-            var cap = buf.size
+            if (needed > MAX_ARRAY) throw IllegalStateException("output of $needed bytes does not fit in one array")
+            var cap = maxOf(buf.size.toLong(), 16L)
             while (cap < needed) cap = cap shl 1
-            buf = buf.copyOf(cap)
+            buf = buf.copyOf(minOf(cap, MAX_ARRAY).toInt())
         }
     }
 
@@ -44,3 +46,6 @@ internal class ByteArrayBuilder(initialCapacity: Int = 64) {
 
     fun toByteArray(): ByteArray = buf.copyOf(len)
 }
+
+/** The largest `ByteArray` every target can allocate: the JVM refuses a few bytes short of `Int.MAX_VALUE`. */
+internal const val MAX_ARRAY: Long = Int.MAX_VALUE - 8L
