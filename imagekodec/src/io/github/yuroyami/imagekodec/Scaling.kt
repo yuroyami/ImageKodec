@@ -2,8 +2,9 @@ package io.github.yuroyami.imagekodec
 
 /**
  * Downscale to fit inside [maxWidth]×[maxHeight], preserving aspect ratio, using
- * box (area-average) filtering: each destination pixel averages every source
- * pixel that maps into its bin, so thumbnails don't shimmer the way
+ * box (area-average) filtering: each destination pixel averages the source pixels
+ * under it, each weighted by the part of it that lies in the bin, so a thin line
+ * keeps the same contrast wherever it falls and thumbnails don't shimmer the way
  * nearest-neighbor ones do.
  *
  * Color channels average **alpha-weighted** (premultiply, average, unpremultiply):
@@ -59,39 +60,45 @@ public fun KiteBitmap.downscaledTo(targetWidth: Int, targetHeight: Int): KiteBit
     val dw = targetWidth
     val dh = targetHeight
 
-    // Invert floor(source * destinationSize / sourceSize) with ceiling
-    // division. Each source sample belongs to exactly one destination bin.
-    fun boundary(bin: Int, sourceSize: Int, destinationSize: Int): Int =
-        ((bin.toLong() * sourceSize + destinationSize - 1) / destinationSize).toInt()
+    // An area-average filter weights each source pixel by the part of it inside the bin. Both
+    // axes are scaled by the destination size, so the weights are whole numbers and every target
+    // gives the same pixels: source pixel x covers [x * dw, (x + 1) * dw) and bin d covers
+    // [d * sw, (d + 1) * sw). A pixel that straddles two bins counts in each by its share (#122).
+    val xs = AxisWeights(width, dw)
+    val ys = AxisWeights(height, dh)
+    // Each bin covers width * height scaled units, the sum of its weights.
+    val area = width.toLong() * height
 
     val out = IntArray(dw * dh)
     for (dy in 0 until dh) {
-        val y0 = boundary(dy, height, dh)
-        val y1 = boundary(dy + 1, height, dh)
+        val yFirst = ys.first(dy)
+        val yCount = ys.count(dy)
         for (dx in 0 until dw) {
-            val x0 = boundary(dx, width, dw)
-            val x1 = boundary(dx + 1, width, dw)
+            val xFirst = xs.first(dx)
+            val xCount = xs.count(dx)
             var sumA = 0L
             var sumR = 0L
             var sumG = 0L
             var sumB = 0L
-            for (y in y0 until y1) {
+            for (j in 0 until yCount) {
+                val y = yFirst + j
+                val wy = ys.weight(dy, y).toLong()
                 val srcBase = y * width
-                for (x in x0 until x1) {
+                for (i in 0 until xCount) {
+                    val x = xFirst + i
                     val p = argb[srcBase + x]
                     if (p ushr 24 == 0) continue
-                    val a = (p ushr 24).toLong()
-                    sumA += a
-                    sumR += ((p ushr 16) and 0xFF) * a
-                    sumG += ((p ushr 8) and 0xFF) * a
-                    sumB += (p and 0xFF) * a
+                    val wa = (p ushr 24) * wy * xs.weight(dx, x)
+                    sumA += wa
+                    sumR += ((p ushr 16) and 0xFF) * wa
+                    sumG += ((p ushr 8) and 0xFF) * wa
+                    sumB += (p and 0xFF) * wa
                 }
             }
-            val n = (x1 - x0).toLong() * (y1 - y0)
             out[dy * dw + dx] = if (sumA == 0L) {
                 0
             } else {
-                (((sumA + n / 2) / n).toInt() shl 24) or
+                (((sumA + area / 2) / area).toInt() shl 24) or
                     (((sumR + sumA / 2) / sumA).toInt() shl 16) or
                     (((sumG + sumA / 2) / sumA).toInt() shl 8) or
                     ((sumB + sumA / 2) / sumA).toInt()
@@ -99,6 +106,28 @@ public fun KiteBitmap.downscaledTo(targetWidth: Int, targetHeight: Int): KiteBit
         }
     }
     return KiteBitmap(dw, dh, out)
+}
+
+/**
+ * The source pixels of each destination bin along one axis of [sourceSize] pixels scaled to
+ * [destinationSize], with the whole-number weights of [downscaledTo].
+ */
+private class AxisWeights(private val sourceSize: Int, private val destinationSize: Int) {
+    /** The first source pixel of bin [d]. Nothing is tabled, so a scale allocates only its output. */
+    fun first(d: Int): Int = (d.toLong() * sourceSize / destinationSize).toInt()
+
+    /** How many source pixels bin [d] touches: its last one may straddle into bin d + 1. */
+    fun count(d: Int): Int {
+        val end = (d + 1).toLong() * sourceSize
+        return (end / destinationSize).toInt() - first(d) + if (end % destinationSize != 0L) 1 else 0
+    }
+
+    /** The overlap of source pixel [x] with bin [d], in units of 1 / [destinationSize] of a pixel. */
+    fun weight(d: Int, x: Int): Int {
+        val lo = maxOf(x.toLong() * destinationSize, d.toLong() * sourceSize)
+        val hi = minOf((x + 1).toLong() * destinationSize, (d + 1).toLong() * sourceSize)
+        return (hi - lo).toInt()
+    }
 }
 
 /**

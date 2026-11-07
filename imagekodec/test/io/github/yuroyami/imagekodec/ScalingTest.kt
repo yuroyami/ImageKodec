@@ -36,36 +36,18 @@ class ScalingTest {
         val column = KiteBitmap(1, 50000, pixels).scaled(1, 49999)
         assertEquals(49999, row.width)
         assertEquals(49999, column.height)
-        assertEquals(gray(1), row[0, 0])
+        // Bin 0 holds all of pixel 0 and a 49999th of pixel 1 (#122).
+        assertEquals(gray(0), row[0, 0])
         assertEquals(pixels.last(), row[49998, 0])
         assertContentEquals(row.argb, column.argb)
     }
 
     @Test
-    fun destinationBinsMatchIndependentSourceAccumulation() {
+    fun destinationBinsMatchAnIndependentAreaAverage() {
         for (w in 2..19) for (h in 2..13) {
             val source = KiteBitmap(w, h, IntArray(w * h) { i -> argb((i * 61) and 255, (i * 37) and 255, (i * 13) and 255, (i * 79) and 255) })
             val output = source.scaled(maxOf(1, w - 3), maxOf(1, h - 2))
-            val sums = Array(output.argb.size) { LongArray(5) }
-            for (y in 0 until h) for (x in 0 until w) {
-                val bin = sums[(y.toLong() * output.height / h).toInt() * output.width + (x.toLong() * output.width / w).toInt()]
-                val pixel = source[x, y]
-                val alpha = (pixel ushr 24).toLong()
-                bin[0] += alpha
-                bin[1] += ((pixel ushr 16) and 255) * alpha
-                bin[2] += ((pixel ushr 8) and 255) * alpha
-                bin[3] += (pixel and 255) * alpha
-                bin[4]++
-            }
-            val expected = IntArray(sums.size) { i ->
-                val s = sums[i]
-                if (s[0] == 0L) 0 else argb(
-                    ((s[0] + s[4] / 2) / s[4]).toInt(),
-                    ((s[1] + s[0] / 2) / s[0]).toInt(),
-                    ((s[2] + s[0] / 2) / s[0]).toInt(),
-                    ((s[3] + s[0] / 2) / s[0]).toInt(),
-                )
-            }
+            val expected = areaAverage(source, output.width, output.height)
             assertContentEquals(expected, output.argb, "$w x $h")
         }
     }

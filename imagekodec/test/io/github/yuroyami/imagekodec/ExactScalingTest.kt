@@ -16,37 +16,30 @@ class ExactScalingTest {
     }
 
     @Test
-    fun everySourceSampleContributesToItsDestinationBin() {
+    fun everySourceSampleCountsByThePartOfItInsideTheBin() {
         for (width in 2..9) for (height in 2..7) {
             val source = KiteBitmap(width, height, IntArray(width * height) { i ->
                 argb((i * 61) and 255, (i * 37) and 255, (i * 13) and 255, (i * 79) and 255)
             })
             for (dw in 1..width) for (dh in 1..height) {
                 if (dw == width && dh == height) continue
-                val sums = Array(dw * dh) { LongArray(5) }
-                for (y in 0 until height) for (x in 0 until width) {
-                    val bin = sums[(y * dh / height) * dw + x * dw / width]
-                    val p = source[x, y]
-                    val a = (p ushr 24).toLong()
-                    bin[0] += a
-                    bin[1] += ((p ushr 16) and 255) * a
-                    bin[2] += ((p ushr 8) and 255) * a
-                    bin[3] += (p and 255) * a
-                    bin[4]++
-                }
-                val expected = IntArray(dw * dh) { i ->
-                    val s = sums[i]
-                    if (s[0] == 0L) 0 else argb(
-                        ((s[0] + s[4] / 2) / s[4]).toInt(),
-                        ((s[1] + s[0] / 2) / s[0]).toInt(),
-                        ((s[2] + s[0] / 2) / s[0]).toInt(),
-                        ((s[3] + s[0] / 2) / s[0]).toInt(),
-                    )
-                }
                 val actual = source.downscaledTo(dw, dh)
                 assertEquals(dw to dh, actual.width to actual.height)
-                assertContentEquals(expected, actual.argb, "$width x $height -> $dw x $dh")
+                assertContentEquals(areaAverage(source, dw, dh), actual.argb, "$width x $height -> $dw x $dh")
             }
+        }
+    }
+
+    @Test
+    fun aThinLineKeepsTheSameContrastWhereverItFalls() {
+        fun gray(v: Int) = argb(255, v, v, v)
+        fun red(row: IntArray, dw: Int) = KiteBitmap(row.size, 1, row).downscaledTo(dw, 1).argb.map { (it ushr 16) and 255 }
+        // The cases of #122: whole-pixel bins gave the line full contrast at x = 2 and 5, half at 1 and 4.
+        assertEquals(listOf(170, 0), red(intArrayOf(gray(255), gray(0), gray(0)), 2))
+        assertEquals(listOf(0, 170), red(intArrayOf(gray(0), gray(0), gray(255)), 2))
+        val expected = mapOf(1 to listOf(170, 170, 255, 255), 2 to listOf(255, 85, 255, 255), 4 to listOf(255, 255, 170, 170), 5 to listOf(255, 255, 255, 85))
+        for ((at, want) in expected) {
+            assertEquals(want, red(IntArray(6) { if (it == at) gray(0) else gray(255) }, 4), "line at $at")
         }
     }
 
@@ -77,5 +70,29 @@ class ExactScalingTest {
             assertEquals(3 to 2, output.frames[i].bitmap.width to output.frames[i].bitmap.height)
             assertContentEquals(IntArray(6) { animation.frames[i].bitmap[0, 0] }, output.frames[i].bitmap.argb)
         }
+    }
+}
+
+/**
+ * The exact fractional-area mean, written apart from the filter: the overlap of each source
+ * pixel's interval with each bin's, both as fractions of the source, by cross-multiplying.
+ */
+internal fun areaAverage(source: KiteBitmap, dw: Int, dh: Int): IntArray {
+    val sw = source.width; val sh = source.height
+    // Overlap of [a/n, (a+1)/n) with [b/m, (b+1)/m), in units of 1/(n*m).
+    fun overlap(a: Int, n: Int, b: Int, m: Int): Long =
+        maxOf(0L, minOf((a + 1).toLong() * m, (b + 1).toLong() * n) - maxOf(a.toLong() * m, b.toLong() * n))
+    return IntArray(dw * dh) { bin ->
+        val bx = bin % dw; val by = bin / dw
+        var a = 0L; var r = 0L; var g = 0L; var b = 0L
+        for (y in 0 until sh) for (x in 0 until sw) {
+            val w = overlap(x, sw, bx, dw) * overlap(y, sh, by, dh)
+            if (w == 0L) continue
+            val p = source[x, y]
+            val wa = w * (p ushr 24)
+            a += wa; r += wa * ((p ushr 16) and 255); g += wa * ((p ushr 8) and 255); b += wa * (p and 255)
+        }
+        val total = sw.toLong() * sh
+        if (a == 0L) 0 else argb(((a + total / 2) / total).toInt(), ((r + a / 2) / a).toInt(), ((g + a / 2) / a).toInt(), ((b + a / 2) / a).toInt())
     }
 }

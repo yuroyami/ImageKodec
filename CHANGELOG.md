@@ -35,6 +35,11 @@ reviewable in the diff.
 - The jars of the three libraries carry `META-INF/LICENSE` and `META-INF/NOTICE`, so
   an app that bundles them can pass on the notices that the ported code's licences
   ask for (#115).
+- `scaled`, `downscaledTo` and the scaled decodes weight each source pixel by the
+  part of it inside each output pixel, as an area average does. Below a 2:1 ratio
+  a one-pixel line kept full or half contrast by where it fell, because every
+  source pixel went whole to one output pixel. Output pixels change slightly for
+  every ratio that is not a whole number (#122).
 - JPEG 2000 tier-1 decoding no longer allocates a `Triple` or a `Pair` for almost
   every coefficient, which was about three quarters of a decode's allocation (#116).
 

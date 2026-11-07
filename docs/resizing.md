@@ -23,8 +23,10 @@ bitmap.scaled(maxWidth = 256, maxHeight = 256)
 bitmap.downscaledTo(targetWidth = 128, targetHeight = 75)
 ```
 
-`scaled` is an alpha-weighted box filter. It preserves the aspect ratio and never upscales. When
-the image already fits the box, it returns the image unchanged.
+`scaled` is an alpha-weighted box filter: each output pixel averages the source pixels under it,
+each weighted by the part of it that lies inside the output pixel, so a one-pixel line keeps the
+same contrast wherever it falls. It preserves the aspect ratio and never upscales. When the image
+already fits the box, it returns the image unchanged.
 
 `downscaledTo` uses the same filter with exact output dimensions. It leaves the aspect ratio to
 the caller, and it throws `IllegalArgumentException` if a side is not positive or exceeds the
