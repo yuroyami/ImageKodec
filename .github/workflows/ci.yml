@@ -6,9 +6,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Every job only reads the repository.
+permissions:
+  contents: read
+
+# A newer push to a pull request supersedes the run before it. A push to main does not:
+# each commit there keeps a result of its own, so a bisect can use CI (#120).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   KOTLIN_CLI_NO_WELCOME_BANNER: 1
@@ -59,6 +65,8 @@ jobs:
       LIBJPEG_TURBO: 3.1.0
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -137,6 +145,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -152,6 +162,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -207,6 +219,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -246,6 +260,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -265,6 +281,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
         id: setup
@@ -300,6 +318,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -326,6 +346,8 @@ jobs:
         target: [MacosArm64, IosSimulatorArm64]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -362,6 +384,8 @@ jobs:
             task: IosSimulatorArm64
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -386,6 +410,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
         id: setup
@@ -424,6 +450,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 

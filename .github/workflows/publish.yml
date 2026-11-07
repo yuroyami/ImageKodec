@@ -10,6 +10,9 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: read
+
 env:
   KOTLIN_CLI_NO_WELCOME_BANNER: 1
 
@@ -19,13 +22,12 @@ jobs:
   publish:
     name: Publish to Maven Central
     runs-on: macos-latest
-    env:
-      KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-      KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
+    # The secrets live on the two steps that publish, not on the job, so the setup and the
+    # API check, which download and run the toolchain, never see them.
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup
 
@@ -40,8 +42,16 @@ jobs:
 
       - name: Publish
         if: ${{ github.event_name == 'release' || !inputs.dry_run }}
+        env:
+          KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: ./kotlin publish mavenCentral -m imagekodec -m imagekodec-compose -m imagekodec-coil
 
       - name: Dry run (build and sign only)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        env:
+          KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: ./kotlin publish mavenLocal -m imagekodec -m imagekodec-compose -m imagekodec-coil
