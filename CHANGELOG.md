@@ -50,6 +50,10 @@ reviewable in the diff.
 - `probe` of an AVIF still reports the size of its AV1 frame, which is what `decode`
   gives, when the item's `ispe` says another size, and refuses an `ispe` past the
   pixel ceiling as it does a grid or an overlay (#124).
+- `decodeAnimation(colorTarget = Srgb())` of a still PNG, AVIF or JPEG XL deeper than
+  8 bits converts at the samples' own precision, as `decode` does, so the dark
+  tones of a 16-bit PNG with a steep `gAMA`, `iCCP` or `cICP` are no longer crushed
+  in `KiteImage` and the Coil decoder (#113).
 
 ## [0.3.0] - 2026-10-08
 

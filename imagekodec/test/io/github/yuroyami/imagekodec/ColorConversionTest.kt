@@ -334,6 +334,18 @@ class ColorConversionTest {
     }
 
     @Test
+    fun aDeepStillConvertsAtItsOwnPrecisionInTheAnimationPathToo() {
+        // A linear gAMA: a stored 255 of 65535 is sRGB 12, and 0 once cut to its high byte (#113).
+        val ramp = PngColorFiles.png(256, 1, 1, 16, IntArray(256) { it }, PngColorFiles.gama(100000))
+        val still = ImageKodec.decode(ramp, colorTarget = ColorTarget.Srgb())
+        assertEquals(0xFF0C0C0C.toInt(), still[255, 0])
+        for (n in listOf(1, Int.MAX_VALUE)) {
+            val frame = ImageKodec.decodeAnimation(ramp, maxFrames = n, colorTarget = ColorTarget.Srgb()).frames.single().bitmap
+            assertContentEquals(still.argb, frame.argb)
+        }
+    }
+
+    @Test
     fun cmykProfilesConvertAsLcms2ConvertsThem() {
         val intents = RenderingIntent.entries
         for ((name, icc, results) in listOf(

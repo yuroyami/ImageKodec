@@ -718,7 +718,14 @@ public object ImageKodec {
         cancellationCheck: (() -> Unit)? = null,
     ): KiteAnimation {
         require(maxFrames >= 1) { "maxFrames must be at least 1, was $maxFrames" }
-        val animation = when (detect(data)) {
+        val format = detect(data)
+        // A deep still in a format that can animate converts as decode converts it, at its own
+        // precision, so the two give the same pixels: narrowed first, a steep curve crushes the
+        // tones that only the low byte holds (#113).
+        val deepStill = colorTarget is ColorTarget.Srgb &&
+            (format == ImageFormat.PNG || format == ImageFormat.AVIF || format == ImageFormat.JXL) &&
+            probeOrNull(data)?.let { it.frameCount == 1 && it.bitDepth > 8 } == true
+        val animation = when (if (deepStill) null else format) {
             ImageFormat.GIF -> GifDecoder.decode(data, maxFrames, cancellationCheck)
             ImageFormat.PNG -> PngDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             ImageFormat.WEBP -> WebpDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
