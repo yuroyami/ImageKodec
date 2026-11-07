@@ -38,6 +38,9 @@ reviewable in the diff.
 - A PNG whose inflated rows cannot fit in one array, such as 16384 by 16384 RGBA at
   16 bits, is refused before inflate, and `probe` says so. The inflater grew its
   buffer with an `Int` that wrapped to 0 past 1 GiB and then looped for ever (#127).
+- A JBIG2 halftone region whose grid covers its region many times over is refused
+  before its gray planes decode, and each pattern draws only the part inside the
+  region. A 106-byte stream used to run for about an hour (#128).
 
 ## [0.3.0] - 2026-10-08
 

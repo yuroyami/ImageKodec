@@ -89,6 +89,12 @@ public object Jbig2Decoder {
      */
     private const val MAX_SYMBOL_SIDE = 10000
 
+    /** How many times over a halftone grid's patterns may cover its region (#128). */
+    private const val HALFTONE_COVER = 16L
+
+    /** The pattern pixels any halftone grid may draw, however small its region. */
+    private const val HALFTONE_SLACK = 1L shl 20
+
     private fun newCx() = IntArray(1 shl 16)
     private fun newIntCx() = IntArray(512)
 
@@ -459,9 +465,12 @@ public object Jbig2Decoder {
 
         /** Draw [src] into [dst] at (x0,y0) with a T.88 composition operator. */
         private fun drawInto(dst: Bitmap, src: Bitmap, x0: Int, y0: Int, op: Int) {
-            for (yy in 0 until src.h) for (xx in 0 until src.w) {
+            // Only the rows and columns that land inside dst, so a pattern far larger than
+            // the region costs the overlap, not its own area (#128).
+            val yFrom = maxOf(0, -y0); val yTo = minOf(src.h, dst.h - y0)
+            val xFrom = maxOf(0, -x0); val xTo = minOf(src.w, dst.w - x0)
+            for (yy in yFrom until yTo) for (xx in xFrom until xTo) {
                 val px = x0 + xx; val py = y0 + yy
-                if (px < 0 || px >= dst.w || py < 0 || py >= dst.h) continue
                 val v = src.get(xx, yy)
                 val cur = dst.get(px, py)
                 dst.set(px, py, when (op) { 0 -> cur or v; 1 -> cur and v; 2 -> cur xor v; 3 -> (cur xor v) xor 1; else -> v })
@@ -581,6 +590,15 @@ public object Jbig2Decoder {
             for (ref in s.refs) patternsBySegment[ref]?.let { pats.addAll(it) }
             if (pats.isEmpty() || hgw <= 0 || hgh <= 0 || hgw.toLong() * hgh > 1 shl 26) return
             val hpw = pats[0].w; val hph = pats[0].h
+            // A halftone tiles its region about once (C.5, 6.6.5.2). A grid whose cells cover
+            // it many times over is damaged, and its gray planes and draw loop would run for
+            // a time set by the grid, not by the input (#128).
+            // The region is weighed at most a few pages tall, as rowsShown weighs its width.
+            val regionArea = ri.w.toLong() * minOf(maxOf(0, ri.h).toLong(), 4L * outHeight + 1024)
+            val cellWork = hgw.toLong() * hgh * maxOf(1L, hpw.toLong() * hph)
+            if (cellWork > HALFTONE_COVER * regionArea + HALFTONE_SLACK) {
+                throw ImageDecodeException("JBIG2: a ${hgw}x$hgh halftone grid of ${hpw}x$hph patterns for a ${ri.w}x${ri.h} region")
+            }
 
             var hbpp = 1
             while (pats.size > (1 shl hbpp)) hbpp++
