@@ -44,6 +44,9 @@ reviewable in the diff.
 - `decodeAnimation(maxFrames = n)` of an APNG stops reading at the fcTL after
   frame `n`, as its KDoc says, so a damaged later frame no longer fails the first
   one, and a paused thumbnail no longer reads and copies the whole file (#114).
+- A gray JPEG 2000 image with an RGB ICC profile is left alone under
+  `ColorTarget.Srgb()`, as the same image in a PNG is. The JP2 probe did not say
+  whether the image decodes to gray or colour, so the profile was applied (#118).
 
 ## [0.3.0] - 2026-10-08
 

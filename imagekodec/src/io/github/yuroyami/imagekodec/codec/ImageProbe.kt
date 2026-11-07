@@ -568,12 +568,10 @@ internal object ImageProbe {
         if (w <= 0 || h <= 0 || w > Int.MAX_VALUE || h > Int.MAX_VALUE) r.fail("bad image size ${w}x$h")
         val reason = jp2Unsupported(data, stream, siz, r.end, grid.count, comps, w.toInt(), h.toInt())
             ?: Jp2Color.unsupported(boxes)
-        // The decoder's own reading of the header boxes says which channel, if any, is opacity.
-        val alpha = if (comps in 1..16 && Jp2Color.unsupported(boxes) == null) {
-            Jp2Color.plan(boxes, comps).alpha != null
-        } else {
-            boxes.definitions?.any { it.type == 1 || it.type == 2 } == true
-        }
+        // The decoder's own reading of the header boxes says which channel, if any, is opacity,
+        // and whether the image decodes to gray or colour.
+        val plan = if (comps in 1..16 && Jp2Color.unsupported(boxes) == null) Jp2Color.plan(boxes, comps) else null
+        val alpha = plan?.alpha != null || (plan == null && boxes.definitions?.any { it.type == 1 || it.type == 2 } == true)
         return ImageInfo(
             format = ImageFormat.JP2,
             width = w.toInt(),
@@ -587,7 +585,10 @@ internal object ImageProbe {
             unsupportedReason = reason,
             // The first colour specification is the one a reader uses (I.5.3.3).
             colorProfile = ColorChunks.profile(boxes.colors.firstOrNull()?.icc),
-        )
+        ).also { info ->
+            // So that a profile of the other space is ignored, as for every other format (#118).
+            if (plan != null) info.colorChannels = if (plan.space == Jp2Color.Space.GRAY) 1 else 3
+        }
     }
 
     /** Header parameters share the decoder's readers; packet bytes are skipped by Psot. */
