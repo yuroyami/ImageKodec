@@ -32,6 +32,9 @@ reviewable in the diff.
 - The Android ABI dumps (`api/android/`) are gone. The JVM dumps (`api/jvm/`) and the
   klib dumps (`api/*.klib.api`) still guard the public API.
 - The Android host tests now run the common test suite.
+- The jars of the three libraries carry `META-INF/LICENSE` and `META-INF/NOTICE`, so
+  an app that bundles them can pass on the notices that the ported code's licences
+  ask for (#115).
 
 ### Fixed
 

@@ -321,6 +321,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Each module's resources/META-INF carries LICENSE and NOTICE into its jar, for the
+      # licences of the ported code that ask for their notice in binary copies (#115).
+      - name: Check the notices that the jars carry
+        run: |
+          for m in imagekodec imagekodec-compose imagekodec-coil; do
+            cmp LICENSE "$m/resources/META-INF/LICENSE"
+            cmp NOTICE "$m/resources/META-INF/NOTICE"
+          done
+
       - uses: ./.github/actions/setup
 
       # `do` is a command of the kotlin script here, not the shell keyword.
