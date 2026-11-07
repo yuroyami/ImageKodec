@@ -12,6 +12,13 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+### Added
+
+- `ImageInfo.colorChannels` is public: 1 for gray, 3 for colour, 4 for CMYK or
+  YCCK, and 0 where a header cannot say. For JPEG 2000 it follows the colour boxes,
+  so a caller can learn whether an image decodes to gray or colour without
+  decoding it (#119).
+
 ### Changed
 
 - The build moves from Gradle to the Kotlin Toolchain 0.13 (`./kotlin`, with

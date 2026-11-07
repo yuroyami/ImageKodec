@@ -126,6 +126,8 @@ final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imag
 
     final val bitDepth // io.github.yuroyami.imagekodec/ImageInfo.bitDepth|{}bitDepth[0]
         final fun <get-bitDepth>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
+    final var colorChannels // io.github.yuroyami.imagekodec/ImageInfo.colorChannels|{}colorChannels[0]
+        final fun <get-colorChannels>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.colorChannels.<get-colorChannels>|<get-colorChannels>(){}[0]
     final val colorProfile // io.github.yuroyami.imagekodec/ImageInfo.colorProfile|{}colorProfile[0]
         final fun <get-colorProfile>(): io.github.yuroyami.imagekodec/ColorProfile? // io.github.yuroyami.imagekodec/ImageInfo.colorProfile.<get-colorProfile>|<get-colorProfile>(){}[0]
     final val displayHeight // io.github.yuroyami.imagekodec/ImageInfo.displayHeight|{}displayHeight[0]

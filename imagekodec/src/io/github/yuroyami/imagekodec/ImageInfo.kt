@@ -112,11 +112,17 @@ public class ImageInfo(
     public val isAnimated: Boolean get() = frameCount > 1
 
     /**
-     * The colour channels the file stores, before any palette or conversion: 1 for gray, 3 for
-     * RGB or YCbCr, 4 for CMYK or YCCK, and 0 where the probe does not say. A profile for
-     * another space does not fit the image and converts nothing.
+     * The colour channels the image decodes to, known from the header before any decode: 1 for
+     * gray, 3 for colour (RGB or YCbCr), 4 for CMYK or YCCK, whose ink a decode converts, and 0
+     * where the format cannot say from its header. A palette counts as the
+     * colours it holds. For a JPEG 2000 image it follows the colour boxes (`colr`, `pclr`,
+     * `cmap`, `cdef`, ITU-T T.800 I.5.3), so it agrees with what the decoder gives, and a
+     * renderer can fix an image's colour space when a page loads without decoding it (#119).
+     *
+     * A colour profile for another space than this does not fit the image and converts nothing.
      */
-    internal var colorChannels: Int = 0
+    public var colorChannels: Int = 0
+        internal set
 
     /** [width] after [orientation] is applied: what the user will actually see. */
     public val displayWidth: Int get() = if (orientation.swapsAxes) height else width

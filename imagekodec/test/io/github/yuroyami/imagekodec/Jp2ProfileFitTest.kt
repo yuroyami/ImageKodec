@@ -1,5 +1,6 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,5 +22,20 @@ class Jp2ProfileFitTest {
         assertEquals(0xFF808080.toInt(), ImageKodec.decode(png, colorTarget = ColorTarget.Srgb())[0, 0])
         assertEquals(0xFF808080.toInt(), ImageKodec.decode(grayJp2)[0, 0])
         assertEquals(0xFF808080.toInt(), ImageKodec.decode(grayJp2, colorTarget = ColorTarget.Srgb())[0, 0])
+    }
+
+    @Test
+    fun probeSaysWhetherAnImageDecodesToGrayOrColour() {
+        // The public count agrees with what the JPEG 2000 decoder gives (#119).
+        assertEquals(1, ImageKodec.probe(grayJp2).colorChannels)
+        assertEquals(1, ImageKodec.probe(Jp2ColorFixtures.iccGray).colorChannels)
+        for ((name, bytes) in Jp2ColorFixtures.converted) {
+            val expected = if (JpxDecoder.decodeForFacade(bytes, 1).colorSpace == "DeviceGray") 1 else 3
+            assertEquals(expected, ImageKodec.probe(bytes).colorChannels, name)
+        }
+        val gray = PngColorFiles.png(2, 2, 1, 8, IntArray(4) { 7 })
+        val rgb = PngColorFiles.png(2, 2, 3, 8, IntArray(12) { 7 })
+        assertEquals(1, ImageKodec.probe(gray).colorChannels)
+        assertEquals(3, ImageKodec.probe(rgb).colorChannels)
     }
 }

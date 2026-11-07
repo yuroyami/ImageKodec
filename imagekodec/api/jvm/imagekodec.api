@@ -65,6 +65,7 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 	public fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;ILio/github/yuroyami/imagekodec/ColorProfile;)V
 	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/ImageFormat;IIIZIJLio/github/yuroyami/imagekodec/Orientation;ZLjava/lang/String;ILio/github/yuroyami/imagekodec/ColorProfile;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getBitDepth ()I
+	public final fun getColorChannels ()I
 	public final fun getColorProfile ()Lio/github/yuroyami/imagekodec/ColorProfile;
 	public final fun getDisplayHeight ()I
 	public final fun getDisplayWidth ()I
