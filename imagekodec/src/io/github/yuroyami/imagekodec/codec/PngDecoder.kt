@@ -113,7 +113,7 @@ internal object PngDecoder {
      * longer matters.
      */
     fun decodeAnimation(data: ByteArray, maxFrames: Int = Int.MAX_VALUE, cancellationCheck: (() -> Unit)? = null): KiteAnimation {
-        val png = parse(data, wantAnimation = true)
+        val png = parse(data, wantAnimation = true, maxFrames = maxFrames)
 
         if (png.frames.isEmpty()) {
             val still = KiteBitmap(png.width, png.height, renderSubImage(png, png.width, png.height, png.idat))
@@ -196,7 +196,7 @@ internal object PngDecoder {
 
     // --- container parse --------------------------------------------------------
 
-    private fun parse(data: ByteArray, wantAnimation: Boolean): Png {
+    private fun parse(data: ByteArray, wantAnimation: Boolean, maxFrames: Int = Int.MAX_VALUE): Png {
         val r = ByteReader(data)
 
         // 8-byte signature: \x89 P N G \r \n \x1a \n (sniffed upstream, re-checked here
@@ -274,7 +274,10 @@ internal object PngDecoder {
             pendingData = ArrayList()
         }
 
-        while (!sawEnd) {
+        // Set when the parse stops at an fcTL once maxFrames frames are complete, so nothing
+        // after them is read, checked or copied (#114).
+        var stoppedEarly = false
+        parse@ while (!sawEnd) {
             chunk = readChunkHeader(r)
             when (chunk.type) {
                 "PLTE" -> {
@@ -320,12 +323,20 @@ internal object PngDecoder {
                     declaredFrames = n.toInt()
                 }
                 "fcTL" -> {
+                    if (wantAnimation) {
+                        flushPending()
+                        // The default image and maxFrames frames are complete, so the rest of the
+                        // file is not wanted, not even this chunk.
+                        if (frames.size >= maxFrames && idat.isNotEmpty()) {
+                            stoppedEarly = true
+                            break@parse
+                        }
+                    }
                     if (chunk.length != 26) throw ImageDecodeException("PNG: fcTL length ${chunk.length}")
                     val raw = r.bytes(26)
                     verifyCrc(r, "fcTL", raw)
                     if (!wantAnimation) continue
 
-                    flushPending()
                     val f = ByteReader(raw)
                     f.skip(4)                                  // sequence number: ordering is the chunk order
                     val fw = f.u32be().toInt()
@@ -401,7 +412,7 @@ internal object PngDecoder {
                 f.delayMillis, f.delayCentiseconds, f.disposeOp, f.blendOp, parts,
             )
         }
-        if (declaredFrames > 0 && resolved.isNotEmpty() && resolved.size != declaredFrames) {
+        if (!stoppedEarly && declaredFrames > 0 && resolved.isNotEmpty() && resolved.size != declaredFrames) {
             throw ImageDecodeException(
                 "APNG: acTL declares $declaredFrames frames, found ${resolved.size}",
             )

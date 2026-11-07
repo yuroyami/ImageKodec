@@ -41,6 +41,9 @@ reviewable in the diff.
 - A JBIG2 halftone region whose grid covers its region many times over is refused
   before its gray planes decode, and each pattern draws only the part inside the
   region. A 106-byte stream used to run for about an hour (#128).
+- `decodeAnimation(maxFrames = n)` of an APNG stops reading at the fcTL after
+  frame `n`, as its KDoc says, so a damaged later frame no longer fails the first
+  one, and a paused thumbnail no longer reads and copies the whole file (#114).
 
 ## [0.3.0] - 2026-10-08
 

@@ -123,6 +123,32 @@ class ApngDecoderTest {
     // --- tests ------------------------------------------------------------------
 
     @Test
+    fun aDamagedLaterFrameDoesNotFailTheFramesBeforeIt() {
+        // Three frames, the default image first. maxFrames stops the parse at the second
+        // fcTL, so a broken checksum or a cut inside a later fdAT is never read (#114).
+        val file = apng(2, 2, solid(2, 2, red), listOf(solid(2, 2, green), solid(2, 2, blue)), defaultIsFirstFrame = true)
+        val badCrc = file.copyOf().also { it[it.size - 12 - 1] = (it[it.size - 12 - 1].toInt() xor 1).toByte() }
+        assertFailsWith<ImageDecodeException> { ImageKodec.decodeAnimation(badCrc) }
+        val lastFdat = file.size - 12 - 4 - 10
+        val cut = file.copyOf(lastFdat)
+        for (damaged in listOf(badCrc, cut)) {
+            for (n in 1..2) {
+                val anim = ImageKodec.decodeAnimation(damaged, maxFrames = n)
+                assertEquals(n, anim.frames.size)
+                assertEquals(red, anim.frames[0].bitmap[0, 0])
+            }
+        }
+        assertEquals(green, ImageKodec.decodeAnimation(cut, maxFrames = 2).frames[1].bitmap[0, 0])
+    }
+
+    @Test
+    fun anIntactFileStillChecksItsFrameCountWhenEveryFrameIsRead() {
+        val file = apng(2, 2, solid(2, 2, red), listOf(solid(2, 2, green)), defaultIsFirstFrame = true, declaredFrames = 3)
+        assertFailsWith<ImageDecodeException> { ImageKodec.decodeAnimation(file) }
+        assertEquals(1, ImageKodec.decodeAnimation(file, maxFrames = 1).frames.size)
+    }
+
+    @Test
     fun plainPngIsASingleFrameAnimation() {
         val still = ImageKodec.encodePng(KiteBitmap(3, 2, IntArray(6) { red }))
         val anim = ImageKodec.decodeAnimation(still)
