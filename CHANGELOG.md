@@ -35,6 +35,8 @@ reviewable in the diff.
 - The jars of the three libraries carry `META-INF/LICENSE` and `META-INF/NOTICE`, so
   an app that bundles them can pass on the notices that the ported code's licences
   ask for (#115).
+- JPEG 2000 tier-1 decoding no longer allocates a `Triple` or a `Pair` for almost
+  every coefficient, which was about three quarters of a decode's allocation (#116).
 
 ### Fixed
 

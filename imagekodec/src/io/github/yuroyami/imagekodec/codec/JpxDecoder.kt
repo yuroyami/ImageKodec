@@ -1085,17 +1085,21 @@ public object JpxDecoder {
         }
     }
 
-    private fun T1.neighborSums(x: Int, y: Int): Triple<Int, Int, Int> {
+    /**
+     * The zero-coding table index `hh * 12 + vv * 4 + dd` of the neighbour significance sums,
+     * packed into one Int: a Triple per coefficient was most of a decode's garbage (#116).
+     */
+    private fun T1.neighborSums(x: Int, y: Int): Int {
         fun s(px: Int, py: Int) = if (px in 0 until w && py in 0 until h) sig[py * w + px] else 0
         val below = seesBelow(y)
         val hh = s(x - 1, y) + s(x + 1, y)
         val vv = s(x, y - 1) + (if (below) s(x, y + 1) else 0)
         val dd = s(x - 1, y - 1) + s(x + 1, y - 1) + (if (below) s(x - 1, y + 1) + s(x + 1, y + 1) else 0)
-        return Triple(min(hh, 2), min(vv, 2), min(dd, 3))
+        return min(hh, 2) * 12 + min(vv, 2) * 4 + min(dd, 3)
     }
 
-    /** Sign context (ctx 9..13) + XOR bit from the H/V neighbour signs. */
-    private fun T1.signContext(x: Int, y: Int): Pair<Int, Int> {
+    /** Sign context (ctx 9..13) shifted left once, or'd with the XOR bit, from the H/V neighbour signs. */
+    private fun T1.signContext(x: Int, y: Int): Int {
         fun c(px: Int, py: Int): Int {
             if (px !in 0 until w || py !in 0 until h) return 0
             if (sig[py * w + px] == 0) return 0
@@ -1104,15 +1108,15 @@ public object JpxDecoder {
         val hc = (c(x - 1, y) + c(x + 1, y)).coerceIn(-1, 1)
         val vc = (c(x, y - 1) + (if (seesBelow(y)) c(x, y + 1) else 0)).coerceIn(-1, 1)
         return when {
-            hc == 1 && vc == 1 -> 13 to 0
-            hc == 1 && vc == 0 -> 12 to 0
-            hc == 1 && vc == -1 -> 11 to 0
-            hc == 0 && vc == 1 -> 10 to 0
-            hc == 0 && vc == 0 -> 9 to 0
-            hc == 0 && vc == -1 -> 10 to 1
-            hc == -1 && vc == 1 -> 11 to 1
-            hc == -1 && vc == 0 -> 12 to 1
-            else -> 13 to 1
+            hc == 1 && vc == 1 -> 13 shl 1
+            hc == 1 && vc == 0 -> 12 shl 1
+            hc == 1 && vc == -1 -> 11 shl 1
+            hc == 0 && vc == 1 -> 10 shl 1
+            hc == 0 && vc == 0 -> 9 shl 1
+            hc == 0 && vc == -1 -> (10 shl 1) or 1
+            hc == -1 && vc == 1 -> (11 shl 1) or 1
+            hc == -1 && vc == 0 -> (12 shl 1) or 1
+            else -> (13 shl 1) or 1
         }
     }
 
@@ -1126,14 +1130,13 @@ public object JpxDecoder {
                     val i = y * w + x
                     t1.visited[i] = 0
                     if (t1.sig[i] != 0) continue
-                    val (hh, vv, dd) = t1.neighborSums(x, y)
-                    val ctx = zc[hh * 12 + vv * 4 + dd]
+                    val ctx = zc[t1.neighborSums(x, y)]
                     if (ctx == 0) continue
                     t1.visited[i] = 1
                     if ((raw?.bit() ?: mq!!.bit(cx, ctx)) == 1) {
                         val sbit = if (raw != null) raw.bit() else {
-                            val (sctx, xor) = t1.signContext(x, y)
-                            mq!!.bit(cx, sctx) xor xor
+                            val sc = t1.signContext(x, y)
+                            mq!!.bit(cx, sc shr 1) xor (sc and 1)
                         }
                         t1.sig[i] = 1
                         t1.sign[i] = sbit
@@ -1161,8 +1164,8 @@ public object JpxDecoder {
                         val ctx = when {
                             t1.refined[i] != 0 -> 16
                             else -> {
-                                val (hh, vv, dd) = t1.neighborSums(x, y)
-                                if (hh + vv + dd > 0) 15 else 14
+                                // Every sum is at least 0, so the index is 0 only when all are.
+                                if (t1.neighborSums(x, y) > 0) 15 else 14
                             }
                         }
                         mq!!.bit(cx, ctx)
@@ -1191,8 +1194,7 @@ public object JpxDecoder {
                     for (yy in y0 until y0 + 4) {
                         val i = yy * w + x
                         if (t1.sig[i] != 0 || t1.visited[i] != 0) { runMode = false; break }
-                        val (hh, vv, dd) = t1.neighborSums(x, yy)
-                        if (zc[hh * 12 + vv * 4 + dd] != 0) { runMode = false; break }
+                        if (zc[t1.neighborSums(x, yy)] != 0) { runMode = false; break }
                     }
                 }
                 if (runMode) {
@@ -1201,8 +1203,8 @@ public object JpxDecoder {
                     y = y0 + pos
                     // The first significant coefficient: sign only (the 1 is implied).
                     val i = y * w + x
-                    val (sctx, xor) = t1.signContext(x, y)
-                    val sbit = mq.bit(cx, sctx) xor xor
+                    val sc = t1.signContext(x, y)
+                    val sbit = mq.bit(cx, sc shr 1) xor (sc and 1)
                     t1.sig[i] = 1
                     t1.sign[i] = sbit
                     t1.mag[i] = 1 shl bp
@@ -1212,11 +1214,10 @@ public object JpxDecoder {
                 while (y < y0 + stripeH) {
                     val i = y * w + x
                     if (t1.sig[i] == 0 && t1.visited[i] == 0) {
-                        val (hh, vv, dd) = t1.neighborSums(x, y)
-                        val ctx = zc[hh * 12 + vv * 4 + dd]
+                        val ctx = zc[t1.neighborSums(x, y)]
                         if (mq.bit(cx, ctx) == 1) {
-                            val (sctx, xor) = t1.signContext(x, y)
-                            val sbit = mq.bit(cx, sctx) xor xor
+                            val sc = t1.signContext(x, y)
+                            val sbit = mq.bit(cx, sc shr 1) xor (sc and 1)
                             t1.sig[i] = 1
                             t1.sign[i] = sbit
                             t1.mag[i] = 1 shl bp
