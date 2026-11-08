@@ -117,6 +117,8 @@ internal object Inflate {
      * the output *would* grow past it, before allocating: the bomb guard runs
      * during decompression, not after.
      *
+     * [cancel] runs before each block, so an image decode can be stopped inside its inflate.
+     *
      * @throws InflateException with the faithful [InflateError] on malformed or
      *   truncated input: the same failure taxonomy puff returns numerically.
      */
@@ -125,11 +127,13 @@ internal object Inflate {
         offset: Int = 0,
         sizeHint: Int = 0,
         maxOutput: Long = Long.MAX_VALUE,
+        cancel: (() -> Unit)? = null,
     ): ByteArray {
         val s = State(input, offset, sizeHint, maxOutput)
         try {
             var last: Int
             do {
+                cancel?.invoke()
                 last = s.bits(1)            // one if last block
                 val type = s.bits(2)        // block type 0..3
                 val err = when (type) {

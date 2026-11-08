@@ -47,6 +47,8 @@ internal class JxlFrameDecoder(
     private val store: JxlFrameStore,
     private val data: ByteArray,
     private val limit: Int,
+    /** A caller's cancellation check, run before each LF group and each group (#123). */
+    private val cancel: (() -> Unit)? = null,
 ) {
     /** Reads the header of the frame at [at] and counts it, without its samples. Gives where the next frame starts. */
     fun skip(at: Int, preview: Boolean = false): Int {
@@ -108,6 +110,7 @@ internal class JxlFrameDecoder(
         modular.readGlobal(first)
 
         for (g in 0 until dim.numDcGroups) {
+            cancel?.invoke()
             val br = if (single) first else section(1 + g)
             if (vardct != null && !fh.usesLfFrame) vardct.readLfCoefficients(br, g)
             modular.readLfGroup(br, g)
@@ -120,6 +123,7 @@ internal class JxlFrameDecoder(
         for (pass in 0 until fh.numPasses) passBracket(fh, pass, shifts)
         val passGroups = 2 + dim.numDcGroups
         for (g in 0 until dim.numGroups) {
+            cancel?.invoke()
             val readers = Array(fh.numPasses) { if (single) first else section(passGroups + it * dim.numGroups + g) }
             vardct?.readGroup(readers, g)
             for (pass in 0 until fh.numPasses) {

@@ -87,9 +87,10 @@ internal object AvifDecoder {
         )
     }
 
-    fun decode(data: ByteArray): KiteBitmap = render(plan(data, probing = false), wide = false).bitmap
+    /** [cancel] runs once a row of superblocks of each AV1 picture the image is made of (#123). */
+    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap = render(plan(data, probing = false), wide = false, cancel).bitmap
 
-    fun decode16(data: ByteArray): KiteBitmap16 = render(plan(data, probing = false), wide = true).wide!!
+    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 = render(plan(data, probing = false), wide = true, cancel).wide!!
 
     /**
      * Every frame of an AV1 image sequence with its duration, or a still image as one frame. The
@@ -437,14 +438,14 @@ internal object AvifDecoder {
 
     private class Rendered(val bitmap: KiteBitmap, val wide: KiteBitmap16?)
 
-    private fun render(p: Plan, wide: Boolean): Rendered {
+    private fun render(p: Plan, wide: Boolean, cancel: (() -> Unit)? = null): Rendered {
         p.unsupported?.let { throw UnsupportedImageException(it) }
         val c = p.c
         val out = if (p.item?.type == IOVL) {
-            overlay(c, p.item)
+            overlay(c, p.item, cancel)
         } else {
-            val color = if (p.track != null) trackPlanes(c, p.track) else planes(c, p.item!!, 0)
-            val alpha = if (p.alphaTrack != null) trackPlanes(c, p.alphaTrack) else p.alphaItem?.let { planes(c, it, 0) }
+            val color = if (p.track != null) trackPlanes(c, p.track, cancel) else planes(c, p.item!!, 0, cancel)
+            val alpha = if (p.alphaTrack != null) trackPlanes(c, p.alphaTrack, cancel) else p.alphaItem?.let { planes(c, it, 0, cancel) }
             convert(color, alpha, p.premultiplied, p.cicp ?: AvifCicp(2, 2, 2, color.fullRange), wide)
         }
         val crop = p.crop?.takeIf { it[0] + it[2] <= out.bitmap.width && it[1] + it[3] <= out.bitmap.height } ?: return out
@@ -486,18 +487,18 @@ internal object AvifDecoder {
         return KiteBitmap16(w, h, ch, out)
     }
 
-    private fun trackPlanes(c: AvifContainer, track: AvifTrack): AvifPlanes {
+    private fun trackPlanes(c: AvifContainer, track: AvifTrack, cancel: (() -> Unit)? = null): AvifPlanes {
         val config = track.properties.firstOrNull { it is AvifProperty.Av1Config } as AvifProperty.Av1Config?
-        return av1(config?.configObus, c.sampleData(track, 0), 0, 0xFFFF)
+        return av1(config?.configObus, c.sampleData(track, 0), 0, 0xFFFF, cancel)
     }
 
-    private fun av1(config: ByteArray?, data: ByteArray, operatingPoint: Int, layer: Int): AvifPlanes {
-        val pic = Av1Decoder(operatingPoint).decodeStill(config, data, layer)
+    private fun av1(config: ByteArray?, data: ByteArray, operatingPoint: Int, layer: Int, cancel: (() -> Unit)? = null): AvifPlanes {
+        val pic = Av1Decoder(operatingPoint).also { it.cancel = cancel }.decodeStill(config, data, layer)
         return AvifPlanes(pic.width, pic.height, pic.bitDepth, pic.subX, pic.subY, pic.planes, pic.strides, pic.seq.colorRange)
     }
 
     /** The YUV or gray planes of [item], before conversion to RGB. */
-    private fun planes(c: AvifContainer, item: AvifItem, depth: Int): AvifPlanes {
+    private fun planes(c: AvifContainer, item: AvifItem, depth: Int, cancel: (() -> Unit)? = null): AvifPlanes {
         if (depth > MAX_DEPTH) throw UnsupportedImageException("AVIF derived images nested more than $MAX_DEPTH deep")
         return when (item.type) {
             AV01 -> {
@@ -506,20 +507,21 @@ internal object AvifDecoder {
                     config.configObus, c.itemData(item),
                     item.property<AvifProperty.OperatingPoint>()?.index ?: 0,
                     item.property<AvifProperty.LayerSelector>()?.layer ?: 0xFFFF,
+                    cancel,
                 )
             }
             GRID -> {
                 val tiles = inputs(c, item)
-                AvifGrid.assemble(AvifGrid.read(c.itemData(item)), tiles.size) { planes(c, tiles[it], depth + 1) }
+                AvifGrid.assemble(AvifGrid.read(c.itemData(item)), tiles.size) { planes(c, tiles[it], depth + 1, cancel) }
             }
             SATO -> {
-                val sources = inputs(c, item).map { planes(c, it, depth + 1) }
+                val sources = inputs(c, item).map { planes(c, it, depth + 1, cancel) }
                 val bits = item.property<AvifProperty.PixelInfo>()?.depths?.firstOrNull()
                     ?: throw ImageDecodeException("AVIF: sample transform item ${item.id} has no 'pixi'")
                 val full = item.property<AvifProperty.Nclx>()?.fullRange ?: sources.first().fullRange
                 AvifSampleTransform.apply(c.itemData(item), sources, bits, full)
             }
-            TMAP -> planes(c, base(c, item, depth), depth + 1)
+            TMAP -> planes(c, base(c, item, depth), depth + 1, cancel)
             else -> throw UnsupportedImageException("AVIF item of type '${fourccName(item.type)}'")
         }
     }
@@ -529,7 +531,7 @@ internal object AvifDecoder {
      * order, over what is under it. The inputs are converted to RGB with their own colour
      * properties first, so this works in 16 bits and narrows once.
      */
-    private fun overlay(c: AvifContainer, item: AvifItem): Rendered {
+    private fun overlay(c: AvifContainer, item: AvifItem, cancel: (() -> Unit)? = null): Rendered {
         val sources = inputs(c, item)
         val ov = AvifOverlay.read(c.itemData(item), sources.size)
         val w = ov.width
@@ -540,8 +542,8 @@ internal object AvifDecoder {
             val shown = base(c, source, 0)
             val alpha = alphaOf(c, shown)
             val premultiplied = alpha != null && alpha.id in c.referencesFrom(shown.id, PREM)
-            val color = planes(c, shown, 1)
-            val rendered = convert(color, alpha?.let { planes(c, it, 1) }, premultiplied, itemCicp(c, shown, 0) ?: AvifCicp(2, 2, 2, color.fullRange), wide = true)
+            val color = planes(c, shown, 1, cancel)
+            val rendered = convert(color, alpha?.let { planes(c, it, 1, cancel) }, premultiplied, itemCicp(c, shown, 0) ?: AvifCicp(2, 2, 2, color.fullRange), wide = true)
             val src = rendered.wide!!
             val (ox, oy) = ov.offsets[index]
             for (y in 0 until src.height) {

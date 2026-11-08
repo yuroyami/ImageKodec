@@ -247,6 +247,9 @@ internal object JpegDecoder {
     private class State(val input: ByteArray) {
         var pos = 0
 
+        /** The caller's cancellation check, run once a row of MCUs and every 32 output rows (#123). */
+        var cancel: (() -> Unit)? = null
+
         val huffDc = Array(4) { Huffman() }
         val huffAc = Array(4) { Huffman() }
         val dequant = arrayOfNulls<IntArray>(4)
@@ -1479,6 +1482,7 @@ internal object JpegDecoder {
             val w = (comp.x + 7) shr 3
             val h = (comp.y + 7) shr 3
             for (jj in 0 until h) {
+                j.cancel?.invoke()
                 for (i in 0 until w) {
                     // Without a restart interval nothing can follow the end of the data.
                     val live = !starved(j)
@@ -1497,6 +1501,7 @@ internal object JpegDecoder {
         } else {
             // interleaved MCUs
             for (jj in 0 until j.mcuY) {
+                j.cancel?.invoke()
                 for (i in 0 until j.mcuX) {
                     val live = !starved(j)
                     if (!live && j.restartInterval == 0) return
@@ -1532,6 +1537,7 @@ internal object JpegDecoder {
             val w = (comp.x + 7) shr 3
             val h = (comp.y + 7) shr 3
             for (jj in 0 until h) {
+                j.cancel?.invoke()
                 for (i in 0 until w) {
                     // A block inside an EOB run reads no Huffman code, so it can be live with no data left.
                     val live = !starved(j) || j.eobRun > 0
@@ -1554,6 +1560,7 @@ internal object JpegDecoder {
         } else {
             // interleaved progressive scans carry DC only
             for (jj in 0 until j.mcuY) {
+                j.cancel?.invoke()
                 for (i in 0 until j.mcuX) {
                     val live = !starved(j)
                     if (!live && j.restartInterval == 0) return
@@ -1592,6 +1599,7 @@ internal object JpegDecoder {
             val w = (comp.x + 7) shr 3
             val h = (comp.y + 7) shr 3
             for (jj in 0 until h) {
+                j.cancel?.invoke()
                 for (i in 0 until w) {
                     val ofs = 64 * (i + jj * comp.coeffW)
                     for (k in 0 until 64) {   // stbi__jpeg_dequantize
@@ -1867,6 +1875,7 @@ internal object JpegDecoder {
             val w = (comp.x + 7) shr 3
             val h = (comp.y + 7) shr 3
             for (by in 0 until h) {
+                j.cancel?.invoke()
                 for (bx in 0 until w) {
                     arithBlock(j, comp, bx, by, data, tmp)
                     if (!arithRestart(j)) return
@@ -1874,6 +1883,7 @@ internal object JpegDecoder {
             }
         } else {
             for (my in 0 until j.mcuY) {
+                j.cancel?.invoke()
                 for (mx in 0 until j.mcuX) {
                     for (k in 0 until j.scanN) {
                         val comp = j.comp[j.order[k]]
@@ -1990,6 +2000,7 @@ internal object JpegDecoder {
         // The data ended early, at a marker that is not the restart due: the rest decodes as zeros.
         var ended = false
         for (my in 0 until down) {
+            j.cancel?.invoke()
             for (mx in 0 until across) {
                 for (k in 0 until j.scanN) {
                     val comp = j.comp[j.order[k]]
@@ -2170,6 +2181,7 @@ internal object JpegDecoder {
         }
         val rows = Array(j.imgN) { res[it].out }
         for (row in 0 until j.imgY) {
+            if ((row and 31) == 0) j.cancel?.invoke()
             for (r in res) wideRow(r)
             emit(row, rows)
         }
@@ -2407,8 +2419,8 @@ internal object JpegDecoder {
      * up, as libjpeg's scaled decode gives it: the IDCT itself shrinks, so the full-size image
      * never exists. [scale] is 0 to 3.
      */
-    fun decode(input: ByteArray, scale: Int = 0): KiteBitmap {
-        val j = decodeFrame(input, scale)
+    fun decode(input: ByteArray, scale: Int = 0, cancel: (() -> Unit)? = null): KiteBitmap {
+        val j = decodeFrame(input, scale, cancel)
         // A lossless frame has no DCT to shrink inside, so its reduced decode averages the pixels.
         return (if (wide(j)) wideBitmap(j).toBitmap() else bitmap(j)).reducedBy(1 shl j.reduceAfter)
     }
@@ -2417,8 +2429,8 @@ internal object JpegDecoder {
      * Decodes [input] at 16 bits a sample: every bit of a lossless frame deeper than 8, gray as one
      * channel, and an 8-bit frame as [decode] gives it, widened to RGB.
      */
-    fun decode16(input: ByteArray): KiteBitmap16 {
-        val j = decodeFrame(input, 0)
+    fun decode16(input: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 {
+        val j = decodeFrame(input, 0, cancel)
         return if (wide(j)) wideBitmap(j) else KiteBitmap16.widened(bitmap(j), alpha = false)
     }
 
@@ -2428,8 +2440,8 @@ internal object JpegDecoder {
      * each sample, and YCCK's YCbCr becomes the ink of cyan, magenta and yellow directly (libjpeg's
      * ycck_cmyk_convert, inverted back), with black stored as CMYK's.
      */
-    fun decodeInk(input: ByteArray, scale: Int = 0): Ink? {
-        val decoded = decodeComponents(input, scale)
+    fun decodeInk(input: ByteArray, scale: Int = 0, cancel: (() -> Unit)? = null): Ink? {
+        val decoded = decodeComponents(input, scale, cancel)
         val model = decoded.model
         if (model != ColorModel.CMYK && model != ColorModel.YCCK) return null
         val c = decoded.components
@@ -2462,12 +2474,12 @@ internal object JpegDecoder {
     }
 
     /** [decodeInk] at 16 bits, every bit of a deep frame kept as [decode16] keeps it. */
-    fun decodeInk16(input: ByteArray): Ink? {
-        val j = decodeFrame(input, 0)
+    fun decodeInk16(input: ByteArray, cancel: (() -> Unit)? = null): Ink? {
+        val j = decodeFrame(input, 0, cancel)
         val model = colorModel(j)
         if (model != ColorModel.CMYK && model != ColorModel.YCCK) return null
         if (!wide(j)) {
-            val narrow = decodeInk(input) ?: return null
+            val narrow = decodeInk(input, cancel = cancel) ?: return null
             val narrowInk = narrow.ink!!
             return Ink(narrow.width, narrow.height, ink16 = ShortArray(narrowInk.size) { ((narrowInk[it].toInt() and 0xFF) * 257).toShort() })
         }
@@ -2506,8 +2518,8 @@ internal object JpegDecoder {
      * The samples of [input] after the IDCT and the upsampling that [decode] runs, before its
      * color conversion: every component of the frame, in the frame header's order, interleaved.
      */
-    fun decodeComponents(input: ByteArray, scale: Int = 0): Components {
-        val j = decodeFrame(input, scale)
+    fun decodeComponents(input: ByteArray, scale: Int = 0, cancel: (() -> Unit)? = null): Components {
+        val j = decodeFrame(input, scale, cancel)
         val n = j.imgN
         if (wide(j) || j.reduceAfter > 0) return Components(losslessComponents(j), colorModel(j))
         val outX = outSize(j.imgX, scale)
@@ -2587,8 +2599,8 @@ internal object JpegDecoder {
      * against luma sampled 2 by 2 comes back at half the size each way. The planes run on
      * to whole MCUs, so they hold at least the samples the image needs.
      */
-    fun decodePlanes(input: ByteArray): Planes {
-        val j = decodeFrame(input, 0)
+    fun decodePlanes(input: ByteArray, cancel: (() -> Unit)? = null): Planes {
+        val j = decodeFrame(input, 0, cancel)
         val planes = List(j.imgN) { k ->
             val c = j.comp[k]
             val data = if (wide(j)) ByteArray(c.samples!!.size) { to8(c.samples!![it].toInt() and 0xFFFF, j.precision).toByte() } else c.data
@@ -2629,9 +2641,10 @@ internal object JpegDecoder {
 
     // stbi__decode_jpeg_header and stbi__decode_jpeg_image: every scan entropy-decoded and through
     // the IDCT, each component's plane at its own reduction.
-    private fun decodeFrame(input: ByteArray, scale: Int): State {
+    private fun decodeFrame(input: ByteArray, scale: Int, cancel: (() -> Unit)? = null): State {
         require(scale in 0..3) { "scale must be 0 to 3, was $scale" }
         val j = State(input)
+        j.cancel = cancel
 
         // stbi__decode_jpeg_header: SOI, then markers until SOF
         if (j.u8() != 0xFF || j.u8() != 0xD8) err("no SOI")
@@ -2924,6 +2937,7 @@ internal object JpegDecoder {
         val arrays = arrayOfNulls<ByteArray>(4)
         val offsets = IntArray(4)
         for (row in 0 until outY) {
+            if ((row and 31) == 0) j.cancel?.invoke()
             for (k in res.indices) {
                 resampleRow(res[k])
                 arrays[k] = res[k].outArr

@@ -1,5 +1,6 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.imagekodec.internal.cancellable
 import io.github.yuroyami.imagekodec.codec.BmpDecoder
 import io.github.yuroyami.imagekodec.codec.BmpEncoder
 import io.github.yuroyami.imagekodec.codec.GifDecoder
@@ -97,13 +98,27 @@ public object ImageKodec {
      * With [colorTarget] [ColorTarget.Srgb] the colours are converted to sRGB through the
      * file's embedded profile, as a browser draws them; by default they come back as stored.
      *
+     * [cancellationCheck], when given, runs at a coarse step of the decode and may throw to stop a
+     * decode whose result no longer matters; what it throws comes out of this call as it is. It
+     * runs once a row of MCUs of a JPEG, every 64 rows and every DEFLATE block of a PNG, before
+     * each strip or tile of a TIFF, each tile and code block of a JPEG 2000 image, each row of
+     * superblocks of an AVIF and each group of a JPEG XL frame; the other formats check it once
+     * before they start.
+     *
      * @throws ImageDecodeException on malformed/truncated input or unknown format
      * @throws UnsupportedImageException on formats recognised but not yet decodable
      *   (see [ImageFormat]: sniffing is deliberately wider than decoding)
      */
     @Throws(ImageDecodeException::class)
-    public fun decode(data: ByteArray, applyOrientation: Boolean = false, colorTarget: ColorTarget = ColorTarget.Source): KiteBitmap {
-        val bitmap = inColor(data, 0, colorTarget) { decodeRaw(data) }
+    public fun decode(
+        data: ByteArray,
+        applyOrientation: Boolean = false,
+        colorTarget: ColorTarget = ColorTarget.Source,
+        cancellationCheck: (() -> Unit)? = null,
+    ): KiteBitmap = cancellable(cancellationCheck) { cancel -> decodeWith(data, applyOrientation, colorTarget, cancel) }
+
+    private fun decodeWith(data: ByteArray, applyOrientation: Boolean, colorTarget: ColorTarget, cancel: (() -> Unit)?): KiteBitmap {
+        val bitmap = inColor(data, 0, colorTarget, cancel = cancel) { decodeRaw(data, cancel) }
         if (!applyOrientation) return bitmap
         val orientation = probeOrNull(data)?.orientation ?: Orientation.Normal
         return bitmap.oriented(orientation)
@@ -130,15 +145,20 @@ public object ImageKodec {
         page: Int,
         applyOrientation: Boolean = false,
         colorTarget: ColorTarget = ColorTarget.Source,
-    ): KiteBitmap {
+        cancellationCheck: (() -> Unit)? = null,
+    ): KiteBitmap = cancellable(cancellationCheck) { cancel ->
         require(page >= 0) { "page must not be negative, was $page" }
         val format = detect(data)
         if (format != ImageFormat.TIFF) {
             // Data that is no image fails as decode fails, whatever the page.
-            if (format == null || page == 0) return decode(data, applyOrientation, colorTarget)
+            if (format == null || page == 0) return@cancellable decodeWith(data, applyOrientation, colorTarget, cancel)
             throw IllegalArgumentException("page $page asked of a one-page $format image")
         }
-        val bitmap = inColor(data, page, colorTarget) { TiffDecoder.decode(data, page) }
+        tiffPage(data, page, applyOrientation, colorTarget, cancel)
+    }
+
+    private fun tiffPage(data: ByteArray, page: Int, applyOrientation: Boolean, colorTarget: ColorTarget, cancel: (() -> Unit)?): KiteBitmap {
+        val bitmap = inColor(data, page, colorTarget, cancel = cancel) { TiffDecoder.decode(data, page, cancel) }
         if (!applyOrientation) return bitmap
         val orientation = try {
             ImageProbe.tiff(data, page).orientation
@@ -166,7 +186,7 @@ public object ImageKodec {
      *
      * [page] counts from 0, as for [decodePage]. With [applyOrientation] the page's
      * orientation tag is honoured, as [decode] does. [colorTarget] converts as for [decode],
-     * at full precision.
+     * at full precision, and [cancellationCheck] runs as for [decode].
      *
      * @throws ImageDecodeException on malformed/truncated input or unknown format
      * @throws UnsupportedImageException on formats or features recognised but not yet decodable
@@ -178,7 +198,10 @@ public object ImageKodec {
         page: Int = 0,
         applyOrientation: Boolean = false,
         colorTarget: ColorTarget = ColorTarget.Source,
-    ): KiteBitmap16 {
+        cancellationCheck: (() -> Unit)? = null,
+    ): KiteBitmap16 = cancellable(cancellationCheck) { cancel -> decode16With(data, page, applyOrientation, colorTarget, cancel) }
+
+    private fun decode16With(data: ByteArray, page: Int, applyOrientation: Boolean, colorTarget: ColorTarget, cancel: (() -> Unit)?): KiteBitmap16 {
         require(page >= 0) { "page must not be negative, was $page" }
         val format = detect(data)
         if (format != ImageFormat.TIFF && format != null && page != 0) {
@@ -187,18 +210,18 @@ public object ImageKodec {
         when (format) {
             ImageFormat.TIFF, ImageFormat.PNG, ImageFormat.JP2, ImageFormat.AVIF, ImageFormat.JPEG, ImageFormat.JXL -> {}
             // A BMP that holds a PNG keeps that PNG's precision.
-            ImageFormat.BMP -> return BmpDecoder.embedded(data)?.let { decode16(it, 0, applyOrientation, colorTarget) }
-                ?: widened(data, applyOrientation, colorTarget)
-            else -> return widened(data, applyOrientation, colorTarget)
+            ImageFormat.BMP -> return BmpDecoder.embedded(data)?.let { decode16With(it, 0, applyOrientation, colorTarget, cancel) }
+                ?: widened(data, applyOrientation, colorTarget, cancel)
+            else -> return widened(data, applyOrientation, colorTarget, cancel)
         }
-        val wide = inColor16(data, page, colorTarget) {
+        val wide = inColor16(data, page, colorTarget, cancel) {
             when (format) {
-                ImageFormat.TIFF -> TiffDecoder.decode16(data, page)
-                ImageFormat.PNG -> PngDecoder.decode16(data)
-                ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data)
-                ImageFormat.AVIF -> AvifDecoder.decode16(data)
-                ImageFormat.JXL -> JxlDecoder.decode16(data)
-                else -> JpegDecoder.decode16(data)
+                ImageFormat.TIFF -> TiffDecoder.decode16(data, page, cancel)
+                ImageFormat.PNG -> PngDecoder.decode16(data, cancel)
+                ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data, cancel)
+                ImageFormat.AVIF -> AvifDecoder.decode16(data, cancel)
+                ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
+                else -> JpegDecoder.decode16(data, cancel)
             }
         }
         if (!applyOrientation) return wide
@@ -211,8 +234,8 @@ public object ImageKodec {
     }
 
     /** [decode], widened to 16 bits a sample, with alpha when the file declares it. */
-    private fun widened(data: ByteArray, applyOrientation: Boolean, colorTarget: ColorTarget): KiteBitmap16 {
-        val bitmap = decode(data, applyOrientation, colorTarget)
+    private fun widened(data: ByteArray, applyOrientation: Boolean, colorTarget: ColorTarget, cancel: (() -> Unit)?): KiteBitmap16 {
+        val bitmap = decodeWith(data, applyOrientation, colorTarget, cancel)
         val alpha = probeOrNull(data)?.hasAlpha ?: bitmap.hasTransparency()
         return KiteBitmap16.widened(bitmap, alpha)
     }
@@ -229,28 +252,34 @@ public object ImageKodec {
      * array reduces as that JPEG does. A JPEG 2000 image drops its finest
      * wavelet levels, as OpenJPEG's reduce option does. Other formats decode in full, then
      * average each block of [reduction] by [reduction] pixels, weighted by alpha as [scaled]
-     * does. [colorTarget] converts as for [decode], after the reduction.
+     * does. [colorTarget] converts as for [decode], after the reduction, and [cancellationCheck]
+     * runs as for [decode].
      *
      * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
      * @throws ImageDecodeException on malformed/truncated input or unknown format
      * @throws UnsupportedImageException on formats recognised but not yet decodable
      */
     @Throws(ImageDecodeException::class, IllegalArgumentException::class)
-    public fun decodeReduced(data: ByteArray, reduction: Int, colorTarget: ColorTarget = ColorTarget.Source): KiteBitmap {
+    public fun decodeReduced(
+        data: ByteArray,
+        reduction: Int,
+        colorTarget: ColorTarget = ColorTarget.Source,
+        cancellationCheck: (() -> Unit)? = null,
+    ): KiteBitmap {
         require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
             "reduction must be 1, 2, 4 or 8, was $reduction"
         }
-        return inColor(data, 0, colorTarget, reduction) { reducedRaw(data, reduction) }
+        return cancellable(cancellationCheck) { cancel -> inColor(data, 0, colorTarget, reduction, cancel) { reducedRaw(data, reduction, cancel) } }
     }
 
-    private fun reducedRaw(data: ByteArray, reduction: Int): KiteBitmap {
-        if (reduction == 1) return decodeRaw(data)
+    private fun reducedRaw(data: ByteArray, reduction: Int, cancel: (() -> Unit)?): KiteBitmap {
+        if (reduction == 1) return decodeRaw(data, cancel)
         return when (detect(data)) {
-            ImageFormat.JPEG -> JpegDecoder.decode(data, scale = reduction.countTrailingZeroBits())
-            ImageFormat.JP2 -> jp2ToBitmap(data, reduction)
+            ImageFormat.JPEG -> JpegDecoder.decode(data, scale = reduction.countTrailingZeroBits(), cancel = cancel)
+            ImageFormat.JP2 -> jp2ToBitmap(data, reduction, cancel)
             // A BMP that holds a JPEG reduces inside that JPEG's inverse DCT.
-            ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { reducedRaw(it, reduction) } ?: decodeRaw(data).reducedBy(reduction)
-            else -> decodeRaw(data).reducedBy(reduction)
+            ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { reducedRaw(it, reduction, cancel) } ?: decodeRaw(data, cancel).reducedBy(reduction)
+            else -> decodeRaw(data, cancel).reducedBy(reduction)
         }
     }
 
@@ -264,7 +293,8 @@ public object ImageKodec {
      * still covers that size, as libjpeg's scaled decode or Android's sample size is chosen, and
      * the box filter of [scaled] finishes the rest. The full-size pixels never exist, and the
      * result differs from the full decode only by the reduced inverse transform. Other formats
-     * decode in full and filter once. [colorTarget] converts as for [decode].
+     * decode in full and filter once. [colorTarget] converts as for [decode], and
+     * [cancellationCheck] runs as for [decode].
      *
      * @throws IllegalArgumentException if [maxWidth] or [maxHeight] is not positive
      * @throws ImageDecodeException on malformed/truncated input or unknown format
@@ -277,14 +307,17 @@ public object ImageKodec {
         maxHeight: Int,
         applyOrientation: Boolean = false,
         colorTarget: ColorTarget = ColorTarget.Source,
+        cancellationCheck: (() -> Unit)? = null,
     ): KiteBitmap {
         require(maxWidth > 0 && maxHeight > 0) { "target must be positive: ${maxWidth}x$maxHeight" }
-        if (!reducesWhileDecoding(data)) return decode(data, applyOrientation, colorTarget).scaled(maxWidth, maxHeight)
-        val info = probe(data)
-        val width = if (applyOrientation) info.displayWidth else info.width
-        val height = if (applyOrientation) info.displayHeight else info.height
-        val (dw, dh) = fittedSize(width, height, maxWidth, maxHeight) ?: return decode(data, applyOrientation, colorTarget)
-        return reducedTo(data, info, dw, dh, applyOrientation, colorTarget)
+        return cancellable(cancellationCheck) { cancel ->
+            if (!reducesWhileDecoding(data)) return@cancellable decodeWith(data, applyOrientation, colorTarget, cancel).scaled(maxWidth, maxHeight)
+            val info = probe(data)
+            val width = if (applyOrientation) info.displayWidth else info.width
+            val height = if (applyOrientation) info.displayHeight else info.height
+            val (dw, dh) = fittedSize(width, height, maxWidth, maxHeight) ?: return@cancellable decodeWith(data, applyOrientation, colorTarget, cancel)
+            reducedTo(data, info, dw, dh, applyOrientation, colorTarget, cancel)
+        }
     }
 
     /**
@@ -292,7 +325,8 @@ public object ImageKodec {
      * `decode(data, applyOrientation).downscaledTo(width, height)` gives. The caller chooses the
      * aspect ratio: use it for the size of a centre crop, computed from [probe], or for a size a
      * layout has already worked out. It reduces a JPEG or JPEG 2000 while decoding as
-     * [decodeScaled] does. [colorTarget] converts as for [decode].
+     * [decodeScaled] does. [colorTarget] converts as for [decode], and [cancellationCheck] runs
+     * as for [decode].
      *
      * @throws IllegalArgumentException if [width] or [height] is not positive or exceeds the side of
      *   the image it applies to, after the orientation when [applyOrientation] is set
@@ -306,10 +340,13 @@ public object ImageKodec {
         height: Int,
         applyOrientation: Boolean = false,
         colorTarget: ColorTarget = ColorTarget.Source,
+        cancellationCheck: (() -> Unit)? = null,
     ): KiteBitmap {
         require(width > 0 && height > 0) { "target must be positive: ${width}x$height" }
-        if (!reducesWhileDecoding(data)) return decode(data, applyOrientation, colorTarget).downscaledTo(width, height)
-        return reducedTo(data, probe(data), width, height, applyOrientation, colorTarget)
+        return cancellable(cancellationCheck) { cancel ->
+            if (!reducesWhileDecoding(data)) return@cancellable decodeWith(data, applyOrientation, colorTarget, cancel).downscaledTo(width, height)
+            reducedTo(data, probe(data), width, height, applyOrientation, colorTarget, cancel)
+        }
     }
 
     private fun ceilDiv(side: Int, reduction: Int): Int = ((side.toLong() + reduction - 1) / reduction).toInt()
@@ -333,6 +370,7 @@ public object ImageKodec {
         height: Int,
         applyOrientation: Boolean,
         colorTarget: ColorTarget,
+        cancel: (() -> Unit)?,
     ): KiteBitmap {
         val orientation = if (applyOrientation) info.orientation else Orientation.Normal
         // The reduction divides the stored sides, so compare them with the target before the orientation.
@@ -342,9 +380,9 @@ public object ImageKodec {
         while (reduction > 1 && (ceilDiv(info.width, reduction) < storedWidth || ceilDiv(info.height, reduction) < storedHeight)) {
             reduction /= 2
         }
-        var bitmap = inColor(data, 0, colorTarget, reduction) { reducedRaw(data, reduction) }
+        var bitmap = inColor(data, 0, colorTarget, reduction, cancel) { reducedRaw(data, reduction, cancel) }
         // A header that disagrees with its data must not make the result smaller than asked for.
-        if (bitmap.width < storedWidth || bitmap.height < storedHeight) bitmap = inColor(data, 0, colorTarget) { decodeRaw(data) }
+        if (bitmap.width < storedWidth || bitmap.height < storedHeight) bitmap = inColor(data, 0, colorTarget, cancel = cancel) { decodeRaw(data, cancel) }
         return bitmap.oriented(orientation).downscaledTo(width, height)
     }
 
@@ -357,18 +395,21 @@ public object ImageKodec {
      * [reduction] works as in [decodeReduced]: 1, 2, 4 or 8, each side divided by it and rounded
      * up, inside the inverse DCT. The decode and the upsampling are those of [decodeReduced], so
      * its color conversion of these samples gives its pixels exactly, and a file it refuses is
-     * refused here with the same exception. It costs about one [decodeReduced].
+     * refused here with the same exception. It costs about one [decodeReduced]. [cancellationCheck]
+     * runs as for [decode], once a row of MCUs.
      *
      * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
      * @throws ImageDecodeException on malformed or truncated input, or input that is not a JPEG
      * @throws UnsupportedImageException on a JPEG feature this decoder does not implement
      */
     @Throws(ImageDecodeException::class, IllegalArgumentException::class)
-    public fun decodeJpegComponents(data: ByteArray, reduction: Int = 1): JpegComponents {
+    public fun decodeJpegComponents(data: ByteArray, reduction: Int = 1, cancellationCheck: (() -> Unit)? = null): JpegComponents {
         require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
             "reduction must be 1, 2, 4 or 8, was $reduction"
         }
-        return JpegDecoder.decodeComponents(data, scale = reduction.countTrailingZeroBits()).components
+        return cancellable(cancellationCheck) { cancel ->
+            JpegDecoder.decodeComponents(data, scale = reduction.countTrailingZeroBits(), cancel = cancel).components
+        }
     }
 
     /**
@@ -460,10 +501,10 @@ public object ImageKodec {
      * divided by [reduction], or null when the page holds no ink this reads: a CMYK or YCCK
      * JPEG, alone or in a BMP, or a CMYK TIFF.
      */
-    private fun inkOf(data: ByteArray, page: Int, reduction: Int, wide: Boolean): Ink? = when (detect(data)) {
-        ImageFormat.JPEG -> if (wide) JpegDecoder.decodeInk16(data) else JpegDecoder.decodeInk(data, scale = reduction.countTrailingZeroBits())
-        ImageFormat.TIFF -> TiffDecoder.decodeInk(data, page, wide)?.let { if (wide) it else it.reducedBy(reduction) }
-        ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { inkOf(it, 0, reduction, wide) }
+    private fun inkOf(data: ByteArray, page: Int, reduction: Int, wide: Boolean, cancel: (() -> Unit)?): Ink? = when (detect(data)) {
+        ImageFormat.JPEG -> if (wide) JpegDecoder.decodeInk16(data, cancel) else JpegDecoder.decodeInk(data, scale = reduction.countTrailingZeroBits(), cancel = cancel)
+        ImageFormat.TIFF -> TiffDecoder.decodeInk(data, page, wide, cancel)?.let { if (wide) it else it.reducedBy(reduction) }
+        ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { inkOf(it, 0, reduction, wide, cancel) }
         else -> null
     }
 
@@ -472,35 +513,42 @@ public object ImageKodec {
      * [reduction], converted as [colorTarget] asks: a CMYK page through its ink, anything else
      * after [raw].
      */
-    private inline fun inColor(data: ByteArray, page: Int, colorTarget: ColorTarget, reduction: Int = 1, raw: () -> KiteBitmap): KiteBitmap {
+    private inline fun inColor(
+        data: ByteArray,
+        page: Int,
+        colorTarget: ColorTarget,
+        reduction: Int = 1,
+        noinline cancel: (() -> Unit)? = null,
+        raw: () -> KiteBitmap,
+    ): KiteBitmap {
         val conversion = conversion(data, page, colorTarget) ?: return raw()
         val converter = conversion.converter
-        if (converter.channels == 4) return inkOf(data, page, reduction, wide = false)?.let { converter.convertInk(it) } ?: raw()
+        if (converter.channels == 4) return inkOf(data, page, reduction, wide = false, cancel)?.let { converter.convertInk(it) } ?: raw()
         // Samples deeper than 8 bits convert at their own precision and narrow after, so a steep
         // curve, PQ's above all, does not stretch the steps of their high byte into bands.
         if (reduction == 1 && conversion.bitDepth > 8) {
-            raw16(data, page)?.let { wide -> applied(converter, wide)?.let { return it.toBitmap() } }
+            raw16(data, page, cancel)?.let { wide -> applied(converter, wide)?.let { return it.toBitmap() } }
         }
         val bitmap = raw()
         return applied(converter, bitmap) ?: bitmap
     }
 
     /** Page [page] of [data] at 16 bits, as [decode16] reads it before any conversion, or null for a format it widens. */
-    private fun raw16(data: ByteArray, page: Int): KiteBitmap16? = when (detect(data)) {
-        ImageFormat.TIFF -> TiffDecoder.decode16(data, page)
-        ImageFormat.PNG -> PngDecoder.decode16(data)
-        ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data)
-        ImageFormat.AVIF -> AvifDecoder.decode16(data)
-        ImageFormat.JPEG -> JpegDecoder.decode16(data)
-        ImageFormat.JXL -> JxlDecoder.decode16(data)
-        ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { raw16(it, 0) }
+    private fun raw16(data: ByteArray, page: Int, cancel: (() -> Unit)?): KiteBitmap16? = when (detect(data)) {
+        ImageFormat.TIFF -> TiffDecoder.decode16(data, page, cancel)
+        ImageFormat.PNG -> PngDecoder.decode16(data, cancel)
+        ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data, cancel)
+        ImageFormat.AVIF -> AvifDecoder.decode16(data, cancel)
+        ImageFormat.JPEG -> JpegDecoder.decode16(data, cancel)
+        ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
+        ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { raw16(it, 0, cancel) }
         else -> null
     }
 
     /** [inColor] at 16 bits a sample. */
-    private inline fun inColor16(data: ByteArray, page: Int, colorTarget: ColorTarget, raw: () -> KiteBitmap16): KiteBitmap16 {
+    private inline fun inColor16(data: ByteArray, page: Int, colorTarget: ColorTarget, noinline cancel: (() -> Unit)?, raw: () -> KiteBitmap16): KiteBitmap16 {
         val converter = conversion(data, page, colorTarget)?.converter ?: return raw()
-        if (converter.channels == 4) return inkOf(data, page, 1, wide = true)?.let { converter.convertInk16(it) } ?: raw()
+        if (converter.channels == 4) return inkOf(data, page, 1, wide = true, cancel)?.let { converter.convertInk16(it) } ?: raw()
         val bitmap = raw()
         return applied(converter, bitmap) ?: bitmap
     }
@@ -523,16 +571,25 @@ public object ImageKodec {
         return Conversion(converter, info.bitDepth)
     }
 
-    private fun decodeRaw(data: ByteArray): KiteBitmap = when (detect(data)) {
-        ImageFormat.PNG -> PngDecoder.decode(data)
-        ImageFormat.BMP -> BmpDecoder.decode(data)
-        ImageFormat.GIF -> GifDecoder.decode(data, maxFrames = 1).frames.first().bitmap
-        ImageFormat.JPEG -> JpegDecoder.decode(data)
-        ImageFormat.JP2 -> jp2ToBitmap(data)
-        ImageFormat.WEBP -> WebpDecoder.decode(data)
-        ImageFormat.TIFF -> TiffDecoder.decode(data)
-        ImageFormat.AVIF -> AvifDecoder.decode(data)
-        ImageFormat.JXL -> JxlDecoder.decode(data)
+    private fun decodeRaw(data: ByteArray, cancel: (() -> Unit)?): KiteBitmap = when (detect(data)) {
+        ImageFormat.PNG -> PngDecoder.decode(data, cancel)
+        ImageFormat.BMP -> {
+            cancel?.invoke()
+            BmpDecoder.decode(data)
+        }
+        ImageFormat.GIF -> {
+            cancel?.invoke()
+            GifDecoder.decode(data, maxFrames = 1).frames.first().bitmap
+        }
+        ImageFormat.JPEG -> JpegDecoder.decode(data, cancel = cancel)
+        ImageFormat.JP2 -> jp2ToBitmap(data, cancel = cancel)
+        ImageFormat.WEBP -> {
+            cancel?.invoke()
+            WebpDecoder.decode(data)
+        }
+        ImageFormat.TIFF -> TiffDecoder.decode(data, cancel = cancel)
+        ImageFormat.AVIF -> AvifDecoder.decode(data, cancel)
+        ImageFormat.JXL -> JxlDecoder.decode(data, cancel)
         null -> throw ImageDecodeException(
             "unrecognised image format (${data.size} bytes${
                 if (data.size >= 4) {
@@ -667,8 +724,8 @@ public object ImageKodec {
         GifEncoder.encode(animation, dither)
 
     /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored), each side divided by [reduction]. */
-    private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1): KiteBitmap {
-        val r = JpxDecoder.decodeForFacade(data, reduction)
+    private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1, cancel: (() -> Unit)? = null): KiteBitmap {
+        val r = JpxDecoder.decodeForFacade(data, reduction, cancel)
         val n = if (r.colorSpace == "DeviceRGB") 3 else 1
         val argb = IntArray(r.width * r.height)
         for (i in argb.indices) {

@@ -76,9 +76,9 @@ internal object PngDecoder {
 
     // --- public entry points ----------------------------------------------------
 
-    fun decode(data: ByteArray): KiteBitmap {
+    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap {
         val png = parse(data, wantAnimation = false)
-        return KiteBitmap(png.width, png.height, renderSubImage(png, png.width, png.height, png.idat))
+        return KiteBitmap(png.width, png.height, renderSubImage(png, png.width, png.height, png.idat, cancel))
     }
 
     /**
@@ -87,7 +87,7 @@ internal object PngDecoder {
      * adding an alpha channel. Narrower samples replicate up, as [decode] replicates
      * them to 8 bits, so its narrowing to the high byte gives exactly [decode]'s pixels.
      */
-    fun decode16(data: ByteArray): KiteBitmap16 {
+    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 {
         val png = parse(data, wantAnimation = false)
         val channels = when (png.colorType) {
             0 -> if (png.trnsGray >= 0) 2 else 1
@@ -97,7 +97,7 @@ internal object PngDecoder {
             else -> 4
         }
         val samples = ShortArray(png.width * png.height * channels)
-        unpack(png, png.width, png.height, png.idat) { d, base, w, h, rowBytes, dst ->
+        unpack(png, png.width, png.height, png.idat, cancel) { d, base, w, h, rowBytes, dst ->
             expand16(png, d, base, w, h, rowBytes, samples, channels, dst)
         }
         return KiteBitmap16(png.width, png.height, channels, samples)
@@ -477,22 +477,24 @@ internal object PngDecoder {
      * single APNG frame. Every frame shares the file's bit depth, colour type,
      * palette and interlace method; only the dimensions and the data differ.
      */
-    private fun renderSubImage(png: Png, width: Int, height: Int, parts: List<ByteArray>): IntArray {
+    private fun renderSubImage(png: Png, width: Int, height: Int, parts: List<ByteArray>, cancel: (() -> Unit)? = null): IntArray {
         val argb = IntArray(width * height)
-        unpack(png, width, height, parts) { d, base, w, h, rowBytes, dst -> expand(png, d, base, w, h, rowBytes, argb, dst) }
+        unpack(png, width, height, parts, cancel) { d, base, w, h, rowBytes, dst -> expand(png, d, base, w, h, rowBytes, argb, dst) }
         return argb
     }
 
     /**
      * Inflates and unfilters [parts], handing [region] each unfiltered region with the
      * mapping from its coordinates to final pixel indices: the whole image once, or each
-     * Adam7 pass with its scatter.
+     * Adam7 pass with its scatter. [cancel] runs before each inflate block and every 64
+     * unfiltered rows (#123).
      */
     private fun unpack(
         png: Png,
         width: Int,
         height: Int,
         parts: List<ByteArray>,
+        cancel: (() -> Unit)?,
         region: (d: ByteArray, base: Int, width: Int, height: Int, rowBytes: Int, dst: (x: Int, y: Int) -> Int) -> Unit,
     ) {
         val compressed = concat(parts)
@@ -514,7 +516,7 @@ internal object PngDecoder {
         }
         if (expected > MAX_ARRAY) throw ImageDecodeException("PNG: $expected inflated bytes do not fit in one array")
         val inflated = try {
-            Zlib.decompress(compressed, maximumSize = expected)
+            Zlib.decompress(compressed, maximumSize = expected, cancel = cancel)
         } catch (e: InflateException) {
             throw ImageDecodeException("PNG: IDAT inflate failed: ${e.message}", e)
         }
@@ -528,7 +530,7 @@ internal object PngDecoder {
 
         if (png.interlace == 0) {
             val rowBytes = rowBytesFor(width)
-            unfilter(inflated, 0, height, rowBytes, fUnit)
+            unfilter(inflated, 0, height, rowBytes, fUnit, cancel)
             region(inflated, 0, width, height, rowBytes) { x, y -> y * width + x }
         } else {
             // Adam7: each pass unfilters + expands independently, scattering its
@@ -539,7 +541,7 @@ internal object PngDecoder {
                 val hp = passHeight(height, p)
                 if (wp == 0 || hp == 0) continue
                 val rb = rowBytesFor(wp)
-                unfilter(inflated, ofs, hp, rb, fUnit)
+                unfilter(inflated, ofs, hp, rb, fUnit, cancel)
                 val x0 = PASS_X_START[p]; val xs = PASS_X_STEP[p]
                 val y0 = PASS_Y_START[p]; val ys = PASS_Y_STEP[p]
                 region(inflated, ofs, wp, hp, rb) { x, y -> (y0 + y * ys) * width + (x0 + x * xs) }
@@ -617,8 +619,9 @@ internal object PngDecoder {
      * `1 + rowBytes`, first byte = filter type. After this runs, the filter bytes
      * are stale and the sample bytes are raw.
      */
-    private fun unfilter(d: ByteArray, base: Int, height: Int, rowBytes: Int, fUnit: Int) {
+    private fun unfilter(d: ByteArray, base: Int, height: Int, rowBytes: Int, fUnit: Int, cancel: (() -> Unit)?) {
         for (y in 0 until height) {
+            if ((y and 63) == 0) cancel?.invoke()
             val rowStart = base + y * (1 + rowBytes) + 1
             val prevStart = rowStart - (1 + rowBytes)
             val filter = d[rowStart - 1].toInt() and 0xFF

@@ -47,6 +47,7 @@ internal object Zlib {
         input: ByteArray,
         maximumSize: Long,
         sizeHint: Int = if (maximumSize <= Int.MAX_VALUE) maximumSize.toInt() else 0,
+        cancel: (() -> Unit)? = null,
     ): ByteArray {
         require(maximumSize > 0) { "maximumSize must be > 0" }
         if (input.size < 2) throw InflateException(InflateError.INVALID_ZLIB_HEADER)
@@ -64,6 +65,7 @@ internal object Zlib {
             offset = 2,
             sizeHint = sizeHint,
             maxOutput = maximumSize,
+            cancel = cancel,
         )
     }
 }

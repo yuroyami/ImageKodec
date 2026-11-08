@@ -1,5 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.imagekodec.internal.DecodeCancelled
+import io.github.yuroyami.imagekodec.internal.cancellable
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Reader as R
@@ -41,23 +43,40 @@ public object JpxDecoder {
         public val alpha: ByteArray?,
     )
 
-    public fun decode(data: ByteArray): Result? = runCatching { decodeOrThrow(data, 0) }.getOrNull()
+    /**
+     * Decode [data] at full size, or null when it is damaged or uses a feature this decoder lacks.
+     *
+     * [cancellationCheck], when given, runs before each tile and each code block and may throw to
+     * stop a decode whose result no longer matters; what it throws comes out of this call as it is.
+     */
+    public fun decode(data: ByteArray, cancellationCheck: (() -> Unit)? = null): Result? =
+        cancellable(cancellationCheck) { cancel -> orNull { decodeOrThrow(data, 0, cancel) } }
+
+    /** [block], or null for any failure but a cancellation, which goes on to the caller. */
+    private inline fun <T> orNull(block: () -> T): T? = try {
+        block()
+    } catch (e: DecodeCancelled) {
+        throw e
+    } catch (_: Throwable) {
+        null
+    }
 
     /**
      * Decode [data] with each side divided by [reduction], rounded up: 1, 2, 4 or 8. The decoder
      * drops the finest wavelet levels, as OpenJPEG's reduce option does, so the full-size samples
      * never exist. Each output sample is the low-pass value at every [reduction]-th sample of the
      * image, not the mean of a block. When a component has fewer levels than that, the decoder
-     * drops the levels it has and averages blocks of the result for the rest.
+     * drops the levels it has and averages blocks of the result for the rest. [cancellationCheck]
+     * runs as for the full decode.
      *
      * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
      */
     @Throws(IllegalArgumentException::class)
-    public fun decode(data: ByteArray, reduction: Int): Result? {
+    public fun decode(data: ByteArray, reduction: Int, cancellationCheck: (() -> Unit)? = null): Result? {
         require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
             "reduction must be 1, 2, 4 or 8, was $reduction"
         }
-        return runCatching { decodeOrThrow(data, reduction.countTrailingZeroBits()) }.getOrNull()
+        return cancellable(cancellationCheck) { cancel -> orNull { decodeOrThrow(data, reduction.countTrailingZeroBits(), cancel) } }
     }
 
     /**
@@ -68,8 +87,8 @@ public object JpxDecoder {
     internal fun decodeChecked(data: ByteArray, reduction: Int): Result = decodeOrThrow(data, reduction.countTrailingZeroBits())
 
     /** Preserve diagnostic failures for the facade without changing the nullable public API. */
-    internal fun decodeForFacade(data: ByteArray, reduction: Int): Result = try {
-        decodeOrThrow(data, reduction.countTrailingZeroBits())
+    internal fun decodeForFacade(data: ByteArray, reduction: Int, cancel: (() -> Unit)? = null): Result = try {
+        decodeOrThrow(data, reduction.countTrailingZeroBits(), cancel)
     } catch (e: ImageDecodeException) {
         throw e
     } catch (e: Exception) {
@@ -299,8 +318,8 @@ public object JpxDecoder {
     // ---- main decode -----------------------------------------------------------
 
     /** The decode with the [levels] finest wavelet levels dropped, as far as every component has them. */
-    private fun decodeOrThrow(data: ByteArray, levels: Int): Result {
-        val rec = reconstruct(data, levels)
+    private fun decodeOrThrow(data: ByteArray, levels: Int, cancel: (() -> Unit)? = null): Result {
+        val rec = reconstruct(data, levels, cancel)
         val out = assemble(rec, wide = false).result()
         return if (rec.drop < levels) out.averaged(1 shl (levels - rec.drop)) else out
     }
@@ -310,8 +329,8 @@ public object JpxDecoder {
      * in the channels the color stage gives, gray or RGB, then the opacity channel when there is
      * one. A damaged codestream or a missing feature throws [ImageDecodeException], as for the facade.
      */
-    internal fun decode16ForFacade(data: ByteArray): KiteBitmap16 = try {
-        assemble(reconstruct(data, 0), wide = true).wide()
+    internal fun decode16ForFacade(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 = try {
+        assemble(reconstruct(data, 0, cancel), wide = true).wide()
     } catch (e: ImageDecodeException) {
         throw e
     } catch (e: Exception) {
@@ -327,7 +346,8 @@ public object JpxDecoder {
     )
 
     /** Tier-2, tier-1, the inverse wavelet and the component transform of every tile, into one plane per component. */
-    private fun reconstruct(data: ByteArray, levels: Int): Reconstruction {
+    /** [cancel] runs before each tile and each code block (#123). */
+    private fun reconstruct(data: ByteArray, levels: Int, cancel: (() -> Unit)? = null): Reconstruction {
         val jp2 = parseContainer(data)
         val cs = jp2.codestream
         val r = R(cs, 0)
@@ -511,9 +531,10 @@ public object JpxDecoder {
             fun quantFor(c: Int): Quant = tileQcc[t]?.get(c) ?: tileQcd[t] ?: mainQcc[c] ?: qcd0
             fun roiFor(c: Int): Int = tileRoi[t]?.get(c) ?: mainRoi[c] ?: 0
 
+            cancel?.invoke()
             decodeTile(
                 s, t, TileStream(body, packed[t], tilePoc[t] ?: mainPoc), ::codFor, ::quantFor, ::roiFor, cod,
-                Planes(planes, planeW, planeH, planeX0, planeY0, drop),
+                Planes(planes, planeW, planeH, planeX0, planeY0, drop), cancel,
             )
         }
 
@@ -598,7 +619,7 @@ public object JpxDecoder {
     private fun decodeTile(
         s: Siz, t: Int, stream: TileStream,
         codFor: (Int) -> Cod, quantFor: (Int) -> Quant, roiFor: (Int) -> Int, tileCod: Cod,
-        out: Planes,
+        out: Planes, cancel: (() -> Unit)?,
     ) {
         val ti = t % s.tilesW
         val tj = t / s.tilesW
@@ -691,7 +712,7 @@ public object JpxDecoder {
         readPackets(stream, comps, tileCod, s, tx0, ty0)
 
         // Tier-1 + dequant + IDWT per component, tile-local and before any shift.
-        val samples = comps.map { decodeTileComp(s, it, out.r) }
+        val samples = comps.map { decodeTileComp(s, it, out.r, cancel) }
 
         // Multiple-component transform on the tile area, then round, shift and clamp into the planes.
         val rounded = arrayOfNulls<IntArray>(comps.size)
@@ -1254,7 +1275,7 @@ public object JpxDecoder {
         fun fixedPoint(): LongArray = fixed ?: ints!!.let { v -> LongArray(v.size) { v[it].toLong() shl FRACT } }
     }
 
-    private fun decodeTileComp(s: Siz, tc: TileComp, drop: Int): TileSamples {
+    private fun decodeTileComp(s: Siz, tc: TileComp, drop: Int, cancel: (() -> Unit)?): TileSamples {
         val cod = tc.cod
         // The resolution that this decode stops at: the full one, or [drop] levels below it.
         val top = cod.decompositions - drop
@@ -1265,7 +1286,10 @@ public object JpxDecoder {
                 val mb = band.guardBits + band.stepExp - 1
                 for (precinct in band.precincts) {
                     for (cb in precinct.blocks) {
-                        if (cb != null) decodeCodeBlock(cb, band, cod, mb, tc.roiShift)
+                        if (cb != null) {
+                            cancel?.invoke()
+                            decodeCodeBlock(cb, band, cod, mb, tc.roiShift)
+                        }
                     }
                 }
             }

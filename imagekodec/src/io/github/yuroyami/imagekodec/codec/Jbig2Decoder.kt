@@ -3,6 +3,8 @@ package io.github.yuroyami.imagekodec.codec
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
+import io.github.yuroyami.imagekodec.internal.DecodeCancelled
+import io.github.yuroyami.imagekodec.internal.cancellable
 
 
 /**
@@ -32,18 +34,35 @@ public object Jbig2Decoder {
      * Returns null when the stream is damaged or uses a feature this decoder lacks, and when [width] or
      * [height] is not positive or the page would pass 2^28 pixels. The input size says little about the
      * page, because a blank scanned page takes a few dozen bytes, so only the pixel ceiling applies.
+     *
+     * [cancellationCheck], when given, runs before each segment and every 64 rows of a generic region,
+     * and may throw to stop a decode whose result no longer matters; what it throws comes out of this
+     * call as it is.
      */
-    public fun decode(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? =
-        runCatching { decodeChecked(data, globals, width, height) }.getOrNull()
+    public fun decode(
+        data: ByteArray,
+        globals: ByteArray?,
+        width: Int,
+        height: Int,
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray? = cancellable(cancellationCheck) { cancel ->
+        try {
+            decodeChecked(data, globals, width, height, cancel)
+        } catch (e: DecodeCancelled) {
+            throw e
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     /**
      * [decode] without its catch-all: a damaged stream or a missing feature throws
      * [ImageDecodeException], and anything else is a fault that escapes, so a test can tell the two
      * apart (#102). [decode] keeps returning null for both.
      */
-    internal fun decodeChecked(data: ByteArray, globals: ByteArray?, width: Int, height: Int): ByteArray? {
+    internal fun decodeChecked(data: ByteArray, globals: ByteArray?, width: Int, height: Int, cancel: (() -> Unit)? = null): ByteArray? {
         if (width < 1 || height < 1 || width.toLong() * height > Budget.MAX_PIXELS) return null
-        return Ctx().decodeEmbedded(data, globals, width, height)
+        return Ctx(cancel).decodeEmbedded(data, globals, width, height)
     }
 
     // The MQ arithmetic decoder (T.88 Annex E) lives in the shared [MqDecoder],
@@ -254,11 +273,12 @@ public object Jbig2Decoder {
     /** Generic region decoding (6.2.5.7), arithmetic, templates 0-3 with TPGDON and SKIP. */
     private fun decodeGeneric(
         mq: MqDecoder, cx: IntArray, w: Int, h: Int, template: Int, at: Array<Point>, tpgdon: Boolean,
-        skip: Bitmap? = null,
+        skip: Bitmap? = null, cancel: (() -> Unit)? = null,
     ): Bitmap {
         val bmp = Bitmap(w, h)
         var ltp = 0
         for (y in 0 until h) {
+            if ((y and 63) == 0) cancel?.invoke()
             if (tpgdon) {
                 val ctxTp = when (template) { 0 -> 0x9B25; 1 -> 0x0795; 2 -> 0x00E5; else -> 0x0195 }
                 ltp = ltp xor mq.bit(cx, ctxTp)
@@ -358,7 +378,8 @@ public object Jbig2Decoder {
         val data: ByteArray, val start: Int, val end: Int,
     )
 
-    private class Ctx {
+    /** [cancel] runs before each segment, and every 64 rows of a generic region (#123). */
+    private class Ctx(private val cancel: (() -> Unit)? = null) {
         private val symbolsBySegment = HashMap<Long, List<Bitmap>>()
         private val patternsBySegment = HashMap<Long, List<Bitmap>>()
         private val tablesBySegment = HashMap<Long, HuffTable>()
@@ -387,6 +408,7 @@ public object Jbig2Decoder {
         }
 
         private fun processSegment(s: Segment) {
+            cancel?.invoke()
             when (s.type) {
                 0 -> symbolsBySegment[s.number] = decodeSymbolDict(s)
                 4, 6, 7 -> decodeTextRegionSeg(s)
@@ -496,7 +518,7 @@ public object Jbig2Decoder {
             }
             val at = readAt(r, template)
             val mq = MqDecoder(s.data, r.pos, s.end)
-            val bmp = decodeGeneric(mq, newCx(), ri.w, rowsShown(ri), template, at, tpgdon == 1)
+            val bmp = decodeGeneric(mq, newCx(), ri.w, rowsShown(ri), template, at, tpgdon == 1, cancel = cancel)
             blit(bmp, ri)
         }
 

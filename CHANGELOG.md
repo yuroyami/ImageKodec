@@ -18,6 +18,16 @@ reviewable in the diff.
   YCCK, and 0 where a header cannot say. For JPEG 2000 it follows the colour boxes,
   so a caller can learn whether an image decodes to gray or colour without
   decoding it (#119).
+- The still decodes take a `cancellationCheck`, as `decodeAnimation` does:
+  `decode`, `decodePage`, `decode16`, `decodeReduced`, `decodeScaled`,
+  `decodeDownscaledTo`, `decodeJpegComponents`, `JpxDecoder.decode` and
+  `Jbig2Decoder.decode`. It runs once a row of MCUs of a JPEG, every 64 rows and
+  every DEFLATE block of a PNG, before each strip or tile of a TIFF, each tile and
+  code block of a JPEG 2000 image, each segment and every 64 rows of a JBIG2 generic
+  region, each row of superblocks of an AVIF and each group of a JPEG XL frame, and
+  what it throws comes out of the call unchanged, through the catch of `JpxDecoder`
+  and `Jbig2Decoder` too. The parameter is new on these JVM signatures, so code built
+  against 0.3.0 that calls them must be rebuilt (#123).
 
 ### Changed
 

@@ -128,16 +128,16 @@ internal object TiffDecoder {
     }
 
     /** Decodes page [page], counting from 0. */
-    fun decode(data: ByteArray, page: Int = 0): KiteBitmap = read(data, page).argb()
+    fun decode(data: ByteArray, page: Int = 0, cancel: (() -> Unit)? = null): KiteBitmap = read(data, page, cancel).argb()
 
     /** Decodes page [page] at 16 bits a sample, in the channels it stores. */
-    fun decode16(data: ByteArray, page: Int = 0): KiteBitmap16 = read(data, page).wide()
+    fun decode16(data: ByteArray, page: Int = 0, cancel: (() -> Unit)? = null): KiteBitmap16 = read(data, page, cancel).wide()
 
     /**
      * The ink of page [page] when it is CMYK, at 16 bits with [wide] and else at 8, for
      * conversion through its profile; null for any other photometric interpretation.
      */
-    fun decodeInk(data: ByteArray, page: Int = 0, wide: Boolean = false): Ink? = read(data, page).ink(wide)
+    fun decodeInk(data: ByteArray, page: Int = 0, wide: Boolean = false, cancel: (() -> Unit)? = null): Ink? = read(data, page, cancel).ink(wide)
 
     /** A page whose samples are read and ready to convert, at 8 or at 16 bits a channel. */
     private interface Raster {
@@ -146,7 +146,8 @@ internal object TiffDecoder {
         fun ink(wide: Boolean): Ink?
     }
 
-    private fun read(data: ByteArray, page: Int): Raster {
+    /** [cancel] runs before each strip or tile, the coarse step of a TIFF decode (#123). */
+    private fun read(data: ByteArray, page: Int, cancel: (() -> Unit)? = null): Raster {
         val r = reader(data)
         val le = r.le
         val chain = pages(data, limit = page + 1)
@@ -394,6 +395,7 @@ internal object TiffDecoder {
 
         /** Decompress block [index], which is expected to hold [expect] bytes. */
         fun block(index: Int, expect: Int, rows: Int, columns: Int): ByteArray {
+            cancel?.invoke()
             if (index >= offsets.size) err("block $index beyond the ${offsets.size} declared")
             val ofs = offsets[index].toInt()
             if (ofs < 0 || ofs > data.size) err("block $index offset out of range")
@@ -405,7 +407,7 @@ internal object TiffDecoder {
             }
             val len = minOf(counts[index], (data.size - ofs).toLong()).toInt()
             // libtiff never reverses the bits of a JPEG stream, whatever FillOrder says.
-            if (jpeg) return jpegBlock(index, data.copyOfRange(ofs, ofs + len), jpegTables, rows, columns, samplesPerPlane, jpegRgb)
+            if (jpeg) return jpegBlock(index, data.copyOfRange(ofs, ofs + len), jpegTables, rows, columns, samplesPerPlane, jpegRgb, cancel)
             val comp = normalizeFillOrder(data.copyOfRange(ofs, ofs + len), fillOrder)
             fun fax(k: Int, byteAligned: Boolean, endOfLine: Boolean = false): ByteArray {
                 if (bits != 1 || spp != 1) err("CCITT requires one bilevel sample")
@@ -414,7 +416,7 @@ internal object TiffDecoder {
             val decoded = when (compression) {
                 5 -> tiffLzw(comp, expect)
                 8, 32946 -> try {
-                    Zlib.decompress(comp, expect.toLong())
+                    Zlib.decompress(comp, expect.toLong(), cancel = cancel)
                 } catch (e: InflateException) {
                     throw ImageDecodeException("TIFF: strip inflate failed: ${e.message}", e)
                 }
@@ -776,6 +778,7 @@ internal object TiffDecoder {
         columns: Int,
         samples: Int,
         ycbcr: Boolean,
+        cancel: (() -> Unit)?,
     ): ByteArray {
         val stream = if (tables == null) block else {
             val head = if (tables.size >= 4 && marker(tables, tables.size - 2) == 0xD9) tables.size - 2 else tables.size
@@ -783,7 +786,7 @@ internal object TiffDecoder {
             tables.copyOf(head) + block.copyOfRange(skip, block.size)
         }
         val decoded = try {
-            JpegDecoder.decodeComponents(stream)
+            JpegDecoder.decodeComponents(stream, cancel = cancel)
         } catch (e: UnsupportedImageException) {
             throw UnsupportedImageException("TIFF: JPEG block $index: ${e.message}", e)
         } catch (e: ImageDecodeException) {

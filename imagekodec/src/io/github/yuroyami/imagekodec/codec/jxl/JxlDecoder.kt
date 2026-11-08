@@ -77,11 +77,11 @@ internal object JxlDecoder {
         ).also { it.colorChannels = if (h.color.isGray) 1 else 3 }
     }
 
-    /** The first frame a viewer shows, as 8-bit ARGB. */
-    fun decode(data: ByteArray): KiteBitmap {
+    /** The first frame a viewer shows, as 8-bit ARGB. [cancel] runs before each group of each frame (#123). */
+    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap {
         val s = open(data)
         var out: KiteBitmap? = null
-        frames(s) { color, extra, _ ->
+        frames(s, cancel) { color, extra, _ ->
             out = toBitmap(s.header, color, extra)
             false
         }
@@ -89,10 +89,10 @@ internal object JxlDecoder {
     }
 
     /** The first frame a viewer shows, with every bit the file stores, up to 16 a sample. */
-    fun decode16(data: ByteArray): KiteBitmap16 {
+    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 {
         val s = open(data)
         var out: KiteBitmap16? = null
-        frames(s) { color, extra, _ ->
+        frames(s, cancel) { color, extra, _ ->
             out = toBitmap16(s.header, color, extra)
             false
         }
@@ -109,7 +109,7 @@ internal object JxlDecoder {
             jxlFail("$count frames of ${h.width} by ${h.height} pass the pixel ceiling")
         }
         val out = ArrayList<KiteFrame>(count)
-        frames(s) { color, extra, fh ->
+        frames(s, null) { color, extra, fh ->
             var millis = 0
             var centiseconds = 0
             if (animation != null) {
@@ -182,13 +182,13 @@ internal object JxlDecoder {
      * the colour planes in the image's colour encoding, the extra planes and the header of
      * the frame that completed it. It stops when [onFrame] returns false.
      */
-    private fun frames(s: Stream, onFrame: (Array<JxlPlane>, Array<JxlPlane>, JxlFrameHeader) -> Boolean) {
+    private fun frames(s: Stream, cancel: (() -> Unit)?, onFrame: (Array<JxlPlane>, Array<JxlPlane>, JxlFrameHeader) -> Boolean) {
         val h = s.header
         // A frame may be smaller than the image, and it is blended into a canvas of the image's size.
         refusal(h, h.width, h.height)?.let { jxlFail("image of $it") }
         val cs = s.codestream
         val store = JxlFrameStore()
-        val decoder = JxlFrameDecoder(h, store, cs.data, cs.end)
+        val decoder = JxlFrameDecoder(h, store, cs.data, cs.end, cancel)
         var at = s.firstFrame
         // The preview is a frame of its own before the image. Its table of contents says where it ends.
         if (h.havePreview) at = decoder.skip(at, preview = true)

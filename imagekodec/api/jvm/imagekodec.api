@@ -93,22 +93,22 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun convertToSrgb (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun convertToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public static synthetic fun convertToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decode ([BZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decode16 ([BIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
-	public static synthetic fun decode16$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public final fun decode ([BZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decode16 ([BIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public static synthetic fun decode16$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public final fun decodeAnimation ([BZILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
-	public final fun decodeDownscaledTo ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decodeJpegComponents ([BI)Lio/github/yuroyami/imagekodec/JpegComponents;
-	public static synthetic fun decodeJpegComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpegComponents;
-	public final fun decodePage ([BIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decodePage$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decodeReduced ([BILio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decodeReduced$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public final fun decodeScaled ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;)Lio/github/yuroyami/imagekodec/KiteBitmap;
-	public static synthetic fun decodeScaled$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeDownscaledTo ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeJpegComponents ([BILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/JpegComponents;
+	public static synthetic fun decodeJpegComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpegComponents;
+	public final fun decodePage ([BIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodePage$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeReduced ([BILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodeReduced$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeScaled ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodeScaled$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun detect ([B)Lio/github/yuroyami/imagekodec/ImageFormat;
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteAnimation;Z)[B
@@ -272,13 +272,16 @@ public final class io/github/yuroyami/imagekodec/codec/CcittOptions {
 
 public final class io/github/yuroyami/imagekodec/codec/Jbig2Decoder {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/codec/Jbig2Decoder;
-	public final fun decode ([B[BII)[B
+	public final fun decode ([B[BIILkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/codec/Jbig2Decoder;[B[BIILkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 }
 
 public final class io/github/yuroyami/imagekodec/codec/JpxDecoder {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/codec/JpxDecoder;
-	public final fun decode ([B)Lio/github/yuroyami/imagekodec/codec/JpxDecoder$Result;
-	public final fun decode ([BI)Lio/github/yuroyami/imagekodec/codec/JpxDecoder$Result;
+	public final fun decode ([BILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/codec/JpxDecoder$Result;
+	public final fun decode ([BLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/codec/JpxDecoder$Result;
+	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/codec/JpxDecoder;[BILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/codec/JpxDecoder$Result;
+	public static synthetic fun decode$default (Lio/github/yuroyami/imagekodec/codec/JpxDecoder;[BLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/codec/JpxDecoder$Result;
 	public final fun isJpx ([B)Z
 }
 

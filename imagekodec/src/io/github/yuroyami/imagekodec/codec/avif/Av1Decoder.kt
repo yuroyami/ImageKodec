@@ -50,6 +50,9 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
     /** Where a test counts the coding tools the stream used; null otherwise. */
     var toolUse: Av1ToolUse? = null
 
+    /** A caller's cancellation check, which each frame runs once a row of superblocks (#123). */
+    var cancel: (() -> Unit)? = null
+
     /** The first frame [data]'s OBUs show; [data] may start with a sequence header or rely on an earlier one. */
     fun decode(data: ByteArray): Av1Picture {
         run(data)
@@ -186,7 +189,7 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
             val saved = refs.cdfs[fh.refFrameIdx[fh.primaryRefFrame]] ?: throw ImageDecodeException("AV1: a primary reference frame with no CDFs")
             saved.copy().also { it.clearCounters() }
         }
-        frame = Av1FrameDecoder(s, fh, cdfs, refs).also { it.toolUse = toolUse }
+        frame = Av1FrameDecoder(s, fh, cdfs, refs).also { it.toolUse = toolUse; it.cancel = cancel }
         toolUse?.let { use ->
             use.add(if (fh.frameIsIntra) "intra frame" else "inter frame")
             if (fh.useSuperres && !fh.frameIsIntra) use.add("superres inter frame")

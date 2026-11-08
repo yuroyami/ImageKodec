@@ -243,6 +243,9 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     // ---- tiles -------------------------------------------------------------------------
 
     /** Decodes tile [tileNum] from [size] bytes of [data] at [start]. */
+    /** A caller's cancellation check, run once a row of superblocks of each tile (#123). */
+    var cancel: (() -> Unit)? = null
+
     fun decodeTile(tileNum: Int, data: ByteArray, start: Int, size: Int) {
         val tileRow = tileNum / fh.tileCols
         val tileCol = tileNum % fh.tileCols
@@ -269,6 +272,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         val sbSize = if (sb128) Av1.BLOCK_128X128 else Av1.BLOCK_64X64
         var r = miRowStart
         while (r < miRowEnd) {
+            cancel?.invoke()
             for (plane in 0 until 3) {
                 leftLevelContext[plane].fill(0)
                 leftDcContext[plane].fill(0)
