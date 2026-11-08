@@ -103,6 +103,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeJpegComponents ([BILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/JpegComponents;
 	public static synthetic fun decodeJpegComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpegComponents;
+	public final fun decodeJpxComponents ([BILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/JpxComponents;
+	public static synthetic fun decodeJpxComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpxComponents;
 	public final fun decodePage ([BIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decodePage$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeReduced ([BILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
@@ -133,6 +135,26 @@ public final class io/github/yuroyami/imagekodec/JpegComponents {
 	public fun <init> (III[BI)V
 	public final fun get (III)I
 	public final fun getAdobeTransform ()I
+	public final fun getComponentCount ()I
+	public final fun getHeight ()I
+	public final fun getSamples ()[B
+	public final fun getWidth ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/JpxColorSpecification {
+	public fun <init> (II[B)V
+	public final fun getEnumerated ()I
+	public final fun getIccProfile ()[B
+	public final fun getMethod ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/JpxComponents {
+	public fun <init> (III[B[ILio/github/yuroyami/imagekodec/JpxColorSpecification;)V
+	public final fun get (III)I
+	public final fun getBitDepths ()[I
+	public final fun getColorSpecification ()Lio/github/yuroyami/imagekodec/JpxColorSpecification;
 	public final fun getComponentCount ()I
 	public final fun getHeight ()I
 	public final fun getSamples ()[B

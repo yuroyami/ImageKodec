@@ -3,6 +3,8 @@ package io.github.yuroyami.imagekodec.codec
 import io.github.yuroyami.imagekodec.internal.DecodeCancelled
 import io.github.yuroyami.imagekodec.internal.cancellable
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.JpxColorSpecification
+import io.github.yuroyami.imagekodec.JpxComponents
 import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Reader as R
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Coding as Cod
@@ -335,6 +337,76 @@ public object JpxDecoder {
         throw e
     } catch (e: Exception) {
         throw ImageDecodeException("JPEG 2000: ${e.message ?: "malformed codestream"}", e)
+    }
+
+    /**
+     * The components of [data] as the codestream stores them, for `ImageKodec.decodeJpxComponents`:
+     * after the inverse wavelet, the component transform and the DC level shift, sampled onto the
+     * image grid and narrowed to 8 bits as the colour stage narrows them, and before the JP2
+     * palette, channel definitions and colour space. A damaged codestream or a missing feature
+     * throws [ImageDecodeException], as for the facade; the colour boxes are reported, not applied,
+     * so one this decoder cannot apply is no reason to refuse the samples.
+     */
+    internal fun decodeComponents(data: ByteArray, reduction: Int, cancel: (() -> Unit)? = null): JpxComponents = try {
+        val levels = reduction.countTrailingZeroBits()
+        val rec = reconstruct(data, levels, cancel)
+        val grid = PlaneGrid(rec)
+        val n = grid.components
+        val w = grid.width
+        val h = grid.height
+        val samples = ByteArray(w * h * n)
+        for (y in 0 until h) for (x in 0 until w) for (c in 0 until n) {
+            samples[(y * w + x) * n + c] = to8(grid.sample(c, x, y), grid.precision(c)).toByte()
+        }
+        val colors = rec.jp2.boxes.colors
+        val spec = colors.firstOrNull()?.let { JpxColorSpecification(it.method, it.enumerated, it.icc) }
+        val depths = IntArray(n) { rec.s.prec[it] }
+        val f = 1 shl (levels - rec.drop)
+        if (f == 1) {
+            JpxComponents(w, h, n, samples, depths, spec)
+        } else {
+            // Levels a component does not have are averaged away, as [Result.averaged] does.
+            val ow = ceilDiv(w, f)
+            val oh = ceilDiv(h, f)
+            val out = ByteArray(ow * oh * n)
+            for (oy in 0 until oh) for (ox in 0 until ow) for (c in 0 until n) {
+                var sum = 0
+                var count = 0
+                for (y in oy * f until min((oy + 1) * f, h)) for (x in ox * f until min((ox + 1) * f, w)) {
+                    sum += samples[(y * w + x) * n + c].toInt() and 0xFF
+                    count++
+                }
+                out[(oy * ow + ox) * n + c] = ((sum + count / 2) / count).toByte()
+            }
+            JpxComponents(ow, oh, n, out, depths, spec)
+        }
+    } catch (e: ImageDecodeException) {
+        throw e
+    } catch (e: Exception) {
+        throw ImageDecodeException("JPEG 2000: ${e.message ?: "malformed codestream"}", e)
+    }
+
+    /** Whether every component of [data] has the wavelet levels [reduction] drops, so no block is averaged. */
+    internal fun reducesExactly(data: ByteArray, reduction: Int): Boolean {
+        val levels = reduction.countTrailingZeroBits()
+        return reconstruct(data, levels).drop == levels
+    }
+
+    /**
+     * [components] through the colour stage of [data]'s JP2 header, as [decode] runs it on the
+     * components it reconstructs: for a test that holds the two to each other. Exact for 8-bit
+     * components, which the narrowing to 8 bits keeps as they are.
+     */
+    internal fun colorStage(data: ByteArray, components: JpxComponents): Result {
+        val boxes = Jp2Color.parse(data) ?: throw ImageDecodeException("JPEG 2000: no jp2c codestream box")
+        val grid = object : Grid {
+            override val components: Int get() = components.componentCount
+            override val width: Int get() = components.width
+            override val height: Int get() = components.height
+            override fun precision(c: Int): Int = 8
+            override fun sample(c: Int, x: Int, y: Int): Int = components[x, y, c]
+        }
+        return assemble(grid, boxes, wide = false).result()
     }
 
     /** The component planes of a decode and what the color stage needs to lay them out. */
@@ -1646,37 +1718,54 @@ public object JpxDecoder {
      * opacity, is computed at 16 bits and kept in the high byte of its 8-bit result, so that
      * `KiteBitmap16.toBitmap` always gives what the 8-bit decode gives.
      */
-    private fun assemble(rec: Reconstruction, wide: Boolean): Assembled {
-        val s = rec.s
-        val planes = rec.planes
-        val planeW = rec.planeW
-        val planeH = rec.planeH
-        val imgW = rec.width
-        val imgH = rec.height
-        val plan = Jp2Color.plan(rec.jp2.boxes, s.comps)
-        val palette = rec.jp2.boxes.palette
+    private fun assemble(rec: Reconstruction, wide: Boolean): Assembled = assemble(PlaneGrid(rec), rec.jp2.boxes, wide)
 
-        // A component's display sample at image position (x, y): sampling clamps to the plane, so a
-        // subsampled or offset grid repeats its edge.
-        fun component(c: Int, x: Int, y: Int): Int {
-            val cw = planeW[c]; val ch = planeH[c]
-            val cx = (x / s.dx[c]).coerceIn(0, cw - 1)
-            val cy = (y / s.dy[c]).coerceIn(0, ch - 1)
-            return planes[c][cy * cw + cx]
+    /**
+     * The components of a decode on the image grid, before any colour stage: [sample] of component
+     * `c` at image position (x, y), [precision] its bit depth.
+     */
+    private interface Grid {
+        val components: Int
+        val width: Int
+        val height: Int
+        fun precision(c: Int): Int
+        fun sample(c: Int, x: Int, y: Int): Int
+    }
+
+    /** The reconstructed planes: sampling clamps to the plane, so a subsampled or offset grid repeats its edge. */
+    private class PlaneGrid(private val rec: Reconstruction) : Grid {
+        override val components: Int get() = rec.s.comps
+        override val width: Int get() = rec.width
+        override val height: Int get() = rec.height
+        override fun precision(c: Int): Int = rec.s.prec[c]
+        override fun sample(c: Int, x: Int, y: Int): Int {
+            val cw = rec.planeW[c]; val ch = rec.planeH[c]
+            val cx = (x / rec.s.dx[c]).coerceIn(0, cw - 1)
+            val cy = (y / rec.s.dy[c]).coerceIn(0, ch - 1)
+            return rec.planes[c][cy * cw + cx]
         }
+    }
+
+    /** The 8 bits of a [prec]-bit sample, as the colour stage narrows one. */
+    private fun to8(v: Int, prec: Int): Int = when {
+        prec == 8 -> v
+        prec > 8 -> v shr (prec - 8)
+        else -> v * 255 / ((1 shl prec) - 1)
+    }.coerceIn(0, 255)
+
+    private fun assemble(grid: Grid, boxes: Jp2Color.Boxes, wide: Boolean): Assembled {
+        val imgW = grid.width
+        val imgH = grid.height
+        val plan = Jp2Color.plan(boxes, grid.components)
+        val palette = boxes.palette
+
         fun value(ch: Jp2Color.Channel, x: Int, y: Int): Int {
-            val v = component(ch.component, x, y)
+            val v = grid.sample(ch.component, x, y)
             if (ch.column < 0) return v
             // Indices past the palette clamp to it, as OpenJPEG's opj_jp2_apply_pclr clamps them.
             return palette!!.values[ch.column][v.coerceIn(0, palette.entries - 1)]
         }
-        fun precision(ch: Jp2Color.Channel): Int = if (ch.column < 0) s.prec[ch.component] else palette!!.depth[ch.column]
-
-        fun to8(v: Int, prec: Int): Int = when {
-            prec == 8 -> v
-            prec > 8 -> v shr (prec - 8)
-            else -> v * 255 / ((1 shl prec) - 1)
-        }.coerceIn(0, 255)
+        fun precision(ch: Jp2Color.Channel): Int = if (ch.column < 0) grid.precision(ch.component) else palette!!.depth[ch.column]
         fun to16(v: Int, prec: Int): Int = when {
             prec >= 16 -> v.coerceIn(0, 0xFFFF)
             prec >= 8 -> v.coerceIn(0, (1 shl prec) - 1).let { (it shl (16 - prec)) or (it shr (2 * prec - 16)) }

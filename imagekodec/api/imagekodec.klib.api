@@ -178,6 +178,39 @@ final class io.github.yuroyami.imagekodec/JpegComponents { // io.github.yuroyami
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/JpegComponents.toString|toString(){}[0]
 }
 
+final class io.github.yuroyami.imagekodec/JpxColorSpecification { // io.github.yuroyami.imagekodec/JpxColorSpecification|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/ByteArray?) // io.github.yuroyami.imagekodec/JpxColorSpecification.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.ByteArray?){}[0]
+
+    final val enumerated // io.github.yuroyami.imagekodec/JpxColorSpecification.enumerated|{}enumerated[0]
+        final fun <get-enumerated>(): kotlin/Int // io.github.yuroyami.imagekodec/JpxColorSpecification.enumerated.<get-enumerated>|<get-enumerated>(){}[0]
+    final val iccProfile // io.github.yuroyami.imagekodec/JpxColorSpecification.iccProfile|{}iccProfile[0]
+        final fun <get-iccProfile>(): kotlin/ByteArray? // io.github.yuroyami.imagekodec/JpxColorSpecification.iccProfile.<get-iccProfile>|<get-iccProfile>(){}[0]
+    final val method // io.github.yuroyami.imagekodec/JpxColorSpecification.method|{}method[0]
+        final fun <get-method>(): kotlin/Int // io.github.yuroyami.imagekodec/JpxColorSpecification.method.<get-method>|<get-method>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/JpxColorSpecification.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/JpxComponents { // io.github.yuroyami.imagekodec/JpxComponents|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/ByteArray, kotlin/IntArray, io.github.yuroyami.imagekodec/JpxColorSpecification?) // io.github.yuroyami.imagekodec/JpxComponents.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.ByteArray;kotlin.IntArray;io.github.yuroyami.imagekodec.JpxColorSpecification?){}[0]
+
+    final val bitDepths // io.github.yuroyami.imagekodec/JpxComponents.bitDepths|{}bitDepths[0]
+        final fun <get-bitDepths>(): kotlin/IntArray // io.github.yuroyami.imagekodec/JpxComponents.bitDepths.<get-bitDepths>|<get-bitDepths>(){}[0]
+    final val colorSpecification // io.github.yuroyami.imagekodec/JpxComponents.colorSpecification|{}colorSpecification[0]
+        final fun <get-colorSpecification>(): io.github.yuroyami.imagekodec/JpxColorSpecification? // io.github.yuroyami.imagekodec/JpxComponents.colorSpecification.<get-colorSpecification>|<get-colorSpecification>(){}[0]
+    final val componentCount // io.github.yuroyami.imagekodec/JpxComponents.componentCount|{}componentCount[0]
+        final fun <get-componentCount>(): kotlin/Int // io.github.yuroyami.imagekodec/JpxComponents.componentCount.<get-componentCount>|<get-componentCount>(){}[0]
+    final val height // io.github.yuroyami.imagekodec/JpxComponents.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/JpxComponents.height.<get-height>|<get-height>(){}[0]
+    final val samples // io.github.yuroyami.imagekodec/JpxComponents.samples|{}samples[0]
+        final fun <get-samples>(): kotlin/ByteArray // io.github.yuroyami.imagekodec/JpxComponents.samples.<get-samples>|<get-samples>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/JpxComponents.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/JpxComponents.width.<get-width>|<get-width>(){}[0]
+
+    final fun get(kotlin/Int, kotlin/Int, kotlin/Int): kotlin/Int // io.github.yuroyami.imagekodec/JpxComponents.get|get(kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/JpxComponents.toString|toString(){}[0]
+}
+
 final class io.github.yuroyami.imagekodec/KiteAnimation { // io.github.yuroyami.imagekodec/KiteAnimation|null[0]
     constructor <init>(kotlin/Int, kotlin/Int, kotlin.collections/List<io.github.yuroyami.imagekodec/KiteFrame>, kotlin/Long) // io.github.yuroyami.imagekodec/KiteAnimation.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.collections.List<io.github.yuroyami.imagekodec.KiteFrame>;kotlin.Long){}[0]
 
@@ -307,6 +340,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun decodeAnimation(kotlin/ByteArray, kotlin/Boolean = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteAnimation // io.github.yuroyami.imagekodec/ImageKodec.decodeAnimation|decodeAnimation(kotlin.ByteArray;kotlin.Boolean;kotlin.Int;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeDownscaledTo(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeDownscaledTo|decodeDownscaledTo(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeJpegComponents(kotlin/ByteArray, kotlin/Int = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/JpegComponents // io.github.yuroyami.imagekodec/ImageKodec.decodeJpegComponents|decodeJpegComponents(kotlin.ByteArray;kotlin.Int;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun decodeJpxComponents(kotlin/ByteArray, kotlin/Int = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/JpxComponents // io.github.yuroyami.imagekodec/ImageKodec.decodeJpxComponents|decodeJpxComponents(kotlin.ByteArray;kotlin.Int;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodePage(kotlin/ByteArray, kotlin/Int, kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodePage|decodePage(kotlin.ByteArray;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeReduced(kotlin/ByteArray, kotlin/Int, io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeReduced|decodeReduced(kotlin.ByteArray;kotlin.Int;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeScaled(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeScaled|decodeScaled(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]

@@ -28,6 +28,13 @@ reviewable in the diff.
   what it throws comes out of the call unchanged, through the catch of `JpxDecoder`
   and `Jbig2Decoder` too. The parameter is new on these JVM signatures, so code built
   against 0.3.0 that calls them must be rebuilt (#123).
+- `ImageKodec.decodeJpxComponents` returns the components of a JPEG 2000 image as
+  the codestream stores them, after the inverse wavelet, the component transform and
+  the DC level shift and before the JP2 palette, channel definitions and colour space,
+  as `JpxComponents`, with the file's first colour specification box as
+  `JpxColorSpecification`. A PDF that names its own colour space for a `JPXDecode`
+  image can read CMYK, indexed and spot colour samples with it. The decode and this
+  share one reconstruction and one colour stage (#121).
 
 ### Changed
 

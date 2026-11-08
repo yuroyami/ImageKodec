@@ -413,6 +413,33 @@ public object ImageKodec {
     }
 
     /**
+     * Decode the JPEG 2000 image in [data] to its stored components: every component after the
+     * inverse wavelet, the multiple component transform and the DC level shift, sampled onto the
+     * image grid, before the JP2 palette, channel definitions and colour space. Use it when the
+     * caller, not the file, says what the components mean, as a PDF's `ColorSpace` does for a
+     * `JPXDecode` image (ISO 32000-1, 8.9.5.2). [JpxComponents] says how the samples are laid out,
+     * and reports the file's own colour specification.
+     *
+     * [reduction] works as in [decodeReduced]: 1, 2, 4 or 8, each side divided by it and rounded up,
+     * by dropping the finest wavelet levels. The reconstruction is the one [decode] runs, so its
+     * colour stage applied to 8-bit components gives its pixels exactly. A codestream [decode]
+     * refuses is refused here with the same exception; a colour box [decode] cannot apply is
+     * reported, not refused. [cancellationCheck] runs as for [decode].
+     *
+     * @throws IllegalArgumentException if [reduction] is not 1, 2, 4 or 8
+     * @throws ImageDecodeException on malformed or truncated input, or input that is not JPEG 2000
+     * @throws UnsupportedImageException on a codestream feature this decoder does not implement
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun decodeJpxComponents(data: ByteArray, reduction: Int = 1, cancellationCheck: (() -> Unit)? = null): JpxComponents {
+        require(reduction == 1 || reduction == 2 || reduction == 4 || reduction == 8) {
+            "reduction must be 1, 2, 4 or 8, was $reduction"
+        }
+        if (detect(data) != ImageFormat.JP2) throw ImageDecodeException("not a JPEG 2000 image (${data.size} bytes)")
+        return cancellable(cancellationCheck) { cancel -> JpxDecoder.decodeComponents(data, reduction, cancel) }
+    }
+
+    /**
      * [bitmap] converted to sRGB through [profile] with [intent], as [decode] converts with
      * [ColorTarget.Srgb]: for a bitmap decoded before, or one whose profile came from elsewhere,
      * such as a PDF's ICCBased colour space. Every declaration of [profile] counts, in the
