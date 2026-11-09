@@ -14,6 +14,11 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageMetadata.gainMap` keeps the gain map of an Ultra HDR JPEG through a re-encode:
+  `readMetadata` finds it through the Multi-Picture Format segment, and `encodeJpeg` writes it
+  unchanged after the new main image, with an MPF segment and an XMP directory that point to
+  it. `upright()` turns it with the pixels; a main image of another aspect ratio drops it with
+  its `hdrgm` fields, so no reader looks for a gain map that is gone (#130).
 - `ImageKodec.motionPhoto` finds the video of a Motion Photo, in Google's format, its older
   MicroVideo form or a Samsung trailer, and `ImageKodec.removeMotion` returns the still photo
   without it: the bytes up to the video, with the XMP that named it rewritten. A gain map and

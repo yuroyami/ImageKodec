@@ -46,7 +46,7 @@ internal object MetadataIo {
             }
             at = end
         }
-        return ImageMetadata(exif, xmp, ColorChunks.jpegIcc(data))
+        return ImageMetadata(exif, xmp, ColorChunks.jpegIcc(data), UltraHdr.find(data))
     }
 
     private fun readPng(data: ByteArray): ImageMetadata {
@@ -151,6 +151,21 @@ internal object MetadataIo {
      * orientation is a SHORT of one value, which sits in the entry itself (TIFF 6.0, section 2).
      */
     fun withOrientation(exif: ByteArray, orientation: Int): ByteArray? {
+        val at = orientationAt(exif) ?: return null
+        val copy = exif.copyOf()
+        if (copy[0].toInt() == 0x49) { copy[at] = orientation.toByte(); copy[at + 1] = 0 } else { copy[at] = 0; copy[at + 1] = orientation.toByte() }
+        return copy
+    }
+
+    /** The IFD0 orientation of [exif], or null when it has none. */
+    fun orientation(exif: ByteArray): Int? {
+        val at = orientationAt(exif) ?: return null
+        return if (exif[0].toInt() == 0x49) (exif[at].toInt() and 0xFF) or ((exif[at + 1].toInt() and 0xFF) shl 8)
+            else ((exif[at].toInt() and 0xFF) shl 8) or (exif[at + 1].toInt() and 0xFF)
+    }
+
+    /** Where the value of the IFD0 orientation entry of [exif] sits, or null when it has none. */
+    private fun orientationAt(exif: ByteArray): Int? {
         if (exif.size < 8) return null
         val little = exif[0].toInt() == 0x49 && exif[1].toInt() == 0x49
         if (!little && !(exif[0].toInt() == 0x4D && exif[1].toInt() == 0x4D)) return null
@@ -164,10 +179,7 @@ internal object MetadataIo {
             val entry = ifd.toInt() + 2 + i * 12
             if (entry + 12 > exif.size) return null
             if (u16(entry) != 0x0112 || u16(entry + 2) != 3) continue
-            val copy = exif.copyOf()
-            val at = entry + 8
-            if (little) { copy[at] = orientation.toByte(); copy[at + 1] = 0 } else { copy[at] = 0; copy[at + 1] = orientation.toByte() }
-            return copy
+            return entry + 8
         }
         return null
     }

@@ -121,6 +121,21 @@ final class io.github.yuroyami.imagekodec/ColorProfile { // io.github.yuroyami.i
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/ColorProfile.toString|toString(){}[0]
 }
 
+final class io.github.yuroyami.imagekodec/GainMap { // io.github.yuroyami.imagekodec/GainMap|null[0]
+    constructor <init>(kotlin/ByteArray, kotlin/ByteArray? = ...) // io.github.yuroyami.imagekodec/GainMap.<init>|<init>(kotlin.ByteArray;kotlin.ByteArray?){}[0]
+
+    final val height // io.github.yuroyami.imagekodec/GainMap.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/GainMap.height.<get-height>|<get-height>(){}[0]
+    final val jpeg // io.github.yuroyami.imagekodec/GainMap.jpeg|{}jpeg[0]
+        final fun <get-jpeg>(): kotlin/ByteArray // io.github.yuroyami.imagekodec/GainMap.jpeg.<get-jpeg>|<get-jpeg>(){}[0]
+    final val primaryIso // io.github.yuroyami.imagekodec/GainMap.primaryIso|{}primaryIso[0]
+        final fun <get-primaryIso>(): kotlin/ByteArray? // io.github.yuroyami.imagekodec/GainMap.primaryIso.<get-primaryIso>|<get-primaryIso>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/GainMap.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/GainMap.width.<get-width>|<get-width>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/GainMap.toString|toString(){}[0]
+}
+
 final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imagekodec/ImageInfo|null[0]
     constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Long, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/ColorProfile? = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Long;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?;kotlin.Int;io.github.yuroyami.imagekodec.ColorProfile?){}[0]
 
@@ -162,10 +177,12 @@ final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imag
 }
 
 final class io.github.yuroyami.imagekodec/ImageMetadata { // io.github.yuroyami.imagekodec/ImageMetadata|null[0]
-    constructor <init>(kotlin/ByteArray? = ..., kotlin/String? = ..., kotlin/ByteArray? = ...) // io.github.yuroyami.imagekodec/ImageMetadata.<init>|<init>(kotlin.ByteArray?;kotlin.String?;kotlin.ByteArray?){}[0]
+    constructor <init>(kotlin/ByteArray? = ..., kotlin/String? = ..., kotlin/ByteArray? = ..., io.github.yuroyami.imagekodec/GainMap? = ...) // io.github.yuroyami.imagekodec/ImageMetadata.<init>|<init>(kotlin.ByteArray?;kotlin.String?;kotlin.ByteArray?;io.github.yuroyami.imagekodec.GainMap?){}[0]
 
     final val exif // io.github.yuroyami.imagekodec/ImageMetadata.exif|{}exif[0]
         final fun <get-exif>(): kotlin/ByteArray? // io.github.yuroyami.imagekodec/ImageMetadata.exif.<get-exif>|<get-exif>(){}[0]
+    final val gainMap // io.github.yuroyami.imagekodec/ImageMetadata.gainMap|{}gainMap[0]
+        final fun <get-gainMap>(): io.github.yuroyami.imagekodec/GainMap? // io.github.yuroyami.imagekodec/ImageMetadata.gainMap.<get-gainMap>|<get-gainMap>(){}[0]
     final val icc // io.github.yuroyami.imagekodec/ImageMetadata.icc|{}icc[0]
         final fun <get-icc>(): kotlin/ByteArray? // io.github.yuroyami.imagekodec/ImageMetadata.icc.<get-icc>|<get-icc>(){}[0]
     final val isEmpty // io.github.yuroyami.imagekodec/ImageMetadata.isEmpty|{}isEmpty[0]

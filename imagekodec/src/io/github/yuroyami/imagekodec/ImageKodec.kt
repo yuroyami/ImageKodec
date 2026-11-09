@@ -721,6 +721,10 @@ public object ImageKodec {
      * 64 KB, is left out. Pixels that a decode with `applyOrientation = true` turned upright take
      * [ImageMetadata.upright], or the copied orientation turns them again.
      *
+     * A [ImageMetadata.gainMap] goes unchanged after the image, with an MPF segment and an XMP
+     * directory that point to it, when [bitmap] has its aspect ratio; otherwise it is left out
+     * together with the `hdrgm` fields of the XMP packet (#130).
+     *
      * @throws IllegalArgumentException as [encodeJpeg] does
      */
     @Throws(IllegalArgumentException::class)
@@ -745,7 +749,8 @@ public object ImageKodec {
     /**
      * The EXIF block, XMP packet and ICC profile of a JPEG, PNG or WebP file, which the
      * `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an [ImageMetadata] write
-     * again, so a re-encode keeps them (#129). A file of another format, or one that has none,
+     * again, so a re-encode keeps them (#129). The gain map of an Ultra HDR JPEG comes too, found
+     * through its Multi-Picture Format segment (#130). A file of another format, or one that has none,
      * gives empty metadata; a damaged segment or chunk is left out.
      */
     public fun readMetadata(data: ByteArray): ImageMetadata = MetadataIo.read(data)

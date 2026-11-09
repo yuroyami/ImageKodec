@@ -48,11 +48,20 @@ class MotionPhotoTest {
         assertTrue("Item:Semantic=\"Primary\"" in xmp)
     }
 
+    /** [jpeg] with an APP1 XMP segment holding [xmp] right after its SOI. */
+    private fun withXmp(jpeg: ByteArray, xmp: String): ByteArray {
+        val body = "http://ns.adobe.com/xap/1.0/\u0000".encodeToByteArray() + xmp.encodeToByteArray()
+        val length = body.size + 2
+        return jpeg.copyOfRange(0, 2) + byteArrayOf(0xFF.toByte(), 0xE1.toByte(), (length ushr 8).toByte(), length.toByte()) + body +
+            jpeg.copyOfRange(2, jpeg.size)
+    }
+
     @Test
     fun a_gain_map_and_its_bytes_stay() {
         val clip = video(3000)
         val gainMap = ImageKodec.encodeJpeg(KiteBitmap(4, 4, IntArray(16) { 0xFF808080.toInt() }), 80)
-        val still = ImageKodec.encodeJpeg(bitmap, 90, ImageMetadata(xmp = googleXmp(clip.size, gainMap.size)))
+        // Spliced by hand: an encode with no gain map leaves out the directory item that names one (#130).
+        val still = withXmp(ImageKodec.encodeJpeg(bitmap, 90), googleXmp(clip.size, gainMap.size))
         val cut = ImageKodec.removeMotion(still + gainMap + clip)
         val xmp = assertNotNull(ImageKodec.readMetadata(cut).xmp)
         assertTrue("Item:Semantic=\"GainMap\"" in xmp, "the gain map item went")

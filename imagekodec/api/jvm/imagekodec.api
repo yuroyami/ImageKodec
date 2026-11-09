@@ -36,6 +36,16 @@ public final class io/github/yuroyami/imagekodec/ColorTarget$Srgb : io/github/yu
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/yuroyami/imagekodec/GainMap {
+	public fun <init> ([B[B)V
+	public synthetic fun <init> ([B[BILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getHeight ()I
+	public final fun getJpeg ()[B
+	public final fun getPrimaryIso ()[B
+	public final fun getWidth ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public class io/github/yuroyami/imagekodec/ImageDecodeException : java/lang/Exception {
 	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -139,9 +149,10 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 
 public final class io/github/yuroyami/imagekodec/ImageMetadata {
 	public fun <init> ()V
-	public fun <init> ([BLjava/lang/String;[B)V
-	public synthetic fun <init> ([BLjava/lang/String;[BILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> ([BLjava/lang/String;[BLio/github/yuroyami/imagekodec/GainMap;)V
+	public synthetic fun <init> ([BLjava/lang/String;[BLio/github/yuroyami/imagekodec/GainMap;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getExif ()[B
+	public final fun getGainMap ()Lio/github/yuroyami/imagekodec/GainMap;
 	public final fun getIcc ()[B
 	public final fun getXmp ()Ljava/lang/String;
 	public final fun isEmpty ()Z

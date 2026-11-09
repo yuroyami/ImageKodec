@@ -106,7 +106,14 @@ internal object JpegEncoder {
         fun writeEntry(packed: Int) = write(packed ushr 5, packed and 31)
     }
 
-    fun encode(bitmap: KiteBitmap, quality: Int, metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null): ByteArray {
+    fun encode(bitmap: KiteBitmap, quality: Int, metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null): ByteArray =
+        if (metadata == null || metadata.isEmpty) encode(bitmap, quality, null, gray = false) else UltraHdr.encode(bitmap, quality, metadata)
+
+    /**
+     * [bitmap] as a baseline JPEG with the raw APPn [segments] after the JFIF header. A [gray]
+     * encode writes one component, the luma, as a single-channel gain map is stored (#130).
+     */
+    fun encode(bitmap: KiteBitmap, quality: Int, segments: ByteArray?, gray: Boolean): ByteArray {
         require(quality in 1..100) { "JPEG quality must be 1..100, was $quality" }
         val width = bitmap.width
         val height = bitmap.height
@@ -141,7 +148,44 @@ internal object JpegEncoder {
 
         // Headers (verbatim stbiw layout): SOI and the JFIF APP0, the metadata segments after it (#129), then the tables.
         out.append(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0x10, 'J'.code.toByte(), 'F'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 0, 1, 1, 0, 0, 1, 0, 1, 0, 0))
-        if (metadata != null && !metadata.isEmpty) out.append(MetadataIo.jpegSegments(metadata))
+        if (segments != null) out.append(segments)
+        if (gray) {
+            out.append(byteArrayOf(0xFF.toByte(), 0xDB.toByte(), 0, 0x43, 0))
+            out.append(yTable)
+            out.append(byteArrayOf(0xFF.toByte(), 0xC0.toByte(), 0, 0x0B, 8, (height shr 8).toByte(), height.toByte(), (width shr 8).toByte(), width.toByte(), 1, 1, 0x11, 0))
+            out.append(byteArrayOf(0xFF.toByte(), 0xC4.toByte(), 0, 0xD2.toByte(), 0))
+            for (i in 1..16) out.append(STD_DC_LUM_NRCODES[i].toByte())
+            for (v in STD_DC_LUM_VALUES) out.append(v.toByte())
+            out.append(0x10.toByte())
+            for (i in 1..16) out.append(STD_AC_LUM_NRCODES[i].toByte())
+            for (v in STD_AC_LUM_VALUES) out.append(v.toByte())
+            out.append(byteArrayOf(0xFF.toByte(), 0xDA.toByte(), 0, 8, 1, 1, 0, 0, 0x3F, 0))
+            val bw = BitWriter(out)
+            var dc = 0
+            val buf = DoubleArray(64)
+            val argb = bitmap.argb
+            var y = 0
+            while (y < height) {
+                var x = 0
+                while (x < width) {
+                    var pos = 0
+                    for (row in y until y + 8) {
+                        val cy = if (row < height) row else height - 1
+                        for (col in x until x + 8) {
+                            val p = argb[cy * width + (if (col < width) col else width - 1)]
+                            buf[pos++] = +0.29900 * ((p ushr 16) and 0xFF) + 0.58700 * ((p ushr 8) and 0xFF) + 0.11400 * (p and 0xFF) - 128
+                        }
+                    }
+                    dc = processDU(bw, buf, 0, 8, fdY, dc, YDC_HT, YAC_HT)
+                    x += 8
+                }
+                y += 8
+            }
+            bw.write(0x7F, 7)
+            out.append(0xFF.toByte())
+            out.append(0xD9.toByte())
+            return out.toByteArray()
+        }
         out.append(byteArrayOf(0xFF.toByte(), 0xDB.toByte(), 0, 0x84.toByte(), 0))
         out.append(yTable)
         out.append(1.toByte())

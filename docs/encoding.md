@@ -37,6 +37,15 @@ val webp = ImageKodec.encodeWebp(upright, metadata.upright())
 - WebP writes the extended format: `VP8X`, `ICCP`, the image, `EXIF` and `XMP `.
 - `upright()` sets the EXIF orientation to 1. Keep the original orientation only when you write the pixels as they were stored.
 
+### Ultra HDR gain maps
+
+Pixel and Samsung phones save Ultra HDR JPEGs: after the main image comes a small second JPEG, the gain map, that tells an HDR screen how much brighter each area may be drawn. `readMetadata` returns it as `metadata.gainMap`, found through the Multi-Picture Format segment, and `encodeJpeg` with that metadata writes it again:
+
+- The gain map goes unchanged after the new main image, with an MPF segment that points to it and an XMP `Container:Directory` that gives its length. Its `hdrgm` fields or ISO 21496-1 segment, which hold its parameters, stay with it.
+- A gain map covers the whole image at any resolution, so a scaled main image keeps it. `upright()` turns it with the pixels.
+- A main image of another aspect ratio, a crop for one, drops it together with the `hdrgm` fields of the XMP packet. An HDR screen then shows the photo as an ordinary one, never with a gain map that no longer fits.
+- PNG and WebP have no place for a gain map, so their encoders leave it out.
+
 ## Removing the video of a Motion Photo
 
 Pixel and Samsung cameras save Motion Photos: a JPEG with a short MP4 video after the image, often as large as the photo. `motionPhoto` says where the video sits, and `removeMotion` returns the still photo without it:
