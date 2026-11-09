@@ -27,10 +27,12 @@ internal object PngEncoder {
     private const val BLEND_SOURCE = 0
     private const val BLEND_OVER = 1
 
-    fun encode(bitmap: KiteBitmap): ByteArray {
+    fun encode(bitmap: KiteBitmap, metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null): ByteArray {
         val alpha = bitmap.hasTransparency()
         val out = ByteArrayBuilder(bitmap.width * bitmap.height + 128)
         header(out, bitmap.width, bitmap.height, alpha)
+        // iCCP comes before the image data, and so does eXIf (PNG, Third Edition, 5.6, #129).
+        if (metadata != null) for ((type, body) in MetadataIo.pngChunks(metadata)) appendChunk(out, type, body)
         appendChunk(out, "IDAT", compressed(bitmap.argb, bitmap.width, 0, 0, bitmap.width, bitmap.height, alpha, null))
         appendChunk(out, "IEND", ByteArray(0))
         return out.toByteArray()

@@ -9,6 +9,7 @@ import io.github.yuroyami.imagekodec.codec.ImageProbe
 import io.github.yuroyami.imagekodec.codec.JpegDecoder
 import io.github.yuroyami.imagekodec.codec.JpegEncoder
 import io.github.yuroyami.imagekodec.codec.JpxDecoder
+import io.github.yuroyami.imagekodec.codec.MetadataIo
 import io.github.yuroyami.imagekodec.codec.PngDecoder
 import io.github.yuroyami.imagekodec.codec.PngEncoder
 import io.github.yuroyami.imagekodec.codec.TiffDecoder
@@ -712,6 +713,42 @@ public object ImageKodec {
     @Throws(IllegalArgumentException::class)
     public fun encodeJpeg(bitmap: KiteBitmap, quality: Int = 90): ByteArray =
         JpegEncoder.encode(bitmap, quality)
+
+    /**
+     * [encodeJpeg] that also writes [metadata]: the EXIF block as an APP1 `Exif` segment, the
+     * XMP packet as an APP1 Adobe XMP segment and the ICC profile as APP2 `ICC_PROFILE` chunks,
+     * after the JFIF header (#129). An EXIF block or XMP packet too long for one segment, about
+     * 64 KB, is left out. Pixels that a decode with `applyOrientation = true` turned upright take
+     * [ImageMetadata.upright], or the copied orientation turns them again.
+     *
+     * @throws IllegalArgumentException as [encodeJpeg] does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJpeg(bitmap: KiteBitmap, quality: Int, metadata: ImageMetadata): ByteArray =
+        JpegEncoder.encode(bitmap, quality, metadata)
+
+    /**
+     * [encodePng] that also writes [metadata]: `iCCP`, `eXIf` and an `iTXt` chunk with the
+     * keyword `XML:com.adobe.xmp`, before the image data (#129).
+     */
+    public fun encodePng(bitmap: KiteBitmap, metadata: ImageMetadata): ByteArray = PngEncoder.encode(bitmap, metadata)
+
+    /**
+     * [encodeWebp] that also writes [metadata], in the extended format: `VP8X`, `ICCP`, the
+     * image, `EXIF` and `XMP ` (#129).
+     *
+     * @throws IllegalArgumentException as [encodeWebp] does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeWebp(bitmap: KiteBitmap, metadata: ImageMetadata): ByteArray = WebpEncoder.encode(bitmap, metadata)
+
+    /**
+     * The EXIF block, XMP packet and ICC profile of a JPEG, PNG or WebP file, which the
+     * `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an [ImageMetadata] write
+     * again, so a re-encode keeps them (#129). A file of another format, or one that has none,
+     * gives empty metadata; a damaged segment or chunk is left out.
+     */
+    public fun readMetadata(data: ByteArray): ImageMetadata = MetadataIo.read(data)
 
     /**
      * Encode [bitmap] as a BMP: 24-bit BI_RGB when it is opaque, or 32-bit

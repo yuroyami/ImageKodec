@@ -106,7 +106,7 @@ internal object JpegEncoder {
         fun writeEntry(packed: Int) = write(packed ushr 5, packed and 31)
     }
 
-    fun encode(bitmap: KiteBitmap, quality: Int): ByteArray {
+    fun encode(bitmap: KiteBitmap, quality: Int, metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null): ByteArray {
         require(quality in 1..100) { "JPEG quality must be 1..100, was $quality" }
         val width = bitmap.width
         val height = bitmap.height
@@ -139,8 +139,10 @@ internal object JpegEncoder {
 
         val out = ByteArrayBuilder(width * height / 2 + 1024)
 
-        // Headers (verbatim stbiw layout).
-        out.append(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0x10, 'J'.code.toByte(), 'F'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0xFF.toByte(), 0xDB.toByte(), 0, 0x84.toByte(), 0))
+        // Headers (verbatim stbiw layout): SOI and the JFIF APP0, the metadata segments after it (#129), then the tables.
+        out.append(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0x10, 'J'.code.toByte(), 'F'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 0, 1, 1, 0, 0, 1, 0, 1, 0, 0))
+        if (metadata != null && !metadata.isEmpty) out.append(MetadataIo.jpegSegments(metadata))
+        out.append(byteArrayOf(0xFF.toByte(), 0xDB.toByte(), 0, 0x84.toByte(), 0))
         out.append(yTable)
         out.append(1.toByte())
         out.append(uvTable)

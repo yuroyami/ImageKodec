@@ -14,6 +14,12 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.readMetadata` reads the EXIF block, the XMP packet and the ICC profile of a
+  JPEG, PNG or WebP file, and new `encodeJpeg`, `encodePng` and `encodeWebp` overloads write
+  an `ImageMetadata` back: APP1 and APP2 segments in JPEG, `eXIf`, `iTXt` and `iCCP` in PNG,
+  and the extended format in WebP. `ImageMetadata.upright()` sets the EXIF orientation to 1
+  for pixels already turned upright. A re-encoded photo keeps its date, place, camera and
+  colours (#129).
 - `ImageInfo.colorChannels` is public: 1 for gray, 3 for colour, 4 for CMYK or
   YCCK, and 0 where a header cannot say. For JPEG 2000 it follows the colour boxes,
   so a caller can learn whether an image decodes to gray or colour without

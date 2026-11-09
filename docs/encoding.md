@@ -19,6 +19,24 @@ ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than t
 
 `encodeJpeg` uses a quality of 90 when you pass none.
 
+## Keeping a photo's metadata
+
+A decode returns pixels only, so a plain re-encode drops the capture date, the place, the camera and the colour profile. `readMetadata` reads the EXIF block, the XMP packet and the ICC profile of a JPEG, PNG or WebP file, and the JPEG, PNG and WebP encoders take them back:
+
+```kotlin
+val metadata = ImageKodec.readMetadata(photo)
+val upright = ImageKodec.decode(photo, applyOrientation = true)
+// The pixels are upright now, so the copied orientation must say so.
+val jpeg = ImageKodec.encodeJpeg(upright, 85, metadata.upright())
+val png = ImageKodec.encodePng(upright, metadata.upright())
+val webp = ImageKodec.encodeWebp(upright, metadata.upright())
+```
+
+- JPEG writes the EXIF block as an APP1 `Exif` segment, the XMP packet as an APP1 Adobe XMP segment and the ICC profile as APP2 `ICC_PROFILE` chunks. An EXIF block or an XMP packet longer than one segment, about 64 KB, is left out. A profile of any size up to 255 segments goes in.
+- PNG writes `iCCP`, `eXIf` and an `iTXt` chunk with the keyword `XML:com.adobe.xmp`.
+- WebP writes the extended format: `VP8X`, `ICCP`, the image, `EXIF` and `XMP `.
+- `upright()` sets the EXIF orientation to 1. Keep the original orientation only when you write the pixels as they were stored.
+
 ## What the encoders do not write
 
 - There is no encoder for lossy WebP, JPEG 2000, AVIF or JPEG XL.
