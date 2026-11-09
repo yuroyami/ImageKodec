@@ -25,6 +25,10 @@ dependencies:
   - $compose.foundation
   - $compose.ui
 
+# The Android conversion runs on the JVM through Robolectric's native graphics (#90).
+test-dependencies@android:
+  - $libs.robolectric
+
 test-dependencies@jvm:
   # Skiko native runtimes for headless tests. YAML has no host condition, so all six are listed.
   # Skiko loads only the one that matches the host.
