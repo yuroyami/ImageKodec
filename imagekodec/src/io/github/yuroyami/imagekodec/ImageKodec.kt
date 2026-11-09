@@ -8,6 +8,7 @@ import io.github.yuroyami.imagekodec.codec.GifEncoder
 import io.github.yuroyami.imagekodec.codec.ImageProbe
 import io.github.yuroyami.imagekodec.codec.JpegDecoder
 import io.github.yuroyami.imagekodec.codec.JpegEncoder
+import io.github.yuroyami.imagekodec.codec.JpegRepack
 import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.codec.MetadataIo
 import io.github.yuroyami.imagekodec.codec.PngDecoder
@@ -730,6 +731,21 @@ public object ImageKodec {
     @Throws(IllegalArgumentException::class)
     public fun encodeJpeg(bitmap: KiteBitmap, quality: Int, metadata: ImageMetadata): ByteArray =
         JpegEncoder.encode(bitmap, quality, metadata)
+
+    /**
+     * [bytes], a JPEG, with the same quantized coefficients written again with Huffman tables
+     * built for the image (#132), as `jpegtran -optimize -copy all` does: the file gets smaller,
+     * and it decodes to the same pixels, byte for byte. Every segment outside the entropy coding
+     * stays in its order, the `APPn` and `COM` segments, the quantization tables and the frame
+     * header, and so does whatever follows the image, such as an Ultra HDR gain map, whose MPF
+     * offsets move with it. The restart interval goes.
+     *
+     * With [progressive], the coefficients go out in a progressive scan script, which is often
+     * smaller still and which a browser draws coarse first. A file this would not make smaller
+     * comes back unchanged, and so do arithmetic-coded, lossless and hierarchical files and
+     * anything that is not a JPEG it can read.
+     */
+    public fun repackJpeg(bytes: ByteArray, progressive: Boolean = false): ByteArray = JpegRepack.repack(bytes, progressive)
 
     /**
      * [encodePng] that also writes [metadata]: `iCCP`, `eXIf` and an `iTXt` chunk with the

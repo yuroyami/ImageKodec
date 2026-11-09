@@ -14,6 +14,12 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.repackJpeg` writes the coefficients of a JPEG again with Huffman tables built for
+  the image, as `jpegtran -optimize -copy all` does: the output decodes to the same pixels and
+  is never larger, every segment outside the entropy coding stays, and a gain map after the
+  image keeps its MPF offsets. `progressive = true` writes a progressive scan script. On
+  libjpeg-turbo's own baseline files the output is within 0.1 percent of its optimal tables
+  (#132).
 - `ImageMetadata.gainMap` keeps the gain map of an Ultra HDR JPEG through a re-encode:
   `readMetadata` finds it through the Multi-Picture Format segment, and `encodeJpeg` writes it
   unchanged after the new main image, with an MPF segment and an XMP directory that point to

@@ -145,6 +145,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun probePage ([BI)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun readMetadata ([B)Lio/github/yuroyami/imagekodec/ImageMetadata;
 	public final fun removeMotion ([B)[B
+	public final fun repackJpeg ([BZ)[B
+	public static synthetic fun repackJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)[B
 }
 
 public final class io/github/yuroyami/imagekodec/ImageMetadata {

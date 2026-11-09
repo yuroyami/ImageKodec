@@ -57,6 +57,21 @@ val still = ImageKodec.removeMotion(photo)        // the photo, the video and it
 
 The still keeps every byte of the photo up to the video. In its XMP, `GCamera:MotionPhoto` becomes 0, and the video's directory item and the older MicroVideo fields go. A gain map item and its bytes stay. A Samsung file is cut at the end of its JPEG, with its trailer. The still decodes to the same pixels.
 
+## Making a JPEG smaller without touching its pixels
+
+Most JPEGs, and `encodeJpeg`'s own output, use the example Huffman tables of the JPEG standard. `repackJpeg` writes the same coefficients again with tables built for the image, as `jpegtran -optimize -copy all` does:
+
+```kotlin
+val smaller = ImageKodec.repackJpeg(photo)                        // baseline, optimal tables
+val progressive = ImageKodec.repackJpeg(photo, progressive = true) // often smaller still
+```
+
+- The output decodes to the same pixels as the input, byte for byte, and is never larger: a file the repack would not shrink comes back as it is.
+- Every segment outside the entropy coding stays in its order: `APPn` and `COM`, the quantization tables and the frame header. Bytes after the image, such as an Ultra HDR gain map, stay after it, with the MPF offsets moved. The restart interval goes.
+- The progressive form sends the DC coefficients first, then two bands of AC coefficients for each component, each band with its own table.
+- Arithmetic-coded, lossless and hierarchical files come back unchanged.
+- `ImageKodec.repackJpeg(ImageKodec.encodeJpeg(bitmap))` gives the encoder's output with optimal tables.
+
 ## What the encoders do not write
 
 - There is no encoder for lossy WebP, JPEG 2000, AVIF or JPEG XL.

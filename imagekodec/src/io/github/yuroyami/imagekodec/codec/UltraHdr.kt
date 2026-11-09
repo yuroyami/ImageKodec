@@ -65,6 +65,36 @@ internal object UltraHdr {
         return null
     }
 
+    /**
+     * [primary], a rewrite of the first image of [original] that ended at [originalEnd], with its
+     * MPF segment moved to the new end: the first entry gets the new size, and every later image,
+     * which stays after the first, its new offset from the TIFF header (#132). A file with no MPF
+     * segment comes back as it is.
+     */
+    fun shiftMpf(original: ByteArray, originalEnd: Int, primary: ByteArray): ByteArray {
+        val before = segments(original).firstOrNull { it.marker == 0xE2 && startsWith(original, it.body, it.end, MPF) } ?: return primary
+        val after = segments(primary).firstOrNull { it.marker == 0xE2 && startsWith(primary, it.body, it.end, MPF) } ?: return primary
+        val oldTiff = before.body + MPF.size
+        val newTiff = after.body + MPF.size
+        val entries = entryPositions(primary, newTiff, after.end)
+        if (entries.isEmpty()) return primary
+        val little = primary[newTiff].toInt() == 0x49
+        val out = primary.copyOf()
+        fun read(at: Int): Long = if (little) (0..3).fold(0L) { v, i -> v or ((out[at + i].toLong() and 0xFF) shl (8 * i)) }
+            else (0..3).fold(0L) { v, i -> (v shl 8) or (out[at + i].toLong() and 0xFF) }
+        fun write(at: Int, value: Long) {
+            for (i in 0..3) out[at + i] = (value ushr (if (little) 8 * i else 24 - 8 * i)).toByte()
+        }
+        for ((n, at) in entries.withIndex()) {
+            if (n == 0) { write(at + 4, primary.size.toLong()); continue }
+            val offset = read(at + 8)
+            if (offset == 0L) continue
+            val absolute = oldTiff + offset - originalEnd + primary.size
+            write(at + 8, absolute - newTiff)
+        }
+        return out
+    }
+
     /** Where each 16-byte MP Entry of the TIFF structure at [tiff] starts. */
     private fun entryPositions(data: ByteArray, tiff: Int, end: Int): List<Int> {
         if (tiff + 8 > end) return emptyList()
