@@ -76,6 +76,20 @@ and fail during the decode.
 - A sample outside the range of 0 to 1, which a float file can hold, is clipped.
 - The black channel of a CMYK file is read and not applied.
 
+### Speed and memory
+
+The decoder keeps every channel of a frame as a full plane of `Float` samples, so it needs about 50
+bytes of heap for each pixel at its peak. `JxlBenchmarkTest` measures a 3000 by 2000 picture on the
+JVM, with 4 cores and libjxl 0.7:
+
+| File | Bytes | djxl | ImageKodec | Peak heap |
+| --- | ---: | ---: | ---: | ---: |
+| Lossy, `-d 1` | 769,489 | 2,002 ms | 1,296 ms | 320 MB |
+| Lossless, `-d 0` | 11,800,802 | 971 ms | 797 ms | 238 MB |
+
+The djxl times include starting the tool and writing its output. A 6-megapixel lossy photo
+therefore needs about 300 MB of heap to decode, which is more than many Android apps get.
+
 ### Work bounds
 
 ImageKodec bounds the work of a JPEG XL file more tightly than libjxl. libjxl limits how many
