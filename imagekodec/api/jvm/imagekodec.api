@@ -129,10 +129,12 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeTiff16 (Ljava/util/List;)[B
 	public final fun encodeWebp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeWebp (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ImageMetadata;)[B
+	public final fun motionPhoto ([B)Lio/github/yuroyami/imagekodec/MotionPhotoInfo;
 	public final fun probe ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probeOrNull ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probePage ([BI)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun readMetadata ([B)Lio/github/yuroyami/imagekodec/ImageMetadata;
+	public final fun removeMotion ([B)[B
 }
 
 public final class io/github/yuroyami/imagekodec/ImageMetadata {
@@ -216,6 +218,23 @@ public final class io/github/yuroyami/imagekodec/KiteFrame {
 	public final fun getBitmap ()Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun getDelayMillis ()I
 	public final fun getDelayRawCentiseconds ()I
+}
+
+public final class io/github/yuroyami/imagekodec/MotionPhotoInfo {
+	public fun <init> (IILio/github/yuroyami/imagekodec/MotionPhotoInfo$Format;)V
+	public final fun getFormat ()Lio/github/yuroyami/imagekodec/MotionPhotoInfo$Format;
+	public final fun getVideoLength ()I
+	public final fun getVideoOffset ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/MotionPhotoInfo$Format : java/lang/Enum {
+	public static final field GOOGLE_MICRO_VIDEO Lio/github/yuroyami/imagekodec/MotionPhotoInfo$Format;
+	public static final field GOOGLE_MOTION_PHOTO Lio/github/yuroyami/imagekodec/MotionPhotoInfo$Format;
+	public static final field SAMSUNG Lio/github/yuroyami/imagekodec/MotionPhotoInfo$Format;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/MotionPhotoInfo$Format;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/MotionPhotoInfo$Format;
 }
 
 public final class io/github/yuroyami/imagekodec/Orientation : java/lang/Enum {

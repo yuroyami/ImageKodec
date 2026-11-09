@@ -37,6 +37,17 @@ val webp = ImageKodec.encodeWebp(upright, metadata.upright())
 - WebP writes the extended format: `VP8X`, `ICCP`, the image, `EXIF` and `XMP `.
 - `upright()` sets the EXIF orientation to 1. Keep the original orientation only when you write the pixels as they were stored.
 
+## Removing the video of a Motion Photo
+
+Pixel and Samsung cameras save Motion Photos: a JPEG with a short MP4 video after the image, often as large as the photo. `motionPhoto` says where the video sits, and `removeMotion` returns the still photo without it:
+
+```kotlin
+val info = ImageKodec.motionPhoto(photo)          // null for a photo with no video
+val still = ImageKodec.removeMotion(photo)        // the photo, the video and its XMP item gone
+```
+
+The still keeps every byte of the photo up to the video. In its XMP, `GCamera:MotionPhoto` becomes 0, and the video's directory item and the older MicroVideo fields go. A gain map item and its bytes stay. A Samsung file is cut at the end of its JPEG, with its trailer. The still decodes to the same pixels.
+
 ## What the encoders do not write
 
 - There is no encoder for lossy WebP, JPEG 2000, AVIF or JPEG XL.

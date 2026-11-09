@@ -751,6 +751,24 @@ public object ImageKodec {
     public fun readMetadata(data: ByteArray): ImageMetadata = MetadataIo.read(data)
 
     /**
+     * Where the video of a Motion Photo sits, or null for a file that has none (#131): a JPEG with
+     * a short MP4 video after the image, as Pixel and Samsung cameras save. Google's format names
+     * the video in XMP, with `GCamera:MotionPhoto` and a `Container:Directory` item of semantic
+     * `MotionPhoto` and its `Item:Length`, or with the older `GCamera:MicroVideo` and
+     * `GCamera:MicroVideoOffset`. A Samsung file puts it after a `MotionPhoto_Data` marker.
+     */
+    public fun motionPhoto(data: ByteArray): MotionPhotoInfo? = MotionPhoto.find(data)
+
+    /**
+     * The still photo of a Motion Photo: every byte up to the video, with the XMP that named the
+     * video rewritten to say there is none: `GCamera:MotionPhoto` 0, the video's directory item
+     * and the MicroVideo fields removed. A gain map item and its bytes stay. A Samsung file is cut
+     * at the end of its JPEG, with its trailer. A file with no video comes back as a copy, and
+     * the photo decodes to the same pixels (#131).
+     */
+    public fun removeMotion(data: ByteArray): ByteArray = MotionPhoto.remove(data)
+
+    /**
      * Encode [bitmap] as a BMP: 24-bit BI_RGB when it is opaque, or 32-bit
      * BI_BITFIELDS under a V4 header when it carries alpha (plain 32-bit BMP
      * alpha is officially "reserved", and half the world's readers discard it).

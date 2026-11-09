@@ -14,6 +14,10 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.motionPhoto` finds the video of a Motion Photo, in Google's format, its older
+  MicroVideo form or a Samsung trailer, and `ImageKodec.removeMotion` returns the still photo
+  without it: the bytes up to the video, with the XMP that named it rewritten. A gain map and
+  its bytes stay, and the photo decodes to the same pixels (#131).
 - `ImageKodec.readMetadata` reads the EXIF block, the XMP packet and the ICC profile of a
   JPEG, PNG or WebP file, and new `encodeJpeg`, `encodePng` and `encodeWebp` overloads write
   an `ImageMetadata` back: APP1 and APP2 segments in JPEG, `eXIf`, `iTXt` and `iCCP` in PNG,
