@@ -425,6 +425,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun readMetadata(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageMetadata // io.github.yuroyami.imagekodec/ImageKodec.readMetadata|readMetadata(kotlin.ByteArray){}[0]
     final fun removeMotion(kotlin/ByteArray): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.removeMotion|removeMotion(kotlin.ByteArray){}[0]
     final fun repackJpeg(kotlin/ByteArray, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.repackJpeg|repackJpeg(kotlin.ByteArray;kotlin.Boolean){}[0]
+    final fun ssimulacra2(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/KiteBitmap): kotlin/Double // io.github.yuroyami.imagekodec/ImageKodec.ssimulacra2|ssimulacra2(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.KiteBitmap){}[0]
 }
 
 final fun (io.github.yuroyami.imagekodec/KiteAnimation).io.github.yuroyami.imagekodec/cropped(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int): io.github.yuroyami.imagekodec/KiteAnimation // io.github.yuroyami.imagekodec/cropped|cropped@io.github.yuroyami.imagekodec.KiteAnimation(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int){}[0]

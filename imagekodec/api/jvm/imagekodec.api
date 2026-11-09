@@ -147,6 +147,7 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun removeMotion ([B)[B
 	public final fun repackJpeg ([BZ)[B
 	public static synthetic fun repackJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)[B
+	public final fun ssimulacra2 (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/KiteBitmap;)D
 }
 
 public final class io/github/yuroyami/imagekodec/ImageMetadata {

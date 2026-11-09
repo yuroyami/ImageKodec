@@ -14,6 +14,10 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.ssimulacra2` scores a distorted image against its source with SSIMULACRA 2,
+  a port of libjxl's `tools/ssimulacra2.cc`: 100 for identical images, lower the more a
+  viewer would see. It streams rows through the blur, so a 12-megapixel photo takes about
+  70 MB. See [Measuring quality](docs/quality.md) (#134).
 - `ImageKodec.repackJpeg` writes the coefficients of a JPEG again with Huffman tables built for
   the image, as `jpegtran -optimize -copy all` does: the output decodes to the same pixels and
   is never larger, every segment outside the entropy coding stays, and a gain map after the

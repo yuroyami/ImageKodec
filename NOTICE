@@ -95,8 +95,10 @@ Microsoft's DIB documentation.
 
 The JPEG XL decoder (the Jxl*.kt files of codec/jxl, except JxlContainer.kt and
 JxlDecoder.kt) is an altered Kotlin port of the decoder of libjxl 0.11.1, with
-its constant tables. Each ported file names the libjxl sources it follows and
-retains libjxl's notice. libjxl is distributed under this license:
+its constant tables. The SSIMULACRA 2 metric (internal/metric/Ssimulacra2.kt) is an
+altered Kotlin port of libjxl's tools/ssimulacra2.cc and tools/gauss_blur.cc, with
+its weights. Each ported file names the libjxl sources it follows and retains
+libjxl's notice. libjxl is distributed under this license:
 
   Copyright (c) the JPEG XL Project Authors.
   All rights reserved.

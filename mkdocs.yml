@@ -76,6 +76,7 @@ nav:
       - Animation: animation.md
       - Writing images: encoding.md
       - Resizing and orientation: resizing.md
+      - Measuring quality: quality.md
       - Compose and Coil: compose-and-coil.md
   - Reference:
       - Limits: limits.md

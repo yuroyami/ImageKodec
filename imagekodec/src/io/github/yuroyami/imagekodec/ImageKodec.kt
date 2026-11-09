@@ -9,6 +9,7 @@ import io.github.yuroyami.imagekodec.codec.ImageProbe
 import io.github.yuroyami.imagekodec.codec.JpegDecoder
 import io.github.yuroyami.imagekodec.codec.JpegEncoder
 import io.github.yuroyami.imagekodec.codec.JpegRepack
+import io.github.yuroyami.imagekodec.internal.metric.Ssimulacra2
 import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.codec.MetadataIo
 import io.github.yuroyami.imagekodec.codec.PngDecoder
@@ -746,6 +747,21 @@ public object ImageKodec {
      * anything that is not a JPEG it can read.
      */
     public fun repackJpeg(bytes: ByteArray, progressive: Boolean = false): ByteArray = JpegRepack.repack(bytes, progressive)
+
+    /**
+     * How close [distorted] looks to [reference], by SSIMULACRA 2 (#134): 100 for identical
+     * images, 90 for visually lossless, 70 for artifacts hard to notice without the original, 50
+     * for a JPEG of about quality 50, and lower, even below 0, for worse. It is a port of `tools/ssimulacra2.cc` of libjxl: both images go to
+     * linear sRGB, alpha blended onto a mid gray, then to the XYB colour space, and six scales of
+     * SSIM and edge maps are weighed as the reference weighs them.
+     *
+     * It reads the images a row at a time and keeps only the half-size image of the next scale,
+     * so a 12-megapixel photo takes about 70 MB besides the two bitmaps.
+     *
+     * @throws IllegalArgumentException if the two bitmaps are not of one size
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun ssimulacra2(reference: KiteBitmap, distorted: KiteBitmap): Double = Ssimulacra2.score(reference, distorted)
 
     /**
      * [encodePng] that also writes [metadata]: `iCCP`, `eXIf` and an `iTXt` chunk with the
