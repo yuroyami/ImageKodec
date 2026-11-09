@@ -129,7 +129,15 @@ class JpxDecode16OracleTest {
         return jp2.copyOf().also { for (i in 0..3) it[at + 7 + i] = (space ushr (24 - 8 * i)).toByte() }
     }
 
-    private fun compare(tag: String, data: ByteArray, channels: Int, bits: Int, tolerance: Int = 0) {
+    /**
+     * With [boundaries], a sample may be one level off where OpenJPEG truncates a sum that is an
+     * integer: `sycc_to_rgb` computes `(int)(0.344 * cb + 0.714 * cr)` in double, and a build that
+     * contracts it into a fused multiply-add, as Ubuntu's x86-64-v3 packages of 2.5.4 do, lands just
+     * inside the integer. At pixel (21, 13) of [source] the sum is exactly -360: plain doubles give
+     * -360 and a green of 1255, ours and OpenJPEG's before, and the fused one -359.99999999999994
+     * and 1254 (#110). Such samples are rare, and every other one must match exactly.
+     */
+    private fun compare(tag: String, data: ByteArray, channels: Int, bits: Int, tolerance: Int = 0, boundaries: Boolean = false) {
         val expected = reference(data, channels)
         assertEquals((1 shl bits) - 1, expected.max, "$tag: OpenJPEG's precision")
         val ours = ImageKodec.decode16(data)
@@ -139,11 +147,16 @@ class JpxDecode16OracleTest {
         var worst = 0
         var sum = 0L
         var lowBits = 0
+        var offByOne = 0
         for (i in expected.samples.indices) {
             val v = expected.samples[i]
             val got = ours.samples[i].toInt() and 0xFFFF
             if (tolerance == 0) {
                 val wide = if (bits == 16) v else (v shl (16 - bits)) or (v shr (2 * bits - 16))
+                if (boundaries && wide != got && kotlin.math.abs((got ushr (16 - bits)) - v) == 1) {
+                    offByOne++
+                    continue
+                }
                 assertEquals(wide, got, "$tag sample $i")
             } else {
                 // Our top bits against OpenJPEG's sample: OpenJPEG's float rounding against our fixed point (#101).
@@ -153,6 +166,7 @@ class JpxDecode16OracleTest {
             }
             if (v and 0xFF != 0 || bits > 8 && (v shr (bits - 8)) != v ushr (bits - 8)) lowBits++
         }
+        assertTrue(offByOne <= expected.samples.size / 1000, "$tag: $offByOne samples a level off, more than float contraction explains")
         assertTrue(worst <= tolerance, "$tag: a sample $worst away")
         assertTrue(sum <= expected.samples.size / 10, "$tag: mean ${sum.toDouble() / expected.samples.size}")
         // The point of it: most samples have bits that 8 bits would lose.
@@ -209,7 +223,7 @@ class JpxDecode16OracleTest {
     @Test
     fun syccConvertsAtFullPrecision() {
         assumeTrue("OpenJPEG tools not installed", tools())
-        compare("12-bit sYCC", withColourSpace(encode(source(3, 12), "-mct", "0"), 18), 3, 12)
+        compare("12-bit sYCC", withColourSpace(encode(source(3, 12), "-mct", "0"), 18), 3, 12, boundaries = true)
     }
 
     @Test

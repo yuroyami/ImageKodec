@@ -419,9 +419,15 @@ class IccOracleTest {
     fun realProfilesMatchLcms2() {
         assumeTrue("cc or lcms2 is not installed", Tools.hasAll("cc") && oracle != null)
         val dir = File("/usr/share/color/icc")
-        val names = listOf("sRGB.icc", "compatibleWithAdobeRGB1998.icc", "LStar-RGB.icc", "Gray.icc")
-        val present = names.map { File(dir, it) }.filter { it.isFile }
-        if (System.getenv(Tools.REQUIRE_ENV) == "1") assertEquals(names.size, present.size, "icc-profiles-free is not installed")
+        // Each profile by the names it has had: icc-profiles-free 2.4, in Ubuntu 26.04, has no
+        // Gray.icc and ships Gray-CIE_L.icc in its place (#110).
+        val names = listOf(
+            listOf("sRGB.icc"), listOf("compatibleWithAdobeRGB1998.icc"), listOf("LStar-RGB.icc"), listOf("Gray.icc", "Gray-CIE_L.icc"),
+        )
+        val present = names.mapNotNull { choices -> choices.map { File(dir, it) }.firstOrNull { it.isFile } }
+        if (System.getenv(Tools.REQUIRE_ENV) == "1") {
+            assertEquals(names.size, present.size, "icc-profiles-free is not installed, or lacks one of $names")
+        }
         assumeTrue("icc-profiles-free is not installed", present.isNotEmpty())
         for (file in present) {
             val icc = file.readBytes()

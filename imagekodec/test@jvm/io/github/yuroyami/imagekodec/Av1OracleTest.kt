@@ -35,12 +35,17 @@ class Av1OracleTest {
         val check: (Av1SequenceHeader, Av1FrameHeader) -> Boolean,
     )
 
+    /** What the last [run] wrote to standard error, for a message. */
+    private var lastError = ""
+
     private fun run(vararg args: String): Pair<Int, ByteArray> {
         val proc = ProcessBuilder(args.toList()).redirectErrorStream(false).start()
         val out = ByteArrayOutputStream()
-        val err = Thread { proc.errorStream.readBytes() }.apply { start() }
+        var stderr = ByteArray(0)
+        val err = Thread { stderr = proc.errorStream.readBytes() }.apply { start() }
         proc.inputStream.copyTo(out)
         err.join()
+        lastError = stderr.decodeToString().trim()
         if (!proc.waitFor(300, TimeUnit.SECONDS)) {
             proc.destroyForcibly()
             return -1 to ByteArray(0)
@@ -216,6 +221,9 @@ class Av1OracleTest {
         ).forEach(::check)
     }
 
+    /** The sequences dav1d could not decode, with its reason, which skip instead of failing. */
+    private val refused = ArrayList<String>()
+
     /** A sequence: [frames] frames of [source] from [encoder] with [args], which must use every tool of [uses]. */
     private class Sequence(val name: String, val source: String, val frames: Int, val pixFmt: String, val encoder: String, val args: List<String>, val uses: List<String>)
 
@@ -232,7 +240,12 @@ class Av1OracleTest {
         val pictures = Av1Decoder().also { it.toolUse = use }.decodeAll(data)
         // Each frame at its own size: ffmpeg would otherwise scale every frame to the first one's.
         val (refCode, ref) = run(ffmpeg, "-hide_banner", "-loglevel", "error", "-c:v", "libdav1d", "-i", out.path, "-autoscale", "0", "-f", "rawvideo", "-pix_fmt", c.pixFmt, "-")
-        assertEquals(0, refCode, "${c.name}: dav1d could not decode")
+        if (refCode != 0) {
+            // The reference cannot read what the encoder wrote, so there is nothing to compare: dav1d
+            // 1.5.3 refuses the stream of libaom 3.13 with every inter tool, in Ubuntu 26.04 (#110).
+            refused += "${c.name} (exit $refCode): ${lastError.take(300)}"
+            return
+        }
         var at = 0
         for ((n, picture) in pictures.withIndex()) {
             val wide = picture.bitDepth > 8
@@ -300,5 +313,7 @@ class Av1OracleTest {
             Sequence("rav1e", rotating, 16, "yuv420p", "librav1e", listOf("-qp", "90", "-speed", "2"), listOf("averaged compound", "segmentation in inter frame")),
             Sequence("rav1e in tiles", fast, 12, "yuv420p", "librav1e", listOf("-qp", "120", "-speed", "9", "-tiles", "4"), listOf("tiles")),
         ).forEach(::checkSequence)
+        // Every other sequence has been checked by now; one dav1d cannot read reports as skipped.
+        assumeTrue("dav1d could not decode ${refused.joinToString("; ")}", refused.isEmpty())
     }
 }
