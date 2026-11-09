@@ -6,6 +6,7 @@ import io.github.yuroyami.imagekodec.ImageInfo
 import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
 import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
+import io.github.yuroyami.imagekodec.codec.jxr.JxrDecoder
 import io.github.yuroyami.imagekodec.internal.ByteReader
 
 /**
@@ -23,6 +24,7 @@ import io.github.yuroyami.imagekodec.internal.ByteReader
  *  - BMP/TIFF/WebP: fixed header fields (and, for animated WebP, the ANMF count)
  *  - AVIF: the boxes of the file and the AV1 headers of what it shows, with no tile decoded
  *  - JPEG XL: the image header, the ICC profile and each frame's header and table of contents
+ *  - JPEG XR: the file directory and the codestream's image and plane headers
  *
  * [ImageInfo.isDecodable] mirrors the decoders' feature refusals, so a Coil-style
  * "should I claim this file?" question is one call rather than a hand-rolled
@@ -42,6 +44,7 @@ internal object ImageProbe {
         ImageFormat.WEBP -> webp(data)
         ImageFormat.AVIF -> AvifDecoder.probe(data)
         ImageFormat.JXL -> JxlDecoder.probe(data)
+        ImageFormat.JXR -> JxrDecoder.probe(data)
         null -> throw ImageDecodeException(
             "unrecognised image format (${data.size} bytes)",
         )

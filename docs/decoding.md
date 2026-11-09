@@ -61,6 +61,7 @@ when you pass `applyOrientation = true`.
 | JPEG 2000 | JP2 container and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN) |
 | AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
 | JPEG XL | the bare codestream and the container, both coding modes: lossy VarDCT with every transform size, and Modular, lossless or lossy. Progressive passes, LF frames, patches, splines, noise, both smoothing filters, upsampling, samples of up to 16 bits and float samples, alpha straight or premultiplied, extra channels, spot colors, recompressed JPEGs, layers with every blend mode, animations |
+| JPEG XR | the container of T.832 Annex A and HD Photo's, lossless and lossy, spatial and frequency order, the three overlap modes, Y only, 4:2:0, 4:2:2 and 4:4:4, soft and hard tiles, planar and interleaved alpha, straight or premultiplied, in the gray, RGB and BGR pixel formats at 8 and 16 bits, 16-bit and 32-bit fixed point, half and float, and the packed 5-5-5, 5-6-5 and 10-10-10 formats |
 
 Chroma subsampling, in the JPEG and AVIF rows, means that the file stores color at a lower
 resolution than brightness. ImageKodec upsamples it before it returns the pixels.
@@ -94,6 +95,15 @@ Layers are blended into one image. The orientation is reported as `ImageInfo.ori
 each frame and the loop count of the file, and `decode` shows its first frame. A recompressed JPEG
 decodes to its pixels. The data that rebuilds the original JPEG file is passed over.
 
+### JPEG XR
+
+JPEG XR, which XPS documents and Windows photo tools write, decodes with a port of the decoder of
+Microsoft's jxrlib. Every sample equals what jxrlib's `JxrDecApp` reads, lossy files included. The
+fixed-point, half and float formats hold linear light (scRGB), and they convert to sRGB as jxrlib's
+own converter does when it writes 8 bits, at 16 bits for `decode16`; their alpha stays linear.
+Premultiplied color is divided by its alpha. The Transformation tag of the file is reported as
+`ImageInfo.orientation`, and `applyOrientation` applies it.
+
 ## Pages of a TIFF
 
 A TIFF can hold any number of pages. `decode` returns the first, `probe(bytes).pageCount` says how
@@ -117,6 +127,7 @@ a scientific or medical image or a graded photograph, `decode16` keeps the whole
 - every bit of a 12-bit JPEG, or of a lossless JPEG of 9 to 16 bits, as medical images carry them
 - a 10- or 12-bit AVIF, converted to RGB at 16 bits
 - a JPEG XL sample of up to 16 bits (a deeper sample or a float sample is rounded to 16 bits)
+- a JPEG XR sample of 16 bits, and a fixed-point, half or float sample converted to sRGB at 16 bits
 
 The samples come in the channels that the file has once a palette is looked up: gray, gray and
 alpha, RGB or RGBA.

@@ -166,6 +166,9 @@ class FuzzTest {
         // JPEG XL from libjxl: both coding modes, the container, an ICC profile, passes, an LF frame, patches,
         // splines, noise, upsampling, a recompressed JPEG, float samples and a blended animation (#42).
         *JxlFixtures.all.map { (name, data) -> "jxl-$name" to data }.toTypedArray(),
+        // JPEG XR from jxrlib: both bitstream orders, every subsampling, tiles soft and hard, planar and
+        // interleaved alpha, 16-bit, half and packed samples, and HD Photo's codec subversion (#125).
+        *JxrFixtures.all.map { (name, data) -> "jxr-$name" to data }.toTypedArray(),
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
@@ -324,7 +327,7 @@ class FuzzTest {
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
         // The 16-bit paths read their own samples; the others widen what decode gives.
         val format = ImageFormat.sniff(bytes)
-        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.JXL) {
+        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.JXL || format == ImageFormat.JXR) {
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
         }
         // A file that declares its colour converts through it when asked, so a profile's tables

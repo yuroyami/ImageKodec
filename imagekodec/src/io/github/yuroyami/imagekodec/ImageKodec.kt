@@ -20,6 +20,7 @@ import io.github.yuroyami.imagekodec.codec.WebpDecoder
 import io.github.yuroyami.imagekodec.codec.WebpEncoder
 import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
 import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
+import io.github.yuroyami.imagekodec.codec.jxr.JxrDecoder
 import io.github.yuroyami.imagekodec.internal.color.ColorManagement
 import io.github.yuroyami.imagekodec.internal.color.Ink
 import io.github.yuroyami.imagekodec.internal.color.SrgbConverter
@@ -105,8 +106,8 @@ public object ImageKodec {
      * decode whose result no longer matters; what it throws comes out of this call as it is. It
      * runs once a row of MCUs of a JPEG, every 64 rows and every DEFLATE block of a PNG, before
      * each strip or tile of a TIFF, each tile and code block of a JPEG 2000 image, each row of
-     * superblocks of an AVIF and each group of a JPEG XL frame; the other formats check it once
-     * before they start.
+     * superblocks of an AVIF, each group of a JPEG XL frame and each row of macroblocks of a JPEG XR
+     * image; the other formats check it once before they start.
      *
      * @throws ImageDecodeException on malformed/truncated input or unknown format
      * @throws UnsupportedImageException on formats recognised but not yet decodable
@@ -179,7 +180,8 @@ public object ImageKodec {
      * up to 16 bits deep, through its palette, channel definitions and colour space, and
      * every bit of a 12-bit JPEG or a lossless one of 9 to 16 bits, converted at that
      * precision. A JPEG XL image keeps up to 16 bits a sample; a deeper or a float
-     * sample is rounded to 16 bits. The channels are those the file stores once a
+     * sample is rounded to 16 bits. A JPEG XR image keeps its 16-bit samples, and its linear
+     * fixed-point, half and float samples convert to sRGB at 16 bits. The channels are those the file stores once a
      * palette is looked up (gray, gray and alpha, RGB or RGBA), so a gray depth map
      * stays one sample a pixel. Narrower samples
      * replicate up (an 8-bit `v` becomes `v * 257`, a 12-bit one `v shl 4 or (v shr 8)`, a
@@ -211,7 +213,7 @@ public object ImageKodec {
             throw IllegalArgumentException("page $page asked of a one-page $format image")
         }
         when (format) {
-            ImageFormat.TIFF, ImageFormat.PNG, ImageFormat.JP2, ImageFormat.AVIF, ImageFormat.JPEG, ImageFormat.JXL -> {}
+            ImageFormat.TIFF, ImageFormat.PNG, ImageFormat.JP2, ImageFormat.AVIF, ImageFormat.JPEG, ImageFormat.JXL, ImageFormat.JXR -> {}
             // A BMP that holds a PNG keeps that PNG's precision.
             ImageFormat.BMP -> return BmpDecoder.embedded(data)?.let { decode16With(it, 0, applyOrientation, colorTarget, cancel) }
                 ?: widened(data, applyOrientation, colorTarget, cancel)
@@ -224,6 +226,7 @@ public object ImageKodec {
                 ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data, cancel)
                 ImageFormat.AVIF -> AvifDecoder.decode16(data, cancel)
                 ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
+                ImageFormat.JXR -> JxrDecoder.decode16(data, cancel)
                 else -> JpegDecoder.decode16(data, cancel)
             }
         }
@@ -571,6 +574,7 @@ public object ImageKodec {
         ImageFormat.AVIF -> AvifDecoder.decode16(data, cancel)
         ImageFormat.JPEG -> JpegDecoder.decode16(data, cancel)
         ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
+        ImageFormat.JXR -> JxrDecoder.decode16(data, cancel)
         ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { raw16(it, 0, cancel) }
         else -> null
     }
@@ -620,6 +624,7 @@ public object ImageKodec {
         ImageFormat.TIFF -> TiffDecoder.decode(data, cancel = cancel)
         ImageFormat.AVIF -> AvifDecoder.decode(data, cancel)
         ImageFormat.JXL -> JxlDecoder.decode(data, cancel)
+        ImageFormat.JXR -> JxrDecoder.decode(data, cancel)
         null -> throw ImageDecodeException(
             "unrecognised image format (${data.size} bytes${
                 if (data.size >= 4) {

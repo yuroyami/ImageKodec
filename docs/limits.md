@@ -9,15 +9,15 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   `decodeScaled`, `decodeDownscaledTo` and `decodeReduced` shrink a JPEG or a JPEG 2000 image
   inside the decoder, and `scaled` works after a full-size decode.
 - `decode` keeps only the high byte of a 16-bit sample, because `KiteBitmap` holds 8 bits a
-  channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000, JPEG XL and 12-bit or
+  channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000, JPEG XL, JPEG XR and 12-bit or
   lossless JPEG, and it converts AVIF at 16 bits. Other formats come through it at 8 bits, widened.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF or JPEG XL. See
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR. See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
 ## Size ceilings
 
 - All image decoders cap their output at 2^28 pixels (about 1 GiB of ARGB).
-- WebP, AVIF, JPEG XL, fax-compressed TIFF, `CcittFax` and `Jbig2Decoder` use that ceiling alone.
+- WebP, AVIF, JPEG XL, JPEG XR, fax-compressed TIFF, `CcittFax` and `Jbig2Decoder` use that ceiling alone.
   Constant VP8L pixels and fax reference rows can take no entropy bits, or one bit a row, so a
   ratio to the input size would refuse valid files. The frames of a WebP, AVIF or JPEG XL
   animation together must fit the same ceiling.
@@ -110,8 +110,23 @@ A preview frame is passed over. `decode` gives the first shown frame, with the l
 blended in. Every frame decodes whole, with all of its passes, so there is no early, coarser
 picture.
 
+## JPEG XR
+
+- CMYK, the N-channel formats and RGBE (32bppRGBE) throw `UnsupportedImageException`, and so do
+  pixel formats that T.832 does not list. `probe` names the format in `unsupportedReason`.
+- An image may hold 2^30 samples over all of its channels, and a macroblock row of all its
+  channels may hold 2^30 samples, so a 128-bit format has to be smaller than the shared ceiling.
+- `decodeReduced` decodes the full image and then averages it. The DC-only and lowpass decodes
+  that jxrlib's thumbnails use are not ported.
+- A region of interest, jxrlib's post-processing filters and the codestream's own orientation
+  field are not read. Like jxrlib, which follows Windows Vista, the orientation comes from the
+  container's Transformation tag alone.
+- A file whose image codestream runs past its end fails, and so does a tile layout that starts a
+  tile nowhere. JxrEncApp writes the size of the whole file as the size of a planar alpha plane,
+  so that size is not held to the file.
+
 ## Orientation
 
 `probe` reports the orientation that a file declares: the EXIF tag of a JPEG or TIFF, the rotation
-and mirror of an AVIF, and the header of a JPEG XL. `decode` applies it only when you pass
+and mirror of an AVIF, the header of a JPEG XL and the Transformation tag of a JPEG XR. `decode` applies it only when you pass
 `applyOrientation = true`. The Compose binding applies it for you.

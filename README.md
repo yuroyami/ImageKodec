@@ -1,7 +1,7 @@
 # ImageKodec
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
-BMP, TIFF, JPEG 2000, WebP, AVIF and JPEG XL from a `ByteArray`, with the same code
+BMP, TIFF, JPEG 2000, WebP, AVIF, JPEG XL and JPEG XR from a `ByteArray`, with the same code
 on every target.
 
 <sub>AI tools wrote much of the code, tests and documentation in this project, under the
@@ -161,6 +161,7 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | JPEG 2000 | all of Part 1, JP2 and raw codestream | no |
 | AVIF | stills and image sequences, 8 to 12 bits | no |
 | JPEG XL | both coding modes, layers and animation | no |
+| JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | no |
 
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
 carries a header of its own, so both take their parameters explicitly. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
@@ -185,7 +186,7 @@ in a browser on the web, so those two modules are for browser apps.
 
 - Every entry point takes the complete file as a `ByteArray`. There is no streaming decode.
 - `decode` returns 8 bits a channel. Use `decode16` for deeper samples.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF or JPEG XL.
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR.
 - A decode refuses an image of more than 2^28 pixels (about 1 GiB of ARGB).
 
 [Limits](docs/limits.md) has the full list, format by format.

@@ -161,3 +161,9 @@ being true.
   an array in place, and the vector code gives wrong bytes. arm64 and JDK 21 are not
   affected, so the fault shows only on the Java 11 job of CI. Reverse bits through a table,
   as `TiffDecoder` does.
+- `JxrDecApp -c` asked for a pixel format of another size than the file's (24-bit RGB from a
+  48-bit half file) decodes into a buffer of the wrong size and writes noise, so `JxrOracleTest`
+  restates jxrlib's converter on `JxrDecApp`'s own samples instead (#125).
+- `JxrEncApp` writes the size of the whole file as a planar alpha plane's AlphaByteCount, and it
+  writes only codec subversion 1. Rewriting the subversion nibble of its codestreams gives HD
+  Photo's 0 and the hard tiles of 9, which `JxrDecApp` reads as the new subversion asks (#125).

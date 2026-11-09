@@ -14,6 +14,14 @@ reviewable in the diff.
 
 ### Added
 
+- JPEG XR decoding (ITU-T T.832 | ISO/IEC 29199-2), with HD Photo and Windows Media Photo, the
+  format of XPS image brushes: `ImageFormat.JXR` sniffs the `II BC` container, `probe` reports its
+  size, depth and alpha, and `decode` and `decode16` read the gray, RGB, BGR, BGRA and premultiplied
+  PBGRA formats at 8 and 16 bits, the 16-bit and 32-bit fixed-point, half and float formats, converted
+  from linear light to sRGB, and the packed 5-5-5, 5-6-5 and 10-10-10 formats. Lossless and lossy
+  files, both bitstream orders, the three overlap modes, every internal colour format, soft and hard
+  tiles and planar and interleaved alpha decode to the samples of jxrlib's `JxrDecApp`, whose decoder
+  this one ports (#125).
 - `ImageKodec.ssimulacra2` scores a distorted image against its source with SSIMULACRA 2,
   a port of libjxl's `tools/ssimulacra2.cc`: 100 for identical images, lower the more a
   viewer would see. It streams rows through the blur, so a 12-megapixel photo takes about

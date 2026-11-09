@@ -3,7 +3,7 @@
 # ImageKodec
 
 Image codecs written in Kotlin, for Kotlin Multiplatform. Decode PNG, JPEG, GIF, BMP, TIFF,
-JPEG 2000, WebP, AVIF and JPEG XL from a `ByteArray`. The same code runs on Android, iOS, desktop,
+JPEG 2000, WebP, AVIF, JPEG XL and JPEG XR from a `ByteArray`. The same code runs on Android, iOS, desktop,
 native, the browser and Wasm.
 
 <div class="kite-hero-actions" markdown>

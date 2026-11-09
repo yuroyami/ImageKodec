@@ -22,6 +22,13 @@ public enum class ImageFormat {
 
     /** JPEG XL: a bare codestream that starts `FF 0A`, or its container, which starts with a `JXL ` box. */
     JXL,
+
+    /**
+     * JPEG XR (ITU-T T.832 | ISO/IEC 29199-2), formerly HD Photo and Windows Media Photo, the
+     * image format of XPS documents: the TIFF-like container of its Annex A, which starts `II BC`
+     * and a version byte of 0 (HD Photo) or 1.
+     */
+    JXR,
     ;
 
     public companion object {
@@ -55,6 +62,9 @@ public enum class ImageFormat {
                 // "II*\0" (little-endian) or "MM\0*" (big-endian)
                 at(0) == 'I'.code && at(1) == 'I'.code && at(2) == 0x2A && at(3) == 0x00 -> TIFF
                 at(0) == 'M'.code && at(1) == 'M'.code && at(2) == 0x00 && at(3) == 0x2A -> TIFF
+
+                // JPEG XR: "II", the identifier BC and a version of 0 or 1 (T.832 A.6).
+                at(0) == 'I'.code && at(1) == 'I'.code && at(2) == 0xBC && (at(3) == 0x00 || at(3) == 0x01) -> JXR
 
                 // JPEG 2000: JP2 signature box (length 12, type "jP  ") or a raw
                 // J2K codestream's SOC marker FF 4F.
