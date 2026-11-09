@@ -54,7 +54,8 @@ jobs:
   test-jvm:
     name: JVM tests on Java ${{ matrix.java }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A build of libjxl's ssimulacra2 on a cold cache takes about ten minutes more.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -63,6 +64,7 @@ jobs:
       IMAGEKODEC_REQUIRE_ORACLES: '1'
       T81_COMMIT: c719010
       LIBJPEG_TURBO: 3.1.0
+      LIBJXL: v0.11.1
     steps:
       - uses: actions/checkout@v7
         with:
@@ -99,6 +101,30 @@ jobs:
           install -m 755 /tmp/ljt3/build/cjpeg-static ~/oracle-tools/cjpeg3
           install -m 755 /tmp/ljt3/build/djpeg-static ~/oracle-tools/djpeg3
 
+      # libjxl's ssimulacra2 scores the SSIMULACRA 2 port (#134). It is a development tool of
+      # libjxl, which no Ubuntu package ships, so it is built like the two above, static, with
+      # the bundled highway, skcms and Brotli. Only the one target is built.
+      - name: Restore libjxl's ssimulacra2
+        id: built-ssimulacra2
+        uses: actions/cache@v6
+        with:
+          path: ~/oracle-tools-jxl
+          key: oracle-ssimulacra2-${{ runner.os }}-${{ env.LIBJXL }}
+
+      - name: Build libjxl's ssimulacra2
+        if: steps.built-ssimulacra2.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpng-dev ninja-build
+          mkdir -p ~/oracle-tools-jxl
+          git clone --quiet --depth 1 --branch "$LIBJXL" --recurse-submodules --shallow-submodules https://github.com/libjxl/libjxl.git /tmp/libjxl
+          cmake -S /tmp/libjxl -B /tmp/libjxl/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_DEVTOOLS=ON -DJPEGXL_ENABLE_JPEGLI=OFF -DJPEGXL_ENABLE_SJPEG=OFF \
+            -DJPEGXL_ENABLE_OPENEXR=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_MANPAGES=OFF \
+            -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF > /dev/null
+          ninja -C /tmp/libjxl/build ssimulacra2 > /dev/null
+          install -m 755 /tmp/libjxl/build/tools/ssimulacra2 ~/oracle-tools-jxl/ssimulacra2
+
       # A skipped oracle test reads exactly like a passing one, so the tools are installed
       # rather than left to chance, and a missing one fails this step. The tests find them on
       # PATH. Ubuntu's ImageMagick is version 6, whose command is `convert`; the tests fall
@@ -106,11 +132,12 @@ jobs:
       - name: Install the oracle tools
         run: |
           echo "$HOME/oracle-tools" >> "$GITHUB_PATH"
-          export PATH="$HOME/oracle-tools:$PATH"
+          echo "$HOME/oracle-tools-jxl" >> "$GITHUB_PATH"
+          export PATH="$HOME/oracle-tools:$HOME/oracle-tools-jxl:$PATH"
           sudo apt-get update
-          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil python3-numpy libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools
+          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil python3-numpy libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools
           missing=0
-          for t in cwebp dwebp tiffcp opj_compress opj_decompress cjpeg djpeg jpegtran tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert cc cjxl djxl t81jpeg cjpeg3 djpeg3; do
+          for t in cwebp dwebp tiffcp opj_compress opj_decompress cjpeg djpeg jpegtran tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert cc cjxl djxl ssimulacra2 t81jpeg cjpeg3 djpeg3; do
             command -v "$t" >/dev/null || { echo "::error::oracle tool $t not on PATH"; missing=1; }
           done
           command -v magick >/dev/null || command -v convert >/dev/null || { echo "::error::ImageMagick not on PATH"; missing=1; }

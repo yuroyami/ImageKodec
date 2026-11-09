@@ -88,9 +88,9 @@ class Ssimulacra2OracleTest {
 
     @Test
     fun libjxl_gives_the_same_scores() {
-        // Not every libjxl-tools package ships the tool, so its absence skips even in CI.
-        val tool = Tools.find("ssimulacra2")?.path
-        assumeTrue("libjxl's ssimulacra2 tool is not installed", tool != null)
-        compare(0.1) { a, b -> run(tool!!, a.path, b.path)!!.lines().last().trim().toDouble() }
+        // No package ships the tool. CI builds it from libjxl, so there its absence fails.
+        assumeTrue("libjxl's ssimulacra2 tool is not installed", Tools.hasAll("ssimulacra2"))
+        val tool = Tools.require("ssimulacra2").path
+        compare(0.1) { a, b -> run(tool, a.path, b.path)!!.lines().last().trim().toDouble() }
     }
 }
