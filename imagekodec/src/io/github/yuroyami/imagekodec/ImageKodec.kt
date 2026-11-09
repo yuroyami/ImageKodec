@@ -256,7 +256,11 @@ public object ImageKodec {
      * memory for about half a megapixel. A progressive JPEG still keeps the coefficients of
      * the full size, 2 bytes a sample, until its last scan. A BMP that holds a JPEG as its pixel
      * array reduces as that JPEG does. A JPEG 2000 image drops its finest
-     * wavelet levels, as OpenJPEG's reduce option does. Other formats decode in full, then
+     * wavelet levels, as OpenJPEG's reduce option does. A JPEG XR image decodes jxrlib's
+     * thumbnail, as `JxrDecApp -T` does: every second sample of the full transform at 2, and
+     * every fourth or eighth, the DCs of the second transform stage alone, at 4 and 8, for which
+     * a file in frequency order skips its highpass. Where jxrlib would round a side otherwise,
+     * the image decodes in full and averages as below. Other formats decode in full, then
      * average each block of [reduction] by [reduction] pixels, weighted by alpha as [scaled]
      * does. [colorTarget] converts as for [decode], after the reduction, and [cancellationCheck]
      * runs as for [decode].
@@ -283,6 +287,7 @@ public object ImageKodec {
         return when (detect(data)) {
             ImageFormat.JPEG -> JpegDecoder.decode(data, scale = reduction.countTrailingZeroBits(), cancel = cancel)
             ImageFormat.JP2 -> jp2ToBitmap(data, reduction, cancel)
+            ImageFormat.JXR -> JxrDecoder.decodeReduced(data, reduction, cancel) ?: decodeRaw(data, cancel).reducedBy(reduction)
             // A BMP that holds a JPEG reduces inside that JPEG's inverse DCT.
             ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { reducedRaw(it, reduction, cancel) } ?: decodeRaw(data, cancel).reducedBy(reduction)
             else -> decodeRaw(data, cancel).reducedBy(reduction)
@@ -295,7 +300,7 @@ public object ImageKodec {
      * than the image. Use it for a thumbnail or a preview, where the full-size pixels would only
      * be thrown away.
      *
-     * A JPEG or JPEG 2000 decodes at the largest reduction [decodeReduced] offers whose output
+     * A JPEG, JPEG 2000 or JPEG XR decodes at the largest reduction [decodeReduced] offers whose output
      * still covers that size, as libjpeg's scaled decode or Android's sample size is chosen, and
      * the box filter of [scaled] finishes the rest. The full-size pixels never exist, and the
      * result differs from the full decode only by the reduced inverse transform. Other formats
@@ -330,7 +335,7 @@ public object ImageKodec {
      * Decode [data] at exactly [width] by [height], the size
      * `decode(data, applyOrientation).downscaledTo(width, height)` gives. The caller chooses the
      * aspect ratio: use it for the size of a centre crop, computed from [probe], or for a size a
-     * layout has already worked out. It reduces a JPEG or JPEG 2000 while decoding as
+     * layout has already worked out. It reduces a JPEG, JPEG 2000 or JPEG XR while decoding as
      * [decodeScaled] does. [colorTarget] converts as for [decode], and [cancellationCheck] runs
      * as for [decode].
      *
@@ -359,7 +364,7 @@ public object ImageKodec {
 
     /** Whether [decodeReduced] reduces [data] inside its decoder, so that a smaller result costs less. */
     private fun reducesWhileDecoding(data: ByteArray): Boolean = when (detect(data)) {
-        ImageFormat.JPEG, ImageFormat.JP2 -> true
+        ImageFormat.JPEG, ImageFormat.JP2, ImageFormat.JXR -> true
         ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { detect(it) == ImageFormat.JPEG } ?: false
         else -> false
     }

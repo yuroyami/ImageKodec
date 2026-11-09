@@ -11,7 +11,9 @@ reads the rewritten files as the subversion asks.
 
 Each file carries the FNV-1a hash of the samples JxrDecApp writes to a TIFF: gray, or red, green,
 blue and alpha, in the pixel format's own values (integers, signed fixed point, the bits of a
-half), each hashed as four bytes, least significant first. A packed pixel is one value.
+half), each hashed as four bytes, least significant first. A packed pixel is one value. So do
+its thumbnails, which `JxrDecApp -T 1`, `-T 2` and `-T 3` decode at a half, a quarter and an eighth,
+at each reduction where jxrlib keeps the size that ImageKodec.decodeReduced promises.
 """
 import os
 import struct
@@ -145,6 +147,23 @@ def kotlin_hex(data, indent="        "):
     return " +\n".join(indent + '"' + text[i:i + 160] + '"' for i in range(0, len(text), 160))
 
 
+def thumbnail_scale(width, height, reduction):
+    """The scale jxrlib's WMPhotoValidate and setROI pick for -T, or 0 when the size is not the promised one."""
+    tw, th = -(-width // reduction), -(-height // reduction)
+    if (width + tw - 1) // tw != (height + th - 1) // th:
+        scale = 1
+        while -(-width // scale) > tw and -(-height // scale) > th:
+            scale <<= 1
+    else:
+        scale = max(1, (width + tw - 1) // tw)
+    if -(-width // scale) != tw or -(-height // scale) != th:
+        return 0
+    p = 1
+    while p * tw < width:
+        p <<= 1
+    return p if p == reduction else 0
+
+
 def subversion(data, version):
     """The file with every codestream's codec subversion set to [version]."""
     data = bytearray(data)
@@ -187,7 +206,12 @@ def main():
             with open(path(name + ".jxr"), "wb") as f:
                 f.write(data)
         run("JxrDecApp", "-i", path(name + ".jxr"), "-o", path(name + ".out.tif"))
-        results.append((name, doc, data, fnv(read_tiff(path(name + ".out.tif")))))
+        reduced = {}
+        for t in (1, 2, 3):
+            if thumbnail_scale(w, h, 1 << t):
+                run("JxrDecApp", "-i", path(name + ".jxr"), "-o", path(name + ".t.tif"), "-T", str(t))
+                reduced[1 << t] = fnv(read_tiff(path(name + ".t.tif")))
+        results.append((name, doc, data, fnv(read_tiff(path(name + ".out.tif"))), reduced))
     print("package io.github.yuroyami.imagekodec")
     print()
     print("/**")
@@ -196,17 +220,23 @@ def main():
     print(" * writes this file. `FuzzTest` mutates the files as well.")
     print(" */")
     print("internal object JxrFixtures {")
-    for name, doc, data, _ in results:
+    for name, doc, data, _, _ in results:
         print(f"    /** {doc} */")
         print(f"    val {name}: ByteArray = hex(\n{kotlin_hex(data)},\n    )\n")
     print("    val all: List<Pair<String, ByteArray>> = listOf(")
-    for name, _, _, _ in results:
+    for name, _, _, _, _ in results:
         print(f'        "{name}" to {name},')
     print("    )\n")
     print("    /** The FNV-1a hash of JxrDecApp's samples of each file. */")
     print("    val hashes: Map<String, Long> = mapOf(")
-    for name, _, _, digest in results:
+    for name, _, _, digest, _ in results:
         print(f'        "{name}" to {kotlin_long(digest)},')
+    print("    )\n")
+    print("    /** The FNV-1a hash of each thumbnail JxrDecApp -T decodes, by file and reduction. */")
+    print("    val reducedHashes: Map<String, Long> = mapOf(")
+    for name, _, _, _, reduced in results:
+        for reduction, digest in reduced.items():
+            print(f'        "{name}/{reduction}" to {kotlin_long(digest)},')
     print("    )")
     print("}")
 

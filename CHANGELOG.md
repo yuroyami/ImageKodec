@@ -21,7 +21,9 @@ reviewable in the diff.
   from linear light to sRGB, and the packed 5-5-5, 5-6-5 and 10-10-10 formats. Lossless and lossy
   files, both bitstream orders, the three overlap modes, every internal colour format, soft and hard
   tiles and planar and interleaved alpha decode to the samples of jxrlib's `JxrDecApp`, whose decoder
-  this one ports (#125).
+  this one ports (#125). `decodeReduced`, `decodeScaled` and `decodeDownscaledTo` reduce a JPEG XR
+  image inside the decoder by a half, a quarter or an eighth, as jxrlib's thumbnails (`JxrDecApp -T`)
+  do, with the same samples.
 - `ImageKodec.ssimulacra2` scores a distorted image against its source with SSIMULACRA 2,
   a port of libjxl's `tools/ssimulacra2.cc`: 100 for identical images, lower the more a
   viewer would see. It streams rows through the blur, so a 12-megapixel photo takes about

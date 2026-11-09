@@ -33,7 +33,7 @@ import io.github.yuroyami.imagekodec.internal.color.ColorMath
 internal object JxrDecoder {
 
     /** The samples a decode writes, the format they are in, and what the file says about them. */
-    internal class Decoded(val format: JxrPixelFormat, val raster: JxrRaster, val alpha: Boolean)
+    internal class Decoded(val format: JxrPixelFormat, val raster: JxrRaster, val alpha: Boolean, val redHigh: Boolean = true)
 
     /** Colour and alpha at the pixel ceiling, as the other decoders count them. */
     private const val MAX_SAMPLES = 4 * Budget.MAX_PIXELS
@@ -93,14 +93,53 @@ internal object JxrDecoder {
     /** The Transformation tag of T.832 Table A.4 as an EXIF orientation: rotation first, then the flips. */
     private fun orientation(o: Int): Orientation = Orientation.fromExif(intArrayOf(1, 4, 2, 3, 6, 7, 5, 8)[o])
 
-    /** The samples of [data] as jxrlib writes them, with planar or interleaved alpha in its slot. [cancel] runs before each row of macroblocks. */
-    internal fun decodeRaw(data: ByteArray, cancel: (() -> Unit)? = null): Decoded {
+    /**
+     * The thumbnail scale jxrlib decodes a reduction of [reduction] at, or 0 when it would give
+     * another size than [reduction] promises. JxrDecApp asks for a thumbnail of each side divided
+     * by the reduction, rounded up; WMPhotoValidate then picks the scale the sizes give, and setROI
+     * the power of 2 that covers the width.
+     */
+    internal fun thumbnailScale(width: Int, height: Int, reduction: Int): Int {
+        val tw = (width + reduction - 1) / reduction
+        val th = (height + reduction - 1) / reduction
+        var scale = 1
+        if ((width + tw - 1) / tw != (height + th - 1) / th) {
+            while ((width + scale - 1) / scale > tw && (height + scale - 1) / scale > th) scale = scale shl 1
+        } else {
+            scale = maxOf(1, (width + tw - 1) / tw)
+        }
+        if ((width + scale - 1) / scale != tw || (height + scale - 1) / scale != th) return 0
+        var p = 1
+        while (p.toLong() * tw < width) p = p shl 1
+        return if (p == reduction) p else 0
+    }
+
+    /** [decodeRaw] at a reduction of 2, 4 or 8, as jxrlib's thumbnail, or null where jxrlib would give another size. */
+    internal fun decodeRawReduced(data: ByteArray, reduction: Int, cancel: (() -> Unit)? = null, asJxrlib: Boolean = true): Decoded? {
+        val h = parse(data).header
+        val scale = thumbnailScale(h.width, h.height, reduction)
+        if (scale == 0 || h.extraLeft != 0 || h.extraTop != 0) return null
+        // jxrlib's quarter thumbnail of subsampled chroma cannot be narrower than 8 (its loop wraps),
+        // so the facade decodes such an image in full instead of failing a file the full decode reads.
+        if (!asJxrlib && scale == 4 && h.width < 8) return null
+        return decodeRaw(data, cancel, scale, asJxrlib)
+    }
+
+    /** [decode] at a reduction of 2, 4 or 8 through [decodeRawReduced], or null where it gives none. */
+    fun decodeReduced(data: ByteArray, reduction: Int, cancel: (() -> Unit)? = null): KiteBitmap? =
+        decodeRawReduced(data, reduction, cancel, asJxrlib = false)?.let { bitmap(it) }
+
+    /**
+     * The samples of [data] as jxrlib writes them, with planar or interleaved alpha in its slot, at
+     * thumbnail scale [scale]. [cancel] runs before each row of macroblocks.
+     */
+    internal fun decodeRaw(data: ByteArray, cancel: (() -> Unit)? = null, scale: Int = 1, asJxrlib: Boolean = true): Decoded {
         val p = parse(data)
         refusal(p)?.let { throw UnsupportedImageException(it) }
         val pf = p.container.pixelFormat
         val h = p.header
         if (h.sourceBitDepth != pf.bitDepth) jxrFail("a codestream of bit depth ${h.sourceBitDepth} in pixel format ${pf.name}")
-        val raster = JxrRaster(h.width, h.height, slots(pf))
+        val raster = JxrRaster((h.width + scale - 1) / scale, (h.height + scale - 1) / scale, slots(pf))
         // WMPhotoValidate: the codestream's colour format overrides the pixel format's where they differ.
         var external = pf.colorFormat
         if (h.plane.colorFormat == JxrColor.YUV_422 && external == JxrColor.YUV_420) external = JxrColor.YUV_422
@@ -108,18 +147,21 @@ internal object JxrDecoder {
         if (h.sourceColorFormat == JxrColor.RGB && external != JxrColor.Y_ONLY) external = JxrColor.RGB
         val planar = p.container.planarAlpha && !h.alphaPlane
         val format = JxrOutputFormat(external, h.sourceBitDepth, rgb = !pf.bgr, alpha = pf.alpha && h.alphaPlane, leadingPadding = 0)
-        JxrCodestream.decode(data, p.container.imageOffset, p.container.imageEnd, format, raster, cancel)
+        JxrCodestream.decode(data, p.container.imageOffset, p.container.imageEnd, format, raster, cancel, scale, asJxrlib)
         if (planar) {
             val alphaHeader = JxrImageHeader.read(data, p.container.alphaOffset, p.container.alphaEnd)
             if (alphaHeader.sourceBitDepth != pf.bitDepth) jxrFail("an alpha plane of bit depth ${alphaHeader.sourceBitDepth} in pixel format ${pf.name}")
             val alphaFormat = JxrOutputFormat(JxrColor.Y_ONLY, alphaHeader.sourceBitDepth, rgb = true, alpha = false, leadingPadding = raster.slots - 1)
-            JxrCodestream.decode(data, p.container.alphaOffset, p.container.alphaEnd, alphaFormat, raster, cancel)
+            JxrCodestream.decode(data, p.container.alphaOffset, p.container.alphaEnd, alphaFormat, raster, cancel, scale, asJxrlib)
         }
-        return Decoded(pf, raster, pf.alpha && (h.alphaPlane || planar))
+        // The codec's red of a packed format is the picture's blue, as jxrlib's RGB555_RGB24 reads it: the full
+        // decode packs it low unless the codestream swaps red and blue, and a thumbnail always packs it low.
+        return Decoded(pf, raster, pf.alpha && (h.alphaPlane || planar), redHigh = scale != 1 || !h.rbSwapped)
     }
 
-    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap {
-        val d = decodeRaw(data, cancel)
+    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap = bitmap(decodeRaw(data, cancel))
+
+    private fun bitmap(d: Decoded): KiteBitmap {
         val pf = d.format
         if (pf.bitDepth != JxrDepth.BD_8) return to16(d).toBitmap()
         val r = d.raster
@@ -168,20 +210,19 @@ internal object JxrDecoder {
         val v = IntArray(4)
         repeat(r.width * r.height) {
             when (bd) {
-                // The packed formats keep blue in the low bits, as jxrlib's RGB555_RGB24 and the others read them.
                 JxrDepth.BD_5 -> {
                     val x = s[o]
-                    for (c in 0 until 3) v[c] = widen((x shr (10 - 5 * c)) and 31, 5)
+                    for (c in 0 until 3) v[c] = widen((x shr (if (d.redHigh) 10 - 5 * c else 5 * c)) and 31, 5)
                 }
                 JxrDepth.BD_565 -> {
                     val x = s[o]
-                    v[0] = widen((x shr 11) and 31, 5)
+                    v[0] = widen((x shr (if (d.redHigh) 11 else 0)) and 31, 5)
                     v[1] = widen((x shr 5) and 63, 6)
-                    v[2] = widen(x and 31, 5)
+                    v[2] = widen((x shr (if (d.redHigh) 0 else 11)) and 31, 5)
                 }
                 JxrDepth.BD_10 -> {
                     val x = s[o]
-                    for (c in 0 until 3) v[c] = widen((x shr (20 - 10 * c)) and 1023, 10)
+                    for (c in 0 until 3) v[c] = widen((x shr (if (d.redHigh) 20 - 10 * c else 10 * c)) and 1023, 10)
                 }
                 else -> {
                     for (c in colorOrder.indices) v[c] = sample16(s[o + colorOrder[c]], bd, alpha = false)

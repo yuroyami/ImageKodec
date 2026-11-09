@@ -38,11 +38,21 @@ internal object JxrCodestream {
 
     /**
      * Decodes the codestream from [start] to [end] of [data] into [raster], as [format] asks.
-     * [cancel] runs before each row of macroblocks.
+     * [cancel] runs before each row of macroblocks. A [scale] of 2, 4 or 8 decodes jxrlib's
+     * thumbnail of that scale (its cThumbnailScale): every [scale]th sample of each row and
+     * column, from the full transform at 2 and from the second stage alone at 4 and 8.
+     *
+     * jxrlib fills a thumbnail of a gray codestream in a BGR format from the blue slot, which it
+     * never wrote, so the picture is black; [asJxrlib] keeps that, and without it the gray fills
+     * all three as in a full decode.
      */
-    fun decode(data: ByteArray, start: Int, end: Int, format: JxrOutputFormat, raster: JxrRaster, cancel: (() -> Unit)?) {
+    fun decode(
+        data: ByteArray, start: Int, end: Int, format: JxrOutputFormat, raster: JxrRaster, cancel: (() -> Unit)?,
+        scale: Int = 1, asJxrlib: Boolean = true,
+    ) {
         val image = JxrImageHeader.read(data, start, end)
-        if (image.width != raster.width || image.height != raster.height) {
+        if (scale > 1 && (image.extraLeft != 0 || image.extraTop != 0)) jxrFail("a thumbnail of a windowed image")
+        if ((image.width + scale - 1) / scale != raster.width || (image.height + scale - 1) / scale != raster.height) {
             jxrFail("a plane of ${image.width} by ${image.height} in an image of ${raster.width} by ${raster.height}")
         }
         val primary = JxrPlane(image, image.plane, secondary = false)
@@ -55,6 +65,8 @@ internal object JxrCodestream {
             plane.skipFlexbits = ruling.subband == JxrBands.NO_FLEXBITS
             plane.decodeHP = ruling.subband == JxrBands.ALL || ruling.subband == JxrBands.NO_FLEXBITS
             plane.decodeLP = ruling.subband != JxrBands.DC_ONLY
+            // A thumbnail of a quarter or less samples the DCs alone, so a frequency order file skips its highpass.
+            if (image.frequencyOrder && scale >= 4) plane.decodeHP = false
         }
         val bands = when (primary.subband) {
             JxrBands.DC_ONLY -> 1
@@ -83,7 +95,7 @@ internal object JxrCodestream {
         val uvResolution = format.colorFormat != JxrColor.Y_ONLY &&
             ((primary.cf == JxrColor.YUV_420 && format.colorFormat != JxrColor.YUV_420) ||
                 (primary.cf == JxrColor.YUV_422 && format.colorFormat != JxrColor.YUV_422))
-        val out = Output(image, primary, alpha, format, raster, uvResolution)
+        val out = Output(image, primary, alpha, format, raster, uvResolution, scale)
         for (row in 0..primary.mbHeight) {
             cancel?.invoke()
             for (plane in planes) {
@@ -116,14 +128,18 @@ internal object JxrCodestream {
                         }
                         plane.updatePrediction()
                     }
-                    JxrTransform.macroblock(plane, overlap, 1)
+                    JxrTransform.macroblock(plane, overlap, scale)
                     plane.advance()
                 }
             }
-            if (row > 0) out.row(row)
+            if (row > 0) {
+                if (scale < 2) out.row(row) else out.thumbnail(row)
+            }
             for (plane in planes) plane.endRow()
         }
-        if (format.colorFormat == JxrColor.RGB && primary.cf == JxrColor.Y_ONLY) out.grayToRgb()
+        if (format.colorFormat == JxrColor.RGB && primary.cf == JxrColor.Y_ONLY) {
+            if (scale < 2 || !asJxrlib) out.grayToRgb() else out.grayToRgbThumbnail()
+        }
     }
 
     /** GetVLWordEsc: a byte-aligned size of 2, 4 or 8 bytes, or 0 for an escape. */
@@ -266,6 +282,7 @@ internal object JxrCodestream {
         val format: JxrOutputFormat,
         val raster: JxrRaster,
         val uvResolution: Boolean,
+        val scale: Int,
     ) {
         val shift = if (plane.scaled) JxrPlane.SHIFT_ZERO + JxrPlane.QP_FRAC_BITS else 0
         val bias2 = if (plane.scaled) (1 shl (JxrPlane.SHIFT_ZERO + JxrPlane.QP_FRAC_BITS - 1)) - 1 else 0
@@ -544,6 +561,234 @@ internal object JxrCodestream {
                     }
                     o += slots
                 }
+            }
+        }
+
+        /**
+         * decodeThumbnail, outputNChannelThumbnail and decodeThumbnailAlpha: every [scale]th sample of
+         * macroblock row [row] - 1, scaled by the gain the skipped transform stages leave (cMul).
+         */
+        fun thumbnail(row: Int) {
+            val mbRow = row - 1
+            val t = scale
+            if ((mbRow * 16) % t != 0) return
+            val cHeight = minOf(image.height - mbRow * 16, 16)
+            val cWidth = image.width
+            val overlap = image.overlap
+            val mul = if (t >= 16) (if (overlap == 0) 16 else if (overlap == 1) 23 else 34) else if (t >= 4) (if (overlap == 0) 64 else 93) else 258
+            val shiftY = 8 + shift
+            val shiftUV = shiftY - if (plane.scaled && t >= 16) (if (plane.cf == JxrColor.YUV_420 || plane.cf == JxrColor.YUV_422) 2 else 1) else 0
+            val out = raster.samples
+            val slots = raster.slots
+            val y = plane.buf[0]
+            val yAt = plane.a0(0)
+            var u: IntArray? = null
+            var v: IntArray? = null
+            var uAt = 0
+            var vAt = 0
+            if ((plane.cf == JxrColor.YUV_422 || plane.cf == JxrColor.YUV_420) && cfExt != JxrColor.Y_ONLY) {
+                val dU = resU ?: jxrFail("chroma of colour format ${plane.cf} in format ${format.colorFormat}")
+                val dV = resV!!
+                val su = plane.buf[1]
+                val sv = plane.buf[2]
+                val s0 = plane.a0(1)
+                for (r in 0 until 16 step t) {
+                    var c = 0
+                    while (c < cWidth) {
+                        val i1 = if (plane.cf == JxrColor.YUV_422) ((c shr 4) shl 7) + IDX_CC[(r shl 4) + ((c shr 1) and 7)]
+                        else ((c shr 4) shl 6) + IDX_CC_420[((r shr 1) shl 3) + ((c shr 1) and 7)]
+                        val i2 = cc(c, r)
+                        dU[i2] = su[s0 + i1]
+                        dV[i2] = sv[s0 + i1]
+                        c += t
+                    }
+                }
+                if (t == 4) {
+                    var i3 = 0
+                    if (plane.cf == JxrColor.YUV_420) {
+                        var c = 0
+                        while (c < cWidth) {
+                            val i1 = cc(c, 0)
+                            val i2 = cc(c, 4)
+                            i3 = cc(c, 8)
+                            dU[i2] = (dU[i1] + dU[i3] + 1) shr 1
+                            dV[i2] = (dV[i1] + dV[i3] + 1) shr 1
+                            val i4 = cc(c, 12)
+                            dU[i4] = dU[i3]
+                            dV[i4] = dV[i3]
+                            c += 8
+                        }
+                    }
+                    // jxrlib counts this loop in an unsigned size, which an image narrower than 8 wraps round.
+                    if (cWidth < 8) jxrFail("a quarter thumbnail of subsampled chroma narrower than 8")
+                    for (r in 0 until 16 step 4) {
+                        var c = 0
+                        while (c < cWidth - 8) {
+                            val i1 = cc(c, r)
+                            val i2 = ((c shr 4) shl 8) + IDX_CC[(r shl 4) + ((c + 4) and 15)]
+                            i3 = ((c shr 4) shl 8) + IDX_CC[(r shl 4) + ((c + 8) and 15)]
+                            dU[i2] = (dU[i1] + dU[i3] + 1) shr 1
+                            dV[i2] = (dV[i1] + dV[i3] + 1) shr 1
+                            c += 8
+                        }
+                        val i2 = ((c shr 4) shl 8) + IDX_CC[(r shl 4) + ((c + 4) and 15)]
+                        dU[i2] = dU[i3]
+                        dV[i2] = dV[i3]
+                    }
+                }
+                u = dU
+                v = dV
+            } else if (plane.channels >= 3) {
+                u = plane.buf[1]
+                v = plane.buf[2]
+                uAt = plane.a0(1)
+                vAt = plane.a0(2)
+            }
+            val bd = format.bitDepth
+            fun at(r: Int, c: Int) = ((((mbRow * 16 + r) / t) * raster.width) + c / t) * slots + format.leadingPadding
+            if (cfExt == JxrColor.RGB) {
+                val uu = u ?: jxrFail("RGB from one channel")
+                val vv = v!!
+                val iB = if (format.rgb) 2 else 0
+                val iR = 2 - iB
+                val offset = when (bd) {
+                    JxrDepth.BD_8 -> (128 shl shiftY) / mul
+                    JxrDepth.BD_16 -> (((1 shl 15) shr len) shl shiftY) / mul
+                    JxrDepth.BD_5 -> (16 shl shiftY) / mul
+                    JxrDepth.BD_565 -> (32 shl shiftY) / mul
+                    JxrDepth.BD_10 -> (512 shl shiftY) / mul
+                    else -> 0
+                }
+                for (r in 0 until cHeight step t) {
+                    var c = 0
+                    while (c < cWidth) {
+                        val i = cc(c, r)
+                        var g = ((y[yAt + i] + offset) * mul) shr shiftY
+                        var rr = (-(uu[uAt + i] * mul)) shr shiftUV
+                        var b = (vv[vAt + i] * mul) shr shiftUV
+                        g -= rr shr 1
+                        rr -= ((b + 1) shr 1) - g
+                        b += rr
+                        val o = at(r, c)
+                        when (bd) {
+                            JxrDepth.BD_8 -> {
+                                out[o + iB] = clip(b, 0, 255)
+                                out[o + 1] = clip(g, 0, 255)
+                                out[o + iR] = clip(rr, 0, 255)
+                            }
+                            JxrDepth.BD_16 -> {
+                                out[o] = clip(rr shl len, 0, 65535)
+                                out[o + 1] = clip(g shl len, 0, 65535)
+                                out[o + 2] = clip(b shl len, 0, 65535)
+                            }
+                            JxrDepth.BD_16S -> {
+                                out[o] = clip(rr shl len, -32768, 32767)
+                                out[o + 1] = clip(g shl len, -32768, 32767)
+                                out[o + 2] = clip(b shl len, -32768, 32767)
+                            }
+                            JxrDepth.BD_16F -> {
+                                out[o] = backwardHalf(rr)
+                                out[o + 1] = backwardHalf(g)
+                                out[o + 2] = backwardHalf(b)
+                            }
+                            JxrDepth.BD_32S -> {
+                                out[o] = rr shl len
+                                out[o + 1] = g shl len
+                                out[o + 2] = b shl len
+                            }
+                            JxrDepth.BD_32F -> {
+                                out[o] = pixel2float(rr, expBias, len)
+                                out[o + 1] = pixel2float(g, expBias, len)
+                                out[o + 2] = pixel2float(b, expBias, len)
+                            }
+                            // The thumbnails pack red low whatever the codestream's red-blue flag says.
+                            JxrDepth.BD_5 -> out[o] = clip(rr, 0, 31) + (clip(g, 0, 31) shl 5) + (clip(b, 0, 31) shl 10)
+                            JxrDepth.BD_565 -> out[o] = clip(rr / 2, 0, 31) + (clip(g, 0, 63) shl 5) + (clip(b / 2, 0, 31) shl 11)
+                            JxrDepth.BD_10 -> out[o] = clip(rr, 0, 1023) + (clip(g, 0, 1023) shl 10) + (clip(b, 0, 1023) shl 20)
+                            else -> jxrFail("RGB samples of bit depth $bd")
+                        }
+                        c += t
+                    }
+                }
+            } else if (bd == JxrDepth.BD_1) {
+                for (r in 0 until cHeight step t) {
+                    var c = 0
+                    while (c < cWidth) {
+                        out[at(r, c)] = if (y[yAt + cc(c, r)] > 0) 1 else 0
+                        c += t
+                    }
+                }
+            } else {
+                val channels = minOf(plane.channels, slots - format.leadingPadding)
+                val offset = when (bd) {
+                    JxrDepth.BD_8 -> (128 shl shiftY) / mul
+                    JxrDepth.BD_16 -> (32768 shl shiftY) / mul
+                    JxrDepth.BD_16S, JxrDepth.BD_16F, JxrDepth.BD_32S, JxrDepth.BD_32F -> 0
+                    else -> jxrFail("samples of bit depth $bd in colour format $cfExt")
+                }
+                for (ch in 0 until channels) {
+                    val src = plane.buf[ch]
+                    val a0 = plane.a0(ch)
+                    for (r in 0 until cHeight step t) {
+                        var c = 0
+                        while (c < cWidth) {
+                            val p = ((src[a0 + cc(c, r)] + offset) * mul) shr shiftY
+                            out[at(r, c) + ch] = when (bd) {
+                                JxrDepth.BD_8 -> clip(p, 0, 255)
+                                JxrDepth.BD_16 -> clip(p shl len, 0, 65535)
+                                JxrDepth.BD_16S -> clip(p shl len, -32768, 32767)
+                                JxrDepth.BD_16F -> backwardHalf(p)
+                                JxrDepth.BD_32S -> p shl len
+                                else -> pixel2float(p, expBias, len)
+                            }
+                            c += t
+                        }
+                    }
+                }
+            }
+            val a = alpha
+            if (format.alpha && a != null) {
+                if (format.colorFormat != JxrColor.RGB && format.colorFormat != JxrColor.CMYK) jxrFail("interleaved alpha in colour format ${format.colorFormat}")
+                val src = a.buf[0]
+                val a0 = a.a0(0)
+                val pos = 3
+                val aLen = a.header.lenMantissaOrShift
+                val aBias = a.header.expBias
+                val offset = when (bd) {
+                    JxrDepth.BD_8 -> (128 shl shiftY) / mul
+                    JxrDepth.BD_16 -> (32768 shl shiftY) / mul
+                    JxrDepth.BD_16S, JxrDepth.BD_16F, JxrDepth.BD_32S, JxrDepth.BD_32F -> 0
+                    else -> jxrFail("alpha of bit depth $bd")
+                }
+                for (r in 0 until cHeight step t) {
+                    var c = 0
+                    while (c < cWidth) {
+                        val p = ((src[a0 + cc(c, r)] + offset) * mul) shr shiftY
+                        out[at(r, c) + pos] = when (bd) {
+                            JxrDepth.BD_8 -> clip(p, 0, 255)
+                            JxrDepth.BD_16 -> clip(p shl aLen, 0, 65535)
+                            JxrDepth.BD_16S -> clip(p shl aLen, -32768, 32767)
+                            JxrDepth.BD_16F -> backwardHalf(p)
+                            JxrDepth.BD_32S -> p shl aLen
+                            else -> pixel2float(p, aBias, aLen)
+                        }
+                        c += t
+                    }
+                }
+            }
+        }
+
+        /** fixupThumb: a thumbnail of a gray codestream in an RGB format copies the red slot to the others, as jxrlib does. */
+        fun grayToRgbThumbnail() {
+            if (format.bitDepth == JxrDepth.BD_5 || format.bitDepth == JxrDepth.BD_10 || format.bitDepth == JxrDepth.BD_565) return
+            val out = raster.samples
+            val iB = if (format.rgb) 2 else 0
+            val iR = 2 - iB
+            var o = 0
+            repeat(raster.width * raster.height) {
+                out[o + 1] = out[o + iR]
+                out[o + iB] = out[o + 1]
+                o += raster.slots
             }
         }
 

@@ -104,6 +104,15 @@ own converter does when it writes 8 bits, at 16 bits for `decode16`; their alpha
 Premultiplied color is divided by its alpha. The Transformation tag of the file is reported as
 `ImageInfo.orientation`, and `applyOrientation` applies it.
 
+`decodeReduced` decodes the thumbnails of jxrlib, the samples `JxrDecApp -T` writes. At a half it
+takes every second sample of the full transform, and at a quarter and an eighth every fourth or
+eighth, the DC of a block from the second transform stage alone, so the first stage never runs
+and a file in frequency order skips its highpass band. These are samples, not averages, so a
+reduction can alias where a full decode averaged would not. A size whose sides jxrlib rounds
+otherwise than `decodeReduced` promises, such as an eighth of an image 16 by 1, decodes in full and
+averages. jxrlib's own thumbnail of a gray codestream in a BGR format is black, from a channel it
+never wrote; `decodeReduced` gives the gray there.
+
 ## Pages of a TIFF
 
 A TIFF can hold any number of pages. `decode` returns the first, `probe(bytes).pageCount` says how

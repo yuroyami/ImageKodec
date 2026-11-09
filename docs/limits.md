@@ -6,7 +6,7 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 ## Input and output
 
 - Every entry point takes a complete `ByteArray`. There is no streaming or partial-decode API.
-  `decodeScaled`, `decodeDownscaledTo` and `decodeReduced` shrink a JPEG or a JPEG 2000 image
+  `decodeScaled`, `decodeDownscaledTo` and `decodeReduced` shrink a JPEG, JPEG 2000 or JPEG XR image
   inside the decoder, and `scaled` works after a full-size decode.
 - `decode` keeps only the high byte of a 16-bit sample, because `KiteBitmap` holds 8 bits a
   channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000, JPEG XL, JPEG XR and 12-bit or
@@ -116,8 +116,9 @@ picture.
   pixel formats that T.832 does not list. `probe` names the format in `unsupportedReason`.
 - An image may hold 2^30 samples over all of its channels, and a macroblock row of all its
   channels may hold 2^30 samples, so a 128-bit format has to be smaller than the shared ceiling.
-- `decodeReduced` decodes the full image and then averages it. The DC-only and lowpass decodes
-  that jxrlib's thumbnails use are not ported.
+- `decodeReduced` samples the thumbnails of jxrlib rather than averaging, and where jxrlib would
+  round a reduced side otherwise than `decodeReduced` promises, it decodes the full image and
+  averages it. A reduction of a sixteenth or less, jxrlib's DC-only decode, is not offered.
 - A region of interest, jxrlib's post-processing filters and the codestream's own orientation
   field are not read. Like jxrlib, which follows Windows Vista, the orientation comes from the
   container's Transformation tag alone.

@@ -21,8 +21,9 @@ class JxrDecoderTest {
     }
 
     /** The decoded samples in the order JxrDecApp writes a TIFF: gray, or red, green, blue and alpha; a packed pixel as one value. */
-    private fun samples(data: ByteArray): IntArray {
-        val d = JxrDecoder.decodeRaw(data)
+    private fun samples(data: ByteArray): IntArray = samples(JxrDecoder.decodeRaw(data))
+
+    private fun samples(d: JxrDecoder.Decoded): IntArray {
         val r = d.raster
         val pf = d.format
         if (r.slots == 1 && pf.colorFormat != 0) return r.samples.copyOf()
@@ -40,6 +41,42 @@ class JxrDecoderTest {
         for ((name, data) in JxrFixtures.all) {
             assertEquals(JxrFixtures.hashes.getValue(name), fnv(samples(data)), name)
         }
+    }
+
+    @Test
+    fun theThumbnailsReadAsJxrDecAppReadsThem() {
+        var checked = 0
+        for ((name, data) in JxrFixtures.all) {
+            for (reduction in intArrayOf(2, 4, 8)) {
+                val want = JxrFixtures.reducedHashes["$name/$reduction"]
+                val d = JxrDecoder.decodeRawReduced(data, reduction)
+                if (want == null) {
+                    assertEquals(null, d, "$name/$reduction")
+                    continue
+                }
+                assertEquals(want, fnv(samples(d ?: throw AssertionError("$name/$reduction gives no thumbnail"))), "$name/$reduction")
+                val info = ImageKodec.probe(data)
+                val bitmap = ImageKodec.decodeReduced(data, reduction)
+                assertEquals((info.width + reduction - 1) / reduction, bitmap.width, "$name/$reduction")
+                assertEquals((info.height + reduction - 1) / reduction, bitmap.height, "$name/$reduction")
+                checked++
+            }
+        }
+        assertEquals(JxrFixtures.reducedHashes.size, checked)
+    }
+
+    @Test
+    fun aSizeJxrlibRoundsOtherwiseReducesAfterAFullDecode() {
+        // A thumbnail 2 by 1 of 16 by 1: jxrlib keeps the whole image, so the facade averages.
+        assertEquals(0, JxrDecoder.thumbnailScale(16, 1, 8))
+        assertEquals(8, JxrDecoder.thumbnailScale(83, 61, 8))
+        assertEquals(4, JxrDecoder.thumbnailScale(40, 24, 4))
+        // The facade averages the full decode there, as it does for formats that do not reduce inside.
+        val narrow = JxrFixtures.rgbLossless
+        assertEquals(2, JxrDecoder.thumbnailScale(40, 24, 2))
+        val reduced = ImageKodec.decodeReduced(narrow, 8)
+        assertEquals(5, reduced.width)
+        assertEquals(3, reduced.height)
     }
 
     @Test

@@ -45,7 +45,7 @@ ImageKodec.decodeScaled(bytes, maxWidth = 256, maxHeight = 256)   // the size sc
 ImageKodec.decodeDownscaledTo(bytes, width = 300, height = 200)   // exactly 300 by 200, as for a center crop
 ```
 
-Each reads the header, decodes a JPEG or JPEG 2000 at the largest reduction whose output still
+Each reads the header, decodes a JPEG, JPEG 2000 or JPEG XR at the largest reduction whose output still
 covers the target, and finishes with the same box filter. So the result is never smaller than you
 asked for and never upscaled. A 6000 by 4000 JPEG asked for at 200 by 200 takes about a fifth of
 the time of a full decode followed by `scaled`, and it allocates 2.6 MiB where that allocates
@@ -65,4 +65,7 @@ The reduction is 1, 2, 4 or 8.
   keeps the detail that the smaller image can show.
 - A progressive JPEG still keeps the coefficients of the full size until its last scan.
 - A JPEG 2000 image drops its finest wavelet levels, as the reduce option of OpenJPEG does.
+- A JPEG XR image decodes the thumbnail of jxrlib, as `JxrDecApp -T` does: a sample of each block
+  of pixels rather than their average, and at a quarter or an eighth no first transform stage at
+  all. A size jxrlib would round otherwise decodes in full and averages.
 - Other formats decode in full, then average each block of pixels.

@@ -230,8 +230,9 @@ class JxrOracleTest {
     }
 
     /** The samples of [jxr] in the order JxrDecApp writes them to a TIFF: gray, or red, green, blue and alpha. */
-    private fun ours(jxr: ByteArray): Pair<Int, IntArray> {
-        val d = JxrDecoder.decodeRaw(jxr)
+    private fun ours(jxr: ByteArray): Pair<Int, IntArray> = ours(JxrDecoder.decodeRaw(jxr))
+
+    private fun ours(d: JxrDecoder.Decoded): Pair<Int, IntArray> {
         val pf = d.format
         val r = d.raster
         val s = r.samples
@@ -329,11 +330,105 @@ class JxrOracleTest {
         val f = formats.first()
         for (case in rgbOptions) check(f, case)
         // Sizes that end inside a macroblock, and one of a single macroblock.
+        // jxrlib's thumbnail of a gray codestream in BGR is black, from a slot it never wrote; the facade fills the gray.
+        val gray = encode(source(formats[1], 83, 61, 9), formats[1], listOf("-q", "0.8", "-d", "0"))
+        assertTrue(JxrDecoder.decodeRawReduced(gray, 2)!!.raster.samples.all { it == 0 })
+        val full = ImageKodec.decode(gray)
+        val half = ImageKodec.decodeReduced(gray, 2)
+        for (y in 0 until half.height) for (x in 0 until half.width) {
+            val d = abs(((half[x, y] shr 8) and 0xFF) - ((full[2 * x, 2 * y] shr 8) and 0xFF))
+            assertTrue(d <= 3, "the gray thumbnail at ($x, $y) is $d levels from the full decode")
+        }
         for ((w, h) in listOf(16 to 16, 1 to 1, 17 to 33, 130 to 9)) {
             check(f, options[0], w, h)
             check(f, options[4], w, h)
         }
         println("JxrOracleTest: $files files, $compared samples equal to JxrDecApp's")
+    }
+
+    private var thumbnails = 0
+    private var thumbnailSamples = 0L
+    private var fellBack = 0
+
+    /** Each reduction of [jxr] against `JxrDecApp -T`, sample for sample, at every size jxrlib keeps. */
+    private fun checkReduced(jxr: ByteArray, label: String) {
+        val info = ImageKodec.probe(jxr)
+        for (t in 1..3) {
+            val reduction = 1 shl t
+            val d = JxrDecoder.decodeRawReduced(jxr, reduction)
+            if (d == null) {
+                // jxrlib gives another size than decodeReduced promises, so the facade averages a full decode.
+                assertEquals(0, JxrDecoder.thumbnailScale(info.width, info.height, reduction), label)
+                fellBack++
+                continue
+            }
+            val want = reference(jxr, "-T", t.toString())
+            val (channels, got) = ours(d)
+            val l = "$label at 1/$reduction"
+            assertEquals(want.width, d.raster.width, "$l: width")
+            assertEquals(want.height, d.raster.height, "$l: height")
+            assertEquals(want.spp, channels, "$l: channels")
+            for (i in got.indices) {
+                if (got[i] != want.samples[i]) {
+                    val px = i / channels
+                    fail("$l: sample ${i % channels} of pixel (${px % want.width}, ${px / want.width}) is ${got[i]}, JxrDecApp ${want.samples[i]}")
+                }
+            }
+            val bitmap = ImageKodec.decodeReduced(jxr, reduction)
+            assertEquals(d.raster.width, bitmap.width, l)
+            assertEquals(d.raster.height, bitmap.height, l)
+            thumbnails++
+            thumbnailSamples += got.size
+        }
+    }
+
+    @Test
+    fun reducedDecodesMatchJxrDecAppThumbnails() {
+        assumeTrue(tools())
+        val cases = listOf(
+            Case("lossless", listOf("-q", "1"), true),
+            Case("q0.8", listOf("-q", "0.8"), false),
+            Case("q0.4 spatial", listOf("-q", "0.4", "-f"), false),
+            Case("tiles", listOf("-q", "0.7", "-U", "2", "3"), false),
+        )
+        for (f in formats) for (case in cases) {
+            val jxr = encode(source(f, 83, 61, f.code + case.name.length), f, case.options)
+            checkReduced(jxr, "${f.name} ${case.name}")
+        }
+        for (f in formats.filter { it.spp == 4 }) {
+            checkReduced(encode(source(f, 83, 61, 3), f, listOf("-q", "0.8", "-a", "3")), "${f.name} interleaved")
+        }
+        val rgb = formats[0]
+        val bgr = formats[1]
+        for (case in rgbOptions) {
+            checkReduced(encode(source(rgb, 83, 61, case.name.length), rgb, case.options), "24bppRGB ${case.name}")
+            checkReduced(encode(source(bgr, 83, 61, case.name.length), bgr, case.options), "24bppBGR ${case.name}")
+        }
+        for ((w, h) in listOf(16 to 16, 1 to 1, 17 to 33, 130 to 9, 100 to 8, 9 to 70, 64 to 48, 40 to 23)) {
+            for (opts in listOf(listOf("-q", "1"), listOf("-q", "0.5", "-d", "1", "-l", "2"), listOf("-q", "0.5", "-d", "2"), listOf("-q", "0.6", "-f", "-l", "0"))) {
+                // JxrEncApp refuses two levels of overlap with subsampled chroma under two macroblocks wide.
+                if (w <= 16 && "-l" in opts && opts[opts.indexOf("-l") + 1] == "2") continue
+                checkReduced(encode(source(rgb, w, h, w + h), rgb, opts), "24bppRGB ${w}x$h ${opts.joinToString(" ")}")
+            }
+        }
+        // A subsampled image under 8 wide, whose quarter thumbnail jxrlib cannot make, still reduces:
+        // the facade decodes it in full and averages.
+        for (opts in listOf(listOf("-q", "0.8", "-d", "1"), listOf("-q", "0.8", "-d", "2"))) {
+            val narrow = encode(source(rgb, 6, 40, 6), rgb, opts)
+            val full = ImageKodec.decode(narrow)
+            val quarter = ImageKodec.decodeReduced(narrow, 4)
+            assertEquals(2, quarter.width, "6x40 ${opts.joinToString(" ")}")
+            assertEquals(10, quarter.height, "6x40 ${opts.joinToString(" ")}")
+            assertEquals(6, full.width)
+        }
+        for (version in listOf(0, 9)) {
+            for (opts in listOf(listOf("-q", "0.6", "-l", "2", "-U", "3", "2"), listOf("-q", "0.5", "-d", "1", "-l", "1", "-U", "2", "2", "-f"))) {
+                val jxr = encode(source(rgb, 83, 61, version), rgb, opts)
+                subVersion(jxr, version)
+                checkReduced(jxr, "24bppRGB subversion $version ${opts.joinToString(" ")}")
+            }
+        }
+        println("JxrOracleTest: $thumbnails thumbnails, $thumbnailSamples samples equal to JxrDecApp -T; $fellBack reductions that jxrlib sizes otherwise")
     }
 
     /**
