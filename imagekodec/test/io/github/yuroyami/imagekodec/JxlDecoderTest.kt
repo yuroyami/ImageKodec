@@ -348,6 +348,12 @@ class JxlDecoderTest {
             return this
         }
 
+        /** Fills the last byte with zeros, as ZeroPadToByte reads it. */
+        fun pad(): Bits {
+            used = 8
+            return this
+        }
+
         fun toByteArray(): ByteArray = bytes.toByteArray()
     }
 
@@ -491,5 +497,87 @@ class JxlDecoderTest {
         assertEquals((1 shl 28) to 1, ImageKodec.probe(file).let { it.width to it.height })
         val failure = assertFailsWith<ImageDecodeException> { ImageKodec.decode(file) }
         assertTrue(failure.message!!.contains("padded"), failure.message)
+    }
+
+    /**
+     * A VarDCT frame that asks for more coefficient contexts than [JxlVarDct] allows (#111): HF
+     * global's histogram count, times the contexts of the default block context map, times the
+     * passes. The count is read after every LF group, so the frame needs sound LF groups; each of
+     * them is a Modular image of zeros that the frame's shared tree, a single leaf with a prefix
+     * code of one symbol, codes in no bits. Most of the file is its table of contents.
+     */
+    private fun manyContextsFrame(passes: Int, histograms: Int): ByteArray {
+        // 27 by 19 groups of 256 pixels: 513, so the histogram count has 10 bits and reaches 1024.
+        val width = 27 * 256
+        val height = 19 * 256
+        val xBlocks = width / 8
+        val yBlocks = height / 8
+        val lfAcross = (xBlocks + 255) / 256
+        val lfGroups = lfAcross * ((yBlocks + 255) / 256)
+        val groups = 27 * 19
+        fun bitsFor(v: Int) = 32 - (v - 1).countLeadingZeroBits()
+        // Zeros at no cost: no LZ77, every context in cluster 0, a prefix code of one symbol whose
+        // hybrid integer split equals the alphabet's 15 bits.
+        fun Bits.zeroCode(contexts: Int): Bits {
+            put(1, 0)
+            if (contexts > 1) put(1, 1).put(2, 0)
+            return put(1, 1).put(4, 15).put(1, 0)
+        }
+        // A Modular stream on the shared tree, with the default weighted predictor parameters and no transforms.
+        fun Bits.zeroStream(): Bits = put(1, 1).put(1, 1).put(2, 0)
+
+        val header = Bits().put(16, 0x0AFF)
+            // The height and then the width, each as selector 1 and 13 bits less 1, then the default metadata and transforms.
+            .put(1, 0).put(2, 1).put(13, height - 1L).put(3, 0).put(2, 1).put(13, width - 1L)
+            .put(1, 1).put(1, 1).toByteArray()
+
+        // LF global: the default LF quantization, a global scale and LF quantizer, the default
+        // block context map and chroma from luma, and the shared tree with its code.
+        val lfGlobal = Bits().put(1, 1).put(2, 0).put(11, 0).put(2, 0).put(1, 1).put(1, 1)
+            .put(1, 1).zeroCode(6).zeroCode(1).toByteArray()
+        val lfGroupSections = List(lfGroups) { g ->
+            val w = minOf(256, xBlocks - (g % lfAcross) * 256)
+            val h = minOf(256, yBlocks - (g / lfAcross) * 256)
+            // The LF coefficients, then the HF metadata: one DCT8 for each block, all with quantizer 1.
+            Bits().put(2, 0).zeroStream().put(bitsFor(w * h), w * h - 1L).zeroStream().toByteArray()
+        }
+        // HF global: the default dequantization matrices, the histogram count, and the first pass's
+        // coefficient orders, all natural. The decoder refuses the count there, before its code.
+        val hfGlobal = Bits().put(1, 1).put(10, histograms - 1L).put(2, 2).toByteArray()
+        val sections = listOf(lfGlobal) + lfGroupSections + listOf(hfGlobal) + List(groups * passes) { ByteArray(0) }
+
+        val frame = Bits()
+            // Not all default: a regular VarDCT frame, no flags, no upsampling, the default quantization matrix scales.
+            .put(1, 0).put(2, 0).put(1, 0).put(2, 0).put(2, 0).put(3, 3).put(3, 2)
+        // The passes, as selector 3 and 3 bits less 4, with no downsampling and no shifts.
+        if (passes >= 4) frame.put(2, 3).put(3, passes - 4L) else frame.put(2, passes - 1L)
+        if (passes > 1) {
+            frame.put(2, 0)
+            repeat(passes - 1) { frame.put(2, 0) }
+        }
+        // Not cropped, replaced, the last frame, no name, the default loop filter, no extensions.
+        frame.put(1, 0).put(2, 0).put(1, 1).put(2, 0).put(1, 1).put(2, 0)
+        // The table of contents, in order, every size in 10 bits.
+        frame.put(1, 0).pad()
+        for (s in sections) frame.put(2, 0).put(10, s.size.toLong())
+        frame.pad()
+        var file = header + frame.toByteArray()
+        for (s in sections) file += s
+        return file
+    }
+
+    @Test
+    fun aFrameOfTooManyCoefficientContextsIsRefused() {
+        // 1024 histograms of 15 block contexts of 495 coefficient contexts each are 7,603,200 a
+        // pass. Nine passes are 68,428,800, past the 2^26 that JxlVarDct allows.
+        val tooMany = manyContextsFrame(passes = 9, histograms = 1024)
+        assertTrue(tooMany.size < 8_000, "${tooMany.size} bytes")
+        assertEquals(6912 to 4864, ImageKodec.probe(tooMany).let { it.width to it.height })
+        val failure = assertFailsWith<ImageDecodeException> { ImageKodec.decode(tooMany) }
+        assertTrue(failure.message!!.contains("7603200 coefficient contexts in each of 9 passes"), failure.message)
+        // Eight passes are 60,825,600, within the limit: the same frame reads on into its codes,
+        // which the file leaves out, so every section before the check is sound.
+        val fewer = assertFailsWith<ImageDecodeException> { ImageKodec.decode(manyContextsFrame(passes = 8, histograms = 1024)) }
+        assertTrue(fewer.message!!.contains("data ends"), fewer.message)
     }
 }
