@@ -90,6 +90,19 @@ JVM, with 4 cores and libjxl 0.7:
 The djxl times include starting the tool and writing its output. A 6-megapixel lossy photo
 therefore needs about 300 MB of heap to decode, which is more than many Android apps get.
 
+`JxlNativeBenchmarkTest` decodes the same two files on linuxX64. It ran on a 4-core Intel Xeon at
+2.3 GHz with libjxl 0.7, in the release test build (`-v release`) and in the debug one, next to
+the JVM test on the same machine and day. Its peak is how far the resident memory of the process
+grew during the decode.
+
+| File | djxl | linuxX64 release | linuxX64 debug | JVM | Peak resident, linuxX64 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Lossy, `-d 1` | 1,748 ms | 812 ms | 3,469 ms | 1,003 ms | 232 MB |
+| Lossless, `-d 0` | 806 ms | 579 ms | 3,825 ms | 670 ms | 178 MB |
+
+An optimized native build decodes about as fast as the JVM, and a debug build four to six times
+slower.
+
 ### Work bounds
 
 ImageKodec bounds the work of a JPEG XL file more tightly than libjxl. libjxl limits how many

@@ -5,7 +5,6 @@ import java.io.File
 import java.lang.management.ManagementFactory
 import java.lang.management.MemoryType
 import java.util.concurrent.TimeUnit
-import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -19,8 +18,8 @@ import kotlin.test.assertTrue
  */
 class JxlBenchmarkTest {
 
-    private val width = 3000
-    private val height = 2000
+    private val width = JxlBenchmarkPicture.WIDTH
+    private val height = JxlBenchmarkPicture.HEIGHT
 
     private fun run(vararg args: String): Int {
         val proc = ProcessBuilder(args.toList()).redirectErrorStream(true).start()
@@ -30,20 +29,6 @@ class JxlBenchmarkTest {
             return -1
         }
         return proc.exitValue()
-    }
-
-    /** A photo-like picture: gradients, edges and noise, so neither coder has an easy time. */
-    private fun picture(): KiteBitmap {
-        val random = Random(111)
-        return KiteBitmap(width, height, IntArray(width * height) {
-            val x = it % width
-            val y = it / width
-            val edge = if ((x / 97 + y / 61) % 3 == 0) 60 else 0
-            val r = (x * 255 / width + edge + random.nextInt(20)).coerceIn(0, 255)
-            val g = (y * 255 / height + random.nextInt(20)).coerceIn(0, 255)
-            val b = ((x + y) * 128 / (width + height) + edge + random.nextInt(20)).coerceIn(0, 255)
-            0xFF000000.toInt() or (r shl 16) or (g shl 8) or b
-        })
     }
 
     private class Measure(val millis: Long, val peakHeapMb: Long, val allocatedMb: Long)
@@ -71,9 +56,9 @@ class JxlBenchmarkTest {
         val djxl = Tools.require("djxl").path
         val dir = kotlin.io.path.createTempDirectory("jxl-bench").toFile()
         try {
-            val png = File(dir, "source.png").apply { writeBytes(ImageKodec.encodePng(picture())) }
+            val png = File(dir, "source.png").apply { writeBytes(ImageKodec.encodePng(JxlBenchmarkPicture.picture())) }
             val report = StringBuilder("# JPEG XL decode, ${width}x$height\n\n| file | bytes | djxl ms | ImageKodec ms | peak heap MB | allocated MB |\n|---|---|---|---|---|---|\n")
-            for ((name, options) in listOf("lossy, -d 1" to listOf("-d", "1", "-e", "3"), "lossless, -d 0" to listOf("-d", "0", "-e", "1"))) {
+            for ((name, options) in JxlBenchmarkPicture.cases) {
                 val jxl = File(dir, "${name.substringBefore(',')}.jxl")
                 assertEquals(0, run(cjxl, png.path, jxl.path, *options.toTypedArray()), "cjxl failed for $name")
                 val bytes = jxl.readBytes()
