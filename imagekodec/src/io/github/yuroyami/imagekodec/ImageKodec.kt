@@ -744,6 +744,31 @@ public object ImageKodec {
         JpegEncoder.encode(bitmap, quality, metadata)
 
     /**
+     * [encodeJpeg] with the encoder [encoder]. [JpegEncoderKind.Jpegli] ports Google's Jpegli
+     * (#133) with the settings its library gives by default: a baseline YCbCr file with 4:2:0
+     * chroma at every quality, Jpegli's quantization matrices scaled by the distance [quality]
+     * maps to, adaptive quantization and the standard Huffman tables, and no JFIF header. Its
+     * files are smaller than [JpegEncoderKind.Fast]'s at the same [quality], which means
+     * something else to each encoder, and it is several times slower.
+     *
+     * @throws IllegalArgumentException as [encodeJpeg] does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJpeg(bitmap: KiteBitmap, quality: Int, encoder: JpegEncoderKind): ByteArray =
+        JpegEncoder.encodeWith(bitmap, quality, null, encoder)
+
+    /**
+     * [encodeJpeg] with the encoder [encoder] that also writes [metadata], as the overload without
+     * an encoder does. [JpegEncoderKind.Jpegli] writes no JFIF header, so its segments come right
+     * after SOI.
+     *
+     * @throws IllegalArgumentException as [encodeJpeg] does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJpeg(bitmap: KiteBitmap, quality: Int, metadata: ImageMetadata, encoder: JpegEncoderKind): ByteArray =
+        JpegEncoder.encode(bitmap, quality, metadata, encoder)
+
+    /**
      * [bytes], a JPEG, with the same quantized coefficients written again with Huffman tables
      * built for the image (#132), as `jpegtran -optimize -copy all` does: the file gets smaller,
      * and it decodes to the same pixels, byte for byte. Every segment outside the entropy coding

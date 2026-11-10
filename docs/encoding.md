@@ -7,6 +7,7 @@ it) and returns the file as a `ByteArray`.
 ```kotlin
 ImageKodec.encodePng(bitmap)                    // 8-bit RGB, or RGBA when alpha is present
 ImageKodec.encodeJpeg(bitmap, quality = 85)     // baseline; 4:2:0 at quality <= 90, 4:4:4 above
+ImageKodec.encodeJpeg(bitmap, 85, JpegEncoderKind.Jpegli) // smaller files at the same score, slower
 ImageKodec.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colors
 ImageKodec.encodeGif(anim)                      // animated, delays and loop count preserved
 ImageKodec.encodePng(anim)                      // APNG: lossless frames, alpha, delays and loop count
@@ -18,6 +19,23 @@ ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than t
 ```
 
 `encodeJpeg` uses a quality of 90 when you pass none.
+
+## Smaller JPEGs with Jpegli
+
+`encodeJpeg` follows stb_image_write by default: simple and fast, but its files are large for what they show. `JpegEncoderKind.Jpegli` uses a port of Google's [Jpegli](https://github.com/google/jpegli) instead (#133):
+
+```kotlin
+val jpeg = ImageKodec.encodeJpeg(bitmap, 75, JpegEncoderKind.Jpegli)
+val withMetadata = ImageKodec.encodeJpeg(bitmap, 75, metadata, JpegEncoderKind.Jpegli)
+```
+
+- It writes what Jpegli's library writes for an RGB image by default (`jpegli_set_defaults`, then `jpegli_set_quality`): a baseline YCbCr JPEG that every reader opens, with 4:2:0 chroma at every quality.
+- The quality maps to a Jpegli distance, which scales Jpegli's own quantization matrices. Adaptive quantization then sets each block's zero bias from how much the luma around it masks errors, so flat areas keep detail that busy areas drop.
+- It uses the example Huffman tables of the JPEG standard and writes no JFIF header, as Jpegli's defaults do. The metadata goes right after SOI, as with the default encoder, and so does a gain map's MPF segment.
+- A quality number means something else to each encoder, so compare files at the same score. On the six synthetic photo-like scenes of the tests, at Jpegli quality 75, its files are 12 to 34 percent smaller than the default encoder's at the lowest quality that scores as well in SSIMULACRA 2 ([Measuring quality](quality.md)). It takes three to four times as long.
+- `repackJpeg` makes its output smaller still, by 6 to 17 percent on the same scenes, with Huffman tables built for the image. `repackJpeg(jpeg, progressive = true)` writes it progressive.
+- The output is the same on every platform. On the JVM it matches pyjpegli 0.3.2, a build of Jpegli, byte for byte on most images and within 0.1 percent in size on the rest. Jpegli works in float32 with fused multiply-adds, this port in Double, so a coefficient now and then rounds the other way.
+- Jpegli's XYB colour space is not written: it needs a reader that applies the ICC profile.
 
 ## Keeping a photo's metadata
 

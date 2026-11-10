@@ -44,7 +44,7 @@ env:
 # `link-debug-frameworks`), and the others restore it. .github/actions/setup explains why.
 jobs:
   # The JVM suite is the one that holds the decoders to the reference codecs. The OpenJPEG,
-  # libwebp, libtiff, libjpeg, jbig2enc, ffmpeg, libavif, libheif and libjxl suites skip
+  # libwebp, libtiff, libjpeg, jbig2enc, ffmpeg, libavif, libheif, libjxl and pyjpegli suites skip
   # themselves when their binary is missing on a contributor's machine, and
   # IMAGEKODEC_REQUIRE_ORACLES turns that skip into a failure here.
   #
@@ -125,6 +125,15 @@ jobs:
           ninja -C /tmp/libjxl/build ssimulacra2 > /dev/null
           install -m 755 /tmp/libjxl/build/tools/ssimulacra2 ~/oracle-tools-jxl/ssimulacra2
 
+      # pyjpegli builds google/jpegli into its wheel, and JpegliOracleTest holds the Jpegli
+      # encoder port to it (#133). The version is pinned: the port follows the jpegli commit
+      # this release builds. Ubuntu's Python refuses a pip install outside a virtual environment
+      # unless told, and the user site is on the path of the python3 the tests run.
+      - name: Install pyjpegli
+        env:
+          PIP_BREAK_SYSTEM_PACKAGES: '1'
+        run: python3 -m pip install pyjpegli==0.3.2 --user
+
       # A skipped oracle test reads exactly like a passing one, so the tools are installed
       # rather than left to chance, and a missing one fails this step. The tests find them on
       # PATH. Ubuntu's ImageMagick is version 6, whose command is `convert`; the tests fall
@@ -147,6 +156,7 @@ jobs:
           [ -f /usr/share/color/icc/sRGB.icc ] || { echo "::error::icc-profiles-free missing"; missing=1; }
           python3 -c "import PIL" || { echo "::error::Pillow missing"; missing=1; }
           python3 -c "import numpy" || { echo "::error::NumPy missing"; missing=1; }
+          python3 -c "import pyjpegli" || { echo "::error::pyjpegli missing"; missing=1; }
           exit $missing
 
       - name: Core, Compose and Coil tests

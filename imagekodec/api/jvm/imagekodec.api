@@ -130,6 +130,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun encodeGif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;ZILjava/lang/Object;)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;)[B
+	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;Lio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
+	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
 	public static synthetic fun encodeJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteAnimation;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
@@ -173,6 +175,14 @@ public final class io/github/yuroyami/imagekodec/JpegComponents {
 	public final fun getSamples ()[B
 	public final fun getWidth ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/JpegEncoderKind : java/lang/Enum {
+	public static final field Fast Lio/github/yuroyami/imagekodec/JpegEncoderKind;
+	public static final field Jpegli Lio/github/yuroyami/imagekodec/JpegEncoderKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/JpegEncoderKind;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/JpegEncoderKind;
 }
 
 public final class io/github/yuroyami/imagekodec/JpxColorSpecification {

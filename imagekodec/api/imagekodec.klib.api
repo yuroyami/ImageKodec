@@ -29,6 +29,17 @@ final enum class io.github.yuroyami.imagekodec/ImageFormat : kotlin/Enum<io.gith
     }
 }
 
+final enum class io.github.yuroyami.imagekodec/JpegEncoderKind : kotlin/Enum<io.github.yuroyami.imagekodec/JpegEncoderKind> { // io.github.yuroyami.imagekodec/JpegEncoderKind|null[0]
+    enum entry Fast // io.github.yuroyami.imagekodec/JpegEncoderKind.Fast|null[0]
+    enum entry Jpegli // io.github.yuroyami.imagekodec/JpegEncoderKind.Jpegli|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/JpegEncoderKind.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/JpegEncoderKind> // io.github.yuroyami.imagekodec/JpegEncoderKind.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/JpegEncoderKind // io.github.yuroyami.imagekodec/JpegEncoderKind.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/JpegEncoderKind> // io.github.yuroyami.imagekodec/JpegEncoderKind.values|values#static(){}[0]
+}
+
 final enum class io.github.yuroyami.imagekodec/Orientation : kotlin/Enum<io.github.yuroyami.imagekodec/Orientation> { // io.github.yuroyami.imagekodec/Orientation|null[0]
     enum entry FlipHorizontal // io.github.yuroyami.imagekodec/Orientation.FlipHorizontal|null[0]
     enum entry FlipVertical // io.github.yuroyami.imagekodec/Orientation.FlipVertical|null[0]
@@ -410,6 +421,8 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun encodeGif(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Boolean){}[0]
     final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
     final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int;io.github.yuroyami.imagekodec.ImageMetadata){}[0]
+    final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int, io.github.yuroyami.imagekodec/ImageMetadata, io.github.yuroyami.imagekodec/JpegEncoderKind): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int;io.github.yuroyami.imagekodec.ImageMetadata;io.github.yuroyami.imagekodec.JpegEncoderKind){}[0]
+    final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int, io.github.yuroyami.imagekodec/JpegEncoderKind): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int;io.github.yuroyami.imagekodec.JpegEncoderKind){}[0]
     final fun encodePng(io.github.yuroyami.imagekodec/KiteAnimation): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteAnimation){}[0]
     final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.ImageMetadata){}[0]

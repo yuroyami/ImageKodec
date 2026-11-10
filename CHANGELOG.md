@@ -14,6 +14,13 @@ reviewable in the diff.
 
 ### Added
 
+- `encodeJpeg(bitmap, quality, JpegEncoderKind.Jpegli)`, and the overload with metadata, write a
+  JPEG with a port of Google's Jpegli encoder at the settings its library gives by default: its
+  quantization matrices scaled by the distance the quality maps to, adaptive quantization, 4:2:0
+  and the standard Huffman tables, in a baseline file every reader opens. On photo-like scenes its
+  files are 12 to 34 percent smaller than the default encoder's at the same SSIMULACRA 2 score, and
+  they match pyjpegli 0.3.2 byte for byte on most images and within 0.1 percent in size on the
+  rest. The default encoder is unchanged. See [Writing images](docs/encoding.md) (#133).
 - JPEG XR decoding (ITU-T T.832 | ISO/IEC 29199-2), with HD Photo and Windows Media Photo, the
   format of XPS image brushes: `ImageFormat.JXR` sniffs the `II BC` container, `probe` reports its
   size, depth and alpha, and `decode` and `decode16` read the gray, RGB, BGR, BGRA and premultiplied

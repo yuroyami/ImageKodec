@@ -9,8 +9,8 @@ Format support and known limits: the Limits section of [README.md](README.md).
 Things that already cost someone time. One line each. Delete a line when it stops
 being true.
 
-- The OpenJPEG, libtiff, libwebp, libjpeg, jbig2enc, ffmpeg, libavif, libheif and libjxl suites
-  skip themselves when their binary is missing, and a skipped test reports as a pass,
+- The OpenJPEG, libtiff, libwebp, libjpeg, jbig2enc, ffmpeg, libavif, libheif, libjxl and pyjpegli
+  suites skip themselves when their binary is missing, and a skipped test reports as a pass,
   so read the skip count and not only the green run. CI sets
   `IMAGEKODEC_REQUIRE_ORACLES=1` to fail instead; set it locally to check the same (#14).
 - Ubuntu's ImageMagick is version 6, which has no `magick` command, only

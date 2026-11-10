@@ -1,6 +1,8 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.imagekodec.JpegEncoderKind
 import io.github.yuroyami.imagekodec.KiteBitmap
+import io.github.yuroyami.imagekodec.codec.jpegli.JpegliEncoder
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
 
 /**
@@ -38,10 +40,10 @@ internal object JpegEncoder {
         1.0 * 2.828427125, 0.785694958 * 2.828427125, 0.541196100 * 2.828427125, 0.275899379 * 2.828427125,
     )
 
-    private val STD_DC_LUM_NRCODES = intArrayOf(0, 0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0)
-    private val STD_DC_LUM_VALUES = intArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
-    private val STD_AC_LUM_NRCODES = intArrayOf(0, 0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7D)
-    private val STD_AC_LUM_VALUES = intArrayOf(
+    internal val STD_DC_LUM_NRCODES = intArrayOf(0, 0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0)
+    internal val STD_DC_LUM_VALUES = intArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+    internal val STD_AC_LUM_NRCODES = intArrayOf(0, 0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7D)
+    internal val STD_AC_LUM_VALUES = intArrayOf(
         0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xA1, 0x08,
         0x23, 0x42, 0xB1, 0xC1, 0x15, 0x52, 0xD1, 0xF0, 0x24, 0x33, 0x62, 0x72, 0x82, 0x09, 0x0A, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x25, 0x26, 0x27, 0x28,
         0x29, 0x2A, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
@@ -50,10 +52,10 @@ internal object JpegEncoder {
         0xB7, 0xB8, 0xB9, 0xBA, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xE1, 0xE2,
         0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA,
     )
-    private val STD_DC_CHR_NRCODES = intArrayOf(0, 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0)
-    private val STD_DC_CHR_VALUES = intArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
-    private val STD_AC_CHR_NRCODES = intArrayOf(0, 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77)
-    private val STD_AC_CHR_VALUES = intArrayOf(
+    internal val STD_DC_CHR_NRCODES = intArrayOf(0, 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0)
+    internal val STD_DC_CHR_VALUES = intArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+    internal val STD_AC_CHR_NRCODES = intArrayOf(0, 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77)
+    internal val STD_AC_CHR_VALUES = intArrayOf(
         0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21, 0x31, 0x06, 0x12, 0x41, 0x51, 0x07, 0x61, 0x71, 0x13, 0x22, 0x32, 0x81, 0x08, 0x14, 0x42, 0x91,
         0xA1, 0xB1, 0xC1, 0x09, 0x23, 0x33, 0x52, 0xF0, 0x15, 0x62, 0x72, 0xD1, 0x0A, 0x16, 0x24, 0x34, 0xE1, 0x25, 0xF1, 0x17, 0x18, 0x19, 0x1A, 0x26,
         0x27, 0x28, 0x29, 0x2A, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
@@ -106,8 +108,27 @@ internal object JpegEncoder {
         fun writeEntry(packed: Int) = write(packed ushr 5, packed and 31)
     }
 
-    fun encode(bitmap: KiteBitmap, quality: Int, metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null): ByteArray =
-        if (metadata == null || metadata.isEmpty) encode(bitmap, quality, null, gray = false) else UltraHdr.encode(bitmap, quality, metadata)
+    fun encode(
+        bitmap: KiteBitmap,
+        quality: Int,
+        metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null,
+        kind: JpegEncoderKind = JpegEncoderKind.Fast,
+    ): ByteArray = when {
+        metadata != null && !metadata.isEmpty -> UltraHdr.encode(bitmap, quality, metadata, kind)
+        else -> encodeWith(bitmap, quality, null, kind)
+    }
+
+    /** [bitmap] in three components by [kind], with the raw APPn [segments] after the header that kind writes. */
+    fun encodeWith(bitmap: KiteBitmap, quality: Int, segments: ByteArray?, kind: JpegEncoderKind): ByteArray = when (kind) {
+        JpegEncoderKind.Fast -> encode(bitmap, quality, segments, gray = false)
+        JpegEncoderKind.Jpegli -> JpegliEncoder.encode(bitmap, quality, segments)
+    }
+
+    /** Where the segments go in a file [kind] writes: after the JFIF header, or right after SOI where it writes none. */
+    fun headerEnd(kind: JpegEncoderKind): Int = when (kind) {
+        JpegEncoderKind.Fast -> 20
+        JpegEncoderKind.Jpegli -> 2
+    }
 
     /**
      * [bitmap] as a baseline JPEG with the raw APPn [segments] after the JFIF header. A [gray]

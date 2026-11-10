@@ -131,7 +131,8 @@ val png: ByteArray = ImageKodec.encodePng(bitmap)
 val jpeg: ByteArray = ImageKodec.encodeJpeg(bitmap, quality = 85)
 ```
 
-There are encoders for PNG and APNG, JPEG, GIF, BMP, TIFF and lossless WebP. See
+There are encoders for PNG and APNG, JPEG (stb_image_write's, or a port of Jpegli for smaller
+files), GIF, BMP, TIFF and lossless WebP. See
 [Writing images](docs/encoding.md).
 
 ### Show an image in Compose

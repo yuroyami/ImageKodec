@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec.codec
 import io.github.yuroyami.imagekodec.GainMap
 import io.github.yuroyami.imagekodec.ImageKodec
 import io.github.yuroyami.imagekodec.ImageMetadata
+import io.github.yuroyami.imagekodec.JpegEncoderKind
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
@@ -24,9 +25,6 @@ internal object UltraHdr {
 
     /** The MPF segment this writes, from its marker to its end. */
     private const val MPF_SEGMENT = 90
-
-    /** The JFIF header [JpegEncoder] writes after SOI, before the metadata segments. */
-    private const val JFIF_END = 20
 
     private class Segment(val marker: Int, val start: Int, val body: Int, val end: Int)
 
@@ -137,20 +135,20 @@ internal object UltraHdr {
      * ratio is left out together with the HDR fields of the XMP packet, so that no reader looks
      * for a gain map that is not there.
      */
-    fun encode(bitmap: KiteBitmap, quality: Int, metadata: ImageMetadata): ByteArray {
+    fun encode(bitmap: KiteBitmap, quality: Int, metadata: ImageMetadata, kind: JpegEncoderKind): ByteArray {
         val gainMap = metadata.gainMap?.takeIf { covers(it, bitmap) }
         val xmp = metadata.xmp?.let { if (gainMap != null) withDirectory(it, gainMap.jpeg.size) else withoutHdr(it) }
         val head = ByteArrayBuilder(256)
         head.append(MetadataIo.jpegSegments(ImageMetadata(metadata.exif, xmp, metadata.icc)))
-        if (gainMap == null) return JpegEncoder.encode(bitmap, quality, head.toByteArray(), gray = false)
+        if (gainMap == null) return JpegEncoder.encodeWith(bitmap, quality, head.toByteArray(), kind)
         gainMap.primaryIso?.takeIf { it.size + 2 <= 0xFFFF }?.let {
             head.append(byteArrayOf(0xFF.toByte(), 0xE2.toByte(), ((it.size + 2) ushr 8).toByte(), (it.size + 2).toByte()))
             head.append(it)
         }
         head.append(mpf(0, 0, 0))
         val segments = head.toByteArray()
-        val primary = JpegEncoder.encode(bitmap, quality, segments, gray = false)
-        val at = JFIF_END + segments.size - MPF_SEGMENT
+        val primary = JpegEncoder.encodeWith(bitmap, quality, segments, kind)
+        val at = JpegEncoder.headerEnd(kind) + segments.size - MPF_SEGMENT
         val tiff = at + 4 + MPF.size
         mpf(primary.size, primary.size - tiff, gainMap.jpeg.size).copyInto(primary, at)
         return primary + gainMap.jpeg

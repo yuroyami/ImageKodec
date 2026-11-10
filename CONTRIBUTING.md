@@ -136,6 +136,7 @@ Every codec's tests compare its output against an independent implementation:
 | Codec | Reference used as the oracle |
 |---|---|
 | PNG, BMP, GIF, JPEG encode | ImageIO reads our output back |
+| JPEG encode with `JpegEncoderKind.Jpegli` | pyjpegli 0.3.2 (`pyjpegli.encode`, a build of google/jpegli), on photo-like scenes: the same segments and quantization tables, the size within 1 percent and the SSIMULACRA 2 score within 0.5, with libjpeg-turbo's `djpeg` opening every file. Three of its files are carried to every platform, byte for byte |
 | JPEG decode | `stb_image`, bit-identical, through committed vectors that `tools/stb_dump.c` produced. Its header gives the commands, including the one-line correction of stb's 4:2:2 right-edge weight |
 | JPEG 2000 | OpenJPEG (`opj_compress` and `opj_decompress`) |
 | WebP lossless | libwebp (`cwebp` and `dwebp`), bit-identical |
@@ -162,6 +163,12 @@ check the skip count, not only whether the run passed:
 ```sh
 brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif pillow little-cms2 jpeg-xl     # macOS
 sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools   # Debian/Ubuntu
+```
+
+The Jpegli encoder suite needs pyjpegli for the `python3` on `PATH`, at the version CI installs:
+
+```sh
+pip install pyjpegli==0.3.2
 ```
 
 The lossless and hierarchical JPEG suites also need `t81jpeg`, the `jpeg` tool of the T.81 reference software, built
