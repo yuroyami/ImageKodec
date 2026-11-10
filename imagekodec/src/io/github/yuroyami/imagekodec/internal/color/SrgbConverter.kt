@@ -224,7 +224,10 @@ internal class SrgbConverter private constructor(
 
         /** The matrix/TRC (or gray TRC) parts of [profile], or null when it has none. */
         private fun shaper(profile: IccProfile): Pair<Array<IccCurve>, DoubleArray?>? {
-            if (profile.colorSpace == "GRAY") return arrayOf(profile.curve("kTRC") ?: return null) to null
+            if (profile.colorSpace == "GRAY") {
+                val curve = profile.curve("kTRC") ?: return null
+                return arrayOf(if (profile.pcs == "Lab ") IccCurve.LStar(curve) else curve) to null
+            }
             if (profile.colorSpace != "RGB ") return null
             val curves = arrayOf(profile.curve("rTRC") ?: return null, profile.curve("gTRC") ?: return null, profile.curve("bTRC") ?: return null)
             val r = profile.xyz("rXYZ") ?: return null

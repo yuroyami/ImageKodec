@@ -12,7 +12,8 @@ import kotlin.test.assertTrue
 /**
  * Conversion to sRGB (#108) on every target. lcms2 built the profiles below through
  * `tools/icc_lcms.c` (a v4 Display P3 with the sRGB curve as `para` type 3, a v2 gray profile
- * with a gamma of 2.2, and a v4 profile whose `para` type 4 curve lifts black, so black point
+ * with a gamma of 2.2, a v2 gray profile with a gamma of 1.8 and a Lab PCS, whose curve lcms2
+ * reads as L* (`gray-lab-v2`), and a v4 profile whose `para` type 4 curve lifts black, so black point
  * compensation applies) and converted the samples through each to its built-in sRGB, perceptual,
  * relative and absolute colorimetric. It also built two CMYK printer profiles of lookup tables
  * (`cmyk-tiny-v2`, `mft2` with a Lab PCS, and `cmyk-tiny-v4`, `mAB` with gamma curves), each
@@ -95,6 +96,37 @@ class ColorConversionTest {
         "b2bcbcbcc7c7c7d2d2d2dddddde8e8e8f2f2f2fdfdfd" +
         "",
     )
+
+    private val grayLab = hex(
+        "000001806c636d73021000006d6e7472475241594c61622007ea000b000a0003002c0035616373704150504c000000000000" +
+        "0000000000000000000000000000000000000000f6d6000100000000d32d6c636d7300000000000000000000000000000000" +
+        "000000000000000000000000000000000000000000000000000000000000000464657363000000b400000084637072740000" +
+        "013800000021777470740000015c000000146b545243000001700000000e64657363000000000000000e6772617920627569" +
+        "6c742d696e00000000000000000e00670072006100790020006200750069006c0074002d0069006e00000000000000000000" +
+        "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" +
+        "00000000000000000000000074657874000000004e6f20636f707972696768742c2075736520667265656c79000000005859" +
+        "5a20000000000000f6d6000100000000d32d63757276000000000000000101cc0000" +
+        "",
+    )
+
+    private val grayLabPerceptual = hex(
+        "0000000101010404040909090f0f0f1414141919191f1f1f2525252d2d2d3535353e3e3e4848485353535f5f5f6c6c6c7a7a" +
+        "7a8989899a9a9aabababbdbdbdd1d1d1e5e5e5fbfbfb" +
+        "",
+    )
+
+    private val grayLabRelative = hex(
+        "0000000101010404040909090f0f0f1414141919191f1f1f2525252d2d2d3535353e3e3e4848485353535f5f5f6c6c6c7a7a" +
+        "7a8989899a9a9aabababbdbdbdd1d1d1e5e5e5fbfbfb" +
+        "",
+    )
+
+    private val grayLabAbsolute = hex(
+        "0000000101010404040909090f0f0f1414141919191f1f1f2525252d2d2d3535353e3e3e4848485353535f5f5f6c6c6c7a7a" +
+        "7a8989899a9a9aabababbdbdbdd1d1d1e5e5e5fbfbfb" +
+        "",
+    )
+
 
     private val para4 = hex(
         "000002506c636d73043000006d6e74725247422058595a2007ea000a0008000800090036616373704150504c000000000000" +
@@ -312,6 +344,7 @@ class ColorConversionTest {
         for ((name, icc, samples, results) in listOf(
             Case("Display P3", displayP3, displayP3Samples, listOf(displayP3Perceptual, displayP3Relative, displayP3Absolute)),
             Case("gray 2.2", grayGamma22, grayGamma22Samples, listOf(grayGamma22Perceptual, grayGamma22Relative, grayGamma22Absolute)),
+            Case("gray Lab", grayLab, grayGamma22Samples, listOf(grayLabPerceptual, grayLabRelative, grayLabAbsolute)),
             Case("para 4", para4, para4Samples, listOf(para4Perceptual, para4Relative, para4Absolute)),
         )) {
             val channels = if (name.startsWith("gray")) 1 else 3

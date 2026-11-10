@@ -19,6 +19,8 @@
  *   table-v2       BT.709 primaries with a 1024-entry curv table
  *   gray-v2        a gray profile with gamma 2.2
  *   gray-v4        a gray profile with the L* curve, parametric type 4
+ *   gray-lab-v2    a gray profile with gamma 1.8 and a Lab PCS, so that its curve gives L*,
+ *                  as icc-profiles-free's Gray-CIE_L.icc does with gamma 1
  *   cmyk-v2        a CMYK printer profile of lut16Type tables (mft2), Lab PCS, a
  *                  different table for each intent and a paper white
  *   cmyk-v4        the same as lutAToBType (mAB): curves, CLUT, curves, matrix, curves
@@ -228,6 +230,10 @@ static int make(const char *kind) {
         // CIE L* as a parametric type 4 curve.
         h = cmsCreateGrayProfile(cmsD50_xyY(), para(4, 3.0, 1 / 1.16, 0.16 / 1.16, 2700.0 / 24389.0, 0.08, 0, 0));
         cmsSetProfileVersion(h, 4.3);
+    } else if (!strcmp(kind, "gray-lab-v2")) {
+        h = cmsCreateGrayProfile(cmsD50_xyY(), cmsBuildGamma(NULL, 1.8));
+        cmsSetPCS(h, cmsSigLabData);
+        cmsSetProfileVersion(h, 2.1);
     } else if (!strcmp(kind, "cmyk-v2")) {
         h = lutProfile(cmsSigCmykData, cmsSigOutputClass, cmsSigLabData, 2.1, 9, 1, 0);
     } else if (!strcmp(kind, "cmyk-v4")) {

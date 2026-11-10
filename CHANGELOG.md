@@ -113,6 +113,9 @@ reviewable in the diff.
 
 ### Fixed
 
+- A gray ICC profile whose PCS is Lab, such as `Gray-CIE_L.icc` of icc-profiles-free, converts to
+  sRGB as lcms2 converts it: its curve gives L*, not luminance. Its mid gray came out up to 79
+  levels too light (#110).
 - A PNG whose inflated rows cannot fit in one array, such as 16384 by 16384 RGBA at
   16 bits, is refused before inflate, and `probe` says so. The inflater grew its
   buffer with an `Int` that wrapped to 0 past 1 GiB and then looped for ever (#127).

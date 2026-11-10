@@ -404,7 +404,7 @@ class IccOracleTest {
         try {
             val kinds = listOf(
                 "p3-v4", "adobe-v2", "prophoto-v2", "rec2020-v4", "table-v2",
-                "para0-v4", "para1-v4", "para2-v4", "para3-v4", "para4-v4", "gray-v2", "gray-v4",
+                "para0-v4", "para1-v4", "para2-v4", "para3-v4", "para4-v4", "gray-v2", "gray-v4", "gray-lab-v2",
             )
             for (kind in kinds) {
                 val file = File(dir, "$kind.icc").apply { writeBytes(run(oracle!!.path, "make", kind)) }

@@ -146,6 +146,15 @@ internal sealed class IccCurve {
         }
     }
 
+    /**
+     * A gray TRC whose PCS is Lab gives L* over 100, not luminance. lcms2 makes that curve L* of a
+     * neutral Lab, a and b 0x8080 in v4's encoding (cmsio1.c BuildGrayInputMatrixPipeline), and
+     * a neutral's D50 XYZ is D50 times the relative luminance this gives.
+     */
+    class LStar(private val curve: IccCurve) : IccCurve() {
+        override fun eval(x: Double): Double = ColorMath.labToXyz(doubleArrayOf(100.0 * curve.eval(x), 0.0, 0.0))[1] / ColorMath.D50[1]
+    }
+
     /** ICC.1 Table 68's five functions, parameters g, a, b, c, d, e, f as many as the type has. */
     class Parametric(val type: Int, val p: DoubleArray) : IccCurve() {
         override fun eval(x: Double): Double {
