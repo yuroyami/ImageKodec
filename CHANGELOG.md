@@ -12,6 +12,8 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-10
+
 ### Added
 
 - `encodeJpeg(bitmap, quality, JpegEncoderKind.Jpegli)`, and the overload with metadata, write a

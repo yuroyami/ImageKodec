@@ -33,7 +33,7 @@ two optional modules.
 
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:imagekodec:0.3.0")
+    implementation("io.github.yuroyami:imagekodec:0.4.0")
 }
 ```
 
@@ -41,7 +41,7 @@ A project on the Kotlin Toolchain lists the same coordinates in its `module.yaml
 
 ```yaml
 dependencies:
-  - io.github.yuroyami:imagekodec:0.3.0
+  - io.github.yuroyami:imagekodec:0.4.0
 ```
 
 The optional modules are `imagekodec-compose` and `imagekodec-coil`, at the same version.
