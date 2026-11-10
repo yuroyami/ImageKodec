@@ -26,7 +26,7 @@ in a plain `IntArray`, and the core artifact depends on `kotlin-stdlib` and noth
 
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.yuroyami:imagekodec:0.3.0")
+    implementation("io.github.yuroyami:imagekodec:0.4.0")
 }
 ```
 
