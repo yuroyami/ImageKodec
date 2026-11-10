@@ -60,11 +60,13 @@ def blur(plane):
     return blur_axis0(blur_axis0(plane.T).T)
 
 
-def to_linear(img):
+def to_linear(img, bg):
     v = np.asarray(img.convert('RGBA'), dtype=np.float64)
-    a = v[..., 3:] / 255.0
+    a = (v[..., 3:] / 255.0).astype(f32)
     c = v[..., :3] / 255.0
-    c = np.where(a < 1.0, a * c + (1.0 - a) * 0.5, c)
+    # AlphaBlend, in float32 on the encoded values, before the transfer to linear.
+    blended = a * c.astype(f32) + (f32(1) - a) * f32(bg)
+    c = np.where(a < 1.0, blended.astype(np.float64), c)
     lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
     return [lin[..., i].astype(f32) for i in range(3)]
 
@@ -112,8 +114,12 @@ WEIGHTS = [0.0, 0.0007376606707406586, 0.0, 0.0, 0.0007793481682867309, 0.0, 0.0
     0.00010854057858411537]
 
 
-def score(ref, dist):
-    lin1, lin2 = to_linear(ref), to_linear(dist)
+def has_alpha(img):
+    return 'A' in img.getbands() or 'transparency' in img.info
+
+
+def score(ref, dist, bg=0.5):
+    lin1, lin2 = to_linear(ref, bg), to_linear(dist, bg)
     scales = []
     w, h = ref.size
     for scale in range(6):
@@ -155,5 +161,13 @@ def score(ref, dist):
     return 100.0 - 10.0 * total ** 0.6276336467831387 if total > 0 else 100.0
 
 
+def tool_score(ref, dist):
+    """What tools/ssimulacra2_main.cc of libjxl 0.11.1 prints: when the original has alpha, both
+    images blended onto 0.1 and onto 0.9, and the worse of the two scores."""
+    if not has_alpha(ref):
+        return score(ref, dist)
+    return min(score(ref, dist, 0.1), score(ref, dist, 0.9))
+
+
 if __name__ == '__main__':
-    print('%.6f' % score(Image.open(sys.argv[1]), Image.open(sys.argv[2])))
+    print('%.6f' % tool_score(Image.open(sys.argv[1]), Image.open(sys.argv[2])))

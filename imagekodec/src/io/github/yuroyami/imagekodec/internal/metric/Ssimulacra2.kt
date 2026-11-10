@@ -1,6 +1,7 @@
 // Altered Kotlin port of libjxl's tools/ssimulacra2.cc, the recursive Gaussian of
 // tools/gauss_blur.cc and the opsin absorbance of lib/jxl/enc_xyb.cc and
-// lib/jxl/cms/opsin_params.h, at commit 1e812edf683fa48b540c193aba0a4b69ad44827f.
+// lib/jxl/cms/opsin_params.h, at commit 1e812edf683fa48b540c193aba0a4b69ad44827f, with the
+// alpha handling of tools/ssimulacra2_main.cc at tag v0.11.1.
 // Copyright (c) the JPEG XL Project Authors. All rights reserved.
 // Use of the original source is governed by a BSD-style license; see NOTICE.
 
@@ -22,12 +23,14 @@ import kotlin.math.tan
  * Authors), for #134: a perceptual score of a distorted image against its reference, where 100
  * means identical.
  *
- * As the reference does, both images go to linear sRGB, with alpha blended onto a gray of 0.5,
- * then to XYB with libjxl's opsin absorbance and rescaled to about 0..1. At each of up to six
- * scales, downsampled 2:1 in linear light, it blurs the planes and their products with libjxl's
- * recursive Gaussian of sigma 1.5 (Charalampidis 2016, as `tools/gauss_blur.cc` builds it), takes
+ * As the reference does, both images go to linear sRGB, with alpha blended onto a gray, then to
+ * XYB with libjxl's opsin absorbance and rescaled to about 0..1. At each of up to six scales,
+ * downsampled 2:1 in linear light, it blurs the planes and their products with libjxl's recursive
+ * Gaussian of sigma 1.5 (Charalampidis 2016, as `tools/gauss_blur.cc` builds it), takes
  * the 1- and 4-norm of an SSIM error map and of two edge maps, and weighs the 108 sums with the
- * reference's weights.
+ * reference's weights. As `tools/ssimulacra2_main.cc` does, a reference with alpha is scored
+ * twice, blended onto 0.1 and onto 0.9, and the worse score counts; without alpha in the
+ * reference, only the distorted image is blended, onto 0.5.
  *
  * The reference holds a dozen full-size float planes. This port streams rows through the
  * separable blur instead: the vertical pass keeps a ring of 2N + 1 blurred rows and its filter
@@ -135,6 +138,13 @@ internal object Ssimulacra2 {
         require(reference.width == distorted.width && reference.height == distorted.height) {
             "SSIMULACRA 2 compares images of one size: ${reference.width}x${reference.height} and ${distorted.width}x${distorted.height}"
         }
+        // The tool asks whether the original has an alpha channel. An opaque one blends to itself
+        // on any background, so asking whether a pixel is not opaque gives the same score.
+        if (reference.argb.all { (it ushr 24) == 0xFF }) return score(reference, distorted, 0.5f)
+        return minOf(score(reference, distorted, 0.1f), score(reference, distorted, 0.9f))
+    }
+
+    private fun score(reference: KiteBitmap, distorted: KiteBitmap, background: Float): Double {
         val images = arrayOf(reference, distorted)
         var rows = Rows { image, y, out ->
             val bitmap = images[image]
@@ -148,11 +158,11 @@ internal object Ssimulacra2 {
                     out[1][x] = linear[(p ushr 8) and 0xFF]
                     out[2][x] = linear[p and 0xFF]
                 } else {
-                    // AlphaBlend onto 0.5 in the encoded values, before the transfer to linear.
+                    // AlphaBlend in the encoded values, before the transfer to linear.
                     val a = alpha / 255f
                     for (c in 0 until 3) {
                         val v = ((p ushr (16 - 8 * c)) and 0xFF) / 255f
-                        out[c][x] = toLinear(a * v + (1f - a) * 0.5f)
+                        out[c][x] = toLinear(a * v + (1f - a) * background)
                     }
                 }
             }

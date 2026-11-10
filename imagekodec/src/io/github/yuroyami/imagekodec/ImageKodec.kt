@@ -787,8 +787,10 @@ public object ImageKodec {
      * How close [distorted] looks to [reference], by SSIMULACRA 2 (#134): 100 for identical
      * images, 90 for visually lossless, 70 for artifacts hard to notice without the original, 50
      * for a JPEG of about quality 50, and lower, even below 0, for worse. It is a port of `tools/ssimulacra2.cc` of libjxl: both images go to
-     * linear sRGB, alpha blended onto a mid gray, then to the XYB colour space, and six scales of
-     * SSIM and edge maps are weighed as the reference weighs them.
+     * linear sRGB, then to the XYB colour space, and six scales of SSIM and edge maps are weighed
+     * as the reference weighs them. As libjxl's `ssimulacra2` tool does, a [reference] with alpha
+     * is scored blended onto a dark and onto a bright gray, and the worse score is returned;
+     * otherwise alpha in [distorted] is blended onto a mid gray.
      *
      * It reads the images a row at a time and keeps only the half-size image of the next scale,
      * so a 12-megapixel photo takes about 70 MB besides the two bitmaps.

@@ -26,8 +26,10 @@ The scale runs to 100, which means identical. The reference's README reads it li
 
 The call is a port of `tools/ssimulacra2.cc` of libjxl:
 
-- Both images go to linear sRGB. A translucent pixel is first blended onto a mid gray, as the
-  reference blends it.
+- Both images go to linear sRGB. When the reference has a translucent pixel, both images are
+  blended onto a dark gray of 0.1 and then onto a light gray of 0.9, and the worse of the two
+  scores is returned, as libjxl's `ssimulacra2` tool does. A translucent pixel in the distorted
+  image alone is blended onto a mid gray. A reference with alpha takes twice the time.
 - The linear values go to XYB, the colour space of JPEG XL, rescaled to about 0..1.
 - At up to six scales, each half the size of the one before and downsampled in linear light, it
   compares local means, variances and edges of the two images.

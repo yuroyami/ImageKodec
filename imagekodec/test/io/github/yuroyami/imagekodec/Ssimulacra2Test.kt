@@ -37,6 +37,24 @@ class Ssimulacra2Test {
         assertTrue(scores[0] in 80.0..100.0 && scores.last() < scores[0] - 10, "$scores")
     }
 
+    /**
+     * libjxl 0.11.1's `tools/ssimulacra2_main.cc` blends both images onto 0.1 and onto 0.9 when
+     * the original has alpha, and prints the worse score. Without alpha in the original, only the
+     * distorted image is blended, onto 0.5. The values are `tools/ssimulacra2_ref.py`'s for these
+     * pixels: 11.154 here, where a blend onto 0.1 alone gives 11.15, onto 0.9 alone 19.23 and onto
+     * 0.5 25.41, and 23.143 the other way round.
+     */
+    @Test
+    fun alpha_in_the_original_takes_the_worse_of_a_dark_and_a_bright_background() {
+        val image = scene(64, 40)
+        val veiled = KiteBitmap(64, 40, IntArray(64 * 40) {
+            val a = if (it % 64 < 24 && it / 64 < 20) 96 else 255
+            (image.argb[it] and 0xFFFFFF) or (a shl 24)
+        })
+        assertEquals(11.154, ImageKodec.ssimulacra2(veiled, image), 0.1)
+        assertEquals(23.143, ImageKodec.ssimulacra2(image, veiled), 0.1)
+    }
+
     @Test
     fun images_of_two_sizes_cannot_be_compared() {
         assertFailsWith<IllegalArgumentException> { ImageKodec.ssimulacra2(scene(20, 20), scene(20, 21)) }
