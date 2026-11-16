@@ -9,6 +9,12 @@ The sources of dav1d, libheif and libde265 are not fetched. The AV1 and AVIF dec
 were written from their specifications (see below). HEIC is out of scope because of the
 patents on HEVC.
 
+The HEVC test data is fetched, never committed: `tools/heic_data.py` downloads the JCT-VC
+conformance packages of ITU-T H.265.1 from the ITU's site and a few HEIC test images of
+[pillow_heif 1.1.1](https://github.com/bigcat88/pillow_heif/tree/v1.1.1/tests/images/heif_other) and
+[libheif 1.19.8](https://github.com/strukturag/libheif/tree/v1.19.8/examples), and checks each file
+against the SHA-256 in `tools/heic_data.manifest`. Neither source states a licence for these files.
+
 | ImageKodec target | Reference tree | Key files | License |
 |---|---|---|---|
 | **Primary all-rounder**: JPEG (baseline+progressive), PNG, GIF and BMP decode | `stb` | `stb_image.h` (single file, ~8k lines, readable) | public domain / MIT |
