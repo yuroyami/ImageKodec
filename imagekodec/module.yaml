@@ -35,6 +35,10 @@ aliases:
 apply:
   - //library.module-template.yaml
 
+# Deadlines, fuzz shards and the HEIF builder, shared with the tests of the other modules.
+test-dependencies:
+  - //imagekodec-testkit
+
 settings:
   kotlin:
     optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi ]

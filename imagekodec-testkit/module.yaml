@@ -1,0 +1,51 @@
+product:
+  type: kmp/lib
+  # Every platform of the core, because the core's tests on each of them use this kit.
+  platforms:
+    - jvm
+    - android
+    - iosArm64
+    - iosSimulatorArm64
+    - iosX64
+    - macosArm64
+    - tvosArm64
+    - tvosSimulatorArm64
+    - watchosArm32
+    - watchosArm64
+    - watchosDeviceArm64
+    - watchosSimulatorArm64
+    - androidNativeArm32
+    - androidNativeArm64
+    - androidNativeX64
+    - androidNativeX86
+    - linuxX64
+    - linuxArm64
+    - mingwX64
+    - js
+    - wasmJs
+    - wasmWasi
+
+# Helpers that the tests of every ImageKodec module share: deadlines, fuzz shards, the HEIF file
+# builder, Annex B streams, picture hashes and the lookup of reference tools. Never published.
+
+aliases:
+  - jvmAndAndroid: [ jvm, android ]
+
+apply:
+  - //library.module-template.yaml
+
+settings:
+  kotlin:
+    # Test code: its declarations are public so that other modules' tests reach them.
+    explicitApi: disable
+    optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi ]
+  android:
+    namespace: io.github.yuroyami.imagekodec.testkit
+    compileSdk:
+      apiLevel: 37
+      minorApiLevel: 2
+    minSdk: 21
+  publishing:
+    enabled: false
+    mavenCentral:
+      enabled: false
