@@ -55,7 +55,7 @@ internal object Deflate {
 
 internal class Deflater(private val data: ByteArray) {
 
-    private val out = ByteArrayBuilder(maxOf(64, data.size / 3))
+    private val out = ByteArrayBuilder(maxOf(64, minOf(data.size / 3, 1 shl 20)))
     private var bitBuf = 0
     private var bitCount = 0
 
@@ -114,12 +114,25 @@ internal class Deflater(private val data: ByteArray) {
     }
 
     fun encode(): ByteArray {
-        lz77()
+        // The tokens of at most [SEGMENT_SYMBOLS] symbols at a time, so memory follows that and the
+        // 32 KiB window, not the input (#163). Input that fits one segment encodes as one.
+        do {
+            val start = lzPos
+            tokenCount = 0
+            lz77(SEGMENT_SYMBOLS)
+            writeBlocks(start, final = lzPos >= data.size)
+        } while (lzPos < data.size)
+        flushToByte()
+        return out.toByteArray()
+    }
+
+    /** Writes the tokens gathered, which encode the input from byte [start], as blocks. */
+    private fun writeBlocks(start: Int, final: Boolean) {
         // Chunks of [BLOCK_SYMBOLS] symbols, as zlib flushes a block, then joined while one block
         // of two costs less than the pair: never more blocks than the statistics pay for.
         val blocks = ArrayList<Pair<Chunk, Tables>>()
         var first = 0
-        var at = 0
+        var at = start
         var group: Chunk? = null
         var groupTables: Tables? = null
         do {
@@ -153,12 +166,12 @@ internal class Deflater(private val data: ByteArray) {
                 // Neighbouring stored blocks join into stored blocks of up to 65535 bytes.
                 var j = i
                 while (j + 1 < blocks.size && blocks[j + 1].second.stored) j++
-                writeStored(chunk.start, blocks[j].first.end, final = j == blocks.size - 1)
+                writeStored(chunk.start, blocks[j].first.end, final = final && j == blocks.size - 1)
                 i = j + 1
                 continue
             }
-            val final = i == blocks.size - 1
-            writeBits(if (final) 1 else 0, 1)
+            val last = final && i == blocks.size - 1
+            writeBits(if (last) 1 else 0, 1)
             if (tables.dynamicBits < tables.fixedBits) {
                 writeBits(0b10, 2)
                 writeDynamicHeader(tables.hlit, tables.hdist, tables.numCl, tables.clSeq, tables.clLen)
@@ -169,8 +182,6 @@ internal class Deflater(private val data: ByteArray) {
             }
             i++
         }
-        flushToByte()
-        return out.toByteArray()
     }
 
     /** The frequencies of tokens [first] until [last], which encode the input from byte [at] on. */
@@ -232,11 +243,17 @@ internal class Deflater(private val data: ByteArray) {
 
     /* ─── LZ77 (greedy, hash-chained): gathers the tokens ──────────────────── */
 
-    private fun lz77() {
+    // The match finder's state, kept from one segment to the next. [prev] is a ring of the window,
+    // as zlib keeps it: every candidate a search follows lies inside the window, so no slot it
+    // reads has been written over.
+    private val head = IntArray(HASH_SIZE) { -1 }
+    private val prev = IntArray(WINDOW_SIZE)
+    private var lzPos = 0
+
+    /** Gathers tokens from [lzPos] until the input ends or [limit] tokens are gathered. */
+    private fun lz77(limit: Int) {
         val n = data.size
         if (n == 0) return
-        val head = IntArray(HASH_SIZE) { -1 }
-        val prev = IntArray(n)
 
         fun hash(i: Int): Int {
             val a = data[i].toInt() and 0xFF
@@ -247,12 +264,12 @@ internal class Deflater(private val data: ByteArray) {
         fun insert(i: Int) {
             if (i > n - MIN_MATCH) return
             val h = hash(i)
-            prev[i] = head[h]
+            prev[i and (WINDOW_SIZE - 1)] = head[h]
             head[h] = i
         }
 
-        var pos = 0
-        while (pos < n) {
+        var pos = lzPos
+        while (pos < n && tokenCount < limit) {
             var bestLen = 0
             var bestDist = 0
             if (pos <= n - MIN_MATCH) {
@@ -268,7 +285,7 @@ internal class Deflater(private val data: ByteArray) {
                         bestDist = pos - cand
                         if (l >= maxLen) break
                     }
-                    cand = prev[cand]
+                    cand = prev[cand and (WINDOW_SIZE - 1)]
                 }
             }
             if (bestLen >= MIN_MATCH) {
@@ -281,6 +298,7 @@ internal class Deflater(private val data: ByteArray) {
                 pos++
             }
         }
+        lzPos = pos
     }
 
     private fun addLiteral(v: Int) = appendToken(v)
@@ -444,6 +462,9 @@ internal class Deflater(private val data: ByteArray) {
 
         /** Symbols per block: zlib's lit_bufsize at its default memLevel of 8. */
         private const val BLOCK_SYMBOLS = 1 shl 14
+
+        /** Tokens gathered before their blocks are written: 64 blocks' worth, 4 MiB of tokens. */
+        private const val SEGMENT_SYMBOLS = BLOCK_SYMBOLS * 64
 
         /** The most a stored block holds: LEN is 16 bits. */
         private const val MAX_STORED = 65_535
