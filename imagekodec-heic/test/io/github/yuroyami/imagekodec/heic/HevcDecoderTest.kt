@@ -27,7 +27,7 @@ class HevcDecoderTest {
     }
 
     /** 48x48, 4:2:0, 8 bits, CTBs of 16, wavefront rows and two slices: x265 with hash=1:keyint=1:no-deblock=1:no-sao=1:ctu=16:min-cu-size=8:wpp=1:slices=2:qp=30. */
-    private val wavefront420 = listOf(
+    internal val wavefront420 = listOf(
         nal("4201010408000003009fa800000300001ea0620c596eaaf0bc05a02000000300200000030321"),
         nal("4401c17182a480"),
         nal(
@@ -49,7 +49,7 @@ class HevcDecoderTest {
     )
 
     /** 24x16, 4:2:2, 10 bits: x265 with ctu=16:min-cu-size=8:qp=28 and the same loop filter and hash settings. */
-    private val chroma422 = listOf(
+    internal val chroma422 = listOf(
         nal("4201010408000003009d2800000300001eb0c844d96eaaf0bc05a02000000300200000030321"),
         nal("4401c17181a480"),
         nal(
@@ -64,7 +64,7 @@ class HevcDecoderTest {
     )
 
     /** 16x16, 4:4:4, 12 bits, transform skip: x265 with ctu=16:min-cu-size=8:tskip=1:qp=30 and the same settings. */
-    private val chroma444 = listOf(
+    internal val chroma444 = listOf(
         nal("420101040800000300982800000300001e9011088a52dd55e1780b4040000003004000000642"),
         nal("4401c17430601a48"),
         nal(
@@ -79,7 +79,7 @@ class HevcDecoderTest {
      * 48x32, 4:2:0, 8 bits, both loop filters with deblocking offsets, wavefront rows: x265 with
      * keyint=1:hash=1:ctu=16:min-cu-size=8:deblock=-2,1:qp=34:ipratio=1:wpp=1:aq-mode=2:qg-size=16.
      */
-    private val loopFilters420 = listOf(
+    internal val loopFilters420 = listOf(
         nal("4201010408000003009fa800000300001ea06208596eaaf2bc05a02000000300200000030321"),
         nal("4401c1718388a480"),
         nal(
@@ -115,7 +115,7 @@ class HevcDecoderTest {
      * Kotlin/JS with its 64-bit arithmetic in software among them, to it, through 16x16 transforms whose
      * sums pass 32 bits. The conformance streams hold the tools themselves to HM on the JVM.
      */
-    private val rangeExtensionReconstruction = listOf(
+    internal val rangeExtensionReconstruction = listOf(
         nal("420101040800000300982800000300001e90084221224b755795e02d01000003000100000300191808c4"),
         nal("4401c17430609160211c"),
         nal("2801af1180", rangeExtensionSliceData),
@@ -129,7 +129,7 @@ class HevcDecoderTest {
      * cu_chroma_qp_offset_enabled_flag. These change the parsing, so the slice data, written for none of
      * them, decodes to no picture: the stream is there for the cut and byte tests.
      */
-    private val rangeExtensionParsing = listOf(
+    internal val rangeExtensionParsing = listOf(
         nal("420101040800000300982800000300001e90084221224b755795e02d0100000300010000030019180edc"),
         nal("4401c174306091601e99c8284a4470"),
         nal("2801af11c0", rangeExtensionSliceData),
