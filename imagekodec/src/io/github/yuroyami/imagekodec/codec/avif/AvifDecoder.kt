@@ -304,8 +304,14 @@ internal object AvifDecoder {
             c.items[id] ?: throw ImageDecodeException("AVIF: derived item ${item.id} refers to a missing item $id")
         }
 
-    /** Why [item] cannot be shown, from its description in the container. */
+    /** Why [item] cannot be shown, from its description in the container. Each item and depth is checked once. */
     private fun unsupported(c: AvifContainer, item: AvifItem, depth: Int): String? {
+        val key = item.id * (MAX_DEPTH + 2) + depth
+        if (c.checked.containsKey(key)) return c.checked[key]
+        return uncheckedReason(c, item, depth).also { c.checked[key] = it }
+    }
+
+    private fun uncheckedReason(c: AvifContainer, item: AvifItem, depth: Int): String? {
         if (depth > MAX_DEPTH) return "AVIF derived images nested more than $MAX_DEPTH deep"
         val codec = codecOf(item)
         if (item.type == HVC1 && codec == null) return NEEDS_HEIC_MODULE
@@ -400,8 +406,14 @@ internal object AvifDecoder {
         )
     }
 
-    /** Why the AV1 frames of [item], or of an item it is derived from, cannot be decoded. */
+    /** Why the coded data of [item], or of an item it is derived from, cannot be decoded. Each item and depth is read once. */
     private fun frames(c: AvifContainer, item: AvifItem, depth: Int): String? {
+        val key = item.id * (MAX_DEPTH + 2) + depth
+        if (c.framesChecked.containsKey(key)) return c.framesChecked[key]
+        return uncheckedFrames(c, item, depth).also { c.framesChecked[key] = it }
+    }
+
+    private fun uncheckedFrames(c: AvifContainer, item: AvifItem, depth: Int): String? {
         if (depth > MAX_DEPTH) return null
         val codec = codecOf(item)
         if (codec != null) {
@@ -609,6 +621,12 @@ internal object AvifDecoder {
 
     /** The YUV or gray planes of [item], before conversion to RGB. */
     private fun planes(c: AvifContainer, item: AvifItem, depth: Int, cancel: (() -> Unit)? = null): AvifPlanes {
+        // An item that several derived images name, or one names twice, decodes once.
+        if (c.inputUses(item.id) < 2) return uncachedPlanes(c, item, depth, cancel)
+        return c.decoded.getOrPut(item.id) { uncachedPlanes(c, item, depth, cancel) }
+    }
+
+    private fun uncachedPlanes(c: AvifContainer, item: AvifItem, depth: Int, cancel: (() -> Unit)?): AvifPlanes {
         if (depth > MAX_DEPTH) throw UnsupportedImageException("AVIF derived images nested more than $MAX_DEPTH deep")
         return when (item.type) {
             in DERIVED_TYPES -> derivedPlanes(c, item, depth, cancel)

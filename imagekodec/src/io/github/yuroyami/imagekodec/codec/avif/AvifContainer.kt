@@ -128,6 +128,23 @@ internal class AvifContainer(
     val tracks: List<AvifTrack>,
     private val idat: IsoBox?,
 ) {
+    /**
+     * What the decoder learned of each item, by its id and depth, so that a file that names one
+     * item many times costs the work of that item once (#166).
+     */
+    val checked = HashMap<Long, String?>()
+    val framesChecked = HashMap<Long, String?>()
+    val decoded = HashMap<Long, AvifPlanes>()
+
+    private val uses: Map<Long, Int> by lazy {
+        val out = HashMap<Long, Int>()
+        for (r in references) if (r.type == DIMG) for (id in r.to) out[id] = (out[id] ?: 0) + 1
+        out
+    }
+
+    /** How many times derived images name item [id] as an input. */
+    fun inputUses(id: Long): Int = uses[id] ?: 0
+
     fun referencesFrom(id: Long, type: Int): List<Long> =
         references.filter { it.type == type && it.from == id }.flatMap { it.to.toList() }
 

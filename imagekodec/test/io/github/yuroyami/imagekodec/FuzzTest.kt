@@ -176,7 +176,24 @@ class FuzzTest {
         "jp2-oversize-siz" to jp2OversizeSeed(),
         // A BMP that declares BI_PNG and holds another BMP must be refused, not read recursively (#17).
         "bmp-nested" to embeddedBmp(5, ImageKodec.encodeBmp(sample(6, 4))),
+        // Grids that name one grid 256 times, three deep: 16.7 million visits without a memo (#166).
+        "heif-nested-grids" to nestedGridSeed(),
     )
+
+    private fun nestedGridSeed(): ByteArray = HeifBuilder().apply {
+        fun be32(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
+        fun ispe(w: Int) = (be32(20) + "ispe".encodeToByteArray() + ByteArray(4) + be32(w) + be32(w)) to false
+        add(100, "av01", ByteArray(4), listOf(ispe(1)), hidden = true)
+        var below = 100L
+        var size = 1
+        for (level in 1..3) {
+            size *= 16
+            add(level, "grid", byteArrayOf(0, 0, 15, 15, (size ushr 8).toByte(), size.toByte(), (size ushr 8).toByte(), size.toByte()), listOf(ispe(size)), hidden = level < 3)
+            references += Triple("dimg", level.toLong(), LongArray(256) { below })
+            below = level.toLong()
+        }
+        primary = 3
+    }.build()
 
     private fun corpus(): List<Pair<String, ByteArray>> = validCorpus() + malformedCorpus()
 
