@@ -86,7 +86,7 @@ internal class SaoFilter(private val d: PictureDecoder) {
             val src = (j + 1) * w + x0
             val dst = (y0 + j) * stride + x0
             for (i in 0 until cw) {
-                val v = buf[src + i].toInt()
+                val v = buf[src + i].toInt() and 0xFFFF
                 val off = table[v shr shift]
                 if (off != 0) {
                     val r = v + off
@@ -135,9 +135,9 @@ internal class SaoFilter(private val d: PictureDecoder) {
 
     /** 8-411 to 8-413 for the band sample at [k], written at [k] + [dst] of [plane]. */
     private fun sample(plane: ShortArray, buf: ShortArray, k: Int, dst: Int, n0: Int, n1: Int, max: Int) {
-        val v = buf[k].toInt()
-        val a = buf[k + n0].toInt()
-        val b = buf[k + n1].toInt()
+        val v = buf[k].toInt() and 0xFFFF
+        val a = buf[k + n0].toInt() and 0xFFFF
+        val b = buf[k + n1].toInt() and 0xFFFF
         val off = edgeOffset[2 + (if (v > a) 1 else if (v < a) -1 else 0) + (if (v > b) 1 else if (v < b) -1 else 0)]
         if (off != 0) {
             val r = v + off

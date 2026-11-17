@@ -9,15 +9,20 @@ internal class InverseTransform {
     /** The sums of each level of [dct]: 32 entries, then 16, 8 and 4 for the even halves. */
     private val work = IntArray(64)
 
+    /** CoeffMaxY or CoeffMaxC of the block being transformed (7-29, 7-30); CoeffMin is -CoeffMax - 1. */
+    private var coeffMax = 32767
+
     /**
      * Turns the scaled coefficients [d] of an n by n block, n = 1 shl [log2], into residual samples
      * [r] (8.6.4.1, then the bdShift of 8-299). Coefficients past column [maxX] or row [maxY] are 0,
      * so the sums stop there. [dst] selects the 4x4 DST of 8-316. The column pass leaves columns past
-     * [maxX] unwritten, as the row pass reads none of them.
+     * [maxX] unwritten, as the row pass reads none of them. [coeffMax] bounds the intermediate values
+     * of 8-314; the sums stay in 32 bits while [fitsInt] holds.
      */
-    fun inverse(d: IntArray, r: IntArray, log2: Int, dst: Boolean, maxX: Int, maxY: Int, bdShift: Int) {
+    fun inverse(d: IntArray, r: IntArray, log2: Int, dst: Boolean, maxX: Int, maxY: Int, bdShift: Int, coeffMax: Int) {
         val n = 1 shl log2
         val t = tmp
+        this.coeffMax = coeffMax
         // The columns: e[ x ][ y ] = sum over j of transMatrix[ y ][ j ] * d[ x ][ j ], then 8-314.
         for (x in 0..maxX) pass(n, dst, d, x, n, maxY, t, x, n, 7, true)
         // The rows, of which only the first maxX + 1 entries can be other than 0.
@@ -25,9 +30,39 @@ internal class InverseTransform {
     }
 
     /**
+     * [inverse] for a DCT whose sums can pass 32 bits: extended precision lets a coefficient reach
+     * 2^22 (7-29), and 2^22 times the largest column sum of a 16-point basis, 940, does not fit. The
+     * sums are kept in 64 bits only here, and only for the blocks [fitsInt] rejects.
+     */
+    fun inverseWide(d: IntArray, r: IntArray, log2: Int, maxX: Int, maxY: Int, bdShift: Int, coeffMax: Int) {
+        val n = 1 shl log2
+        val m = MATRICES[log2 - 2]
+        val t = tmp
+        val min = -coeffMax - 1
+        for (x in 0..maxX) {
+            for (i in 0 until n) {
+                var s = 0L
+                for (k in 0..maxY) s += m[k * n + i].toLong() * d[k * n + x]
+                // 8-314: the clipped value fits in 32 bits again.
+                val v = (s + 64) shr 7
+                t[i * n + x] = if (v < min) min else if (v > coeffMax) coeffMax else v.toInt()
+            }
+        }
+        val round = 1L shl (bdShift - 1)
+        for (y in 0 until n) {
+            for (i in 0 until n) {
+                var s = 0L
+                for (k in 0..maxX) s += m[k * n + i].toLong() * t[y * n + k]
+                // 8-299 with a bdShift of at least 11 under extended precision brings it back into 32 bits.
+                r[y * n + i] = ((s + round) shr bdShift).toInt()
+            }
+        }
+    }
+
+    /**
      * One 1-D transform of 8.6.4.2 on the coefficients of [src] at [from] + k * [step], 0 past index
      * [last], written to [dst] at [to] + i * [outStep], rounded and shifted right by [shift], and
-     * clipped to 16 bits when [clip] (8-314).
+     * clipped to coeffMin and coeffMax when [clip] (8-314).
      */
     private fun pass(n: Int, sine: Boolean, src: IntArray, from: Int, step: Int, last: Int, dst: IntArray, to: Int, outStep: Int, shift: Int, clip: Boolean) {
         val sums = work
@@ -43,9 +78,11 @@ internal class InverseTransform {
             dct(n, src, from, step, last, 0)
         }
         val round = 1 shl (shift - 1)
+        val max = coeffMax
+        val min = -max - 1
         for (i in 0 until n) {
             val v = (sums[i] + round) shr shift
-            dst[to + i * outStep] = if (clip) clip16(v) else v
+            dst[to + i * outStep] = if (!clip) v else if (v < min) min else if (v > max) max else v
         }
     }
 
@@ -96,6 +133,29 @@ internal class InverseTransform {
             val n = 4 shl s
             IntArray(n * n) { i -> HevcTables.DCT_32[(i / n) * (32 / n) * 32 + i % n] }
         }
+
+        /**
+         * The largest sum of the magnitudes of one column of each matrix of [MATRICES] and of the DST:
+         * a bound on a sum of 8.6.4.2 over inputs of magnitude 1, which the butterfly's partial sums keep too.
+         */
+        private val COLUMN_SUMS = IntArray(4) { s ->
+            val n = 4 shl s
+            var most = 0
+            for (m in if (s == 0) listOf(MATRICES[0], HevcTables.DST_4) else listOf(MATRICES[s])) {
+                for (i in 0 until n) {
+                    var sum = 0
+                    for (k in 0 until n) sum += kotlin.math.abs(m[k * n + i])
+                    most = maxOf(most, sum)
+                }
+            }
+            most
+        }
+
+        /**
+         * Whether the sums of an n-point transform, n = 1 shl [log2], over values within [coeffMax] stay
+         * in 32 bits with the largest rounding term of 8-299 added, 2^11 for a bdShift of 12.
+         */
+        fun fitsInt(log2: Int, coeffMax: Int): Boolean = coeffMax.toLong() * COLUMN_SUMS[log2 - 2] + 2048 <= Int.MAX_VALUE
 
         /** Clip3( CoeffMin, CoeffMax, v ) for the 16-bit range of 7.4.9.11 without extended precision. */
         fun clip16(v: Int): Int = if (v < -32768) -32768 else if (v > 32767) 32767 else v

@@ -10,7 +10,10 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   inside the decoder, and `scaled` works after a full-size decode.
 - `decode` keeps only the high byte of a 16-bit sample, because `KiteBitmap` holds 8 bits a
   channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000, JPEG XL, JPEG XR and 12-bit or
-  lossless JPEG, and it converts AVIF at 16 bits. Other formats come through it at 8 bits, widened.
+  lossless JPEG, and it converts AVIF and HEIC at 16 bits. Other formats come through it at 8 bits,
+  widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
+  `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
+  can move by up to 255 sixteen-bit units to stay in that level.
 - There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR. See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
@@ -63,11 +66,9 @@ and fail during the decode.
 - Decoding needs the `imagekodec-heic` module and a call to `ImageKodecHeic.install()`. Without it,
   `decode` throws `UnsupportedImageException`, and `probe` reports the file as not decodable.
 - Only intra pictures decode. An image sequence or a picture with inter slices is refused.
-- The coding tools of the range extensions (residual DPCM, cross-component prediction, extended
-  precision, persistent Rice adaptation, chroma QP offset lists, transform skip rotation, context
-  and sizes above 4, disabled intra smoothing and boundary filtering, CABAC bypass alignment), the
-  tools of the screen content extensions, separate colour planes, CTBs of 8 samples and bit depths
-  above 12 are refused, and `unsupportedReason` names the field that asks for them.
+- The tools of the screen content extensions (palette mode, current picture referencing, the
+  adaptive colour transform and disabled intra boundary filtering), separate colour planes and CTBs
+  of 8 samples are refused, and `unsupportedReason` names the field that asks for them.
 - Chroma is upsampled bilinearly, as for AVIF. libheif's `heif-convert` takes the nearest sample,
   so the two differ at sharp colour edges of a subsampled image.
 

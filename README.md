@@ -163,7 +163,7 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | AVIF | stills and image sequences, 8 to 12 bits | no |
 | JPEG XL | both coding modes, layers and animation | no |
 | JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | no |
-| HEIC | intra HEVC pictures, 8 to 12 bits, grids and alpha, with the `imagekodec-heic` module | no |
+| HEIC | intra HEVC pictures, 8 to 16 bits, grids and alpha, with the `imagekodec-heic` module | no |
 
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
 carries a header of its own, so both take their parameters explicitly. HEIC decodes only with the

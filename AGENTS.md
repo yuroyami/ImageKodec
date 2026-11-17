@@ -163,6 +163,8 @@ being true.
 - A JPEG decoder clips Y, Cb and Cr after the inverse transform, and libjxl clips only
   the RGB they give. A recompressed JPEG therefore reads up to 94 levels away from the
   JPEG decoder's picture at a hard edge, and 1 on average, in djxl as well (#42).
+- HEVC samples of 16 bits do not fit a signed `Short`: read them with `and 0xFFFF`. Luma deblocking once
+  took a sample past 32767 as negative, and only the 16-bit WAVETILES conformance stream showed it (#148).
 - The C2 compiler of JDK 11 on x64 vectorises a loop that reverses the bits of each byte of
   an array in place, and the vector code gives wrong bytes. arm64 and JDK 21 are not
   affected, so the fault shows only on the Java 11 job of CI. Reverse bits through a table,

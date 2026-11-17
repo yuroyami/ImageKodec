@@ -32,7 +32,13 @@ reviewable in the diff.
   points and several slices, and intra reconstruction in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 12
   bits, with scaling lists, transform skip, lossless coding and PCM (#141, #142), the deblocking
   filter and sample adaptive offset, tiles and dependent slice segments (#143, #144). An inter slice
-  or a range extension coding tool is named in `unsupportedReason`.
+  or a screen content coding tool is named in `unsupportedReason`.
+- `imagekodec-heic` decodes the coding tools of the range extensions in intra pictures: transform
+  skip rotation, context and sizes above 4x4, implicit residual DPCM, cross-component prediction,
+  extended precision and bit depths up to 16, persistent Rice adaptation, CABAC bypass alignment,
+  disabled intra smoothing, chroma QP offset lists and scaled SAO offsets. The intra pictures of all
+  49 H.265.1 range extension conformance streams match their picture hash or the MD5 of their YUV
+  file, except four streams with no hash for them, which match libde265 (#148).
 - With `imagekodec-heic` installed, `ImageKodec.decode` and `decode16` read HEIC photos end to end:
   grids, alpha, crops, rotation, mirror, overlays and thumbnails. Colour comes from the item's `nclx`,
   else from the VUI of the stream, also beside an ICC profile (#145).

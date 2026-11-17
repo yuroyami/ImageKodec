@@ -518,6 +518,49 @@ class HeicOracleTest {
         }
     }
 
+    /**
+     * A 16-bit 4:4:4 HEIC reaches `decode16` (#148): the first picture of the GENERAL_16b_444
+     * conformance stream, whose hash SEI the decoder matches, under an identity matrix, so green
+     * is Y, blue Cb and red Cr. `decode16` keeps each sample in the 8-bit level that `decode`
+     * rounds it to, so that `toBitmap` gives `decode`; inside that level it is exact.
+     */
+    @Test
+    fun sixteenBitPicturesKeepEveryBitThroughTheCore() {
+        val root = samples()?.parentFile
+        assumeTrue("no HEIC conformance data; run tools/heic_data.py", root != null)
+        val bit = File(root, "conformance/RExt/GENERAL_16b_444_RExt_Sony_2/GENERAL_16b_444_RExt_Sony_2.bit")
+        assumeTrue("no $bit", bit.isFile)
+        val units = AnnexB.split(bit.readBytes())
+        fun type(u: ByteArray) = (u[0].toInt() shr 1) and 0x3F
+        // The parameter sets before the first picture: a later one may replace an id.
+        val parameterSets = units.takeWhile { type(it) >= 32 }.filter { type(it) in 32..34 }
+        // The VCL units of the first picture: up to the next unit whose first_slice_segment_in_pic_flag is set.
+        val vcl = units.filter { type(it) < 32 }
+        val first = listOf(vcl[0]) + vcl.drop(1).takeWhile { (it[2].toInt() and 0x80) == 0 }
+        val config = AnnexB.hvcC(parameterSets, chromaFormat = 3, bitDepthLuma = 16, bitDepthChroma = 16)
+        val sample = AnnexB.sample(first)
+        val planes = ours(config, sample)
+        assertEquals(16, planes.bitDepthLuma)
+        val file = heif { add(1, "hvc1", sample, listOf(box("hvcC", config) to true, ispe(planes.width, planes.height), nclx(1, 13, 0, true))) }
+        val wide = ImageKodec.decode16(file)
+        assertEquals(planes.width to planes.height, wide.width to wide.height)
+        assertEquals(3, wide.channels)
+        var high = 0
+        for (y in 0 until planes.height) for (x in 0 until planes.width) {
+            val at = (y * planes.width + x) * 3
+            fun plane(c: Int) = planes.planes[c][y * planes.strides[c] + x].toInt() and 0xFFFF
+            fun kept(v: Int): Int {
+                val v8 = (0.5 + v / 65535.0 * 255).toInt()
+                return v.coerceIn(v8 shl 8, (v8 shl 8) or 255)
+            }
+            val rgb = Triple(wide.samples[at].toInt() and 0xFFFF, wide.samples[at + 1].toInt() and 0xFFFF, wide.samples[at + 2].toInt() and 0xFFFF)
+            assertEquals(Triple(kept(plane(2)), kept(plane(0)), kept(plane(1))), rgb, "($x, $y)")
+            if (kept(plane(0)) == plane(0) && plane(0) and 0xFF != 0) high++
+        }
+        assertTrue(high > 0, "the low byte of the samples is kept where the level allows")
+        assertContentEquals(ImageKodec.decode(file).argb, wide.toBitmap().argb)
+    }
+
     /** cat.hif carries thumbnails of 1616x1080, 320x212 and 160x120, as heif-info lists them (#150). */
     @Test
     fun thumbnailsOfASonyPhoto() {

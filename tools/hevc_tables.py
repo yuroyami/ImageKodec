@@ -4,11 +4,12 @@ Writes HevcTables.kt, the constant tables of the HEVC decoder in imagekodec-heic
 ITU-T H.265 itself, so no table is typed by hand.
 
 The tables are the ones the specification gives as data, which nothing derives: the default scaling
-lists of Table 7-6, the context initialisation values of Tables 9-5 to 9-31, the arithmetic decoder's
-Tables 9-50, 9-52 and 9-53, the intra tables 8-3 and 8-5, the chroma QP table 8-10, the deblocking
-thresholds of Table 8-12 and the transform matrices of 8-316, 8-319 and 8-321. The script reads the
-text that `pdftotext -layout` makes of the 07/2024 edition (V10), checks each table's element count,
-and writes the tables with the SHA-256 of the text it read and the CRC-32 of every table.
+lists of Table 7-6, the context initialisation values of Tables 9-5 to 9-31 and of the range
+extension elements of intra pictures in Tables 9-34 to 9-37, the arithmetic decoder's Tables 9-50,
+9-52 and 9-53, the intra tables 8-3 and 8-5, the chroma QP table 8-10, the deblocking thresholds
+of Table 8-12 and the transform matrices of 8-316, 8-319 and 8-321. The script reads the text that
+`pdftotext -layout` makes of the 07/2024 edition (V10), checks each table's element count, and
+writes the tables with the SHA-256 of the text it read and the CRC-32 of every table.
 HevcTablesTest holds the Kotlin file to those CRCs, so an edit by hand fails.
 
     pdftotext -layout T-REC-H.265-202407-I.pdf h265.txt
@@ -83,6 +84,10 @@ INIT_TABLES = [
     (29, "SIG_COEFF", "sig_coeff_flag", 132),
     (30, "GREATER1", "coeff_abs_level_greater1_flag", 72),
     (31, "GREATER2", "coeff_abs_level_greater2_flag", 18),
+    (34, "CU_CHROMA_QP_OFFSET_FLAG", "cu_chroma_qp_offset_flag", 3),
+    (35, "CU_CHROMA_QP_OFFSET_IDX", "cu_chroma_qp_offset_idx", 3),
+    (36, "LOG2_RES_SCALE_ABS", "log2_res_scale_abs_plus1", 24),
+    (37, "RES_SCALE_SIGN", "res_scale_sign_flag", 6),
 ]
 
 

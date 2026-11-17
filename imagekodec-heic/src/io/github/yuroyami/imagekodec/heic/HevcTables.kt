@@ -174,6 +174,27 @@ internal object HevcTables {
         107, 167,
     )
 
+    /** Table 9-34: initValue of each ctxIdx of cu_chroma_qp_offset_flag. CRC-32 of the bytes: 0x94B1FCFE. */
+    val INIT_CU_CHROMA_QP_OFFSET_FLAG: IntArray = intArrayOf(
+        154, 154, 154,
+    )
+
+    /** Table 9-35: initValue of each ctxIdx of cu_chroma_qp_offset_idx. CRC-32 of the bytes: 0x94B1FCFE. */
+    val INIT_CU_CHROMA_QP_OFFSET_IDX: IntArray = intArrayOf(
+        154, 154, 154,
+    )
+
+    /** Table 9-36: initValue of each ctxIdx of log2_res_scale_abs_plus1. CRC-32 of the bytes: 0xF4C79D28. */
+    val INIT_LOG2_RES_SCALE_ABS: IntArray = intArrayOf(
+        154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154, 154,
+        154, 154, 154, 154, 154, 154, 154, 154,
+    )
+
+    /** Table 9-37: initValue of each ctxIdx of res_scale_sign_flag. CRC-32 of the bytes: 0x2F848F1B. */
+    val INIT_RES_SCALE_SIGN: IntArray = intArrayOf(
+        154, 154, 154, 154, 154, 154,
+    )
+
     /** Table 9-50: ctxIdxMap[ i ] of sig_coeff_flag in a 4x4 block. CRC-32 of the bytes: 0xB0091FC4. */
     val CTX_IDX_MAP: IntArray = intArrayOf(
         0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8,

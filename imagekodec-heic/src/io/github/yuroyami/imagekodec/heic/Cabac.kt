@@ -3,7 +3,9 @@ package io.github.yuroyami.imagekodec.heic
 /**
  * The context variables of one slice, laid out for one initType (Table 9-4): each syntax element owns
  * a run of entries from its offset here, indexed by ctxInc. An element with no context for an
- * initType (the inter elements of an I slice) keeps a neutral state that nothing reads.
+ * initType (the inter elements of an I slice) keeps a neutral state that nothing reads. The four Rice
+ * parameter initialization states StatCoeff of 9.3.3.11 follow the contexts, as 9.3.2.4 and 9.3.2.5
+ * store and restore them together, so one copy of the array carries both.
  */
 internal object Ctx {
     const val SAO_MERGE = 0
@@ -34,7 +36,15 @@ internal object Ctx {
     const val SIG_COEFF = 83
     const val GREATER1 = 127
     const val GREATER2 = 151
-    const val COUNT = 157
+    const val CU_CHROMA_QP_OFFSET_FLAG = 157
+    const val CU_CHROMA_QP_OFFSET_IDX = 158
+    const val LOG2_RES_SCALE_ABS = 159
+    const val RES_SCALE_SIGN = 167
+    /** The number of context variables. */
+    const val CONTEXTS = 169
+    /** StatCoeff[ 0..3 ], each 0 to about 90 (9-23 stops it near the largest level), so a byte holds it. */
+    const val STAT_COEFF = 169
+    const val COUNT = 173
 
     /** The initValue of every entry for initType 0, 1 and 2. */
     private val initValues: Array<IntArray> = Array(3) { t -> layout(t) }
@@ -47,7 +57,7 @@ internal object Ctx {
     private fun layout(t: Int): IntArray {
         val T = HevcTables
         // 154 gives m = 0 and n = 64 in 9-5, an even state: the one of an element unused at this initType.
-        val v = IntArray(COUNT) { 154 }
+        val v = IntArray(CONTEXTS) { 154 }
         v.put(T.INIT_SAO_MERGE, SAO_MERGE, t, 1)
         v.put(T.INIT_SAO_TYPE, SAO_TYPE, t, 1)
         v.put(T.INIT_SPLIT_CU, SPLIT_CU, t, 3)
@@ -70,6 +80,10 @@ internal object Ctx {
         v[SIG_COEFF + 43] = T.INIT_SIG_COEFF[127 + 2 * t]
         v.put(T.INIT_GREATER1, GREATER1, t, 24)
         v.put(T.INIT_GREATER2, GREATER2, t, 6)
+        v.put(T.INIT_CU_CHROMA_QP_OFFSET_FLAG, CU_CHROMA_QP_OFFSET_FLAG, t, 1)
+        v.put(T.INIT_CU_CHROMA_QP_OFFSET_IDX, CU_CHROMA_QP_OFFSET_IDX, t, 1)
+        v.put(T.INIT_LOG2_RES_SCALE_ABS, LOG2_RES_SCALE_ABS, t, 8)
+        v.put(T.INIT_RES_SCALE_SIGN, RES_SCALE_SIGN, t, 2)
         // part_mode has one context at initType 0 and four at the others (Table 9-4).
         if (t == 0) {
             v[PART_MODE] = T.INIT_PART_MODE[0]
@@ -90,13 +104,14 @@ internal object Ctx {
     }
 
     /**
-     * Initialises [states] for [initType] and the slice's SliceQpY [qp] (9.3.2.2): each entry holds
-     * pStateIdx shl 1 or valMps.
+     * Initialises [states] for [initType] and the slice's SliceQpY [qp] (9.3.2.2): each context holds
+     * pStateIdx shl 1 or valMps. StatCoeff starts at 0 (9.3.2.1).
      */
     fun init(states: ByteArray, initType: Int, qp: Int) {
         val values = initValues[initType]
         val q = qp.coerceIn(0, 51)
-        for (i in 0 until COUNT) {
+        states.fill(0, STAT_COEFF, COUNT)
+        for (i in 0 until CONTEXTS) {
             val init = values[i]
             // 9-4 to 9-6.
             val m = (init shr 4) * 5 - 45
@@ -200,6 +215,15 @@ internal class Cabac {
         val mask = (value - scaled).inv() shr 31
         value -= scaled and mask
         return mask and 1
+    }
+
+    /**
+     * The alignment process of 9.3.4.3.6, before the bypass bins of a sub-block when
+     * cabac_bypass_alignment_enabled_flag is 1. A range of 256 makes each bypass bin a plain bit of
+     * the data, which a decoder may read faster; this one reads them as any bypass bin.
+     */
+    fun align() {
+        range = 256
     }
 
     /** [n] bypass bins, the first in the highest bit: the FL binarisation of 9.3.3.5. */

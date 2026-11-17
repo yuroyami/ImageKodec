@@ -244,23 +244,29 @@ class HevcDecodeOracleTest {
     }
 
     /** Where [planes] differ from libde265's decode of [units], or null when every sample matches. */
-    private fun libde265Differs(units: List<ByteArray>, planes: io.github.yuroyami.imagekodec.HeifPlanes): String? {
+    private fun libde265Differs(units: List<ByteArray>, planes: io.github.yuroyami.imagekodec.HeifPlanes): String? =
+        libde265Differs(units, listOf(planes))
+
+    /** Where the pictures [pictures] differ from libde265's decode of [units], in order, or null when every sample matches. */
+    private fun libde265Differs(units: List<ByteArray>, pictures: List<io.github.yuroyami.imagekodec.HeifPlanes>): String? {
         val input = File.createTempFile("kite-hevc", ".hevc").apply { deleteOnExit(); writeBytes(AnnexB.join(units)) }
         val yuv = File.createTempFile("kite-hevc", ".yuv").apply { deleteOnExit() }
         val (code, log) = run(Tools.require("dec265").path, "-q", "-o", yuv.path, input.path)
         if (code != 0) return "$DEC265_FAILED: ${log.decodeToString().trim()}"
-        val wide = planes.bitDepthLuma > 8
         val theirs = yuv.readBytes()
         var at = 0
-        for (c in planes.planes.indices) {
-            val w = if (c == 0) planes.width else planes.width shr planes.subX
-            val h = if (c == 0) planes.height else planes.height shr planes.subY
-            if (at + w * h * (if (wide) 2 else 1) > theirs.size) return "libde265 gave ${theirs.size} bytes, fewer than the picture"
-            for (y in 0 until h) for (x in 0 until w) {
-                val v = if (wide) (theirs[at].toInt() and 0xFF) or ((theirs[at + 1].toInt() and 0xFF) shl 8) else theirs[at].toInt() and 0xFF
-                at += if (wide) 2 else 1
-                val mine = planes.planes[c][y * planes.strides[c] + x].toInt()
-                if (mine != v) return "plane $c differs from libde265 at ($x, $y): $mine, not $v"
+        for ((i, planes) in pictures.withIndex()) {
+            val wide = planes.bitDepthLuma > 8
+            for (c in planes.planes.indices) {
+                val w = if (c == 0) planes.width else planes.width shr planes.subX
+                val h = if (c == 0) planes.height else planes.height shr planes.subY
+                if (at + w * h * (if (wide) 2 else 1) > theirs.size) return "libde265 gave ${theirs.size} bytes, fewer than the picture"
+                for (y in 0 until h) for (x in 0 until w) {
+                    val v = if (wide) (theirs[at].toInt() and 0xFF) or ((theirs[at + 1].toInt() and 0xFF) shl 8) else theirs[at].toInt() and 0xFF
+                    at += if (wide) 2 else 1
+                    val mine = planes.planes[c][y * planes.strides[c] + x].toInt() and 0xFFFF
+                    if (mine != v) return "plane $c of picture $i differs from libde265 at ($x, $y): $mine, not $v"
+                }
             }
         }
         if (theirs.size != at) return "libde265 gave ${theirs.size} bytes, not $at"
@@ -369,8 +375,7 @@ class HevcDecodeOracleTest {
      * Each H.265.1 conformance stream: whether its first picture is intra and supported, and if so
      * whether it matches its hash SEI, the MD5 of its YUV file when it has one picture, or else
      * libde265's decode of the same units. Every supported picture must match, and the streams that
-     * do are asserted: every first picture of HEVC_v1 but one, and the range extension streams that
-     * use none of the tools #148 adds.
+     * do are asserted: every first picture of HEVC_v1 but one, and of the range extension package.
      */
     @Test
     fun conformanceStreams() {
@@ -443,7 +448,7 @@ class HevcDecodeOracleTest {
         assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
         val v1 = File(root, "HEVC_v1").listFiles { f -> f.isDirectory }.orEmpty().map { it.name }
         // Its parameter sets defeat libde265, and it has no hash to compare.
-        val expected = v1.toSet() - "VPSSPSPPS_A_MainConcept_1" + MATCHING_REXT
+        val expected = v1.toSet() - "VPSSPSPPS_A_MainConcept_1" + MATCHING_REXT_STREAMS
         if (withLibde265) {
             assertEquals(expected.sorted(), matchedNames.sorted(), "the streams whose first picture matches")
         } else {
@@ -451,18 +456,135 @@ class HevcDecodeOracleTest {
         }
     }
 
+    /**
+     * Every picture of each range extension stream up to its first inter picture, held to its hash SEI,
+     * or, for a stream without one, to the MD5 of its YUV file when it decodes whole, and else to
+     * libde265's decode of the same pictures. The streams whose every intra picture matches are
+     * asserted; the others are listed with the reason.
+     */
+    @Test
+    fun rangeExtensionStreams() {
+        val root = File(System.getenv("IMAGEKODEC_HEIC_DATA") ?: "../reference/heic", "conformance/RExt")
+        if (!root.isDirectory) {
+            if (System.getenv(Tools.REQUIRE_ENV) == "1") error("no conformance streams at $root, and ${Tools.REQUIRE_ENV}=1 forbids skipping; run tools/heic_data.py")
+            assumeTrue("no conformance streams at $root; run tools/heic_data.py", false)
+        }
+        val matching = ArrayList<String>()
+        val failures = ArrayList<String>()
+        val withLibde265 = Tools.hasAll("dec265")
+        for (dir in root.listFiles { f -> f.isDirectory }.orEmpty().sortedBy { it.name }) {
+            val file = dir.listFiles()?.firstOrNull { it.name.endsWith(".bit") || it.name.endsWith(".bin") } ?: continue
+            val line = try {
+                rangeExtensionStream(file, withLibde265)
+            } catch (e: UnsupportedImageException) {
+                "unsupported: ${e.message}"
+            } catch (e: Exception) {
+                failures += "${dir.name}: ${e::class.simpleName} ${e.message}"
+                "FAILED: ${e::class.simpleName} ${e.message}"
+            }
+            if (line.startsWith("MATCHES")) matching += dir.name
+            if (line.startsWith("DIFFERS")) failures += "${dir.name}: $line"
+            println("  ${dir.name}: $line")
+        }
+        println("HEVC range extension conformance: ${matching.size} streams match")
+        assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
+        val expected = if (withLibde265) MATCHING_REXT_STREAMS else MATCHING_REXT_STREAMS - MATCHING_REXT_LIBDE265
+        assertEquals(expected.sorted(), matching.sorted(), "the range extension streams whose every intra picture matches")
+    }
+
+    /** The outcome of one range extension stream: MATCHES, DIFFERS or why it stops. */
+    private fun rangeExtensionStream(file: File, withLibde265: Boolean): String {
+        // The units of each picture: a slice with first_slice_segment_in_pic_flag starts the next one.
+        val pictures = ArrayList<ArrayList<ByteArray>>()
+        var current = ArrayList<ByteArray>()
+        var slices = 0
+        for (u in AnnexB.split(file.readBytes())) {
+            if (u.size < 3) continue
+            val type = (u[0].toInt() shr 1) and 0x3F
+            val layer = ((u[0].toInt() and 1) shl 5) or ((u[1].toInt() and 0xFF) shr 3)
+            if (layer == 0 && NalType.isSlice(type)) {
+                if (slices > 0 && u[2].toInt() and 0x80 != 0) {
+                    pictures += current
+                    current = ArrayList()
+                }
+                slices++
+            }
+            current += u
+        }
+        pictures += current
+        // Decode the pictures whose slices are all intra, up to the first that is not (#156).
+        val store = ParameterSetStore()
+        var previous: SliceHeader? = null
+        val decoder = HevcDecoder()
+        val intraUnits = ArrayList<ByteArray>()
+        var inter: Int? = null
+        for ((i, units) in pictures.withIndex()) {
+            for (u in units) {
+                val r = BitReader(unescapeNal(u))
+                val nal = readNalHeader(r)
+                if (nal.layerId != 0) continue
+                if (NalType.isSlice(nal.type)) {
+                    val h = readSliceHeader(r, nal, store, previous, u.size)
+                    previous = h
+                    if (h.sliceType != SliceType.I) inter = i
+                } else if (nal.type != NalType.SUFFIX_SEI) {
+                    store.add(nal, r)
+                }
+            }
+            if (inter != null) break
+            for (u in units) decoder.decodeNal(u, 0, u.size, null)
+            intraUnits += units
+        }
+        val decoded = decoder.finish()
+        if (decoded.isEmpty()) return "no intra picture before the first inter one (#156)"
+        val stop = if (inter != null) ", up to the inter picture $inter of ${pictures.size} (#156)" else ""
+        if (decoded.all { it.hash != null }) {
+            val bad = decoded.indices.filter { !matchesHash(decoded[it], decoded[it].hash!!) }
+            if (bad.isNotEmpty()) return "DIFFERS from the hash SEI of pictures $bad of ${decoded.size}$stop"
+            return "MATCHES the hash SEI of all ${decoded.size} pictures$stop"
+        }
+        // No hash SEI: the MD5 of the YUV file, which needs every picture.
+        val expected = file.parentFile.listFiles().orEmpty().filter { it.name.endsWith(".md5") || it.name.endsWith("md5sum.txt") }
+            .flatMap { it.readLines() }.map { it.trim().split(Regex("\\s+\\*?|\\*")) }
+            .firstOrNull { it.size >= 2 && (it[1].endsWith(".yuv") || it[1].endsWith(".gbr")) }?.get(0)?.lowercase()
+        if (inter != null || expected == null) {
+            if (!withLibde265) return "decoded ${decoded.size} pictures with no hash to compare$stop"
+            // No hash for the intra pictures alone: libde265's decode of the same units instead.
+            val diff = libde265Differs(intraUnits, decoded.map { it.toHeifPlanes() })
+                ?: return "MATCHES libde265 over all ${decoded.size} pictures$stop"
+            return if (diff.startsWith(DEC265_FAILED)) "decoded ${decoded.size} pictures with no hash to compare ($diff)$stop" else "DIFFERS from libde265: $diff"
+        }
+        val out = java.io.ByteArrayOutputStream()
+        for (p in decoded) out.write(yuvBytes(p.toHeifPlanes()))
+        val md5 = hex(PictureHash.md5(out.toByteArray()))
+        if (md5 != expected) return "DIFFERS from the MD5 of its YUV file over ${decoded.size} pictures"
+        return "MATCHES the MD5 of its YUV file over all ${decoded.size} pictures"
+    }
+
     private companion object {
         const val DEC265_FAILED = "libde265 cannot decode it"
 
         /**
-         * The range extension streams that decode now. The others need transform_skip_rotation and the
-         * rest of #148, 16-bit samples, chroma QP offset lists, or intra_smoothing_disabled_flag.
+         * The range extension streams whose every intra picture matches: the whole package. Nineteen of
+         * them hold inter pictures after the first (#156), which this checks up to the first one.
          */
-        val MATCHING_REXT = setOf(
+        val MATCHING_REXT_STREAMS = setOf(
             "ADJUST_IPRED_ANGLE_A_RExt_Mitsubishi_2",
+            "Bitdepth_A_RExt_Sony_1",
+            "Bitdepth_B_RExt_Sony_1",
+            "CCP_10bit_RExt_QCOM_1",
+            "CCP_12bit_RExt_QCOM_1",
+            "CCP_8bit_RExt_QCOM_1",
+            "EXTPREC_HIGHTHROUGHPUT_444_16_INTRA_10BIT_RExt_Sony_1",
+            "EXTPREC_HIGHTHROUGHPUT_444_16_INTRA_12BIT_RExt_Sony_1",
+            "EXTPREC_HIGHTHROUGHPUT_444_16_INTRA_16BIT_RExt_Sony_1",
+            "EXTPREC_HIGHTHROUGHPUT_444_16_INTRA_8BIT_RExt_Sony_1",
             "EXTPREC_MAIN_444_16_INTRA_10BIT_RExt_Sony_1",
             "EXTPREC_MAIN_444_16_INTRA_12BIT_RExt_Sony_1",
+            "EXTPREC_MAIN_444_16_INTRA_16BIT_RExt_Sony_1",
             "EXTPREC_MAIN_444_16_INTRA_8BIT_RExt_Sony_1",
+            "ExplicitRdpcm_A_BBC_1",
+            "ExplicitRdpcm_B_BBC_2",
             "GENERAL_10b_420_RExt_Sony_1",
             "GENERAL_10b_422_RExt_Sony_1",
             "GENERAL_10b_444_RExt_Sony_2",
@@ -470,10 +592,38 @@ class HevcDecodeOracleTest {
             "GENERAL_12b_420_RExt_Sony_1",
             "GENERAL_12b_422_RExt_Sony_1",
             "GENERAL_12b_444_RExt_Sony_2",
+            "GENERAL_16b_400_RExt_Sony_1",
+            "GENERAL_16b_444_RExt_Sony_2",
+            "GENERAL_16b_444_highThroughput_RExt_Sony_2",
             "GENERAL_8b_400_RExt_Sony_1",
             "GENERAL_8b_420_RExt_Sony_1",
             "GENERAL_8b_444_RExt_Sony_2",
             "IPCM_A_RExt_NEC_2",
+            "IPCM_B_RExt_NEC",
+            "Main_422_10_A_RExt_Sony_2",
+            "Main_422_10_B_RExt_Sony_2",
+            "PERSIST_RPARAM_A_RExt_Sony_3",
+            "QMATRIX_A_RExt_Sony_1",
+            "SAO_A_RExt_MediaTek_1",
+            "TSCTX_10bit_I_RExt_SHARP_1",
+            "TSCTX_10bit_RExt_SHARP_1",
+            "TSCTX_12bit_I_RExt_SHARP_1",
+            "TSCTX_12bit_RExt_SHARP_1",
+            "TSCTX_8bit_I_RExt_SHARP_1",
+            "TSCTX_8bit_RExt_SHARP_1",
+            "WAVETILES_RExt_Sony_2",
+            "WPP_AND_TILE_10Bit422Test_HIGH_TP_444_10BIT_RExt_Apple_2",
+            "WPP_AND_TILE_AND_CABAC_BYPASS_ALIGN_0_HIGH_TP_444_14BIT_RExt_Apple_2",
+            "WPP_AND_TILE_AND_CABAC_BYPASS_ALIGN_1_HIGH_TP_444_14BIT_RExt_Apple_2",
+            "WPP_AND_TILE_AND_CABAC_EXT_PREC_1_HIGH_TP_444_14BIT_RExt_Apple_2",
+            "WPP_AND_TILE_HIGH_TP_444_8BIT_RExt_Apple_2",
+            "WPP_HIGH_TP_444_8BIT_RExt_Apple_2",
         )
+
+        /**
+         * The streams of [MATCHING_REXT_STREAMS] with neither a hash SEI nor, as an inter picture follows
+         * the first, a YUV file to hold their intra picture to: only libde265 checks them.
+         */
+        val MATCHING_REXT_LIBDE265 = setOf("CCP_10bit_RExt_QCOM_1", "CCP_12bit_RExt_QCOM_1", "CCP_8bit_RExt_QCOM_1", "SAO_A_RExt_MediaTek_1")
     }
 }

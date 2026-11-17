@@ -47,6 +47,10 @@ class HevcTablesTest {
             "INIT_SIG_COEFF" to (0xD0E3BD23L to HevcTables.INIT_SIG_COEFF),
             "INIT_GREATER1" to (0x48D945AFL to HevcTables.INIT_GREATER1),
             "INIT_GREATER2" to (0x61B682F9L to HevcTables.INIT_GREATER2),
+            "INIT_CU_CHROMA_QP_OFFSET_FLAG" to (0x94B1FCFEL to HevcTables.INIT_CU_CHROMA_QP_OFFSET_FLAG),
+            "INIT_CU_CHROMA_QP_OFFSET_IDX" to (0x94B1FCFEL to HevcTables.INIT_CU_CHROMA_QP_OFFSET_IDX),
+            "INIT_LOG2_RES_SCALE_ABS" to (0xF4C79D28L to HevcTables.INIT_LOG2_RES_SCALE_ABS),
+            "INIT_RES_SCALE_SIGN" to (0x2F848F1BL to HevcTables.INIT_RES_SCALE_SIGN),
             "CTX_IDX_MAP" to (0xB0091FC4L to HevcTables.CTX_IDX_MAP),
             "RANGE_TAB_LPS" to (0xDB858CD6L to HevcTables.RANGE_TAB_LPS),
             "TRANS_IDX_LPS" to (0xF9DA248CL to HevcTables.TRANS_IDX_LPS),
@@ -85,6 +89,11 @@ class HevcTablesTest {
             val n = kotlin.math.sqrt(m.size.toDouble()).toInt()
             for (k in 0 until n) for (i in 0 until n) assertEquals(if (k % 2 == 0) m[k * n + i] else -m[k * n + i], m[k * n + n - 1 - i], "basis $k of $n")
         }
+        // Extended precision lets a coefficient reach 2^22 - 1 at 16 bits (7-29): its 16 and 32-point sums
+        // pass 32 bits and its 8-point ones do not, and at 20 bits of range only the 32-point ones do.
+        assertEquals(listOf(true, true, false, false), (2..5).map { InverseTransform.fitsInt(it, (1 shl 22) - 1) })
+        assertEquals(listOf(true, true, true, true), (2..5).map { InverseTransform.fitsInt(it, (1 shl 20) - 1) })
+        assertEquals(listOf(true, true, true, false), (2..5).map { InverseTransform.fitsInt(it, (1 shl 21) - 1) })
         // 9-6 at SliceQpY 26 for the neutral initValue 154: m = 0, n = 64, so pStateIdx 0 and valMps 1.
         val states = ByteArray(Ctx.COUNT)
         Ctx.init(states, 0, 26)

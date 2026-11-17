@@ -60,21 +60,12 @@ internal object HevcSupport {
     private fun firstUnsupportedField(s: Sps, p: Pps?, slice: SliceHeader?): String? = when {
         s.ctbLog2 < 4 -> "a CTB of ${s.ctbSize} samples (log2_diff_max_min_luma_coding_block_size)"
         s.separateColourPlane -> "separate_colour_plane_flag"
-        s.bitDepthY > 12 -> "bit_depth_luma_minus8 ${s.bitDepthY - 8}"
-        s.bitDepthC > 12 -> "bit_depth_chroma_minus8 ${s.bitDepthC - 8}"
-        s.transformSkipRotation -> "transform_skip_rotation_enabled_flag"
-        s.transformSkipContext -> "transform_skip_context_enabled_flag"
-        s.implicitRdpcm -> "implicit_rdpcm_enabled_flag"
-        s.explicitRdpcm -> "explicit_rdpcm_enabled_flag"
-        s.extendedPrecision -> "extended_precision_processing_flag"
-        s.intraSmoothingDisabled -> "intra_smoothing_disabled_flag"
-        s.persistentRiceAdaptation -> "persistent_rice_adaptation_enabled_flag"
-        s.cabacBypassAlignment -> "cabac_bypass_alignment_enabled_flag"
+        // The tools of the screen content coding extension. explicit_rdpcm_enabled_flag of the range
+        // extension needs nothing here, as only an inter unit codes explicit_rdpcm_flag (7.3.8.11).
         s.paletteMode -> "palette_mode_enabled_flag"
+        // No decoder at hand reads it to check one against (ffmpeg 6.1 ignores it), and every SCC
+        // conformance stream that sets it also turns palette mode on.
         s.intraBoundaryFilteringDisabled -> "intra_boundary_filtering_disabled_flag"
-        p != null && p.log2MaxTransformSkipSize > 2 -> "log2_max_transform_skip_block_size_minus2 ${p.log2MaxTransformSkipSize - 2}"
-        p != null && p.crossComponentPrediction -> "cross_component_prediction_enabled_flag"
-        p != null && p.chromaQpOffsetListEnabled -> "chroma_qp_offset_list_enabled_flag"
         p != null && p.currPicRefEnabled -> "pps_curr_pic_ref_enabled_flag"
         p != null && p.residualAdaptiveColourTransform -> "residual_adaptive_colour_transform_enabled_flag"
         slice != null && slice.sliceType != SliceType.I -> "slice_type ${slice.sliceType}"

@@ -37,10 +37,13 @@ finds the video of a Motion Photo, with or without the module.
 
 ## What decodes
 
-- The HEVC pictures of the Main, Main 10, Main Still Picture and format range extensions profiles
-  that use no range extension coding tool: 4:0:0, 4:2:0, 4:2:2 and 4:4:4, at 8 to 12 bits, with
-  scaling lists, transform skip, lossless coding, PCM, wavefront rows, tiles, several slices and
-  dependent slice segments, deblocking and sample adaptive offset.
+- The intra HEVC pictures of the Main, Main 10, Main Still Picture and format range extensions
+  profiles: 4:0:0, 4:2:0, 4:2:2 and 4:4:4, at 8 to 16 bits, with scaling lists, transform skip,
+  lossless coding, PCM, wavefront rows, tiles, several slices and dependent slice segments,
+  deblocking and sample adaptive offset, and the coding tools of the range extensions: residual
+  DPCM, cross-component prediction, extended precision, persistent Rice adaptation, CABAC bypass
+  alignment, chroma QP offset lists, transform skip rotation, context and sizes above 4, disabled
+  intra smoothing and scaled SAO offsets.
 - Support follows the fields of the parameter sets, not the profile number, so a file whose
   profile says more than it uses still decodes.
 - The HEIF structure that the core reads for AVIF too: grids, overlays, identity items, alpha, the

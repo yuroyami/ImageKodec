@@ -21,7 +21,11 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private val minTbLog2 = sps.minTbLog2
     private val minCbLog2 = sps.minCbLog2
 
-    /** The decoded picture before the conformance window: luma, then Cb and Cr unless 4:0:0. */
+    /**
+     * The decoded picture before the conformance window: luma, then Cb and Cr unless 4:0:0. Samples
+     * are unsigned, so one of 16 bits sits in its Short as a negative value, and every read masks it
+     * with 0xFFFF.
+     */
     val planes: Array<ShortArray>
     val strides: IntArray
 
@@ -68,6 +72,26 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     }
 
     private val cabac = Cabac()
+
+    // The range extension tools (7.4.3.2.2, 7.4.3.3.2), read once per picture so the common path tests a field.
+    private val extendedPrecision = sps.extendedPrecision
+    /** CoeffMaxY and CoeffMaxC of 7-29 and 7-30; CoeffMin is -CoeffMax - 1. */
+    private val coeffMaxY = (1 shl (if (extendedPrecision) maxOf(15, sps.bitDepthY + 6) else 15)) - 1
+    private val coeffMaxC = (1 shl (if (extendedPrecision) maxOf(15, sps.bitDepthC + 6) else 15)) - 1
+    /** The smallest log2 size whose transform sums need 64 bits, per component kind: luma, chroma. */
+    private val wideLog2Y = (2..5).firstOrNull { !InverseTransform.fitsInt(it, coeffMaxY) } ?: 6
+    private val wideLog2C = (2..5).firstOrNull { !InverseTransform.fitsInt(it, coeffMaxC) } ?: 6
+    /** log2TransformRange of 8-300 and 8-304. */
+    private val log2RangeY = if (extendedPrecision) maxOf(15, sps.bitDepthY + 6) else 15
+    private val log2RangeC = if (extendedPrecision) maxOf(15, sps.bitDepthC + 6) else 15
+    private val rotation = sps.transformSkipRotation
+    private val skipContext = sps.transformSkipContext
+    private val implicitRdpcm = sps.implicitRdpcm
+    private val persistentRice = sps.persistentRiceAdaptation
+    private val bypassAlignment = sps.cabacBypassAlignment
+    private val crossComponent = pps.crossComponentPrediction
+    /** Log2MinCuChromaQpOffsetSize, 7-39. */
+    private val log2MinCuChromaQpOffsetSize = ctbLog2 - pps.diffCuChromaQpOffsetDepth
     private val wppStates = ByteArray(Ctx.COUNT)
     private val dsStates = ByteArray(Ctx.COUNT)
     private val tiles = pps.tilesEnabled
@@ -77,6 +101,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private val transform = InverseTransform()
     private val coeff = IntArray(32 * 32)
     private val residual = IntArray(32 * 32)
+    /** The luma residual of the current transform unit, which cross-component prediction adds to chroma (8.6.6). */
+    private val lumaResidual = IntArray(if (pps.crossComponentPrediction) 32 * 32 else 0)
     private val subFlags = IntArray(64)
     private val positions = IntArray(16)
 
@@ -120,6 +146,14 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private var yCu = 0
     private var log2Cu = 0
     private val chromaMode = IntArray(4)
+    /** intra_chroma_pred_mode of each prediction block, whose value 4 lets cross_comp_pred( ) be coded. */
+    private val chromaSyntax = IntArray(4)
+    /** ResScaleVal of 7-80 for Cb and Cr of the current transform unit. */
+    private var resScaleCb = 0
+    private var resScaleCr = 0
+    private var isCuChromaQpOffsetCoded = false
+    private var cuQpOffsetCb = 0
+    private var cuQpOffsetCr = 0
     private var isCuQpDeltaCoded = false
     private var cuQpDeltaVal = 0
     private var qpYPred = 0
@@ -142,6 +176,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         sliceAddrRs = h.sliceAddrRs
         sliceQpY = h.sliceQpY
         stopBit = BitReader(rbsp).stopBit
+        // 7.4.7.1: each slice segment starts with CuQpOffsetCb and CuQpOffsetCr at 0.
+        cuQpOffsetCb = 0
+        cuQpOffsetCr = 0
         ctbAddr = h.sliceSegmentAddress
         if (ctbSlice[ctbAddr] != -1) hevcError("slice_segment_address $ctbAddr names a CTB already decoded")
         ctbTs = layout.ctbAddrRsToTs[ctbAddr]
@@ -375,6 +412,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             log2 > minCbLog2
         }
         if (log2 >= log2MinCuQpDeltaSize) startQuantizationGroup(x0, y0)
+        if (slice.cuChromaQpOffsetEnabled && log2 >= log2MinCuChromaQpOffsetSize) isCuChromaQpOffsetCoded = false
         if (split) {
             val half = size shr 1
             codingQuadtree(x0, y0, log2 - 1, depth + 1)
@@ -476,6 +514,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             val yPb = y0 + (k shr 1) * half
             // Table 9-46: 0 is mode 4; 1 and two bypass bins give modes 0 to 3.
             val icpm = if (cabac.decode(Ctx.INTRA_CHROMA_PRED_MODE) == 0) 4 else cabac.bypassBits(2)
+            chromaSyntax[k] = icpm
             val luma = predModeY[(yPb shr 2) * w4 + (xPb shr 2)].toInt()
             // Table 8-2: modes 0 to 3 name planar, vertical, horizontal and DC, and 34 stands in for the luma mode.
             val modeIdx = if (icpm == 4) luma else CHROMA_CANDIDATES[icpm].let { if (it == luma) 34 else it }
@@ -597,7 +636,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
     /** transform_unit( ), 7.3.8.10, each block reconstructed as soon as it is parsed. */
     private fun transformUnit(x0: Int, y0: Int, xBase: Int, yBase: Int, log2: Int, blkIdx: Int, cbfLuma: Int, cb: Int, cr: Int) {
-        if (cbfLuma != 0 || cb != 0 || cr != 0) deltaQp()
+        if (cbfLuma != 0 || cb != 0 || cr != 0) {
+            deltaQp()
+            if ((cb != 0 || cr != 0) && !cuBypass) chromaQpOffset()
+        }
         markEdges(x0, y0, 1 shl log2)
         val lumaMode = predModeY[(y0 shr 2) * w4 + (x0 shr 2)].toInt()
         block(0, x0, y0, log2, lumaMode, cbfLuma != 0)
@@ -621,8 +663,11 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         val k = if (chromaArrayType == 3 && intraSplit) (if (yC - yCu >= half) 2 else 0) + (if (xC - xCu >= half) 1 else 0) else 0
         val mode = chromaMode[k]
         val blocks = if (chromaArrayType == 2) 2 else 1
+        // 7.3.8.10: cross_comp_pred( ) only in 4:4:4 (Pps.checkAgainst), whose chroma blocks are the luma block's.
+        val ccp = crossComponent && cbfLuma != 0 && chromaSyntax[k] == 4
         for (c in 1..2) {
             val cbf = if (c == 1) cb else cr
+            if (ccp) crossComponentPrediction(c) else if (c == 1) resScaleCb = 0 else resScaleCr = 0
             for (t in 0 until blocks) {
                 block(c, xC shr subWShift, (yC shr subHShift) + (t shl log2C), log2C, mode, (cbf shr t) and 1 != 0)
             }
@@ -653,30 +698,36 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
     /**
      * One transform block of component [cIdx] at ([x0], [y0]) in its own samples: intra prediction
-     * (8.4.4.2), then, when [coded], residual_coding( ) and the residual (8.6.2) added with clipping (8.6.7).
+     * (8.4.4.2), then, when [coded], residual_coding( ) and the residual (8.6.2), changed by residual DPCM
+     * (8.6.5) and cross-component prediction (8.6.6), added with clipping (8.6.7).
      */
     private fun block(cIdx: Int, x0: Int, y0: Int, log2: Int, mode: Int, coded: Boolean) {
-        intra.predict(cIdx, x0, y0, log2, mode)
-        if (!coded) return
+        intra.predict(cIdx, x0, y0, log2, mode, cuBypass && implicitRdpcm)
+        // 8.4.4.1, step 8: a chroma block takes a share of the luma residual even with no residual of its own.
+        val resScale = if (cIdx == 0) 0 else if (cIdx == 1) resScaleCb else resScaleCr
+        if (!coded && resScale == 0) return
         val n = 1 shl log2
         val bitDepth = if (cIdx == 0) sps.bitDepthY else sps.bitDepthC
-        val qp = if (cIdx == 0) cuQpY + sps.qpBdOffsetY else chromaQp(cIdx)
-        val packed = residualCoding(cIdx, x0, y0, log2, mode, qp, bitDepth)
-        val maxX = packed and 0xFF
-        val maxY = (packed shr 8) and 0xFF
-        val skip = packed and TRANSFORM_SKIPPED != 0
         val r: IntArray
-        if (cuBypass) {
-            r = coeff
+        if (coded) {
+            val qp = if (cIdx == 0) cuQpY + sps.qpBdOffsetY else chromaQp(cIdx)
+            val packed = residualCoding(cIdx, x0, y0, log2, mode, qp, bitDepth)
+            r = residualOf(packed, cIdx, log2, mode, bitDepth)
         } else {
             r = residual
-            val bdShift = 20 - bitDepth
-            if (skip) {
-                // 8-298 with tsShift 5 + Log2( nTbS ), then 8-299.
-                val round = 1 shl (bdShift - 1)
-                for (i in 0 until n * n) r[i] = ((coeff[i] shl (5 + log2)) + round) shr bdShift
-            } else {
-                transform.inverse(coeff, r, log2, cIdx == 0 && log2 == 2, maxX, maxY, bdShift)
+            r.fill(0, 0, n * n)
+        }
+        if (crossComponent) {
+            if (cIdx == 0) {
+                r.copyInto(lumaResidual, 0, 0, n * n)
+            } else if (resScale != 0) {
+                // 8-324, with ( rY << BitDepthC ) >> BitDepthY as one shift so it stays in 32 bits.
+                val shift = sps.bitDepthC - sps.bitDepthY
+                val rY = lumaResidual
+                for (i in 0 until n * n) {
+                    val y = if (shift >= 0) rY[i] shl shift else rY[i] shr -shift
+                    r[i] += (resScale * y) shr 3
+                }
             }
         }
         val plane = planes[cIdx]
@@ -685,15 +736,100 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         for (y in 0 until n) {
             val row = (y0 + y) * stride + x0
             for (x in 0 until n) {
-                val v = plane[row + x] + r[y * n + x]
+                val v = (plane[row + x].toInt() and 0xFFFF) + r[y * n + x]
                 plane[row + x] = (if (v < 0) 0 else if (v > max) max else v).toShort()
             }
         }
     }
 
+    /**
+     * The residual samples of 8.6.2 from the coefficients [coeff] that [residualCoding] returned as
+     * [packed], with the residual DPCM of 8.6.5 that 8.4.4.1 applies to intra blocks.
+     */
+    private fun residualOf(packed: Int, cIdx: Int, log2: Int, mode: Int, bitDepth: Int): IntArray {
+        val n = 1 shl log2
+        val maxX = packed and 0xFF
+        val maxY = (packed shr 8) and 0xFF
+        val skip = packed and TRANSFORM_SKIPPED != 0
+        // rotateCoeffs of 8.6.2: a 4x4 block without a transform, read back to front.
+        val rotate = rotation && log2 == 2 && (skip || cuBypass)
+        val r: IntArray
+        if (cuBypass) {
+            if (rotate) {
+                r = residual
+                for (i in 0 until 16) r[i] = coeff[15 - i]
+            } else {
+                r = coeff
+            }
+        } else {
+            r = residual
+            // 8-295.
+            val bdShift = maxOf(20 - bitDepth, if (extendedPrecision) 11 else 0)
+            if (skip) {
+                // 8-298 with tsShift 5 + Log2( nTbS ), then 8-299, as one shift: d << tsShift is a multiple
+                // of 1 << bdShift or the rounding of 8-299 lands on d shifted by their difference, which
+                // keeps an extended precision coefficient of 22 bits from passing 32.
+                val ts = 5 + log2
+                val last = n * n - 1
+                if (ts >= bdShift) {
+                    val up = ts - bdShift
+                    for (i in 0..last) r[i] = coeff[if (rotate) last - i else i] shl up
+                } else {
+                    val down = bdShift - ts
+                    val round = 1 shl (down - 1)
+                    for (i in 0..last) r[i] = (coeff[if (rotate) last - i else i] + round) shr down
+                }
+            } else if (log2 >= (if (cIdx == 0) wideLog2Y else wideLog2C)) {
+                transform.inverseWide(coeff, r, log2, maxX, maxY, bdShift, if (cIdx == 0) coeffMaxY else coeffMaxC)
+            } else {
+                transform.inverse(coeff, r, log2, cIdx == 0 && log2 == 2, maxX, maxY, bdShift, if (cIdx == 0) coeffMaxY else coeffMaxC)
+            }
+        }
+        // 8.4.4.1, step 7: residualDpcm, along the direction of prediction (mDir = predModeIntra / 26).
+        if (implicitRdpcm && (skip || cuBypass) && (mode == 10 || mode == 26)) {
+            if (mode == 10) {
+                for (y in 0 until n) for (x in 1 until n) r[y * n + x] += r[y * n + x - 1]
+            } else {
+                for (y in 1 until n) for (x in 0 until n) r[y * n + x] += r[(y - 1) * n + x]
+            }
+        }
+        return r
+    }
+
+    /** chroma_qp_offset( ), 7.3.8.15, and CuQpOffsetCb and CuQpOffsetCr by 7-87 and 7-88. */
+    private fun chromaQpOffset() {
+        if (!slice.cuChromaQpOffsetEnabled || isCuChromaQpOffsetCoded) return
+        isCuChromaQpOffsetCoded = true
+        if (cabac.decode(Ctx.CU_CHROMA_QP_OFFSET_FLAG) == 0) {
+            cuQpOffsetCb = 0
+            cuQpOffsetCr = 0
+            return
+        }
+        // cu_chroma_qp_offset_idx: TR with cMax chroma_qp_offset_list_len_minus1, every bin in one context.
+        val last = pps.cbQpOffsetList.size - 1
+        var idx = 0
+        while (idx < last && cabac.decode(Ctx.CU_CHROMA_QP_OFFSET_IDX) == 1) idx++
+        cuQpOffsetCb = pps.cbQpOffsetList[idx]
+        cuQpOffsetCr = pps.crQpOffsetList[idx]
+    }
+
+    /** cross_comp_pred( x0, y0, c ), 7.3.8.12, for [cIdx] = c + 1: ResScaleVal by 7-79 and 7-80. */
+    private fun crossComponentPrediction(cIdx: Int) {
+        val c = cIdx - 1
+        // log2_res_scale_abs_plus1: TR with cMax 4, bin k in context 4 * c + k.
+        var log2Abs = 0
+        while (log2Abs < 4 && cabac.decode(Ctx.LOG2_RES_SCALE_ABS + 4 * c + log2Abs) == 1) log2Abs++
+        var v = 0
+        if (log2Abs != 0) {
+            v = 1 shl (log2Abs - 1)
+            if (cabac.decode(Ctx.RES_SCALE_SIGN + c) == 1) v = -v
+        }
+        if (cIdx == 1) resScaleCb = v else resScaleCr = v
+    }
+
     /** Qp′Cb or Qp′Cr of 8.6.1 for the current coding unit. */
     private fun chromaQp(cIdx: Int): Int {
-        val offset = if (cIdx == 1) pps.cbQpOffset + slice.cbQpOffset else pps.crQpOffset + slice.crQpOffset
+        val offset = if (cIdx == 1) pps.cbQpOffset + slice.cbQpOffset + cuQpOffsetCb else pps.crQpOffset + slice.crQpOffset + cuQpOffsetCr
         val qpi = (cuQpY + offset).coerceIn(-sps.qpBdOffsetC, 57)
         val qpc = if (chromaArrayType == 1) {
             // Table 8-10.
@@ -746,8 +882,16 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             if (skip && n > 4) null else f[subLog2 * 6 + cIdx]
         }
         val levelScale = LEVEL_SCALE[qp % 6]
-        val shift = qp / 6 - (bitDepth + log2 - 5)
-        val hide = pps.signDataHiding && !cuBypass
+        val coeffMax = if (chroma) coeffMaxC else coeffMaxY
+        // 8-301: bdShift is BitDepth + Log2( nTbS ) + 10 - log2TransformRange, and log2TransformRange is
+        // 15 unless extended precision raises it (8-300).
+        val log2Range = if (chroma) log2RangeC else log2RangeY
+        val shift = qp / 6 - (bitDepth + log2 + 10 - log2Range)
+        // 7.3.8.11: neither a bypass block nor one that implicit residual DPCM changes hides a sign.
+        val hide = pps.signDataHiding && !cuBypass && !(implicitRdpcm && skip && (predMode == 10 || predMode == 26))
+        // sbType of 9-20 and 9-21, whose StatCoeff seeds the Rice parameter of each sub-block.
+        val statIdx = Ctx.STAT_COEFF + (if (chroma) 0 else 2) + (if (skip || cuBypass) 1 else 0)
+        val skipSig = skipContext && (skip || cuBypass)
         var maxX = 0
         var maxY = 0
         var greater1Ctx = 1
@@ -782,7 +926,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
                     val xP = pos and 0xFF
                     val yP = pos shr 8
                     if (k > 0 || !inferDc) {
-                        val sigCtx = sigContext(log2, cIdx, scanIdx, xS, yS, xP, yP, prevCsbf)
+                        // 9-40: one context for every coefficient of a block without a transform.
+                        val sigCtx = if (skipSig) (if (chroma) 16 else 42) else sigContext(log2, cIdx, scanIdx, xS, yS, xP, yP, prevCsbf)
                         if (c.decode(sigBase + sigCtx) == 1) {
                             positions[count++] = k
                             inferDc = false
@@ -814,17 +959,31 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             if (firstGreater1 >= 0) greater2 = c.decode(Ctx.GREATER2 + ctxSet + (if (chroma) 4 else 0))
             val signHidden = hide && positions[0] - positions[count - 1] > 3
             val signCount = if (signHidden) count - 1 else count
+            // 9.3.4.3.6 before the bypass bins, when escapeDataPresent of 7.3.8.11 is 1: a second greater1
+            // flag of 1, a greater2 flag of 1, or more coefficients than greater1 flags.
+            if (bypassAlignment && (count > 8 || greater2 == 1 || greater1 and (greater1 - 1) != 0)) c.align()
             var signs = c.bypassBits(signCount) shl (32 - signCount)
-            var rice = 0
+            var rice = if (persistentRice) c.states[statIdx] / 4 else 0
+            var firstRemaining = persistentRice
             var sum = 0
             for (k in 0 until count) {
                 var abs = 1 + ((greater1 shr k) and 1) + (if (k == firstGreater1) greater2 else 0)
                 val threshold = if (k < 8) (if (k == firstGreater1) 3 else 2) else 1
                 if (abs == threshold) {
-                    abs += remaining(rice)
-                    if (abs > 3 * (1 shl rice)) rice = minOf(rice + 1, 4)
+                    val rem = remaining(rice, log2Range)
+                    abs += rem
+                    if (firstRemaining) {
+                        // 9-23, on the first coeff_abs_level_remaining of the sub-block.
+                        firstRemaining = false
+                        val stat = c.states[statIdx].toInt()
+                        if (rem >= (3 shl (stat / 4))) c.states[statIdx] = (stat + 1).toByte()
+                        else if (2 * rem < (1 shl (stat / 4)) && stat > 0) c.states[statIdx] = (stat - 1).toByte()
+                    }
+                    // 9-24, or 9-25 without its bound of 4 under persistent_rice_adaptation_enabled_flag.
+                    if (abs > 3 * (1 shl rice)) rice = if (persistentRice) rice + 1 else minOf(rice + 1, 4)
                 }
-                if (abs > 32768) hevcError("a coefficient level of $abs is out of range")
+                // A level past CoeffMin or CoeffMax (7.4.9.11); this also keeps the Rice parameter below 23.
+                if (abs > coeffMax + 1) hevcError("a coefficient level of $abs is out of range")
                 var level = abs
                 if (k < signCount) {
                     if (signs < 0) level = -level
@@ -833,13 +992,14 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
                 sum += abs
                 // Sign data hiding: the parity of the sum gives the sign of the last coefficient.
                 if (signHidden && k == count - 1 && sum and 1 == 1) level = -level
-                if (level > 32767) hevcError("a coefficient level of $level is out of range")
+                if (level > coeffMax) hevcError("a coefficient level of $level is out of range")
                 val pos = scan[positions[k]]
                 val xC = (xS shl 2) + (pos and 0xFF)
                 val yC = (yS shl 2) + (pos shr 8)
                 if (xC > maxX) maxX = xC
                 if (yC > maxY) maxY = yC
-                coeff[yC * n + xC] = if (cuBypass) level else scale(level, if (factor == null) 16 else factor[yC * n + xC], levelScale, shift)
+                val m = if (factor == null) 16 else factor[yC * n + xC]
+                coeff[yC * n + xC] = if (cuBypass) level else if (extendedPrecision) scaleWide(level, m, levelScale, shift, coeffMax) else scale(level, m, levelScale, shift)
             }
         }
         return maxX or (maxY shl 8) or (if (skip) TRANSFORM_SKIPPED else 0)
@@ -866,12 +1026,22 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
     /**
      * coeff_abs_level_remaining with Rice parameter [rice]: a TR prefix of up to four ones (9.3.3.11),
-     * then a suffix of EG( rice + 1 ) (9.3.3.3).
+     * then a suffix of EG( rice + 1 ) (9.3.3.3), or under extended precision the limited EGk of 9.3.3.4
+     * for a component of [log2Range], log2TransformRange of 9-14.
      */
-    private fun remaining(rice: Int): Int {
+    private fun remaining(rice: Int, log2Range: Int): Int {
         var prefix = 0
         while (prefix < 4 && cabac.bypass() == 1) prefix++
         if (prefix < 4) return (prefix shl rice) + cabac.bypassBits(rice)
+        if (extendedPrecision) {
+            // 9-15 and 9-16: at most 28 - log2TransformRange ones, then an escape of up to log2TransformRange bits.
+            val riceParam = rice + 1
+            val maxPrefix = 28 - log2Range
+            var ext = 0
+            while (ext < maxPrefix && cabac.bypass() == 1) ext++
+            val escape = if (ext == maxPrefix) log2Range else ext + riceParam
+            return (((1 shl ext) - 1) shl riceParam) + cabac.bypassBits(escape) + (4 shl rice)
+        }
         var k = rice + 1
         var v = 0
         while (cabac.bypass() == 1) {
@@ -902,8 +1072,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         }
 
         /**
-         * 8-309 in 32 bits: the product level * m * levelScale fits, and a left shift past 16 bits only
-         * saturates, so the shift by qP / 6 and the one by bdShift become one shift either way.
+         * 8-309 in 32 bits without extended precision: the product level * m * levelScale fits, and a left
+         * shift past 16 bits only saturates, so the shift by qP / 6 and the one by bdShift become one
+         * shift either way.
          */
         fun scale(level: Int, m: Int, levelScale: Int, shift: Int): Int {
             val x = level * m * levelScale
@@ -914,6 +1085,30 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             }
             val b = -shift
             return InverseTransform.clip16((x + (1 shl (b - 1))) shr b)
+        }
+
+        /**
+         * 8-309 for any CoeffMax, still in 32 bits. A level of 22 bits times m * levelScale (below 2^15)
+         * can pass 2^31, but then the result saturates: bdShift of 8-301 is at most 31 - log2TransformRange,
+         * so 2^31 shifted right by it is already past CoeffMax. The rounding of a right shift by b is taken
+         * as ( ( x >> ( b - 1 ) ) + 1 ) >> 1, which equals ( x + 2^( b - 1 ) ) >> b and cannot overflow.
+         */
+        fun scaleWide(level: Int, m: Int, levelScale: Int, shift: Int, coeffMax: Int): Int {
+            val f = m * levelScale
+            val mag = if (level < 0) -level else level
+            // Below 2^16 the product fits; above, a division tells whether it would.
+            if (mag >= 65536 && mag > Int.MAX_VALUE / f) return if (level < 0) -coeffMax - 1 else coeffMax
+            val x = level * f
+            val min = -coeffMax - 1
+            val v: Int
+            if (shift >= 0) {
+                if (x > (coeffMax shr shift)) return coeffMax
+                if (x < (min shr shift)) return min
+                v = x shl shift
+            } else {
+                v = ((x shr (-shift - 1)) + 1) shr 1
+            }
+            return if (v < min) min else if (v > coeffMax) coeffMax else v
         }
     }
 }

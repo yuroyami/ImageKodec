@@ -14,9 +14,10 @@ import kotlin.test.fail
 
 /**
  * Four tiny intra pictures from libx265, three with the loop filters off and one with both on, decoded
- * on every platform and held to the MD5 that each carries in its decoded picture hash SEI (D.3.20).
- * Then every cut and many altered bytes of two of them must give a picture or an ImageDecodeException,
- * within a deadline.
+ * on every platform and held to the MD5 that each carries in its decoded picture hash SEI (D.3.20), and
+ * two with their headers rewritten to turn on the range extension tools. Then every cut and many
+ * altered bytes of two of the first and of both of the others must give a picture or an
+ * ImageDecodeException, within a deadline.
  */
 class HevcDecoderTest {
 
@@ -92,6 +93,48 @@ class HevcDecoderTest {
         nal("5001843100baec8acc647c2719dfa04925be31a1825f93985b6d167a1e75b39fcea7c59dc07042d5eff4e502493c230d351f5cfbc380"),
     )
 
+    /**
+     * The slice data of two 32x16 4:4:4 streams for the range extension tools, which no encoder at hand
+     * writes: x265 writes none, and the conformance pictures are tens of kilobytes. Both are x265 with
+     * keyint=1:ctu=16:min-cu-size=8:tskip=1:qp=30:ipratio=1:cu-lossless=1 on yuv444p12le, with its VPS
+     * and SEI left out and its headers rewritten bit by bit; the slice data that follows the four bytes of
+     * the slice header is the same.
+     */
+    private val rangeExtensionSliceData =
+        "ef3b2668ee3e0cacaf99ae3410be16669c749aa122167998d91e71d9755deefd39dabf8db95f034ba7035f007aa6b09c3d04e5332bf3e2" +
+            "d2f635f4ccb9d1067295b0e2883d2433530b79e1dec571f8474cdbcc2f1716f04e12f581ce54fd3fae330ea40b89d36c37c28680c3ca33b3dddb4209" +
+            "7f21e2d5239a8774b5cfbf3d504594dbb68c1b199ad9b77a20bae5b9889b860b7d6206fe40090423e49d3c3fefdf77de4664ea7c26d9184466b47915" +
+            "bedb05c6b1a5c41c517cda7c1b4be00817ba98ab0112dda88c8962d49858ce18acc122a8fe67a250cbb35a0ffe8ef24c49a352d274fa396de748bdef" +
+            "390940469ff2158c0814265ab7ae616a1344ef592ff2022595767c309cb868f12eb8"
+
+    /**
+     * The tools that leave the parsing of this slice as x265 wrote it: an SPS at 16 bits with
+     * extended_precision_processing_flag, transform_skip_rotation_enabled_flag and
+     * intra_smoothing_disabled_flag, and a PPS with SAO offset scales 3 and 2. It decodes to a picture
+     * that nobody but this decoder made, so its MD5 is the JVM's decode: it holds the other targets,
+     * Kotlin/JS with its 64-bit arithmetic in software among them, to it, through 16x16 transforms whose
+     * sums pass 32 bits. The conformance streams hold the tools themselves to HM on the JVM.
+     */
+    private val rangeExtensionReconstruction = listOf(
+        nal("420101040800000300982800000300001e90084221224b755795e02d01000003000100000300191808c4"),
+        nal("4401c17430609160211c"),
+        nal("2801af1180", rangeExtensionSliceData),
+    )
+
+    /**
+     * Every intra tool of sps_range_extension( ) and pps_range_extension( ) on: the SPS also with
+     * transform_skip_context_enabled_flag, persistent_rice_adaptation_enabled_flag and
+     * cabac_bypass_alignment_enabled_flag, the PPS also with log2_max_transform_skip_block_size_minus2 2,
+     * cross-component prediction and three chroma QP offset pairs, and the slice header with
+     * cu_chroma_qp_offset_enabled_flag. These change the parsing, so the slice data, written for none of
+     * them, decodes to no picture: the stream is there for the cut and byte tests.
+     */
+    private val rangeExtensionParsing = listOf(
+        nal("420101040800000300982800000300001e90084221224b755795e02d0100000300010000030019180edc"),
+        nal("4401c174306091601e99c8284a4470"),
+        nal("2801af11c0", rangeExtensionSliceData),
+    )
+
     private fun decode(units: List<ByteArray>): List<DecodedPicture> {
         val d = HevcDecoder()
         for (u in units) d.decodeNal(u, 0, u.size, null)
@@ -149,6 +192,36 @@ class HevcDecoderTest {
         assertEquals(48 to 32, p.sps.width to p.sps.height)
     }
 
+    @Test
+    fun rangeExtensionReconstructionAt16Bits() {
+        val p = decode(rangeExtensionReconstruction).single()
+        val s = p.sps
+        // The features the fixture is for, read from the stream.
+        assertEquals(3 to 16, s.chromaFormatIdc to s.bitDepthY)
+        assertTrue(s.extendedPrecision && s.transformSkipRotation && s.intraSmoothingDisabled)
+        val pps = sliceHeaders(rangeExtensionReconstruction).single().pps
+        assertEquals(3 to 2, pps.log2SaoOffsetScaleLuma to pps.log2SaoOffsetScaleChroma)
+        val expected = listOf("c9efe4e9565d93fea779406554200fc4", "a98c549a59580dc6759d96197ba80da1", "0ae7b2cbe59bd236dea0767715838cae")
+        for (c in p.planes.indices) {
+            assertEquals(expected[c], hex(PictureHash.md5(PictureHash.pictureData(p.planes[c], 0, p.strides[c], s.width, s.height, 16))), "plane $c")
+        }
+    }
+
+    @Test
+    fun rangeExtensionParsingToolsAreOnInTheCutTestStream() {
+        val h = sliceHeaders(rangeExtensionParsing).single()
+        val s = h.sps
+        val p = h.pps
+        // The features the fixture is for, read from the stream.
+        assertEquals(3 to 16, s.chromaFormatIdc to s.bitDepthY)
+        assertTrue(s.transformSkipRotation && s.transformSkipContext && s.implicitRdpcm && s.extendedPrecision)
+        assertTrue(s.intraSmoothingDisabled && s.persistentRiceAdaptation && s.cabacBypassAlignment)
+        assertTrue(p.crossComponentPrediction && p.chromaQpOffsetListEnabled && h.cuChromaQpOffsetEnabled && p.transquantBypassEnabled)
+        assertEquals(4, p.log2MaxTransformSkipSize)
+        assertEquals(listOf(-3, 5, 1), p.cbQpOffsetList.toList())
+        assertEquals(null, HevcSupport.sliceReason(h))
+    }
+
     private fun sliceHeaders(units: List<ByteArray>): List<SliceHeader> {
         val store = ParameterSetStore()
         return units.mapNotNull { u ->
@@ -186,7 +259,7 @@ class HevcDecoderTest {
 
     @Test
     fun everyCutAndAlteredByteFailsCleanly() {
-        for ((name, units) in listOf("4:2:2" to chroma422, "loop filters" to loopFilters420)) {
+        for ((name, units) in listOf("4:2:2" to chroma422, "loop filters" to loopFilters420, "range extension" to rangeExtensionReconstruction, "range extension parsing" to rangeExtensionParsing)) {
             val index = units.indexOfFirst { NalType.isSlice((it[0].toInt() shr 1) and 0x3F) }
             val slice = units[index]
             withDeadline("HEVC truncation, $name", 60_000) {

@@ -169,10 +169,10 @@ internal class Deblocker(private val d: PictureDecoder) {
         // With tC 0 every filter below clips its change to nothing.
         if (tc == 0) return
         val a3 = at + 3 * along
-        val dp0 = abs(s[at - 3 * across] - 2 * s[at - 2 * across] + s[at - across])
-        val dp3 = abs(s[a3 - 3 * across] - 2 * s[a3 - 2 * across] + s[a3 - across])
-        val dq0 = abs(s[at + 2 * across] - 2 * s[at + across] + s[at])
-        val dq3 = abs(s[a3 + 2 * across] - 2 * s[a3 + across] + s[a3])
+        val dp0 = abs(u(s, at - 3 * across) - 2 * u(s, at - 2 * across) + u(s, at - across))
+        val dp3 = abs(u(s, a3 - 3 * across) - 2 * u(s, a3 - 2 * across) + u(s, a3 - across))
+        val dq0 = abs(u(s, at + 2 * across) - 2 * u(s, at + across) + u(s, at))
+        val dq3 = abs(u(s, a3 + 2 * across) - 2 * u(s, a3 + across) + u(s, a3))
         val dpq0 = dp0 + dq0
         val dpq3 = dp3 + dq3
         if (dpq0 + dpq3 >= b) return
@@ -185,23 +185,23 @@ internal class Deblocker(private val d: PictureDecoder) {
         val max = maxY
         for (k in 0 until 4) {
             val q0i = at + k * along
-            val p0 = s[q0i - across].toInt()
-            val p1 = s[q0i - 2 * across].toInt()
-            val p2 = s[q0i - 3 * across].toInt()
-            val q0 = s[q0i].toInt()
-            val q1 = s[q0i + across].toInt()
-            val q2 = s[q0i + 2 * across].toInt()
+            val p0 = s[q0i - across].toInt() and 0xFFFF
+            val p1 = s[q0i - 2 * across].toInt() and 0xFFFF
+            val p2 = s[q0i - 3 * across].toInt() and 0xFFFF
+            val q0 = s[q0i].toInt() and 0xFFFF
+            val q1 = s[q0i + across].toInt() and 0xFFFF
+            val q2 = s[q0i + 2 * across].toInt() and 0xFFFF
             if (strong) {
                 // 8-389 to 8-394.
                 val tc2 = 2 * tc
                 if (!keepP) {
-                    val p3 = s[q0i - 4 * across].toInt()
+                    val p3 = s[q0i - 4 * across].toInt() and 0xFFFF
                     s[q0i - across] = clip(p0 - tc2, p0 + tc2, (p2 + 2 * p1 + 2 * p0 + 2 * q0 + q1 + 4) shr 3).toShort()
                     s[q0i - 2 * across] = clip(p1 - tc2, p1 + tc2, (p2 + p1 + p0 + q0 + 2) shr 2).toShort()
                     s[q0i - 3 * across] = clip(p2 - tc2, p2 + tc2, (2 * p3 + 3 * p2 + p1 + p0 + q0 + 4) shr 3).toShort()
                 }
                 if (!keepQ) {
-                    val q3 = s[q0i + 3 * across].toInt()
+                    val q3 = s[q0i + 3 * across].toInt() and 0xFFFF
                     s[q0i] = clip(q0 - tc2, q0 + tc2, (p1 + 2 * p0 + 2 * q0 + 2 * q1 + q2 + 4) shr 3).toShort()
                     s[q0i + across] = clip(q1 - tc2, q1 + tc2, (p0 + q0 + q1 + q2 + 2) shr 2).toShort()
                     s[q0i + 2 * across] = clip(q2 - tc2, q2 + tc2, (p0 + q0 + q1 + 3 * q2 + 2 * q3 + 4) shr 3).toShort()
@@ -226,10 +226,10 @@ internal class Deblocker(private val d: PictureDecoder) {
 
     /** dSam of 8.7.2.5.6 for the line whose q0 is at [q0i]. */
     private fun decision(s: ShortArray, q0i: Int, across: Int, dpq: Int, b: Int, tc: Int): Boolean {
-        val p0 = s[q0i - across].toInt()
-        val p3 = s[q0i - 4 * across].toInt()
-        val q0 = s[q0i].toInt()
-        val q3 = s[q0i + 3 * across].toInt()
+        val p0 = s[q0i - across].toInt() and 0xFFFF
+        val p3 = s[q0i - 4 * across].toInt() and 0xFFFF
+        val q0 = s[q0i].toInt() and 0xFFFF
+        val q3 = s[q0i + 3 * across].toInt() and 0xFFFF
         return dpq < (b shr 2) && abs(p3 - p0) + abs(q0 - q3) < (b shr 3) && abs(p0 - q0) < ((5 * tc + 1) shr 1)
     }
 
@@ -250,10 +250,10 @@ internal class Deblocker(private val d: PictureDecoder) {
         val max = maxC
         for (k in 0 until 4) {
             val q0i = at + k * along
-            val p0 = s[q0i - across].toInt()
-            val p1 = s[q0i - 2 * across].toInt()
-            val q0 = s[q0i].toInt()
-            val q1 = s[q0i + across].toInt()
+            val p0 = s[q0i - across].toInt() and 0xFFFF
+            val p1 = s[q0i - 2 * across].toInt() and 0xFFFF
+            val q0 = s[q0i].toInt() and 0xFFFF
+            val q1 = s[q0i + across].toInt() and 0xFFFF
             val delta = clip(-tc, tc, (((q0 - p0) shl 2) + p1 - q1 + 4) shr 3)
             if (!keepP) s[q0i - across] = clip(0, max, p0 + delta).toShort()
             if (!keepQ) s[q0i] = clip(0, max, q0 - delta).toShort()
@@ -263,5 +263,8 @@ internal class Deblocker(private val d: PictureDecoder) {
     private companion object {
         fun clip(lo: Int, hi: Int, v: Int): Int = if (v < lo) lo else if (v > hi) hi else v
         fun abs(v: Int): Int = if (v < 0) -v else v
+
+        /** The sample at [i], unsigned: one of 16 bits sits in its Short as a negative value. */
+        fun u(s: ShortArray, i: Int): Int = s[i].toInt() and 0xFFFF
     }
 }

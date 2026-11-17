@@ -7,6 +7,8 @@ package io.github.yuroyami.imagekodec.heic
  * which 8.4.4.2.3 filters them.
  */
 internal class IntraPredictor(private val d: PictureDecoder) {
+    /** 8.4.4.2.1, step 1: intra_smoothing_disabled_flag turns the filter of 8.4.4.2.3 off. */
+    private val smoothing = !d.sps.intraSmoothingDisabled
     private val line = IntArray(4 * 32 + 1)
     private val filtered = IntArray(4 * 32 + 1)
     private val ok = BooleanArray(4 * 32 + 1)
@@ -14,9 +16,11 @@ internal class IntraPredictor(private val d: PictureDecoder) {
 
     /**
      * Predicts the n by n block, n = 1 shl [log2], at ([xTb], [yTb]) of component [cIdx], in that
-     * component's samples, with intra prediction mode [mode].
+     * component's samples, with intra prediction mode [mode]. [bypassRdpcm] is a unit with
+     * cu_transquant_bypass_flag under implicit_rdpcm_enabled_flag, which 8.4.4.2.6 predicts without
+     * the edge filters of the vertical and horizontal modes.
      */
-    fun predict(cIdx: Int, xTb: Int, yTb: Int, log2: Int, mode: Int) {
+    fun predict(cIdx: Int, xTb: Int, yTb: Int, log2: Int, mode: Int, bypassRdpcm: Boolean) {
         val n = 1 shl log2
         val plane = d.planes[cIdx]
         val stride = d.strides[cIdx]
@@ -28,7 +32,7 @@ internal class IntraPredictor(private val d: PictureDecoder) {
         gather(plane, stride, xTb, yTb, n, sw, sh, bitDepth)
         var p = line
         // 8.4.4.2.3 filters luma, and chroma only in 4:4:4.
-        if ((cIdx == 0 || d.chromaArrayType == 3) && mode != INTRA_DC && n != 4) {
+        if (smoothing && (cIdx == 0 || d.chromaArrayType == 3) && mode != INTRA_DC && n != 4) {
             val minDist = minOf(abs(mode - 26), abs(mode - 10))
             val threshold = when (n) { 8 -> 7; 16 -> 1; else -> 0 }
             if (minDist > threshold) {
@@ -86,12 +90,12 @@ internal class IntraPredictor(private val d: PictureDecoder) {
                     for (y in 1 until n) plane[base + y * stride] = ((p[corner - 1 - y] + 3 * dc + 2) shr 2).toShort()
                 }
             }
-            else -> angular(plane, stride, base, p, n, mode, cIdx, max)
+            else -> angular(plane, stride, base, p, n, mode, cIdx == 0 && n < 32 && !bypassRdpcm, max)
         }
     }
 
-    /** 8.4.4.2.6 for predModeIntra 2 to 34. */
-    private fun angular(plane: ShortArray, stride: Int, base: Int, p: IntArray, n: Int, mode: Int, cIdx: Int, max: Int) {
+    /** 8.4.4.2.6 for predModeIntra 2 to 34; [edgeFilter] when disableIntraBoundaryFilter is 0 for a luma block below 32. */
+    private fun angular(plane: ShortArray, stride: Int, base: Int, p: IntArray, n: Int, mode: Int, edgeFilter: Boolean, max: Int) {
         val corner = 2 * n
         val angle = HevcTables.INTRA_PRED_ANGLE[mode - 2]
         val r = ref
@@ -120,7 +124,7 @@ internal class IntraPredictor(private val d: PictureDecoder) {
                 if (vertical) plane[base + k * stride + j] = v.toShort() else plane[base + j * stride + k] = v.toShort()
             }
         }
-        if (cIdx == 0 && n < 32) {
+        if (edgeFilter) {
             val c = p[corner]
             if (mode == 26) {
                 // 8-60.
@@ -154,7 +158,7 @@ internal class IntraPredictor(private val d: PictureDecoder) {
             val a = d.intraAvailable(xCurr, yCurr, (xTb - 1) shl sw, (yTb + y) shl sh)
             for (k in y until y + unitY) {
                 ok[corner - 1 - k] = a
-                if (a) l[corner - 1 - k] = plane[(yTb + k) * stride + xTb - 1].toInt()
+                if (a) l[corner - 1 - k] = plane[(yTb + k) * stride + xTb - 1].toInt() and 0xFFFF
             }
             if (a) any = true else all = false
             y += unitY
@@ -162,7 +166,7 @@ internal class IntraPredictor(private val d: PictureDecoder) {
         val c = d.intraAvailable(xCurr, yCurr, (xTb - 1) shl sw, (yTb - 1) shl sh)
         ok[corner] = c
         if (c) {
-            l[corner] = plane[(yTb - 1) * stride + xTb - 1].toInt()
+            l[corner] = plane[(yTb - 1) * stride + xTb - 1].toInt() and 0xFFFF
             any = true
         } else {
             all = false
@@ -175,7 +179,7 @@ internal class IntraPredictor(private val d: PictureDecoder) {
             val row = (yTb - 1) * stride + xTb
             for (k in x until x + unitX) {
                 ok[corner + 1 + k] = a
-                if (a) l[corner + 1 + k] = plane[row + k].toInt()
+                if (a) l[corner + 1 + k] = plane[row + k].toInt() and 0xFFFF
             }
             if (a) any = true else all = false
             x += unitX
