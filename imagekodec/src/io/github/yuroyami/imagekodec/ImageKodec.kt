@@ -55,8 +55,9 @@ public object ImageKodec {
      * Sets the [TileRunner] that every decode from now on hands its independent jobs to: the tiles
      * of a HEIC or AVIF grid, in [decode], [decode16], [decodeScaled] and the other decodes of a grid
      * image (#152). The default, [TileRunner.Serial], runs them in order on the calling thread,
-     * which is all JS and Wasm can do. Set it once, at startup; a decode already running keeps the
-     * runner it started with.
+     * which is all JS and Wasm can do. Set it once, at startup, before any decode: a decode reads the
+     * runner each time it hands out a set of jobs, so a change while it runs can apply to its later
+     * rows of tiles.
      *
      * A decode's result does not depend on the runner, and neither does its error: of several tiles
      * that fail, the first in tile order gives the exception. With a runner that uses several
@@ -170,8 +171,9 @@ public object ImageKodec {
      *
      * @throws ImageDecodeException on a malformed thumbnail
      * @throws UnsupportedImageException when every thumbnail needs a codec this build lacks
+     * @throws IllegalArgumentException if [maxWidth] or [maxHeight] is not positive
      */
-    @Throws(ImageDecodeException::class)
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
     public fun decodeThumbnail(
         data: ByteArray,
         maxWidth: Int = Int.MAX_VALUE,
@@ -179,6 +181,18 @@ public object ImageKodec {
         applyOrientation: Boolean = false,
         colorTarget: ColorTarget = ColorTarget.Source,
         cancellationCheck: (() -> Unit)? = null,
+    ): KiteBitmap? {
+        require(maxWidth > 0 && maxHeight > 0) { "box must be positive: ${maxWidth}x$maxHeight" }
+        return decodeThumbnailIn(data, maxWidth, maxHeight, applyOrientation, colorTarget, cancellationCheck)
+    }
+
+    private fun decodeThumbnailIn(
+        data: ByteArray,
+        maxWidth: Int,
+        maxHeight: Int,
+        applyOrientation: Boolean,
+        colorTarget: ColorTarget,
+        cancellationCheck: (() -> Unit)?,
     ): KiteBitmap? = cancellable(cancellationCheck) { cancel ->
         when (detect(data)) {
             ImageFormat.JPEG -> ImageProbe.jpegThumbnail(data)?.let { thumb ->

@@ -37,8 +37,8 @@ reviewable in the diff.
   the same order (#157).
 - `HeifCodecSession.decodeInOutputOrder` and `HeifCodecSession.flush`, under
   `ExperimentalHeifCodecApi`, let a codec whose output order differs from its decoding order give its
-  pictures in output order. Both have default implementations, so an existing codec compiles and
-  behaves as before (#157).
+  pictures in output order. Both have default implementations, so a codec that does not reorder
+  needs neither (#157).
 
 - `ImageKodec.auxiliaryImages` lists the auxiliary images of a HEIC or AVIF file's primary image,
   alpha, depth and gain maps among them, each with its `auxC` URN, its size, its bit depth and the
@@ -53,9 +53,10 @@ reviewable in the diff.
   `readMetadata` still decodes no picture. `HeifGainMap` is a new type beside `GainMap`, which stays
   the gain map of an Ultra HDR JPEG and keeps its `jpeg` bytes, so no code that reads it changes
   (#153).
-- `decodeScaled` and `decodeDownscaledTo` reduce a HEIC or AVIF grid while it decodes. One row of
-  tiles at a time is converted to RGB and fed to the box filter, so a 48-megapixel grid never exists
-  at full size; the result equals `decode` followed by the same scale, pixel for pixel (#151).
+- `decodeScaled` and `decodeDownscaledTo` reduce a HEIC or AVIF grid while it decodes. The decoder
+  converts one row of tiles at a time to RGB and feeds it to the box filter, so a 48-megapixel grid
+  never exists at full size. The result equals `decode` followed by the same scale, pixel for pixel
+  (#151).
 - A HEIC or AVIF file with several top-level images has a page for each, the primary first:
   `pageCount`, `probePage`, `decodePage` and `decode16(page =)` reach them as they reach the pages
   of a TIFF. `ImageInfo.stereoLeftPage` and `stereoRightPage` name the two eyes of a `ster` group,
@@ -64,34 +65,29 @@ reviewable in the diff.
   AVIF file, or the thumbnail in the EXIF of a JPEG. Of several, it gives the smallest that reaches
   a requested box. `ImageInfo.thumbnailWidth` and `thumbnailHeight` give the largest one's size
   (#150).
-- `imagekodec-heic`, the module that will hold the HEVC decoder of HEIC, kept out of the core so that
+- `imagekodec-heic`, the module that holds the HEVC decoder of HEIC, kept out of the core so that
   an app that reads no HEIC carries none of its code. `ImageKodecHeic.install()` registers its codec
   for `hvc1` items and `hvc1` and `hev1` tracks; a second call changes nothing. It reads the HEVC
   parameter sets and slice segment headers of ITU-T H.265, from `hvcC` or from the sample data, so
   `probe` reports a HEIC file's coded size after the conformance window, its depths, chroma format
   and VUI colour. The module is not published (#139, #140).
-- `imagekodec-heic` decodes intra HEVC pictures: the CABAC slice data with wavefront rows, entry
-  points and several slices, and intra reconstruction in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 12
-  bits, with scaling lists, transform skip, lossless coding and PCM (#141, #142), the deblocking
-  filter and sample adaptive offset, tiles and dependent slice segments (#143, #144). An inter slice
-  or a screen content coding tool is named in `unsupportedReason`.
-- `imagekodec-heic` decodes P and B pictures: the picture order count, short-term and long-term
-  reference picture sets with the pictures 8.3.3 generates, reference picture lists with their
-  modification, and a decoded picture buffer with its output order and bumping, which the codec's
-  session keeps from sample to sample; RASL pictures of a CRA picture that starts the stream are
-  skipped (#156). Merge mode with its spatial, temporal, combined bi-predictive and zero
-  candidates and the parallel merge level, AMVP, temporal candidates from a 16x16 motion grid, skip
-  mode and every partition mode with the asymmetric ones (#171). Fractional sample interpolation in
-  every chroma format, default and explicit weighted prediction, the inter residual quadtree with
-  explicit residual DPCM, and the motion cases of the deblocking filter's boundary strength (#172).
-  Every picture of every HEVC_v1 and RExt conformance stream matches its hash SEI or the MD5 of
-  the package's output.
-- `imagekodec-heic` decodes the coding tools of the range extensions in intra pictures: transform
-  skip rotation, context and sizes above 4x4, implicit residual DPCM, cross-component prediction,
-  extended precision and bit depths up to 16, persistent Rice adaptation, CABAC bypass alignment,
-  disabled intra smoothing, chroma QP offset lists and scaled SAO offsets. The intra pictures of all
-  49 H.265.1 range extension conformance streams match their picture hash or the MD5 of their YUV
-  file, except four streams with no hash for them, which match libde265 (#148).
+- `imagekodec-heic` decodes intra HEVC pictures. It reads the CABAC slice data with wavefront rows,
+  entry points and several slices, and reconstructs 4:0:0, 4:2:0, 4:2:2 and 4:4:4 pictures with
+  scaling lists, transform skip, lossless coding and PCM (#141, #142). It applies the deblocking
+  filter and sample adaptive offset, and decodes tiles and dependent slice segments (#143, #144).
+  A screen content coding tool is named in `unsupportedReason`.
+- `imagekodec-heic` decodes the coding tools of the range extensions: transform skip rotation,
+  context and sizes above 4x4, residual DPCM, cross-component prediction, extended precision and
+  bit depths up to 16, persistent Rice adaptation, CABAC bypass alignment, disabled intra smoothing,
+  chroma QP offset lists and scaled SAO offsets (#148).
+- `imagekodec-heic` decodes P and B pictures. It derives the picture order count, the short-term
+  and long-term reference picture sets and the reference picture lists, and keeps a decoded picture
+  buffer with its output order from sample to sample. It skips the RASL pictures of a CRA picture
+  that starts the stream (#156). It derives motion with merge mode, AMVP and temporal candidates,
+  for every partition mode with the asymmetric ones (#171). It predicts samples with fractional
+  interpolation and default or explicit weighted prediction, and filters inter edges (#172).
+- Every picture of the 147 HEVC_v1 and 49 range extension conformance streams of H.265.1 matches
+  its hash SEI where it has one, and the output of each stream matches the MD5 its package gives.
 - With `imagekodec-heic` installed, `ImageKodec.decode` and `decode16` read HEIC photos end to end:
   grids, alpha, crops, rotation, mirror, overlays and thumbnails. Colour comes from the item's `nclx`,
   else from the VUI of the stream, also beside an ICC profile (#145).

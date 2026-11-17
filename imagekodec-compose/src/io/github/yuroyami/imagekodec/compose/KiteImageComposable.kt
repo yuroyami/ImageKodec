@@ -139,7 +139,7 @@ internal class DrawBounds(maxWidth: Int, maxHeight: Int, val contentScale: Conte
     /**
      * The size a [width] by [height] image is decoded at to draw in this box: scaled as [contentScale]
      * scales it, rounded up so it covers the box, and never larger than the image. A [ContentScale]
-     * other than the six of Compose, such as [ContentScale.None], gives the image's own size.
+     * other than the six handled here, [ContentScale.None] or a custom one, gives the image's own size.
      */
     fun sizeFor(width: Int, height: Int): IntSize {
         val sx = if (maxWidth == Constraints.Infinity) null else maxWidth.toDouble() / width

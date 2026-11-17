@@ -8,8 +8,8 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 - Every entry point takes a complete `ByteArray`. There is no streaming or partial-decode API.
   `decodeScaled`, `decodeDownscaledTo` and `decodeReduced` shrink a JPEG, JPEG 2000 or JPEG XR image
   inside the decoder, and `scaled` works after a full-size decode. `decodeScaled` and
-  `decodeDownscaledTo` also reduce a HEIC or AVIF `grid` while it decodes: one row of tiles at a
-  time is converted to RGB and scaled, so memory holds two rows of tiles and the output, not the
+  `decodeDownscaledTo` also reduce a HEIC or AVIF `grid` while it decodes. The decoder converts and
+  scales one row of tiles at a time, so memory holds two rows of tiles and the output, not the
   picture, and the pixels equal those of `decode` then `scaled`. The tiles still decode at full size,
   so this saves memory, not time. An alpha image that is one coded item, not a grid, decodes whole
   beside the rows. A grid whose alpha is neither one coded item nor a grid of the same layout, and
@@ -92,8 +92,8 @@ and fail during the decode.
 
 ### Speed and memory
 
-`HeicBenchmarkTest` codes two 4096 by 3072 pictures (12.6 megapixels) with x265 at test time, as
-the tests build every HEIC file, so nothing large is committed: a grid of 48 tiles of 512 by 512 at
+`HeicBenchmarkTest` codes two 4096 by 3072 pictures (12.6 megapixels) with x265 at test time, so
+nothing large is committed. One is a grid of 48 tiles of 512 by 512 at
 8 bits 4:2:0, and one picture with wavefront rows at 10 bits 4:2:0, both near 2.8 MB. It reports the
 fastest of five decodes to RGB after two to warm up, and libde265 1.0.15's `dec265 -q -t 0`, one
 thread, on the same Annex B stream, fastest of three, starting the tool included and writing no

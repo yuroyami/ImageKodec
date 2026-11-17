@@ -5,6 +5,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -58,6 +59,9 @@ class ThumbnailTest {
         // None reaches the box: the largest that decodes, not the 48 nothing reads.
         assertEquals(32, ImageKodec.decodeThumbnail(file, 100, 100)!!.width)
         assertEquals(32, ImageKodec.decodeThumbnail(file)!!.width)
+        // A box that is not positive is refused, as decodeScaled refuses it.
+        assertFailsWith<IllegalArgumentException> { ImageKodec.decodeThumbnail(file, 0, 10) }
+        assertFailsWith<IllegalArgumentException> { ImageKodec.decodeThumbnail(file, 10, -1) }
         val info = ImageKodec.probe(file)
         assertEquals(48 to 48, info.thumbnailWidth to info.thumbnailHeight)
     }

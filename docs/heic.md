@@ -37,19 +37,20 @@ finds the video of a Motion Photo, with or without the module.
 
 ## What decodes
 
-- The HEVC pictures of the Main, Main 10, Main Still Picture and format range extensions profiles:
-  4:0:0, 4:2:0, 4:2:2 and 4:4:4, at 8 to 16 bits, with scaling lists, transform skip, lossless
-  coding, PCM, wavefront rows, tiles, several slices and dependent slice segments, deblocking and
-  sample adaptive offset, and the coding tools of the range extensions: residual DPCM (implicit and
-  explicit), cross-component prediction, extended precision, persistent Rice adaptation, CABAC bypass
-  alignment, chroma QP offset lists, transform skip rotation, context and sizes above 4, disabled
-  intra smoothing and scaled SAO offsets.
+- The HEVC pictures of the Main, Main 10, Main Still Picture and format range extensions profiles,
+  in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 16 bits.
+- Scaling lists, transform skip, lossless coding, PCM, wavefront rows, tiles, several slices,
+  dependent slice segments, deblocking and sample adaptive offset.
+- The coding tools of the range extensions: residual DPCM, cross-component prediction, extended
+  precision, persistent Rice adaptation, CABAC bypass alignment, chroma QP offset lists, transform
+  skip rotation, context and sizes above 4, disabled intra smoothing and scaled SAO offsets.
 - P and B pictures as well as intra ones: the picture order count, short-term and long-term
   reference picture sets, reference picture lists with their modification, a decoded picture buffer
   with its output order, CRA and BLA pictures with their RASL pictures, merge mode, AMVP, temporal
   motion vector prediction, every partition mode with the asymmetric ones, fractional sample
-  interpolation and default and explicit weighted prediction. Every stream of the HEVC_v1 and RExt
-  conformance packages of H.265.1 decodes to its hash, in every picture.
+  interpolation and default and explicit weighted prediction. Every picture of the HEVC_v1 and RExt
+  conformance streams of H.265.1 matches its hash SEI where it has one, and the output of each
+  stream matches the MD5 its package gives.
 - HEVC image sequences (brands `msf1`, `hevc`, `hevx`): `decodeAnimation` returns every frame of a
   track whose sample entry is `hvc1` or `hev1` and whose handler is `pict` or `vide`, as ffmpeg writes
   an MP4. The frames come in presentation order, the order of the composition times of `ctts`, which
