@@ -282,6 +282,7 @@ class Av1OracleTest {
     fun interPrediction() {
         assumeTrue("ffmpeg with dav1d, libaom, SVT-AV1 and rav1e not installed", tools())
         val aom = { crf: Int, speed: Int -> listOf("-crf", "$crf", "-cpu-used", "$speed") }
+        val failures = ArrayList<String>()
         listOf(
             Sequence(
                 "libaom with every inter tool", rotating, 16, "yuv420p", "libaom-av1", aom(32, 1) + allInterTools,
@@ -309,10 +310,19 @@ class Av1OracleTest {
                 listOf("superres inter frame", "scaled reference"),
             ),
             Sequence("SVT-AV1 film grain at 10 bits", panning, 16, "yuv420p10le", "libsvtav1", listOf("-crf", "40", "-preset", "4", "-svtav1-params", "film-grain=10"), listOf("film grain inter frame")),
-            Sequence("SVT-AV1 at an odd size", small, 12, "yuv420p10le", "libsvtav1", listOf("-crf", "35", "-preset", "6"), listOf("obmc")),
+            // There for the odd size: SVT-AV1 3 at this preset no longer chooses OBMC, which the libaom cases cover.
+            Sequence("SVT-AV1 at an odd size", small, 12, "yuv420p10le", "libsvtav1", listOf("-crf", "35", "-preset", "6"), emptyList()),
             Sequence("rav1e", rotating, 16, "yuv420p", "librav1e", listOf("-qp", "90", "-speed", "2"), listOf("averaged compound", "segmentation in inter frame")),
             Sequence("rav1e in tiles", fast, 12, "yuv420p", "librav1e", listOf("-qp", "120", "-speed", "9", "-tiles", "4"), listOf("tiles")),
-        ).forEach(::checkSequence)
+        ).forEach { c ->
+            // Every sequence runs, so one run names every failure, not only the first.
+            try {
+                checkSequence(c)
+            } catch (e: AssertionError) {
+                failures += e.message ?: c.name
+            }
+        }
+        assertTrue(failures.isEmpty(), failures.joinToString("\n"))
         // Every other sequence has been checked by now; one dav1d cannot read reports as skipped.
         assumeTrue("dav1d could not decode ${refused.joinToString("; ")}", refused.isEmpty())
     }
