@@ -421,6 +421,29 @@ jobs:
           name: api-docs
           path: build/dokka/html
 
+  # The JVM oracle suites that once differed with Homebrew's newer tools (#110): ffmpeg's
+  # libaom, SVT-AV1, rav1e and dav1d, libtiff with ImageMagick, and OpenJPEG, on a Mac.
+  test-jvm-macos:
+    name: JVM oracle tests on macOS
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      IMAGEKODEC_REQUIRE_ORACLES: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Install the oracle tools
+        run: brew install ffmpeg libtiff imagemagick openjpeg
+
+      - name: AV1, 16-bit TIFF and JPEG 2000 oracle tests
+        run: >
+          ./kotlin test -p jvm -m imagekodec
+          --include-classes='*Av1OracleTest*' --include-classes='*Decode16OracleTest*' --include-classes='*JpxDecode16OracleTest*'
+
   # Apple programs link only on a Mac, and Apple targets are the reason this library exists,
   # so its tests run on two of them.
   test-apple:
