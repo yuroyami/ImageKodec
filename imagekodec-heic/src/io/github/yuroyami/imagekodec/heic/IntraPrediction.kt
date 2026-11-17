@@ -18,9 +18,10 @@ internal class IntraPredictor(private val d: PictureDecoder) {
      * Predicts the n by n block, n = 1 shl [log2], at ([xTb], [yTb]) of component [cIdx], in that
      * component's samples, with intra prediction mode [mode]. [bypassRdpcm] is a unit with
      * cu_transquant_bypass_flag under implicit_rdpcm_enabled_flag, which 8.4.4.2.6 predicts without
-     * the edge filters of the vertical and horizontal modes.
+     * the edge filters of the vertical and horizontal modes. An encoder that tries several modes on one block
+     * passes [sameBlock] after the first, which keeps the reference samples gathered for it.
      */
-    fun predict(cIdx: Int, xTb: Int, yTb: Int, log2: Int, mode: Int, bypassRdpcm: Boolean) {
+    fun predict(cIdx: Int, xTb: Int, yTb: Int, log2: Int, mode: Int, bypassRdpcm: Boolean, sameBlock: Boolean = false) {
         val n = 1 shl log2
         val plane = d.planes[cIdx]
         val stride = d.strides[cIdx]
@@ -29,7 +30,7 @@ internal class IntraPredictor(private val d: PictureDecoder) {
         val bitDepth = if (cIdx == 0) d.sps.bitDepthY else d.sps.bitDepthC
         val corner = 2 * n
         val total = 4 * n + 1
-        gather(plane, stride, xTb, yTb, n, sw, sh, bitDepth)
+        if (!sameBlock) gather(plane, stride, xTb, yTb, n, sw, sh, bitDepth)
         var p = line
         // 8.4.4.2.3 filters luma, and chroma only in 4:4:4.
         if (smoothing && (cIdx == 0 || d.chromaArrayType == 3) && mode != INTRA_DC && n != 4) {

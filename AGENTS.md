@@ -189,6 +189,8 @@ being true.
 - ffmpeg encodes at the time base of the frame rate unless told `-enc_time_base`, so `setpts` timestamps
   between frames round to whole frames. Uneven durations in an MP4 need `settb=1/1000` and
   `-enc_time_base 1:1000` as well as `-fps_mode passthrough` (#157).
+- libde265 1.0's dec265 aborts with `std::bad_alloc` on a 4:0:0 stream above 8 bits that has a conformance
+  window, x265's 66x38 `gray10le` included, so the encoder's oracle test checks those streams with ffmpeg (#175).
 - libde265 1.0's dec265 fails the MD5 SEI of an x265 picture with several slices and SAO on, so the
   sample-for-sample comparisons with it use one slice; the hash SEI covers several (#143).
 - libheif 1.17.6 turns the colour of an image with alpha by its `irot` but not the alpha, so `HeicOracleTest`

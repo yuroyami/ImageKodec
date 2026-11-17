@@ -96,7 +96,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private val tiles = pps.tilesEnabled
     private val wpp = pps.entropyCodingSync
     private val heightInCtbs = sps.picHeightInCtbs
-    private val intra = IntraPredictor(this)
+    /** Intra prediction into [planes], which an encoder's reconstruction runs too. */
+    internal val intra: IntraPredictor = IntraPredictor(this)
     /** The motion of the picture, made by its first P or B slice segment. */
     var motion: MotionField? = null
         private set
@@ -336,13 +337,65 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private val deblocker = Deblocker(this)
     private val saoFilter: SaoFilter? = if (sps.saoEnabled) SaoFilter(this) else null
 
-    /** Deblocks the CTB rows before [rows], then applies SAO to every row whose neighbours below are deblocked. */
-    private fun runLoopFilters(rows: Int) {
+    /**
+     * Deblocks the CTB rows before [rows], then applies SAO to every row whose neighbours below are deblocked.
+     * An encoder passes [beforeSao], which sees each row deblocked just before SAO changes it, to choose the
+     * row's SAO parameters there.
+     */
+    internal fun runLoopFilters(rows: Int, beforeSao: ((Int) -> Unit)? = null) {
         while (deblockedRows < rows) deblocker.filterRow(deblockedRows++)
         val last = if (deblockedRows == heightInCtbs) heightInCtbs else deblockedRows - 1
         while (saoRows < last) {
+            beforeSao?.invoke(saoRows)
             saoFilter?.filterRow(saoRows)
             saoRows++
+        }
+    }
+
+    // The entry points of an encoder (HevcEncoder), which reconstructs its picture in a PictureDecoder so that
+    // prediction, the residual and the loop filters are the decoder's own. It codes one slice of I slice segments.
+
+    /** Starts the reconstruction of the slice [h]. */
+    internal fun beginEncoding(h: SliceHeader) {
+        slice = h
+        sliceAddrRs = h.sliceAddrRs
+        sliceQpY = h.sliceQpY
+    }
+
+    /** Marks the CTB [rs] as being coded in the slice, as the decoder does before it parses the CTB. */
+    internal fun beginEncodedCtb(rs: Int) {
+        ctbAddr = rs
+        ctbSlice[rs] = sliceAddrRs
+        ctbHeader[rs] = slice
+        decodedCtbs++
+    }
+
+    /**
+     * Records the coding unit of 1 shl [log2] samples at ([x0], [y0]) as the decoder records an intra unit
+     * it parses: its depth [depth] in the coding quadtree, its bypass flag, its QpY [qp] and its edges.
+     */
+    internal fun markEncodedUnit(x0: Int, y0: Int, log2: Int, depth: Int, bypass: Boolean, qp: Int) {
+        val size = 1 shl log2
+        val unitFlags = FLAG_INTRA or (if (bypass) FLAG_BYPASS else 0)
+        for (y in (y0 shr 2) until ((y0 + size) shr 2)) {
+            val row = y * w4
+            for (x in (x0 shr 2) until ((x0 + size) shr 2)) {
+                ctDepth[row + x] = depth.toByte()
+                flags[row + x] = unitFlags.toByte()
+            }
+        }
+        markEdges(x0, y0, size)
+        fillUnits(qpY, x0, y0, size, size, qp)
+    }
+
+    /** Records a luma transform block as [transformUnit] does: its edges, and FLAG_CODED when [coded]. */
+    internal fun markEncodedTransform(x0: Int, y0: Int, log2: Int, coded: Boolean) {
+        markEdges(x0, y0, 1 shl log2)
+        if (!coded) return
+        val n = 1 shl (log2 - 2)
+        for (y in 0 until n) for (x in 0 until n) {
+            val u = ((y0 shr 2) + y) * w4 + (x0 shr 2) + x
+            flags[u] = (flags[u].toInt() or FLAG_CODED).toByte()
         }
     }
 
@@ -921,7 +974,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
      */
     private fun block(cIdx: Int, x0: Int, y0: Int, log2: Int, mode: Int, coded: Boolean) {
         // An inter unit's prediction is already in the picture (8.5.1).
-        if (!cuInter) intra.predict(cIdx, x0, y0, log2, mode, cuBypass && implicitRdpcm)
+        if (!cuInter) intra.predict(cIdx, x0, y0, log2, mode, cuBypass && implicitRdpcm, false)
         // 8.4.4.1, step 8: a chroma block takes a share of the luma residual even with no residual of its own.
         val resScale = if (cIdx == 0) 0 else if (cIdx == 1) resScaleCb else resScaleCr
         if (!coded && resScale == 0) return
@@ -949,6 +1002,11 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
                 }
             }
         }
+        addResidual(cIdx, x0, y0, n, r, bitDepth)
+    }
+
+    /** 8.6.7: adds the residual [r] of the n by n block at ([x0], [y0]) of [cIdx] to its prediction, clipped. */
+    internal fun addResidual(cIdx: Int, x0: Int, y0: Int, n: Int, r: IntArray, bitDepth: Int) {
         val plane = planes[cIdx]
         val stride = strides[cIdx]
         val max = (1 shl bitDepth) - 1
@@ -985,19 +1043,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             // 8-295.
             val bdShift = maxOf(20 - bitDepth, if (extendedPrecision) 11 else 0)
             if (skip) {
-                // 8-298 with tsShift 5 + Log2( nTbS ), then 8-299, as one shift: d << tsShift is a multiple
-                // of 1 << bdShift or the rounding of 8-299 lands on d shifted by their difference, which
-                // keeps an extended precision coefficient of 22 bits from passing 32.
-                val ts = 5 + log2
-                val last = n * n - 1
-                if (ts >= bdShift) {
-                    val up = ts - bdShift
-                    for (i in 0..last) r[i] = coeff[if (rotate) last - i else i] shl up
-                } else {
-                    val down = bdShift - ts
-                    val round = 1 shl (down - 1)
-                    for (i in 0..last) r[i] = (coeff[if (rotate) last - i else i] + round) shr down
-                }
+                transformSkipResidual(coeff, r, log2, bdShift, rotate)
             } else if (log2 >= (if (cIdx == 0) wideLog2Y else wideLog2C)) {
                 transform.inverseWide(coeff, r, log2, maxX, maxY, bdShift, if (cIdx == 0) coeffMaxY else coeffMaxC)
             } else {
@@ -1232,25 +1278,6 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         return maxX or (maxY shl 8) or (if (skip) TRANSFORM_SKIPPED else 0) or explicit
     }
 
-    /** sigCtx of 9.3.4.2.5, as an offset from the first sig_coeff_flag context of the component. */
-    private fun sigContext(log2: Int, cIdx: Int, scanIdx: Int, xS: Int, yS: Int, xP: Int, yP: Int, prevCsbf: Int): Int {
-        if (log2 == 2) return HevcTables.CTX_IDX_MAP[(yP shl 2) + xP]
-        if (xS == 0 && yS == 0 && xP == 0 && yP == 0) return 0
-        var sig = when (prevCsbf) {
-            0 -> if (xP + yP == 0) 2 else if (xP + yP < 3) 1 else 0
-            1 -> if (yP == 0) 2 else if (yP == 1) 1 else 0
-            2 -> if (xP == 0) 2 else if (xP == 1) 1 else 0
-            else -> 2
-        }
-        if (cIdx == 0) {
-            if (xS + yS > 0) sig += 3
-            sig += if (log2 == 3) (if (scanIdx == 0) 9 else 15) else 21
-        } else {
-            sig += if (log2 == 3) 9 else 12
-        }
-        return sig
-    }
-
     /**
      * coeff_abs_level_remaining with Rice parameter [rice]: a TR prefix of up to four ones (9.3.3.11),
      * then a suffix of EG( rice + 1 ) (9.3.3.3), or under extended precision the limited EGk of 9.3.3.4
@@ -1299,6 +1326,44 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
         /** levelScale of 8.6.3. */
         val LEVEL_SCALE = intArrayOf(40, 45, 51, 57, 64, 72)
+
+        /**
+         * The residual of a transform-skipped block (8.6.4.2 with tsShift 5 + Log2( nTbS ), then 8-299) from the
+         * scaled coefficients [coeff] into [r], read back to front when [rotate]. The two shifts are one: d << tsShift
+         * is a multiple of 1 << bdShift or the rounding of 8-299 lands on d shifted by their difference, which keeps an
+         * extended precision coefficient of 22 bits from passing 32.
+         */
+        fun transformSkipResidual(coeff: IntArray, r: IntArray, log2: Int, bdShift: Int, rotate: Boolean) {
+            val ts = 5 + log2
+            val last = (1 shl (2 * log2)) - 1
+            if (ts >= bdShift) {
+                val up = ts - bdShift
+                for (i in 0..last) r[i] = coeff[if (rotate) last - i else i] shl up
+            } else {
+                val down = bdShift - ts
+                val round = 1 shl (down - 1)
+                for (i in 0..last) r[i] = (coeff[if (rotate) last - i else i] + round) shr down
+            }
+        }
+
+        /** sigCtx of 9.3.4.2.5, as an offset from the first sig_coeff_flag context of the component. */
+        fun sigContext(log2: Int, cIdx: Int, scanIdx: Int, xS: Int, yS: Int, xP: Int, yP: Int, prevCsbf: Int): Int {
+            if (log2 == 2) return HevcTables.CTX_IDX_MAP[(yP shl 2) + xP]
+            if (xS == 0 && yS == 0 && xP == 0 && yP == 0) return 0
+            var sig = when (prevCsbf) {
+                0 -> if (xP + yP == 0) 2 else if (xP + yP < 3) 1 else 0
+                1 -> if (yP == 0) 2 else if (yP == 1) 1 else 0
+                2 -> if (xP == 0) 2 else if (xP == 1) 1 else 0
+                else -> 2
+            }
+            if (cIdx == 0) {
+                if (xS + yS > 0) sig += 3
+                sig += if (log2 == 3) (if (scanIdx == 0) 9 else 15) else 21
+            } else {
+                sig += if (log2 == 3) 9 else 12
+            }
+            return sig
+        }
 
         fun indexOf(scan: IntArray, packed: Int): Int {
             for (i in scan.indices) if (scan[i] == packed) return i
