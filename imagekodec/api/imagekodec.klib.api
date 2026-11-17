@@ -6,6 +6,10 @@
 // - Show declarations: true
 
 // Library unique name: <io.github.yuroyami:imagekodec>
+open annotation class io.github.yuroyami.imagekodec/ExperimentalHeifCodecApi : kotlin/Annotation { // io.github.yuroyami.imagekodec/ExperimentalHeifCodecApi|null[0]
+    constructor <init>() // io.github.yuroyami.imagekodec/ExperimentalHeifCodecApi.<init>|<init>(){}[0]
+}
+
 final enum class io.github.yuroyami.imagekodec/ImageFormat : kotlin/Enum<io.github.yuroyami.imagekodec/ImageFormat> { // io.github.yuroyami.imagekodec/ImageFormat|null[0]
     enum entry AVIF // io.github.yuroyami.imagekodec/ImageFormat.AVIF|null[0]
     enum entry BMP // io.github.yuroyami.imagekodec/ImageFormat.BMP|null[0]
@@ -78,6 +82,22 @@ final enum class io.github.yuroyami.imagekodec/RenderingIntent : kotlin/Enum<io.
     final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/RenderingIntent> // io.github.yuroyami.imagekodec/RenderingIntent.values|values#static(){}[0]
 }
 
+abstract interface io.github.yuroyami.imagekodec/HeifCodec { // io.github.yuroyami.imagekodec/HeifCodec|null[0]
+    abstract val configurationType // io.github.yuroyami.imagekodec/HeifCodec.configurationType|{}configurationType[0]
+        abstract fun <get-configurationType>(): kotlin/String // io.github.yuroyami.imagekodec/HeifCodec.configurationType.<get-configurationType>|<get-configurationType>(){}[0]
+    abstract val itemType // io.github.yuroyami.imagekodec/HeifCodec.itemType|{}itemType[0]
+        abstract fun <get-itemType>(): kotlin/String // io.github.yuroyami.imagekodec/HeifCodec.itemType.<get-itemType>|<get-itemType>(){}[0]
+    abstract val sampleEntryTypes // io.github.yuroyami.imagekodec/HeifCodec.sampleEntryTypes|{}sampleEntryTypes[0]
+        abstract fun <get-sampleEntryTypes>(): kotlin.collections/Set<kotlin/String> // io.github.yuroyami.imagekodec/HeifCodec.sampleEntryTypes.<get-sampleEntryTypes>|<get-sampleEntryTypes>(){}[0]
+
+    abstract fun inspect(kotlin/ByteArray?, kotlin/ByteArray?): io.github.yuroyami.imagekodec/HeifCodecInfo // io.github.yuroyami.imagekodec/HeifCodec.inspect|inspect(kotlin.ByteArray?;kotlin.ByteArray?){}[0]
+    abstract fun open(kotlin/ByteArray?): io.github.yuroyami.imagekodec/HeifCodecSession // io.github.yuroyami.imagekodec/HeifCodec.open|open(kotlin.ByteArray?){}[0]
+}
+
+abstract interface io.github.yuroyami.imagekodec/HeifCodecSession { // io.github.yuroyami.imagekodec/HeifCodecSession|null[0]
+    abstract fun decode(kotlin/ByteArray, kotlin/Function0<kotlin/Unit>?): io.github.yuroyami.imagekodec/HeifPlanes? // io.github.yuroyami.imagekodec/HeifCodecSession.decode|decode(kotlin.ByteArray;kotlin.Function0<kotlin.Unit>?){}[0]
+}
+
 final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuroyami.imagekodec.codec/CcittOptions|null[0]
     constructor <init>(kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Boolean, kotlin/Boolean, kotlin/Boolean) // io.github.yuroyami.imagekodec.codec/CcittOptions.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean){}[0]
 
@@ -146,6 +166,54 @@ final class io.github.yuroyami.imagekodec/GainMap { // io.github.yuroyami.imagek
         final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/GainMap.width.<get-width>|<get-width>(){}[0]
 
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/GainMap.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/HeifCodecInfo { // io.github.yuroyami.imagekodec/HeifCodecInfo|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean? = ..., kotlin/String? = ...) // io.github.yuroyami.imagekodec/HeifCodecInfo.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean?;kotlin.String?){}[0]
+
+    final val bitDepthChroma // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthChroma|{}bitDepthChroma[0]
+        final fun <get-bitDepthChroma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthChroma.<get-bitDepthChroma>|<get-bitDepthChroma>(){}[0]
+    final val bitDepthLuma // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthLuma|{}bitDepthLuma[0]
+        final fun <get-bitDepthLuma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthLuma.<get-bitDepthLuma>|<get-bitDepthLuma>(){}[0]
+    final val chromaFormat // io.github.yuroyami.imagekodec/HeifCodecInfo.chromaFormat|{}chromaFormat[0]
+        final fun <get-chromaFormat>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.chromaFormat.<get-chromaFormat>|<get-chromaFormat>(){}[0]
+    final val colorPrimaries // io.github.yuroyami.imagekodec/HeifCodecInfo.colorPrimaries|{}colorPrimaries[0]
+        final fun <get-colorPrimaries>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifCodecInfo.colorPrimaries.<get-colorPrimaries>|<get-colorPrimaries>(){}[0]
+    final val fullRange // io.github.yuroyami.imagekodec/HeifCodecInfo.fullRange|{}fullRange[0]
+        final fun <get-fullRange>(): kotlin/Boolean? // io.github.yuroyami.imagekodec/HeifCodecInfo.fullRange.<get-fullRange>|<get-fullRange>(){}[0]
+    final val height // io.github.yuroyami.imagekodec/HeifCodecInfo.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.height.<get-height>|<get-height>(){}[0]
+    final val matrixCoefficients // io.github.yuroyami.imagekodec/HeifCodecInfo.matrixCoefficients|{}matrixCoefficients[0]
+        final fun <get-matrixCoefficients>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifCodecInfo.matrixCoefficients.<get-matrixCoefficients>|<get-matrixCoefficients>(){}[0]
+    final val transferCharacteristics // io.github.yuroyami.imagekodec/HeifCodecInfo.transferCharacteristics|{}transferCharacteristics[0]
+        final fun <get-transferCharacteristics>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifCodecInfo.transferCharacteristics.<get-transferCharacteristics>|<get-transferCharacteristics>(){}[0]
+    final val unsupportedReason // io.github.yuroyami.imagekodec/HeifCodecInfo.unsupportedReason|{}unsupportedReason[0]
+        final fun <get-unsupportedReason>(): kotlin/String? // io.github.yuroyami.imagekodec/HeifCodecInfo.unsupportedReason.<get-unsupportedReason>|<get-unsupportedReason>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/HeifCodecInfo.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.width.<get-width>|<get-width>(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/HeifPlanes { // io.github.yuroyami.imagekodec/HeifPlanes|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Array<kotlin/ShortArray>, kotlin/IntArray, kotlin/Boolean) // io.github.yuroyami.imagekodec/HeifPlanes.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Array<kotlin.ShortArray>;kotlin.IntArray;kotlin.Boolean){}[0]
+
+    final val bitDepthChroma // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthChroma|{}bitDepthChroma[0]
+        final fun <get-bitDepthChroma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthChroma.<get-bitDepthChroma>|<get-bitDepthChroma>(){}[0]
+    final val bitDepthLuma // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthLuma|{}bitDepthLuma[0]
+        final fun <get-bitDepthLuma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthLuma.<get-bitDepthLuma>|<get-bitDepthLuma>(){}[0]
+    final val fullRange // io.github.yuroyami.imagekodec/HeifPlanes.fullRange|{}fullRange[0]
+        final fun <get-fullRange>(): kotlin/Boolean // io.github.yuroyami.imagekodec/HeifPlanes.fullRange.<get-fullRange>|<get-fullRange>(){}[0]
+    final val height // io.github.yuroyami.imagekodec/HeifPlanes.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.height.<get-height>|<get-height>(){}[0]
+    final val planes // io.github.yuroyami.imagekodec/HeifPlanes.planes|{}planes[0]
+        final fun <get-planes>(): kotlin/Array<kotlin/ShortArray> // io.github.yuroyami.imagekodec/HeifPlanes.planes.<get-planes>|<get-planes>(){}[0]
+    final val strides // io.github.yuroyami.imagekodec/HeifPlanes.strides|{}strides[0]
+        final fun <get-strides>(): kotlin/IntArray // io.github.yuroyami.imagekodec/HeifPlanes.strides.<get-strides>|<get-strides>(){}[0]
+    final val subX // io.github.yuroyami.imagekodec/HeifPlanes.subX|{}subX[0]
+        final fun <get-subX>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.subX.<get-subX>|<get-subX>(){}[0]
+    final val subY // io.github.yuroyami.imagekodec/HeifPlanes.subY|{}subY[0]
+        final fun <get-subY>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.subY.<get-subY>|<get-subY>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/HeifPlanes.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.width.<get-width>|<get-width>(){}[0]
 }
 
 final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imagekodec/ImageInfo|null[0]
@@ -437,6 +505,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun probeOrNull(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo? // io.github.yuroyami.imagekodec/ImageKodec.probeOrNull|probeOrNull(kotlin.ByteArray){}[0]
     final fun probePage(kotlin/ByteArray, kotlin/Int): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probePage|probePage(kotlin.ByteArray;kotlin.Int){}[0]
     final fun readMetadata(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageMetadata // io.github.yuroyami.imagekodec/ImageKodec.readMetadata|readMetadata(kotlin.ByteArray){}[0]
+    final fun registerHeifCodec(io.github.yuroyami.imagekodec/HeifCodec) // io.github.yuroyami.imagekodec/ImageKodec.registerHeifCodec|registerHeifCodec(io.github.yuroyami.imagekodec.HeifCodec){}[0]
     final fun removeMotion(kotlin/ByteArray): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.removeMotion|removeMotion(kotlin.ByteArray){}[0]
     final fun repackJpeg(kotlin/ByteArray, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.repackJpeg|repackJpeg(kotlin.ByteArray;kotlin.Boolean){}[0]
     final fun ssimulacra2(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/KiteBitmap): kotlin/Double // io.github.yuroyami.imagekodec/ImageKodec.ssimulacra2|ssimulacra2(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.KiteBitmap){}[0]
