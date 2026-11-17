@@ -239,10 +239,10 @@ class Av1OracleTest {
         val use = Av1ToolUse()
         val pictures = Av1Decoder().also { it.toolUse = use }.decodeAll(data)
         // Each frame at its own size: ffmpeg would otherwise scale every frame to the first one's.
-        val (refCode, ref) = run(ffmpeg, "-hide_banner", "-loglevel", "error", "-c:v", "libdav1d", "-i", out.path, "-autoscale", "0", "-f", "rawvideo", "-pix_fmt", c.pixFmt, "-")
+        // ffmpeg 8 reads -autoscale as a flag, so "-autoscale 0" made "0" an output file (#110).
+        val (refCode, ref) = run(ffmpeg, "-hide_banner", "-loglevel", "error", "-c:v", "libdav1d", "-i", out.path, "-noautoscale", "-f", "rawvideo", "-pix_fmt", c.pixFmt, "-")
         if (refCode != 0) {
-            // The reference cannot read what the encoder wrote, so there is nothing to compare: dav1d
-            // 1.5.3 refuses the stream of libaom 3.13 with every inter tool, in Ubuntu 26.04 (#110).
+            // The reference cannot read what the encoder wrote, so there is nothing to compare.
             refused += "${c.name} (exit $refCode): ${lastError.take(300)}"
             return
         }
