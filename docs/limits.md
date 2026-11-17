@@ -20,13 +20,13 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
   `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
   can move by up to 255 sixteen-bit units to stay in that level.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR. See
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL, JPEG XR or HEIC. See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
 ## Size ceilings
 
 - All image decoders cap their output at 2^28 pixels (about 1 GiB of ARGB).
-- WebP, AVIF, JPEG XL, JPEG XR, fax-compressed TIFF, `CcittFax` and `Jbig2Decoder` use that ceiling alone.
+- WebP, AVIF, HEIC, JPEG XL, JPEG XR, fax-compressed TIFF, `CcittFax` and `Jbig2Decoder` use that ceiling alone.
   Constant VP8L pixels and fax reference rows can take no entropy bits, or one bit a row, so a
   ratio to the input size would refuse valid files. The frames of a WebP, AVIF or JPEG XL
   animation together must fit the same ceiling.

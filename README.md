@@ -2,7 +2,7 @@
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
 BMP, TIFF, JPEG 2000, WebP, AVIF, JPEG XL and JPEG XR from a `ByteArray`, with the same code
-on every target.
+on every target. HEIC decodes with the separate `imagekodec-heic` module.
 
 <sub>AI tools wrote much of the code, tests and documentation in this project, under the
 direction and review of its author.</sub>
@@ -90,7 +90,7 @@ every bit of a sample deeper than 8 bits, and `decodePage` reads the other pages
 
 ### Play an animation
 
-GIF, APNG, animated WebP, animated AVIF and animated JPEG XL all come back as one type. Every frame
+GIF, APNG, animated WebP, animated AVIF, HEIC image sequences and animated JPEG XL all come back as one type. Every frame
 is already composited, so playback is "draw frame N, wait delay N".
 
 ```kotlin
@@ -163,7 +163,7 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | AVIF | stills and image sequences, 8 to 12 bits | no |
 | JPEG XL | both coding modes, layers and animation | no |
 | JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | no |
-| HEIC | HEVC pictures (intra, P and B), 8 to 16 bits, grids and alpha, with the `imagekodec-heic` module | no |
+| HEIC | stills, grids, alpha, depth and gain maps, and image sequences, 8 to 16 bits, with the `imagekodec-heic` module | no |
 
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
 carries a header of its own, so both take their parameters explicitly. HEIC decodes only with the

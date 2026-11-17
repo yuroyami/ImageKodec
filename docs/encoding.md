@@ -92,7 +92,7 @@ val progressive = ImageKodec.repackJpeg(photo, progressive = true) // often smal
 
 ## What the encoders do not write
 
-- There is no encoder for lossy WebP, JPEG 2000, AVIF or JPEG XL.
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL, JPEG XR or HEIC.
 - The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit
   output. It picks a filter for each row, which is a compression choice and not a format
   capability. Use `encodeTiff16` for 16-bit output.

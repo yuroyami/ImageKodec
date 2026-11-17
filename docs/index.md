@@ -3,8 +3,8 @@
 # ImageKodec
 
 Image codecs written in Kotlin, for Kotlin Multiplatform. Decode PNG, JPEG, GIF, BMP, TIFF,
-JPEG 2000, WebP, AVIF, JPEG XL and JPEG XR from a `ByteArray`. The same code runs on Android, iOS, desktop,
-native, the browser and Wasm.
+JPEG 2000, WebP, AVIF, JPEG XL and JPEG XR from a `ByteArray`, and HEIC with the separate `imagekodec-heic`
+module. The same code runs on Android, iOS, desktop, native, the browser and Wasm.
 
 <div class="kite-hero-actions" markdown>
 [Get started](#install){ .kite-primary }
@@ -43,7 +43,7 @@ val bitmap = ImageKodec.decode(bytes)   // format sniffed from the magic bytes
 val pixel = bitmap[10, 20]              // 0xAARRGGBB
 ```
 
-GIF, APNG, animated WebP, animated AVIF and animated JPEG XL all come back as one type, with every
+GIF, APNG, animated WebP, animated AVIF, HEIC image sequences and animated JPEG XL all come back as one type, with every
 frame already composited:
 
 ```kotlin

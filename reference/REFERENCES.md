@@ -6,8 +6,10 @@ ignored by Git and are not distributed; this catalog is tracked. A source port
 must retain its applicable copyright and license notice, and identify alterations.
 
 The sources of dav1d, libheif and libde265 are not fetched. The AV1 and AVIF decoders
-were written from their specifications (see below). HEIC is out of scope because of the
-patents on HEVC.
+were written from their specifications (see below). The HEVC decoder of HEIC, in the separate
+module `imagekodec-heic`, was written from ITU-T H.265 (07/2024). libde265, ffmpeg, x265 and
+libheif are run as external test tools and never ported. HEVC is under patent licence, so the
+module is kept out of the core and is not published until the owner decides (#136).
 
 The HEVC test data is fetched, never committed: `tools/heic_data.py` downloads the JCT-VC
 conformance packages of ITU-T H.265.1 from the ITU's site and a few HEIC test images of

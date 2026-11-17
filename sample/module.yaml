@@ -8,6 +8,7 @@ apply:
 dependencies:
   - //imagekodec
   - //imagekodec-compose
+  - //imagekodec-heic
   - $compose.desktop.currentOs
   - $compose.material3
 
