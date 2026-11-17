@@ -4,7 +4,7 @@ package io.github.yuroyami.imagekodec
 class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf("avif", "mif1", "miaf")) {
     class Item(
         val id: Int, val type: String, val data: ByteArray, val properties: List<Pair<ByteArray, Boolean>>,
-        val hidden: Boolean, val idat: Boolean, val extents: Int,
+        val hidden: Boolean, val idat: Boolean, val extents: Int, val contentType: String? = null,
     )
 
     val items = ArrayList<Item>()
@@ -14,9 +14,9 @@ class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf(
 
     fun add(
         id: Int, type: String, data: ByteArray, properties: List<Pair<ByteArray, Boolean>>,
-        hidden: Boolean = false, idat: Boolean = false, extents: Int = 1,
+        hidden: Boolean = false, idat: Boolean = false, extents: Int = 1, contentType: String? = null,
     ) {
-        items += Item(id, type, data, properties, hidden, idat, extents)
+        items += Item(id, type, data, properties, hidden, idat, extents, contentType)
     }
 
     private fun be32(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
@@ -63,7 +63,8 @@ class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf(
             }
             var iinf = be16(items.size)
             for (item in items) {
-                iinf += fullBox("infe", 2, if (item.hidden) 1 else 0, be16(item.id) + be16(0) + item.type.encodeToByteArray() + byteArrayOf(0))
+                iinf += fullBox("infe", 2, if (item.hidden) 1 else 0, be16(item.id) + be16(0) + item.type.encodeToByteArray() + byteArrayOf(0) +
+                        (item.contentType?.let { it.encodeToByteArray() + byteArrayOf(0) } ?: ByteArray(0)))
             }
             var ipco = ByteArray(0)
             var ipma = be32(items.size)

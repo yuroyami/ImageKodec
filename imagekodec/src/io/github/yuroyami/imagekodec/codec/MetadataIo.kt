@@ -1,6 +1,9 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.ImageMetadata
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer
+import io.github.yuroyami.imagekodec.codec.avif.AvifProperty
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 
@@ -8,7 +11,8 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  * Reads and writes the EXIF, XMP and ICC metadata of JPEG, PNG and WebP files (#129): JPEG APP1
  * `Exif` and Adobe XMP segments and APP2 `ICC_PROFILE` chunks (Exif 2.32, 4.5.4; XMP Part 3,
  * 1.1.3; ICC.1:2022, B.4), PNG `eXIf`, `iTXt` with the keyword `XML:com.adobe.xmp`, and `iCCP`
- * (PNG, Third Edition, 11.3), and the `EXIF`, `XMP ` and `ICCP` chunks of extended WebP.
+ * (PNG, Third Edition, 11.3), the `EXIF`, `XMP ` and `ICCP` chunks of extended WebP, and the
+ * `Exif` and XMP items and the ICC `colr` of the primary image of a HEIF file (#149).
  */
 internal object MetadataIo {
 
@@ -21,7 +25,40 @@ internal object MetadataIo {
         data.size >= 3 && (data[0].toInt() and 0xFF) == 0xFF && (data[1].toInt() and 0xFF) == 0xD8 -> readJpeg(data)
         data.size >= 8 && (data[0].toInt() and 0xFF) == 0x89 && data[1].toInt() == 0x50 && data[2].toInt() == 0x4E && data[3].toInt() == 0x47 -> readPng(data)
         data.size >= 12 && ascii(data, 0, 4) == "RIFF" && ascii(data, 8, 4) == "WEBP" -> readWebp(data)
+        AvifContainer.heifFormat(data) != null -> readHeif(data)
         else -> ImageMetadata()
+    }
+
+    /**
+     * The metadata of a HEIF file's primary image: the `Exif` and `mime` items that a `cdsc`
+     * reference links to it, and its ICC `colr`, or that of the first image it is derived from.
+     */
+    private fun readHeif(data: ByteArray): ImageMetadata {
+        val c = try {
+            AvifContainer.parse(data)
+        } catch (_: ImageDecodeException) {
+            return ImageMetadata()
+        }
+        val primary = c.primary ?: return ImageMetadata()
+        val described = c.referencesTo(primary, AvifContainer.CDSC).mapNotNull { c.items[it] }
+        val exif = described.firstOrNull { it.type == AvifContainer.EXIF }?.let { item ->
+            val body = c.itemDataOrNull(item) ?: return@let null
+            if (body.size < 4) return@let null
+            // ISO/IEC 23008-12 A.2.1: a 4-byte offset from its end to the TIFF header, 6 after "Exif\0\0".
+            val offset = ((body[0].toLong() and 0xFF) shl 24) or ((body[1].toLong() and 0xFF) shl 16) or
+                ((body[2].toLong() and 0xFF) shl 8) or (body[3].toLong() and 0xFF)
+            if (offset > body.size - 4L - 8) null else body.copyOfRange(4 + offset.toInt(), body.size)
+        }
+        val xmp = described.firstOrNull { it.type == AvifContainer.MIME && it.contentType == "application/rdf+xml" }
+            ?.let { c.itemDataOrNull(it)?.decodeToString() }
+        var icc: ByteArray? = null
+        var at = c.items[primary]
+        repeat(9) {
+            val item = at ?: return@repeat
+            if (icc == null) icc = item.property<AvifProperty.Icc>()?.profile
+            at = c.referencesFrom(item.id, AvifContainer.DIMG).firstOrNull()?.let { c.items[it] }
+        }
+        return ImageMetadata(exif = exif, xmp = xmp, icc = icc)
     }
 
     private fun readJpeg(data: ByteArray): ImageMetadata {

@@ -824,9 +824,10 @@ public object ImageKodec {
     public fun encodeWebp(bitmap: KiteBitmap, metadata: ImageMetadata): ByteArray = WebpEncoder.encode(bitmap, metadata)
 
     /**
-     * The EXIF block, XMP packet and ICC profile of a JPEG, PNG or WebP file, which the
-     * `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an [ImageMetadata] write
-     * again, so a re-encode keeps them (#129). The gain map of an Ultra HDR JPEG comes too, found
+     * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, AVIF or HEIC file. The
+     * `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an [ImageMetadata] write them
+     * again, so a re-encode keeps them (#129). A HEIF file gives those of its primary image (#149);
+     * its orientation is in `irot` and `imir`, which `decode` applies, never in the EXIF tag. The gain map of an Ultra HDR JPEG comes too, found
      * through its Multi-Picture Format segment (#130). A file of another format, or one that has none,
      * gives empty metadata; a damaged segment or chunk is left out.
      */

@@ -79,6 +79,9 @@ internal class AvifItem(val id: Long, val type: Int, val hidden: Boolean) {
     val unknownEssential = ArrayList<Int>()
     var location: AvifLocation? = null
 
+    /** The content type of a `mime` item, such as `application/rdf+xml` for XMP. */
+    var contentType: String? = null
+
     inline fun <reified T : AvifProperty> property(): T? = properties.firstOrNull { it is T } as T?
 }
 
@@ -229,6 +232,9 @@ internal class AvifContainer(
         val AUXL = fourcc("auxl")
         val DIMG = fourcc("dimg")
         val PREM = fourcc("prem")
+        val CDSC = fourcc("cdsc")
+        val MIME = fourcc("mime")
+        val EXIF = fourcc("Exif")
         val ALTR = fourcc("altr")
         val HVC1 = fourcc("hvc1")
         val HEV1 = fourcc("hev1")
@@ -400,7 +406,13 @@ internal class AvifContainer(
                 ir.u16()
                 val type = ir.fourcc()
                 if (id in items) ir.fail("declares item $id twice")
-                items[id] = AvifItem(id, type, (flags and 1) != 0)
+                val item = AvifItem(id, type, (flags and 1) != 0)
+                // ISO/IEC 23008-12 9.2: a mime item names its content type after the item name.
+                if (type == MIME && ir.remaining > 0) {
+                    ir.string()
+                    if (ir.remaining > 0) item.contentType = ir.string()
+                }
+                items[id] = item
             }
         }
 
