@@ -14,6 +14,18 @@ reviewable in the diff.
 
 ### Added
 
+- `decodeAnimation` plays HEIC image sequences with the `imagekodec-heic` module: every frame of a
+  track whose sample entry is `hvc1` or `hev1` and whose handler is `pict` or `vide`, in presentation
+  order from the composition offsets of `ctts`, each with its duration, the loop count from the edit
+  list and an alpha track through `auxl`. `detect` and `probe` recognise the sequence brands `msf1`,
+  `hevc` and `hevx`, and `probe` gives the frame count and size; without the module the error names
+  it. The frames of x265 sequences with B pictures in an MP4 from ffmpeg equal ffmpeg's decode, in
+  the same order (#157).
+- `HeifCodecSession.decodeInOutputOrder` and `HeifCodecSession.flush`, under
+  `ExperimentalHeifCodecApi`, let a codec whose output order differs from its decoding order give its
+  pictures in output order. Both have default implementations, so an existing codec compiles and
+  behaves as before (#157).
+
 - `ImageKodec.auxiliaryImages` lists the auxiliary images of a HEIC or AVIF file's primary image,
   alpha, depth and gain maps among them, each with its `auxC` URN, its size, its bit depth and the
   subtype bytes after the URN, unparsed; `decodeAuxiliaryImage` decodes one as a gray `KiteBitmap16`
@@ -145,6 +157,10 @@ reviewable in the diff.
 
 ### Changed
 
+- A HEIF file with both an image sequence and a primary item shows what libavif shows: the primary
+  item when the major brand is `avif`, the track when it is `avis`, and for any other brand the track.
+  Before, the track was shown whatever the brand, and only an AV1 track of handler `pict` counted
+  (#157).
 - `ImageFormat` has a new value, `HEIC`, so an exhaustive `when` over `ImageFormat` in caller code
   needs a branch for it (#138).
 - The build moves from Gradle to the Kotlin Toolchain 0.13 (`./kotlin`, with

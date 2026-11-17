@@ -27,26 +27,25 @@ import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALTR
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.AUXL
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.DIMG
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.GRID
-import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HEV1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVC1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVCC
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IDEN
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.MIAF
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.LHV1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IOVL
-import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PICT
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PREM
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.SATO
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.THMB
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.TMAP
 
 /**
- * AVIF (AV1 Image File Format 1.1): picks what to show, decodes its AV1 data, builds a derived
- * image from its inputs, converts it to RGB and joins its alpha.
+ * AVIF (AV1 Image File Format 1.1) and HEIC: picks what to show, decodes its coded data, builds a
+ * derived image from its inputs, converts it to RGB and joins its alpha.
  *
- * What to show follows libavif: the first frame of an AV1 image sequence when the file has
- * one, else the primary item, or the first item of the primary item's `altr` group this reader
- * can show. A `grid` joins its tiles before the conversion to RGB, as libavif and libheif do; a
+ * What to show follows libavif: the major brand `avif` shows the primary item, `avis` the image
+ * sequence, and any other brand the sequence when the file has one ([AvifContainer.shownTrack]).
+ * Of the primary item, it shows the first item of the primary item's `altr` group this reader can
+ * show. A `grid` joins its tiles before the conversion to RGB, as libavif and libheif do; a
  * sample transform (`sato`) computes its samples from its inputs'; a tone-mapped image (`tmap`)
  * shows its base image, as a reader that does not tone map does; and an overlay (`iovl`) draws
  * its inputs in RGB on its canvas.
@@ -185,6 +184,9 @@ internal object AvifDecoder {
     /** The reason [unsupported] gives a HEVC item while no codec reads it. */
     const val NEEDS_HEIC_MODULE = "HEIC item of type 'hvc1' needs the imagekodec-heic module: add it and call ImageKodecHeic.install()"
 
+    /** The reason [unsupported] gives a HEVC image sequence while no codec reads it. */
+    const val NEEDS_HEIC_MODULE_TRACK = "HEIC image sequence of sample entry 'hvc1' needs the imagekodec-heic module: add it and call ImageKodecHeic.install()"
+
     /**
      * Runs [block] and names the format of a HEIC file in its errors. The reader is shared with
      * AVIF, whose name its messages start with.
@@ -201,11 +203,13 @@ internal object AvifDecoder {
     }
 
     /**
-     * Every frame of an AV1 image sequence with its duration, or a still image as one frame. The
-     * frames decode in order from the first sample, as each predicts from the ones before it, and
-     * the alpha track decodes beside them sample by sample. A frame coded at another size than
-     * the first, which AV1 allows mid-sequence, is scaled to the first frame's size, as a player
-     * shows every frame in one window.
+     * Every frame of an image sequence with its duration, or a still image as one frame. The samples
+     * decode in decoding order from the first, as each predicts from the ones before it, and the
+     * codec gives their pictures in output order, which for HEVC with B pictures is not the decoding
+     * order. The [rank]th picture out is the [rank]th sample by composition time (`ctts`), whose
+     * timing it takes. The alpha track decodes beside the colour track picture by picture. A frame
+     * coded at another size than the first, which AV1 allows mid-sequence, is scaled to the first
+     * frame's size, as a player shows every frame in one window.
      */
     fun decodeAnimation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation =
         labelled(data) { animation(data, maxFrames, cancellationCheck) }
@@ -226,44 +230,78 @@ internal object AvifDecoder {
         if (!Budget.framesFitAbsolute(width, height, count)) {
             throw ImageDecodeException("AVIF: $count frames of ${width}x$height exceed the output safety limit")
         }
-        val color = sequenceDecoder(track)
-        val alphaTrack = p.alphaTrack
-        val alpha = alphaTrack?.let { sequenceDecoder(it) }
-        val frames = ArrayList<KiteFrame>(count)
-        for (i in 0 until count) {
-            val colorPlanes = sample(color, c, track, i)
-            val alphaPlanes = if (alphaTrack != null && alpha != null) {
-                if (i >= alphaTrack.sizes.size) throw ImageDecodeException("AVIF: the alpha track has ${alphaTrack.sizes.size} samples for ${track.sizes.size} frames")
-                sample(alpha, c, alphaTrack, i)
-            } else null
+        val color = TrackReader(c, track, cancellationCheck)
+        val alpha = p.alphaTrack?.let { TrackReader(c, it, null) }
+        val bitmaps = ArrayList<KiteBitmap>(count)
+        var skipped = 0
+        for (rank in 0 until count) {
+            val colorPlanes = color.next()
+            if (colorPlanes == null) {
+                // A stream that starts at a CRA picture drops its RASL pictures, as H.265 8.1.3 allows.
+                // They come before the CRA in output order, so the pictures shown are the last ones by
+                // composition time. A track that shows no picture at all is damaged.
+                // Only HEVC skips pictures this way; an AV1 sample that shows no frame is damage.
+                if (rank == 0 || track.sampleEntry == AV01_ENTRY) {
+                    throw ImageDecodeException("AVIF: the ${track.sizes.size} samples of track ${track.id} show $rank frames")
+                }
+                skipped = track.sizes.size - rank
+                break
+            }
+            val alphaPlanes = alpha?.let {
+                it.next() ?: throw ImageDecodeException("AVIF: the alpha track has ${it.track.sizes.size} samples for ${track.sizes.size} frames")
+            }
             var bitmap = convert(colorPlanes, alphaPlanes, p.premultiplied, p.cicp ?: AvifCicp(2, 2, 2, colorPlanes.fullRange), wide = false).bitmap
             if (bitmap.width != p.width || bitmap.height != p.height) bitmap = resampled(bitmap, p.width, p.height)
             p.crop?.let { bitmap = cropped(bitmap, it) }
-            val timescale = if (track.timescale > 0) track.timescale else 1L
-            val duration = if (i < track.durations.size) track.durations[i] else 0L
+            bitmaps += bitmap
+        }
+        val timescale = if (track.timescale > 0) track.timescale else 1L
+        val frames = bitmaps.mapIndexed { rank, bitmap ->
+            val duration = track.presentedDuration(rank + skipped)
             val millis = ((duration * 1000 + timescale / 2) / timescale).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-            frames += KiteFrame(
+            KiteFrame(
                 bitmap,
                 // A duration of 0 means as fast as possible; clamp it as browsers do.
                 delayMillis = if (millis <= 10) 100 else millis,
                 delayRawCentiseconds = ((duration * 100 + timescale / 2) / timescale).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
             )
-            if (i + 1 < count) cancellationCheck?.invoke()
         }
         return KiteAnimation(width, height, frames, p.loopCount)
+    }
+
+    /**
+     * The pictures of [track] in output order: it hands the codec one sample at a time in decoding
+     * order, and the codec's pictures wait in a queue, which holds no more than the codec's reorder
+     * delay. [cancel] runs before each sample after the first, so once a frame.
+     */
+    private class TrackReader(private val c: AvifContainer, val track: AvifTrack, private val cancel: (() -> Unit)?) {
+        private val session = sequenceDecoder(track)
+        private val queue = ArrayDeque<HeifPlanes>()
+        private var nextSample = 0
+        private var flushed = false
+
+        /** The next picture in output order, or null when the track has no more. */
+        fun next(): AvifPlanes? {
+            while (queue.isEmpty()) {
+                if (nextSample < track.sizes.size) {
+                    if (nextSample > 0) cancel?.invoke()
+                    queue.addAll(session.decodeInOutputOrder(c.sampleData(track, nextSample), null))
+                    nextSample++
+                } else if (!flushed) {
+                    flushed = true
+                    queue.addAll(session.flush())
+                } else {
+                    return null
+                }
+            }
+            return planesOf(queue.removeFirst())
+        }
     }
 
     /** A codec session for the samples of [track], configured by its configuration property. */
     private fun sequenceDecoder(track: AvifTrack): HeifCodecSession {
         val codec = trackCodec(track)
         return codec.open(configuration(track.properties, codec))
-    }
-
-    /** The planes of the frame sample [index] of [track] shows. */
-    private fun sample(decoder: HeifCodecSession, c: AvifContainer, track: AvifTrack, index: Int): AvifPlanes {
-        val pic = decoder.decode(c.sampleData(track, index), null)
-            ?: throw ImageDecodeException("AVIF: sample $index of track ${track.id} shows no frame")
-        return planesOf(pic)
     }
 
     // ---- codecs -----------------------------------------------------------------------
@@ -285,6 +323,7 @@ internal object AvifDecoder {
     }
 
     private val AV1C = fourcc("av1C")
+    private val AV01_ENTRY = fourcc("av01")
 
     /** What [codec] reads from [item]'s configuration and data, or null when the data is cut off. */
     private fun inspect(c: AvifContainer, item: AvifItem, codec: HeifCodec): HeifCodecInfo? {
@@ -491,11 +530,7 @@ internal object AvifDecoder {
      */
     private fun plan(data: ByteArray, probing: Boolean): Plan {
         val c = AvifContainer.parse(data)
-        val track = c.tracks.firstOrNull { HeifCodecs.forSampleEntry(it.sampleEntry) != null && it.handler == PICT && it.sizes.isNotEmpty() }
-        if (track != null) return trackPlan(c, track, probing)
-        if (c.tracks.any { (it.sampleEntry == HVC1 || it.sampleEntry == HEV1) && it.handler == PICT && it.sizes.isNotEmpty() } && c.primary == null) {
-            throw UnsupportedImageException(NEEDS_HEIC_MODULE)
-        }
+        AvifContainer.shownTrack(c)?.let { return trackPlan(c, it, probing) }
         val primaryId = c.primary ?: throw ImageDecodeException("AVIF: no primary item and no image sequence")
         val primary = c.items[primaryId] ?: throw ImageDecodeException("AVIF: the primary item $primaryId is not described in 'iinf'")
         // An 'altr' group lists alternatives in order of preference: show the first this reader can.
@@ -591,7 +626,7 @@ internal object AvifDecoder {
     }
 
     private fun trackPlan(c: AvifContainer, track: AvifTrack, probing: Boolean): Plan {
-        val codec = trackCodec(track)
+        val codec = HeifCodecs.forSampleEntry(track.sampleEntry) ?: return missingCodecPlan(c, track)
         val config = configuration(track.properties, codec)
         val alpha = c.tracks.firstOrNull { t ->
             t !== track && HeifCodecs.forSampleEntry(t.sampleEntry) != null && (t.auxType == ALPHA_URN || t.auxType == ALPHA_URN_HEVC) &&
@@ -624,6 +659,17 @@ internal object AvifDecoder {
             contentLight = (track.properties.firstOrNull { it is AvifProperty.ContentLight } as AvifProperty.ContentLight?)
                 ?.let { intArrayOf(it.maxContent * 10000, it.maxFrameAverage * 10000) },
             masteringDisplay = (track.properties.firstOrNull { it is AvifProperty.MasteringDisplay } as AvifProperty.MasteringDisplay?)?.values,
+        )
+    }
+
+    /** An HEVC track while no codec reads it: its size from its sample entry, and the module it needs. */
+    private fun missingCodecPlan(c: AvifContainer, track: AvifTrack): Plan {
+        val hvcC = track.properties.firstOrNull { it is AvifProperty.Other && it.type == HVCC } as AvifProperty.Other?
+        val depth = hvcC?.let { AvifContainer.hevcConfigDepths(it.payload) }?.get(1) ?: 8
+        return Plan(
+            c, null, track, null, null, false, track.width, track.height, depth, null, Orientation.Normal,
+            frameCount = track.sizes.size, loopCount = track.playCount, icc = null, cicp = null,
+            unsupported = NEEDS_HEIC_MODULE_TRACK.replace("'hvc1'", "'${fourccName(track.sampleEntry)}'"),
         )
     }
 
@@ -973,8 +1019,16 @@ internal object AvifDecoder {
         return KiteBitmap16(w, h, ch, out)
     }
 
+    /**
+     * The first frame of [track] as it plays. That is the picture of the first sample, unless a
+     * picture decoded after it shows before it, as a leading picture of HEVC can; then the frame
+     * comes from the sequence decoded in output order.
+     */
     private fun trackPlanes(c: AvifContainer, track: AvifTrack, cancel: (() -> Unit)? = null): AvifPlanes {
         val codec = trackCodec(track)
+        if (track.presentationOrder[0] != 0) {
+            return TrackReader(c, track, cancel).next() ?: throw ImageDecodeException("AVIF: track ${track.id} shows no frame")
+        }
         return still(codec, configuration(track.properties, codec), c.sampleData(track, 0), 0, 0xFFFF, cancel)
     }
 

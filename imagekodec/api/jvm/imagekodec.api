@@ -100,6 +100,13 @@ public final class io/github/yuroyami/imagekodec/HeifCodecInfo {
 
 public abstract interface class io/github/yuroyami/imagekodec/HeifCodecSession {
 	public abstract fun decode ([BLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/HeifPlanes;
+	public fun decodeInOutputOrder ([BLkotlin/jvm/functions/Function0;)Ljava/util/List;
+	public fun flush ()Ljava/util/List;
+}
+
+public final class io/github/yuroyami/imagekodec/HeifCodecSession$DefaultImpls {
+	public static fun decodeInOutputOrder (Lio/github/yuroyami/imagekodec/HeifCodecSession;[BLkotlin/jvm/functions/Function0;)Ljava/util/List;
+	public static fun flush (Lio/github/yuroyami/imagekodec/HeifCodecSession;)Ljava/util/List;
 }
 
 public final class io/github/yuroyami/imagekodec/HeifGainMap {

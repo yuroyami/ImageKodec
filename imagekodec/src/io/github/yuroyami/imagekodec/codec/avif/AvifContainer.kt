@@ -105,6 +105,12 @@ internal class AvifTrack(
     val offsets: LongArray,
     val sizes: LongArray,
     val durations: LongArray,
+    /**
+     * The composition time of each sample, in decoding order: its decoding time, the sum of the
+     * `stts` durations before it, plus its `ctts` offset (ISO/IEC 14496-12 8.6.1). A track whose
+     * pictures show in another order than they decode, as HEVC with B pictures does, needs them.
+     */
+    val compositionTimes: LongArray,
     val sync: Set<Int>?,
     /**
      * How many times the sequence plays, 0 for ever: an edit list that repeats plays as many times
@@ -113,7 +119,26 @@ internal class AvifTrack(
      * with no edit list, which leaves it open, a sequence loops, as browsers play it.
      */
     val playCount: Long,
-)
+) {
+    /** The samples in presentation order: by composition time, and in decoding order where two tie. */
+    val presentationOrder: IntArray by lazy {
+        sizes.indices.sortedWith(compareBy<Int> { compositionTimes[it] }.thenBy { it }).toIntArray()
+    }
+
+    /**
+     * The duration of the frame shown [rank]th: the time to the next frame's composition, and for the
+     * last frame its own `stts` duration, as a player shows it until the track ends.
+     */
+    fun presentedDuration(rank: Int): Long {
+        val order = presentationOrder
+        val sample = order[rank]
+        if (rank + 1 < order.size) return compositionTimes[order[rank + 1]] - compositionTimes[sample]
+        return durations[sample]
+    }
+
+    /** Whether this track is an auxiliary one, such as alpha, rather than one of pictures to show. */
+    val isAuxiliary: Boolean get() = auxType != null || references.any { it.type == AvifContainer.AUXL }
+}
 
 /**
  * The structure of an AVIF file (AV1 Image File Format 1.1, over HEIF and ISO base media):
@@ -228,6 +253,7 @@ internal class AvifContainer(
         val TMAP = fourcc("tmap")
         val SATO = fourcc("sato")
         val PICT = fourcc("pict")
+        val VIDE = fourcc("vide")
         val AUXV = fourcc("auxv")
         val AUXL = fourcc("auxl")
         val DIMG = fourcc("dimg")
@@ -297,9 +323,24 @@ internal class AvifContainer(
             }
         }
 
-        /** The coded type of what [c] shows: its first picture track's sample entry, else the primary item's, through derived images. */
+        /**
+         * The track of pictures [c] shows instead of its primary item, as libavif chooses: the major
+         * brand `avif` shows the primary item, `avis` the track, and any other brand the track when
+         * the file has one (libavif's avifDecoderReset with AVIF_DECODER_SOURCE_AUTO). The track is
+         * the first one of handler `pict` or `vide` whose samples a registered codec reads, or that
+         * is HEVC, which names the module it needs, and that is not an auxiliary track.
+         */
+        fun shownTrack(c: AvifContainer): AvifTrack? {
+            if (c.majorBrand == AVIF && c.primary != null) return null
+            return c.tracks.firstOrNull {
+                (it.handler == PICT || it.handler == VIDE) && it.sizes.isNotEmpty() && !it.isAuxiliary &&
+                    (HeifCodecs.forSampleEntry(it.sampleEntry) != null || it.sampleEntry == HVC1 || it.sampleEntry == HEV1)
+            }
+        }
+
+        /** The coded type of what [c] shows: its track's sample entry, else the primary item's, through derived images. */
         private fun shownType(c: AvifContainer): Int? {
-            c.tracks.firstOrNull { it.handler == PICT && it.sizes.isNotEmpty() }?.let { return it.sampleEntry }
+            shownTrack(c)?.let { return it.sampleEntry }
             var item = c.primary?.let { c.items[it] } ?: return null
             repeat(8) {
                 if (item.type != GRID && item.type != IOVL && item.type != TMAP && item.type != SATO) return item.type
@@ -634,7 +675,9 @@ internal class AvifContainer(
             var auxType: String? = null
             var width = 0
             var height = 0
-            if (HeifCodecs.forSampleEntry(entry.type) != null) {
+            // An HEVC entry is read without its codec too, so that probe gives the size of a sequence
+            // whose module is missing.
+            if (HeifCodecs.forSampleEntry(entry.type) != null || entry.type == HVC1 || entry.type == HEV1) {
                 val er = IsoReader(data, entry)
                 // The VisualSampleEntry fields up to its child boxes, with the size among them.
                 er.skip(24)
@@ -745,6 +788,33 @@ internal class AvifContainer(
                     }
                 }
             }
+            // Composition offsets are signed in version 1 and unsigned in version 0, which ffmpeg and
+            // libheif read as signed all the same; a composition time before 0 is refused either way.
+            val compositionTimes = LongArray(sizes.size)
+            var decodingTime = 0L
+            for (i in sizes.indices) {
+                compositionTimes[i] = decodingTime
+                decodingTime += durations[i]
+            }
+            child(data, stbl, "ctts")?.let {
+                val r = IsoReader(data, it)
+                r.fullBox()
+                val n = r.u32()
+                if (n > r.remaining / 8) r.fail("lists $n runs")
+                var s = 0L
+                for (i in 0 until n.toInt()) {
+                    val count = r.u32()
+                    val offset = r.s32().toLong()
+                    if (count > sizes.size - s) throw ImageDecodeException("AVIF: 'ctts' of track $id gives offsets to more than its ${sizes.size} samples")
+                    for (k in 0 until count.toInt()) {
+                        val at = (s + k).toInt()
+                        compositionTimes[at] += offset
+                        if (compositionTimes[at] < 0) throw ImageDecodeException("AVIF: sample $at of track $id is composed before the track starts")
+                    }
+                    s += count
+                }
+                if (s != sizes.size.toLong()) throw ImageDecodeException("AVIF: 'ctts' of track $id gives offsets to $s of its ${sizes.size} samples")
+            }
             val sync = child(data, stbl, "stss")?.let {
                 val r = IsoReader(data, it)
                 r.fullBox()
@@ -752,7 +822,7 @@ internal class AvifContainer(
                 if (n > r.remaining / 4) r.fail("lists $n sync samples")
                 (0 until n.toInt()).map { r.u32().toInt() - 1 }.toSet()
             }
-            return AvifTrack(id, handler, timescale, entry.type, width, height, properties, auxType, references, offsets, sizes, durations, sync, playCount)
+            return AvifTrack(id, handler, timescale, entry.type, width, height, properties, auxType, references, offsets, sizes, durations, compositionTimes, sync, playCount)
         }
     }
 }

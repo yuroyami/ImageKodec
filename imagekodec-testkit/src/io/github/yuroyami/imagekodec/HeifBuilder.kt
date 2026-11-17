@@ -1,13 +1,29 @@
 package io.github.yuroyami.imagekodec
 
-/** A HEIF file of items, with each item's properties, references and entity groups, for tests. */
+/**
+ * A HEIF file of items, with each item's properties, references and entity groups, and of tracks, for
+ * tests. Without items and a primary item it has no `meta` box, as an image sequence from ffmpeg has none.
+ */
 class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf("avif", "mif1", "miaf")) {
     class Item(
         val id: Int, val type: String, val data: ByteArray, val properties: List<Pair<ByteArray, Boolean>>,
         val hidden: Boolean, val idat: Boolean, val extents: Int, val contentType: String? = null,
     )
 
+    /**
+     * A track of an image sequence: [entryBoxes] are the boxes inside its sample entry, such as its
+     * configuration and `auxi`; [ctts] the runs of its `ctts` box as (sample count, offset), written in
+     * version [cttsVersion]; [references] its `tref` boxes; [repeat] sets the repetition flag of an
+     * edit list that spans [editDuration], or leaves the edit list out when null.
+     */
+    class Track(
+        val id: Int, val handler: String, val entry: String, val width: Int, val height: Int, val entryBoxes: ByteArray,
+        val samples: List<ByteArray>, val durations: List<Int>, val timescale: Int, val ctts: List<Pair<Int, Int>>?,
+        val cttsVersion: Int, val references: List<Pair<String, IntArray>>, val repeat: Boolean?, val editDuration: Int,
+    )
+
     val items = ArrayList<Item>()
+    val tracks = ArrayList<Track>()
     val references = ArrayList<Triple<String, Long, LongArray>>()
     val groups = ArrayList<Pair<String, LongArray>>()
     var primary: Int? = 1
@@ -17,6 +33,15 @@ class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf(
         hidden: Boolean = false, idat: Boolean = false, extents: Int = 1, contentType: String? = null,
     ) {
         items += Item(id, type, data, properties, hidden, idat, extents, contentType)
+    }
+
+    fun addTrack(
+        id: Int, entry: String, width: Int, height: Int, entryBoxes: ByteArray, samples: List<ByteArray>,
+        durations: List<Int> = List(samples.size) { 1 }, timescale: Int = 10, handler: String = "pict",
+        ctts: List<Pair<Int, Int>>? = null, cttsVersion: Int = 0, references: List<Pair<String, IntArray>> = emptyList(),
+        repeat: Boolean? = null, editDuration: Int = durations.sum(),
+    ) {
+        tracks += Track(id, handler, entry, width, height, entryBoxes, samples, durations, timescale, ctts, cttsVersion, references, repeat, editDuration)
     }
 
     private fun be32(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
@@ -99,10 +124,48 @@ class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf(
             }
             return fullBox("meta", 0, 0, children)
         }
-        val size = meta(0).size
-        val meta = meta(ftyp.size + size)
+        val withMeta = items.isNotEmpty() || primary != null || tracks.isEmpty()
+        val size = if (withMeta) meta(0).size else 0
+        val moovSize = moov(0).size
+        val mdatStart = ftyp.size + size + moovSize
+        val meta = if (withMeta) meta(mdatStart) else ByteArray(0)
         var mdat = ByteArray(0)
         for (i in items.indices.filter { !items[it].idat }) for (k in pieces[i].indices.reversed()) mdat += pieces[i][k]
-        return ftyp + meta + box("mdat", mdat)
+        val moov = moov(mdatStart + 8 + mdat.size)
+        for (t in tracks) for (sample in t.samples) mdat += sample
+        return ftyp + meta + moov + box("mdat", mdat)
+    }
+
+    /** The `moov` box of [tracks], whose samples lie one after another from [samplesAt], or nothing without tracks. */
+    private fun moov(samplesAt: Int): ByteArray {
+        if (tracks.isEmpty()) return ByteArray(0)
+        var at = samplesAt
+        var traks = ByteArray(0)
+        for (t in tracks) {
+            val duration = t.durations.sum()
+            val tkhd = fullBox("tkhd", 0, 3, ByteArray(8) + be32(t.id) + ByteArray(4) + be32(duration) + ByteArray(52) + be32(t.width shl 16) + be32(t.height shl 16))
+            var tref = ByteArray(0)
+            for ((type, ids) in t.references) tref += box(type, ids.fold(ByteArray(0)) { a, v -> a + be32(v) })
+            val edts = t.repeat?.let { box("edts", fullBox("elst", 0, if (it) 1 else 0, be32(1) + be32(t.editDuration) + be32(0) + be32(0x10000))) } ?: ByteArray(0)
+            val mdhd = fullBox("mdhd", 0, 0, ByteArray(8) + be32(t.timescale) + be32(duration) + ByteArray(4))
+            val hdlr = fullBox("hdlr", 0, 0, be32(0) + t.handler.encodeToByteArray() + ByteArray(12) + byteArrayOf(0))
+            // A VisualSampleEntry (ISO/IEC 14496-12 12.1.3): its fixed fields, then its boxes.
+            val entry = box(
+                t.entry,
+                ByteArray(6) + be16(1) + ByteArray(16) + be16(t.width) + be16(t.height) + be32(0x480000) + be32(0x480000) +
+                    ByteArray(4) + be16(1) + ByteArray(32) + be16(0x18) + be16(0xFFFF) + t.entryBoxes,
+            )
+            val stsd = fullBox("stsd", 0, 0, be32(1) + entry)
+            val stts = fullBox("stts", 0, 0, be32(t.durations.size) + t.durations.fold(ByteArray(0)) { a, d -> a + be32(1) + be32(d) })
+            val ctts = t.ctts?.let { runs -> fullBox("ctts", t.cttsVersion, 0, be32(runs.size) + runs.fold(ByteArray(0)) { a, (n, o) -> a + be32(n) + be32(o) }) } ?: ByteArray(0)
+            val stsc = fullBox("stsc", 0, 0, be32(1) + be32(1) + be32(t.samples.size) + be32(1))
+            val stsz = fullBox("stsz", 0, 0, be32(0) + be32(t.samples.size) + t.samples.fold(ByteArray(0)) { a, s -> a + be32(s.size) })
+            val stco = fullBox("stco", 0, 0, be32(1) + be32(at))
+            at += t.samples.sumOf { it.size }
+            val stbl = box("stbl", stsd + stts + ctts + stsc + stsz + stco)
+            val mdia = box("mdia", mdhd + hdlr + box("minf", stbl))
+            traks += box("trak", tkhd + (if (tref.isEmpty()) ByteArray(0) else box("tref", tref)) + edts + mdia)
+        }
+        return box("moov", traks)
     }
 }

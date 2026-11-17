@@ -41,9 +41,10 @@ class HeicFuzzTest {
         }
     }
 
-    private fun exercise(label: String, bytes: ByteArray) {
+    private fun exercise(label: String, bytes: ByteArray, animation: Boolean = false) {
         if (!shard.takesNext()) return
         withDeadline(label + FuzzSettings.replay, DEADLINE_MILLIS) {
+            if (animation) mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes) }
             mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
             mustFailCleanly("$label decode") { ImageKodec.decode(bytes, applyOrientation = true) }
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes) }
@@ -106,7 +107,43 @@ class HeicFuzzTest {
         exercise("heic cut@${size - 1}", seed.copyOf(size - 1))
     }
 
+    /**
+     * [HeicSequenceVector] (#157): its sample table with `ctts`, and P and B pictures that refer to the
+     * samples before them, through decodeAnimation as well.
+     */
+    @Test
+    fun sequenceMutations() {
+        ImageKodecHeic.install()
+        val sequence = HeicSequenceVector.file()
+        val rng = Rng(FuzzSettings.mix(0x6d736631))
+        repeat(SEQUENCE_MUTANTS * FuzzSettings.rounds) {
+            val bytes = sequence.copyOf()
+            val at = rng.nextInt(bytes.size)
+            val label = if (rng.nextInt(2) == 0) {
+                val bit = rng.nextInt(8)
+                bytes[at] = (bytes[at].toInt() xor (1 shl bit)).toByte()
+                "heic sequence bit@$at.$bit"
+            } else {
+                val v = when (rng.nextInt(3)) {
+                    0 -> 0
+                    1 -> 0xFF
+                    else -> rng.nextInt(256)
+                }
+                bytes[at] = v.toByte()
+                "heic sequence byte@$at=$v"
+            }
+            exercise(label, bytes, animation = true)
+        }
+        val step = maxOf(1, sequence.size / (TRUNCATIONS * FuzzSettings.rounds))
+        var cut = 0
+        while (cut < sequence.size) {
+            exercise("heic sequence cut@$cut", sequence.copyOf(cut), animation = true)
+            cut += step
+        }
+    }
+
     private companion object {
+        const val SEQUENCE_MUTANTS = 600
         const val BIT_FLIPS = 1000
         const val BYTE_CHANGES = 600
         const val TRUNCATIONS = 200

@@ -49,11 +49,18 @@ finds the video of a Motion Photo, with or without the module.
   with its output order, CRA and BLA pictures with their RASL pictures, merge mode, AMVP, temporal
   motion vector prediction, every partition mode with the asymmetric ones, fractional sample
   interpolation and default and explicit weighted prediction. Every stream of the HEVC_v1 and RExt
-  conformance packages of H.265.1 decodes to its hash, in every picture. The core does not read an
-  HEVC image sequence yet (#157), so this matters today for the codec's session, which keeps the
-  reference pictures from one sample to the next.
+  conformance packages of H.265.1 decodes to its hash, in every picture.
+- HEVC image sequences (brands `msf1`, `hevc`, `hevx`): `decodeAnimation` returns every frame of a
+  track whose sample entry is `hvc1` or `hev1` and whose handler is `pict` or `vide`, as ffmpeg writes
+  an MP4. The frames come in presentation order, the order of the composition times of `ctts`, which
+  for B pictures is not the order they decode in. Each frame has its duration and the loop count
+  follows the edit list, as for AVIF, and an alpha track tied to the colour track through `auxl`
+  applies to each frame. `probe` reports the frame count and the size (#157).
 - Support follows the fields of the parameter sets, not the profile number, so a file whose
   profile says more than it uses still decodes.
+- Which of a track and the primary item a file shows follows libavif: the major brand `avif` shows
+  the primary item, `avis` the track, and any other brand, `heic` and `msf1` among them, the track
+  when the file has one.
 - The HEIF structure that the core reads for AVIF too: grids, overlays, identity items, alpha, the
   clean aperture, rotation and mirror, EXIF, XMP and ICC metadata, thumbnails, the pages of a file
   with several images, stereo pairs, Motion Photos, auxiliary images and gain maps.

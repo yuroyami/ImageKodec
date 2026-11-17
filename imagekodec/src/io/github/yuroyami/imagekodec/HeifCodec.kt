@@ -53,8 +53,30 @@ public interface HeifCodec {
  */
 @ExperimentalHeifCodecApi
 public interface HeifCodecSession {
-    /** The picture that [sample] shows, or null when it shows none, as a sample a codec skips can. */
+    /**
+     * The picture that [sample] shows, or null when it shows none, as a sample a codec skips can. The
+     * core decodes an item, and the first frame of a track, through this method.
+     */
     public fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes?
+
+    /**
+     * Decodes [sample], the next sample of a track in decoding order, and returns the pictures the
+     * codec outputs after it, in output order: none, one or several. A codec whose output order differs
+     * from its decoding order, as HEVC's does with B pictures, holds a picture back until every picture
+     * before it in output order is decoded, and [flush] gives the ones it still holds at the end. The
+     * core plays a track through this method and [flush], and pairs the pictures in turn with the
+     * samples in order of composition time.
+     *
+     * The default returns what [decode] gives, for a codec that outputs each picture as it decodes it.
+     */
+    public fun decodeInOutputOrder(sample: ByteArray, cancellationCheck: (() -> Unit)?): List<HeifPlanes> =
+        listOfNotNull(decode(sample, cancellationCheck))
+
+    /**
+     * Ends the track: the pictures the codec still holds back for output, in output order. The default
+     * holds none.
+     */
+    public fun flush(): List<HeifPlanes> = emptyList()
 }
 
 /**

@@ -63,6 +63,8 @@ and fail during the decode.
   2085 and ICtCp) throw `UnsupportedImageException`, as libavif refuses them.
 - An ICC profile or a transfer function is reported, and applied only with a `colorTarget`.
 - An image sequence without an edit list loops forever, as browsers play it.
+- A file with both a track and a primary item shows the primary item when its major brand is `avif`
+  and the track otherwise, as libavif chooses.
 - AV1 allows a frame coded at another size than the first. Such a frame is scaled to the size of
   the first frame.
 - Large scale tile lists, which no image uses, are refused.
@@ -71,8 +73,13 @@ and fail during the decode.
 
 - Decoding needs the `imagekodec-heic` module and a call to `ImageKodecHeic.install()`. Without it,
   `decode` throws `UnsupportedImageException`, and `probe` reports the file as not decodable.
-- The decoder decodes intra, P and B pictures, but the core does not read an HEVC image sequence
-  yet: `decodeAnimation` of a HEIC sequence gives its primary item, as for a still (#157).
+- An image sequence plays from its first sample: `maxFrames` stops it early, and the frames of the
+  whole sequence count together against the output ceiling, as for AVIF. A frame lasts until the
+  next frame's composition time, and the last frame for its own `stts` duration. A `ctts` that does
+  not give each sample one offset, or that puts a sample before the start of the track, is a decode
+  error (#157).
+- Without the module, a HEVC image sequence is reported as not decodable, with its size from its
+  sample entry, and `decodeAnimation` throws `UnsupportedImageException` that names the module.
 - An inter picture whose reference picture set names a picture the decoder does not hold is a
   decode error, except for the RASL pictures of a CRA picture that starts the stream, which are
   skipped as H.265 allows. All the pictures the decoded picture buffer holds count together

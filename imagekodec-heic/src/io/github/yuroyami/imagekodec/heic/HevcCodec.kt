@@ -124,26 +124,33 @@ internal object HevcCodec : HeifCodec {
 /**
  * The samples of an item or a track, decoded in order by one [HevcDecoder], so the decoded picture
  * buffer carries the reference pictures from sample to sample. [decode] returns the picture each sample
- * codes, in decoding order. A caller that shows a sequence in output order creates the session with
- * [keepOutput] and takes the pictures from [takeOutput] after each sample and from [flush] at the end,
- * as the "bumping" process of C.5.2.4 outputs them.
+ * codes, in decoding order; [decodeInOutputOrder] and [flush] return the pictures in output order, as
+ * the "bumping" process of C.5.2.4 outputs them. The buffer keeps what it outputs until a call takes it,
+ * and [decode] drops what it does not return, so a caller that mixes the two holds nothing it does not use.
  */
-internal class HevcSession(private val config: HevcConfig?, keepOutput: Boolean = false) : HeifCodecSession {
-    private val decoder = HevcDecoder(keepOutput)
+internal class HevcSession(private val config: HevcConfig?) : HeifCodecSession {
+    private val decoder = HevcDecoder(keepOutput = true)
 
     init {
         config?.nalUnits?.forEach { decoder.decodeNal(it, 0, it.size, null) }
     }
 
-    override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes? {
+    private fun decodeNals(sample: ByteArray, cancellationCheck: (() -> Unit)?): List<DecodedPicture> {
         cancellationCheck?.invoke()
         for (range in splitSample(sample, config?.lengthSize ?: 4)) decoder.decodeNal(sample, range.first, range.last + 1, cancellationCheck)
-        return decoder.finish().lastOrNull()?.toHeifPlanes()
+        return decoder.finish()
     }
 
-    /** The pictures output since the last call, in output order; empty unless the session keeps output. */
-    fun takeOutput(): List<HeifPlanes> = decoder.takeOutput().map { it.toHeifPlanes() }
+    override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes? {
+        val decoded = decodeNals(sample, cancellationCheck)
+        decoder.takeOutput()
+        return decoded.lastOrNull()?.toHeifPlanes()
+    }
 
-    /** Ends the sequence: the pictures still waiting for output, in output order. */
-    fun flush(): List<HeifPlanes> = decoder.flush().map { it.toHeifPlanes() }
+    override fun decodeInOutputOrder(sample: ByteArray, cancellationCheck: (() -> Unit)?): List<HeifPlanes> {
+        decodeNals(sample, cancellationCheck)
+        return decoder.takeOutput().map { it.toHeifPlanes() }
+    }
+
+    override fun flush(): List<HeifPlanes> = decoder.flush().map { it.toHeifPlanes() }
 }

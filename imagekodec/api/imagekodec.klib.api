@@ -97,6 +97,8 @@ abstract interface io.github.yuroyami.imagekodec/HeifCodec { // io.github.yuroya
 
 abstract interface io.github.yuroyami.imagekodec/HeifCodecSession { // io.github.yuroyami.imagekodec/HeifCodecSession|null[0]
     abstract fun decode(kotlin/ByteArray, kotlin/Function0<kotlin/Unit>?): io.github.yuroyami.imagekodec/HeifPlanes? // io.github.yuroyami.imagekodec/HeifCodecSession.decode|decode(kotlin.ByteArray;kotlin.Function0<kotlin.Unit>?){}[0]
+    open fun decodeInOutputOrder(kotlin/ByteArray, kotlin/Function0<kotlin/Unit>?): kotlin.collections/List<io.github.yuroyami.imagekodec/HeifPlanes> // io.github.yuroyami.imagekodec/HeifCodecSession.decodeInOutputOrder|decodeInOutputOrder(kotlin.ByteArray;kotlin.Function0<kotlin.Unit>?){}[0]
+    open fun flush(): kotlin.collections/List<io.github.yuroyami.imagekodec/HeifPlanes> // io.github.yuroyami.imagekodec/HeifCodecSession.flush|flush(){}[0]
 }
 
 final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuroyami.imagekodec.codec/CcittOptions|null[0]
