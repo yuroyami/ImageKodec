@@ -36,6 +36,9 @@ public final class io/github/yuroyami/imagekodec/ColorTarget$Srgb : io/github/yu
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface annotation class io/github/yuroyami/imagekodec/ExperimentalHeifCodecApi : java/lang/annotation/Annotation {
+}
+
 public final class io/github/yuroyami/imagekodec/GainMap {
 	public fun <init> ([B[B)V
 	public synthetic fun <init> ([B[BILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -44,6 +47,46 @@ public final class io/github/yuroyami/imagekodec/GainMap {
 	public final fun getPrimaryIso ()[B
 	public final fun getWidth ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/yuroyami/imagekodec/HeifCodec {
+	public abstract fun getConfigurationType ()Ljava/lang/String;
+	public abstract fun getItemType ()Ljava/lang/String;
+	public abstract fun getSampleEntryTypes ()Ljava/util/Set;
+	public abstract fun inspect ([B[B)Lio/github/yuroyami/imagekodec/HeifCodecInfo;
+	public abstract fun open ([B)Lio/github/yuroyami/imagekodec/HeifCodecSession;
+}
+
+public final class io/github/yuroyami/imagekodec/HeifCodecInfo {
+	public fun <init> (IIIIILjava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Boolean;Ljava/lang/String;)V
+	public synthetic fun <init> (IIIIILjava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Boolean;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBitDepthChroma ()I
+	public final fun getBitDepthLuma ()I
+	public final fun getChromaFormat ()I
+	public final fun getColorPrimaries ()Ljava/lang/Integer;
+	public final fun getFullRange ()Ljava/lang/Boolean;
+	public final fun getHeight ()I
+	public final fun getMatrixCoefficients ()Ljava/lang/Integer;
+	public final fun getTransferCharacteristics ()Ljava/lang/Integer;
+	public final fun getUnsupportedReason ()Ljava/lang/String;
+	public final fun getWidth ()I
+}
+
+public abstract interface class io/github/yuroyami/imagekodec/HeifCodecSession {
+	public abstract fun decode ([BLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/HeifPlanes;
+}
+
+public final class io/github/yuroyami/imagekodec/HeifPlanes {
+	public fun <init> (IIIIII[[S[IZ)V
+	public final fun getBitDepthChroma ()I
+	public final fun getBitDepthLuma ()I
+	public final fun getFullRange ()Z
+	public final fun getHeight ()I
+	public final fun getPlanes ()[[S
+	public final fun getStrides ()[I
+	public final fun getSubX ()I
+	public final fun getSubY ()I
+	public final fun getWidth ()I
 }
 
 public class io/github/yuroyami/imagekodec/ImageDecodeException : java/lang/Exception {
@@ -147,6 +190,7 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun probeOrNull ([B)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun probePage ([BI)Lio/github/yuroyami/imagekodec/ImageInfo;
 	public final fun readMetadata ([B)Lio/github/yuroyami/imagekodec/ImageMetadata;
+	public final fun registerHeifCodec (Lio/github/yuroyami/imagekodec/HeifCodec;)V
 	public final fun removeMotion ([B)[B
 	public final fun repackJpeg ([BZ)[B
 	public static synthetic fun repackJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)[B

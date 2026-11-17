@@ -1,0 +1,102 @@
+package io.github.yuroyami.imagekodec.codec.avif
+
+import io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi
+import io.github.yuroyami.imagekodec.HeifCodec
+import io.github.yuroyami.imagekodec.HeifCodecInfo
+import io.github.yuroyami.imagekodec.HeifCodecSession
+import io.github.yuroyami.imagekodec.HeifPlanes
+import io.github.yuroyami.imagekodec.ImageDecodeException
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+
+/**
+ * The codecs of the HEIF item types this build decodes, by item type. AV1 is built in; a module
+ * adds others through [io.github.yuroyami.imagekodec.ImageKodec.registerHeifCodec]. Registration
+ * swaps an immutable map atomically, so it is safe from several threads, and readers never lock.
+ */
+@OptIn(ExperimentalHeifCodecApi::class, ExperimentalAtomicApi::class)
+internal object HeifCodecs {
+
+    private class Table(val byItem: Map<Int, HeifCodec>, val bySampleEntry: Map<Int, HeifCodec>, val configurations: Set<Int>)
+
+    private fun table(codecs: Collection<HeifCodec>) = Table(
+        codecs.associateBy { fourcc(it.itemType) },
+        codecs.flatMap { c -> c.sampleEntryTypes.map { fourcc(it) to c } }.toMap(),
+        codecs.map { fourcc(it.configurationType) }.toSet(),
+    )
+
+    private val builtIn: List<HeifCodec> = listOf(Av1Codec)
+    private val current = AtomicReference(table(builtIn))
+
+    fun register(codec: HeifCodec) {
+        for (t in listOf(codec.itemType, codec.configurationType) + codec.sampleEntryTypes) {
+            require(t.length == 4 && t.all { it.code in 0x20..0x7E }) { "'$t' is not a four-character code" }
+        }
+        while (true) {
+            val old = current.load()
+            val codecs = old.byItem.values.filter { it.itemType != codec.itemType } + codec
+            if (current.compareAndSet(old, table(codecs))) return
+        }
+    }
+
+    /** Back to the built-in codecs alone, for tests. */
+    fun reset() = current.store(table(builtIn))
+
+    fun forItem(type: Int): HeifCodec? = current.load().byItem[type]
+
+    fun forSampleEntry(type: Int): HeifCodec? = current.load().bySampleEntry[type]
+
+    /** The property types that configure a registered codec: a reader knows them. */
+    fun isConfiguration(type: Int): Boolean = type in current.load().configurations
+}
+
+/** The AV1 decoder of the core as the codec of `av01` items and tracks. */
+@OptIn(ExperimentalHeifCodecApi::class)
+internal object Av1Codec : HeifCodec {
+    override val itemType: String = "av01"
+    override val sampleEntryTypes: Set<String> = setOf("av01")
+    override val configurationType: String = "av1C"
+
+    /** The configuration OBUs after the four fixed bytes of `av1C` (AV1-ISOBMFF section 2.3). */
+    private fun obus(configuration: ByteArray?): ByteArray? =
+        configuration?.let { if (it.size > 4) it.copyOfRange(4, it.size) else ByteArray(0) }
+
+    override fun inspect(configuration: ByteArray?, data: ByteArray?): HeifCodecInfo {
+        if (data == null) {
+            val c = configuration ?: throw ImageDecodeException("AVIF: an AV1 item without 'av1C' or data")
+            if (c.size < 4) throw ImageDecodeException("AVIF: 'av1C' of ${c.size} bytes")
+            val b2 = c[2].toInt() and 0xFF
+            val depth = if ((b2 and 0x20) != 0) 12 else if ((b2 and 0x40) != 0) 10 else 8
+            val chroma = if ((b2 and 0x10) != 0) 0 else if ((b2 and 0x08) == 0) 3 else if ((b2 and 0x04) == 0) 2 else 1
+            return HeifCodecInfo(0, 0, depth, depth, chroma)
+        }
+        val h = Av1Decoder.inspect(obus(configuration), data)
+        val seq = h.seq
+        return HeifCodecInfo(
+            h.width, h.height, seq.bitDepth, seq.bitDepth,
+            chromaFormat = if (seq.monochrome) 0 else if (seq.subsamplingX == 0) 3 else if (seq.subsamplingY == 0) 2 else 1,
+            colorPrimaries = seq.colorPrimaries, transferCharacteristics = seq.transferCharacteristics,
+            matrixCoefficients = seq.matrixCoefficients, fullRange = seq.colorRange,
+            unsupportedReason = h.unsupported,
+        )
+    }
+
+    override fun open(configuration: ByteArray?): HeifCodecSession = open(configuration, 0, 0xFFFF, still = false)
+
+    /**
+     * A session at AV1 operating point [operatingPoint] (`a1op`), showing spatial layer [layer]
+     * (`lsel`). A [still] session decodes one item; a sequence session decodes temporal units in order.
+     */
+    fun open(configuration: ByteArray?, operatingPoint: Int, layer: Int, still: Boolean): HeifCodecSession {
+        val config = obus(configuration)
+        val decoder = Av1Decoder(operatingPoint)
+        if (!still) config?.takeIf { it.isNotEmpty() }?.let { decoder.configure(it) }
+        return object : HeifCodecSession {
+            override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes? {
+                decoder.cancel = cancellationCheck
+                val pic = if (still) decoder.decodeStill(config, sample, layer) else decoder.decodeTemporalUnit(sample) ?: return null
+                return HeifPlanes(pic.width, pic.height, pic.bitDepth, pic.bitDepth, pic.subX, pic.subY, pic.planes, pic.strides, pic.seq.colorRange)
+            }
+        }
+    }
+}

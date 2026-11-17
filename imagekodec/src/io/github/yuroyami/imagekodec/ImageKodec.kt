@@ -19,6 +19,7 @@ import io.github.yuroyami.imagekodec.codec.TiffEncoder
 import io.github.yuroyami.imagekodec.codec.WebpDecoder
 import io.github.yuroyami.imagekodec.codec.WebpEncoder
 import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
+import io.github.yuroyami.imagekodec.codec.avif.HeifCodecs
 import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
 import io.github.yuroyami.imagekodec.codec.jxr.JxrDecoder
 import io.github.yuroyami.imagekodec.internal.color.ColorManagement
@@ -39,6 +40,13 @@ import io.github.yuroyami.imagekodec.internal.color.reducedBy
  * ```
  */
 public object ImageKodec {
+
+    /**
+     * Adds [codec] as the decoder of its HEIF item type, so that HEIF files whose items have that
+     * type decode. A codec for a type that already has one replaces it. Safe from several threads.
+     */
+    @ExperimentalHeifCodecApi
+    public fun registerHeifCodec(codec: HeifCodec): Unit = HeifCodecs.register(codec)
 
     /** Identify [data]'s format from its magic bytes, or null if unrecognised. */
     public fun detect(data: ByteArray): ImageFormat? = ImageFormat.sniff(data)

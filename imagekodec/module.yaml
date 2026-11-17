@@ -41,7 +41,7 @@ test-dependencies:
 
 settings:
   kotlin:
-    optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi ]
+    optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi, io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi ]
   android:
     namespace: io.github.yuroyami.imagekodec
     compileSdk:

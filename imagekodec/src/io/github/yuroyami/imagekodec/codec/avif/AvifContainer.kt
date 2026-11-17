@@ -15,6 +15,8 @@ internal sealed class AvifProperty {
         val subX: Int,
         val subY: Int,
         val configObus: ByteArray,
+        /** The whole payload, as a codec reads it. */
+        val payload: ByteArray,
     ) : AvifProperty() {
         val bitDepth: Int get() = if (twelveBit) 12 else if (highBitdepth) 10 else 8
     }
@@ -58,8 +60,11 @@ internal sealed class AvifProperty {
     /** `lsel`: the spatial layer to show, or 0xFFFF for the highest. */
     class LayerSelector(val layer: Int) : AvifProperty()
 
-    /** Any other property: [known] when its meaning needs no action from a reader that shows the image. */
-    class Other(val type: Int, val known: Boolean) : AvifProperty()
+    /**
+     * Any other property, with its [payload]: [known] when its meaning needs no action from a reader
+     * that shows the image, or when it configures a registered codec.
+     */
+    class Other(val type: Int, val known: Boolean, val payload: ByteArray = ByteArray(0)) : AvifProperty()
 }
 
 /** Where an item's bytes are (`iloc`, ISO/IEC 14496-12 section 8.11.3). */
@@ -418,6 +423,7 @@ internal class AvifContainer(
                     val b1 = r.u8()
                     val b2 = r.u8()
                     r.u8()
+                    val payload = data.copyOfRange(box.start, box.end)
                     AvifProperty.Av1Config(
                         profile = b1 ushr 5,
                         highBitdepth = (b2 and 0x40) != 0,
@@ -426,6 +432,7 @@ internal class AvifContainer(
                         subX = (b2 ushr 3) and 1,
                         subY = (b2 ushr 2) and 1,
                         configObus = r.bytes(r.remaining),
+                        payload = payload,
                     )
                 }
                 "ispe" -> {
@@ -466,7 +473,11 @@ internal class AvifContainer(
                 )
                 "a1op" -> AvifProperty.OperatingPoint(r.u8())
                 "lsel" -> AvifProperty.LayerSelector(r.u16())
-                else -> AvifProperty.Other(box.type, known = box.type in KNOWN_DESCRIPTIVE)
+                else -> AvifProperty.Other(
+                    box.type,
+                    known = box.type in KNOWN_DESCRIPTIVE || HeifCodecs.isConfiguration(box.type),
+                    payload = if (HeifCodecs.isConfiguration(box.type)) data.copyOfRange(box.start, box.end) else ByteArray(0),
+                )
             }
         }
 
@@ -542,7 +553,7 @@ internal class AvifContainer(
             var auxType: String? = null
             var width = 0
             var height = 0
-            if (entry.type == AV01) {
+            if (HeifCodecs.forSampleEntry(entry.type) != null) {
                 val er = IsoReader(data, entry)
                 // The VisualSampleEntry fields up to its child boxes, with the size among them.
                 er.skip(24)
