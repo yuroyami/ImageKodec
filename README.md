@@ -163,9 +163,12 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | AVIF | stills and image sequences, 8 to 12 bits | no |
 | JPEG XL | both coding modes, layers and animation | no |
 | JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | no |
+| HEIC | intra HEVC pictures, 8 to 12 bits, grids and alpha, with the `imagekodec-heic` module | no |
 
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
-carries a header of its own, so both take their parameters explicitly. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
+carries a header of its own, so both take their parameters explicitly. HEIC decodes only with the
+separate `imagekodec-heic` module, which is not published yet. [HEIC](docs/heic.md) explains why and
+how to install it. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
 format.
 
 ## Platforms
@@ -187,7 +190,7 @@ in a browser on the web, so those two modules are for browser apps.
 
 - Every entry point takes the complete file as a `ByteArray`. There is no streaming decode.
 - `decode` returns 8 bits a channel. Use `decode16` for deeper samples.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR.
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL, JPEG XR or HEIC.
 - A decode refuses an image of more than 2^28 pixels (about 1 GiB of ARGB).
 
 [Limits](docs/limits.md) has the full list, format by format.

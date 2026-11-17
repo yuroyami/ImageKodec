@@ -58,6 +58,19 @@ and fail during the decode.
   the first frame.
 - Large scale tile lists, which no image uses, are refused.
 
+## HEIC
+
+- Decoding needs the `imagekodec-heic` module and a call to `ImageKodecHeic.install()`. Without it,
+  `decode` throws `UnsupportedImageException`, and `probe` reports the file as not decodable.
+- Only intra pictures decode. An image sequence or a picture with inter slices is refused.
+- The coding tools of the range extensions (residual DPCM, cross-component prediction, extended
+  precision, persistent Rice adaptation, chroma QP offset lists, transform skip rotation, context
+  and sizes above 4, disabled intra smoothing and boundary filtering, CABAC bypass alignment), the
+  tools of the screen content extensions, separate colour planes, CTBs of 8 samples and bit depths
+  above 12 are refused, and `unsupportedReason` names the field that asks for them.
+- Chroma is upsampled bilinearly, as for AVIF. libheif's `heif-convert` takes the nearest sample,
+  so the two differ at sharp colour edges of a subsampled image.
+
 ## JPEG XL
 
 ### Color
