@@ -45,20 +45,36 @@ internal object HevcHeaderReader {
  * Apple's alpha and gain map images are of the Main Intra profile in 4:0:0, for one (#140).
  */
 internal object HevcSupport {
-    const val NOT_IMPLEMENTED: String = "HEVC decoding is not implemented yet"
+    const val DEBLOCKING: String = "HEVC: the deblocking filter is not implemented yet"
+    const val SAO: String = "HEVC: sample adaptive offset is not implemented yet"
 
-    /** Why the picture of [h] cannot be decoded. Each issue that adds a tool removes its line here. */
-    fun reason(h: HevcHeaders): String {
-        val field = firstUnsupportedField(h.sps, h.pps, h.slice) ?: return NOT_IMPLEMENTED
-        return "HEVC: $field is not supported yet"
+    /**
+     * Why the picture of [h] cannot be decoded, or null when it can. Without a slice header the
+     * parameter sets decide, as if every slice turned on what they allow. Each issue that adds a tool
+     * removes its line here.
+     */
+    fun reason(h: HevcHeaders): String? {
+        h.slice?.let { return sliceReason(it, true) }
+        firstUnsupportedField(h.sps, h.pps, null)?.let { return "HEVC: $it is not supported yet" }
+        val p = h.pps
+        if (p != null && (!p.deblockingFilterDisabled || p.deblockingFilterOverrideEnabled)) return DEBLOCKING
+        if (h.sps.saoEnabled) return SAO
+        return null
+    }
+
+    /** Why the slice segment [h] cannot be decoded, or null; the loop filters count only when [loopFilters] is set. */
+    fun sliceReason(h: SliceHeader, loopFilters: Boolean): String? {
+        firstUnsupportedField(h.sps, h.pps, h)?.let { return "HEVC: $it is not supported yet" }
+        if (loopFilters && !h.deblockingFilterDisabled) return DEBLOCKING
+        if (loopFilters && (h.saoLuma || h.saoChroma)) return SAO
+        return null
     }
 
     private fun firstUnsupportedField(s: Sps, p: Pps?, slice: SliceHeader?): String? = when {
         s.ctbLog2 < 4 -> "a CTB of ${s.ctbSize} samples (log2_diff_max_min_luma_coding_block_size)"
         s.separateColourPlane -> "separate_colour_plane_flag"
-        s.chromaFormatIdc == 2 || s.chromaFormatIdc == 3 -> "chroma_format_idc ${s.chromaFormatIdc}"
-        s.bitDepthY > 10 -> "bit_depth_luma_minus8 ${s.bitDepthY - 8}"
-        s.bitDepthC > 10 -> "bit_depth_chroma_minus8 ${s.bitDepthC - 8}"
+        s.bitDepthY > 12 -> "bit_depth_luma_minus8 ${s.bitDepthY - 8}"
+        s.bitDepthC > 12 -> "bit_depth_chroma_minus8 ${s.bitDepthC - 8}"
         s.transformSkipRotation -> "transform_skip_rotation_enabled_flag"
         s.transformSkipContext -> "transform_skip_context_enabled_flag"
         s.implicitRdpcm -> "implicit_rdpcm_enabled_flag"
@@ -69,12 +85,14 @@ internal object HevcSupport {
         s.cabacBypassAlignment -> "cabac_bypass_alignment_enabled_flag"
         s.paletteMode -> "palette_mode_enabled_flag"
         s.intraBoundaryFilteringDisabled -> "intra_boundary_filtering_disabled_flag"
+        p != null && p.tilesEnabled -> "tiles_enabled_flag"
         p != null && p.log2MaxTransformSkipSize > 2 -> "log2_max_transform_skip_block_size_minus2 ${p.log2MaxTransformSkipSize - 2}"
         p != null && p.crossComponentPrediction -> "cross_component_prediction_enabled_flag"
         p != null && p.chromaQpOffsetListEnabled -> "chroma_qp_offset_list_enabled_flag"
         p != null && p.currPicRefEnabled -> "pps_curr_pic_ref_enabled_flag"
         p != null && p.residualAdaptiveColourTransform -> "residual_adaptive_colour_transform_enabled_flag"
         slice != null && slice.sliceType != SliceType.I -> "slice_type ${slice.sliceType}"
+        slice != null && slice.dependentSliceSegment -> "dependent_slice_segment_flag"
         else -> null
     }
 }
@@ -94,7 +112,7 @@ internal object HevcCodec : HeifCodec {
             return fromConfig(config, e.message)
         }
         if (headers == null) {
-            // Probing a depth reads hvcC alone; any other caller needs an SPS.
+            // Probing a depth reads hvcC alone, whose SPS may come with the samples; any other caller needs an SPS.
             if (data == null && config != null) return fromConfig(config, null)
             hevcError("no sequence parameter set")
         }
@@ -117,15 +135,24 @@ internal object HevcCodec : HeifCodec {
 
     private fun fromConfig(config: HevcConfig?, reason: String?) = HeifCodecInfo(
         0, 0, config?.bitDepthLuma ?: 8, config?.bitDepthChroma ?: 8, config?.chromaFormat ?: 1,
-        unsupportedReason = reason ?: HevcSupport.NOT_IMPLEMENTED,
+        unsupportedReason = reason,
     )
 
-    /** A session that reads each sample's headers, so malformed data fails as such, then reports what it lacks. */
-    override fun open(configuration: ByteArray?): HeifCodecSession = object : HeifCodecSession {
-        override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes? {
-            cancellationCheck?.invoke()
-            val reason = inspect(configuration, sample).unsupportedReason ?: HevcSupport.NOT_IMPLEMENTED
-            throw UnsupportedImageException(reason)
+    /**
+     * A session that decodes each sample into one picture. The parameter sets of hvcC, and any a sample
+     * carries, stay for the samples after it. A picture the decoder lacks a tool for throws
+     * UnsupportedImageException with the reason [inspect] gives.
+     */
+    override fun open(configuration: ByteArray?): HeifCodecSession {
+        val config = configuration?.let { HevcConfig.parse(it) }
+        val decoder = HevcDecoder()
+        config?.nalUnits?.forEach { decoder.decodeNal(it, 0, it.size, null) }
+        return object : HeifCodecSession {
+            override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes? {
+                cancellationCheck?.invoke()
+                for (range in splitSample(sample, config?.lengthSize ?: 4)) decoder.decodeNal(sample, range.first, range.last + 1, cancellationCheck)
+                return decoder.finish().lastOrNull()?.toHeifPlanes()
+            }
         }
     }
 }

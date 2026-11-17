@@ -13,6 +13,7 @@ internal object NalType {
     const val VPS = 32
     const val SPS = 33
     const val PPS = 34
+    const val SUFFIX_SEI = 40
 
     /** The coded slice segments. The reserved VCL types 10 to 15 and 22 to 31 are ignored, as 7.4.2.2 asks. */
     fun isSlice(type: Int): Boolean = type in 0..RASL_R || type in BLA_W_LP..CRA_NUT
@@ -50,6 +51,28 @@ internal fun unescapeNal(nal: ByteArray, from: Int = 0, to: Int = nal.size): Byt
         i++
     }
     return if (n == out.size) out else out.copyOf(n)
+}
+
+/**
+ * The positions, counted from [from] in the escaped bytes of [nal], of the emulation prevention bytes
+ * that [unescapeNal] drops. Entry point offsets count those bytes (7.4.7.1), so the slice decoder maps
+ * them back.
+ */
+internal fun emulationPreventionBytes(nal: ByteArray, from: Int = 0, to: Int = nal.size): IntArray {
+    var out = IntArray(0)
+    var n = 0
+    var zeros = 0
+    for (i in from until to) {
+        val b = nal[i].toInt() and 0xFF
+        if (zeros >= 2 && b == 3 && i - from >= 2) {
+            if (n == out.size) out = out.copyOf(maxOf(8, n * 2))
+            out[n++] = i - from
+            zeros = 0
+            continue
+        }
+        zeros = if (b == 0) zeros + 1 else 0
+    }
+    return out.copyOf(n)
 }
 
 /**

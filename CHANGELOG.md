@@ -19,8 +19,12 @@ reviewable in the diff.
   for `hvc1` items and `hvc1` and `hev1` tracks; a second call changes nothing. It reads the HEVC
   parameter sets and slice segment headers of ITU-T H.265, from `hvcC` or from the sample data, so
   `probe` reports a HEIC file's coded size after the conformance window, its depths, chroma format
-  and VUI colour. Decoding the pictures is not implemented yet, and every item says so in
-  `unsupportedReason`. The module is not published (#139, #140).
+  and VUI colour. The module is not published (#139, #140).
+- `imagekodec-heic` decodes intra HEVC pictures: the CABAC slice data with wavefront rows, entry
+  points and several slices, and intra reconstruction in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 12
+  bits, with scaling lists, transform skip, lossless coding and PCM. A picture that turns on the
+  deblocking filter or sample adaptive offset, which are not implemented yet, still reports so in
+  `unsupportedReason`; so do tiles, dependent slice segments and inter slices (#141, #142).
 - `ImageFormat.HEIC`: `detect` and `probe` recognise a HEIF file whose image is not AV1, by its HEVC
   brands, or by the type of the image it shows when it names only `mif1` or `msf1`. `probe` reports
   its size and depth from the container. Until a codec reads its HEVC items, `isDecodable` is false

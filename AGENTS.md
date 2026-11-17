@@ -170,5 +170,7 @@ being true.
 - x265 3.5, given a scaling list file whose inter lists equal its intra ones, writes an SPS that
   ffmpeg 6 refuses ("Invalid delta in scaling list data"). `HevcHeaderOracleTest` gives every list
   its own values; the conformance streams cover predicted lists (#140).
+- x265 moves the QP of an I picture by `ipratio` (1.4), so `qp=51` gives a SliceQpY of 48 and `qp=1`
+  of 0. Add `ipratio=1` to pin it (#142).
 - ffmpeg's `trace_headers` names two HEVC elements otherwise than H.265 does: `matrix_coefficients`
   for `matrix_coeffs` and `scaling_list_delta_coeff` for `scaling_list_delta_coef` (#140).

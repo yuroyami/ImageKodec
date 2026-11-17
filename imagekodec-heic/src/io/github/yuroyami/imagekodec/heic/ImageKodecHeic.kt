@@ -10,9 +10,9 @@ import io.github.yuroyami.imagekodec.ImageKodec
  * val info = ImageKodec.probe(heicBytes)
  * ```
  *
- * The module reads the parameter sets and slice headers of HEVC today, so `probe` reports the coded
- * size, depths and colour of a HEIC file. Decoding the pictures is not implemented yet: every HEVC
- * item reports why in `ImageInfo.unsupportedReason`, and `decode` throws `UnsupportedImageException`.
+ * The module decodes intra pictures of HEVC in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 12 bits. The loop
+ * filters are not implemented yet, so a picture that turns on deblocking or sample adaptive offset, as
+ * most do, reports why in `ImageInfo.unsupportedReason`, and `decode` throws `UnsupportedImageException`.
  */
 public object ImageKodecHeic {
     /**

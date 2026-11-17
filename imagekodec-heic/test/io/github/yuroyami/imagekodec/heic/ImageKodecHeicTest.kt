@@ -41,7 +41,7 @@ class ImageKodecHeicTest {
         assertEquals(8, info.bitDepth)
         assertFalse(info.isDecodable)
         // The reason comes from this module's codec, not from the core's note that the module is missing.
-        assertEquals(HevcSupport.NOT_IMPLEMENTED, info.unsupportedReason)
+        assertEquals(HevcSupport.DEBLOCKING, info.unsupportedReason)
         val e = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(heic()) }
         assertEquals(true, e.message?.contains("not implemented"), e.message)
     }
