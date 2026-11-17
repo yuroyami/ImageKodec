@@ -63,6 +63,9 @@ being true.
 - GitHub keeps 10 GB of caches for a repository and drops the oldest past that. A cache
   key with the commit in it adds an entry on every push, so the toolchain caches of CI
   are keyed on the build files alone.
+- A runner that runs out of memory stops with exit code 143 and "The runner has received a shutdown
+  signal", which reads like a fault of GitHub's. One `./kotlin build` of every non-Apple platform did
+  this once the HEIC module was in, so CI builds the native platforms one at a time.
 - Two release framework links at once do not fit in the 7 GB of a macOS runner and take
   three times as long, so `tools/apple_frameworks.py` links them one after the other.
 - Kotlin/JS does 64-bit arithmetic in software, and the AV1 inverse transform uses it for

@@ -365,12 +365,14 @@ jobs:
       - uses: ./.github/actions/setup
         id: setup
 
+      # One build of all twelve platforms with the HEIC module ran the runner out of memory, which
+      # GitHub reports as a shutdown signal. The native platforms build one at a time.
       - name: Build
-        run: >
-          ./kotlin build
-          -p jvm -p android -p js -p wasmJs -p wasmWasi
-          -p linuxX64 -p linuxArm64 -p mingwX64
-          -p androidNativeArm32 -p androidNativeArm64 -p androidNativeX64 -p androidNativeX86
+        run: |
+          ./kotlin build -p jvm -p android -p js -p wasmJs -p wasmWasi
+          for p in linuxX64 linuxArm64 mingwX64 androidNativeArm32 androidNativeArm64 androidNativeX64 androidNativeX86; do
+            ./kotlin build -p "$p"
+          done
 
       - name: Check the JVM public API
         run: ./kotlin check abi
