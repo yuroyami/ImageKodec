@@ -516,7 +516,7 @@ internal object PngDecoder {
         }
         if (expected > MAX_ARRAY) throw ImageDecodeException("PNG: $expected inflated bytes do not fit in one array")
         val inflated = try {
-            Zlib.decompress(compressed, maximumSize = expected, cancel = cancel)
+            Zlib.decompress(compressed, maximumSize = expected, cancel = cancel, checkAdler = false)
         } catch (e: InflateException) {
             throw ImageDecodeException("PNG: IDAT inflate failed: ${e.message}", e)
         }

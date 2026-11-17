@@ -82,13 +82,13 @@ internal object MetadataIo {
         }
         if (at > body.size) return null
         val text = body.copyOfRange(at, body.size)
-        return runCatching { if (compressed) Zlib.decompress(text, MAX_TEXT, 0).decodeToString() else text.decodeToString() }.getOrNull()
+        return runCatching { if (compressed) Zlib.decompress(text, MAX_TEXT, 0, checkAdler = false).decodeToString() else text.decodeToString() }.getOrNull()
     }
 
     private fun pngIcc(body: ByteArray): ByteArray? {
         val nul = body.indexOf(0)
         if (nul !in 1..79 || nul + 2 > body.size || body[nul + 1].toInt() != 0) return null
-        return runCatching { Zlib.decompress(body.copyOfRange(nul + 2, body.size), MAX_TEXT, 0) }.getOrNull()
+        return runCatching { Zlib.decompress(body.copyOfRange(nul + 2, body.size), MAX_TEXT, 0, checkAdler = false) }.getOrNull()
     }
 
     private fun readWebp(data: ByteArray): ImageMetadata {

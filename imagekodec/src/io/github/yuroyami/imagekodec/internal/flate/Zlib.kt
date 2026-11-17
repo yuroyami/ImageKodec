@@ -32,7 +32,9 @@ internal object Zlib {
     }
 
     /**
-     * Decompress a zlib stream. The Adler-32 trailer is not re-validated here.
+     * Decompress a zlib stream. With [checkAdler], the Adler-32 after the last block must match the
+     * output, as RFC 1950 2.3 requires (#160). PNG passes false: its chunks carry a CRC-32 each, and
+     * the `png` crate, a reader in wide use, also skips the Adler-32 by default.
      *
      * [maximumSize] is the decompression-bomb guard, enforced *during* inflate:
      * the stream aborts the moment the output would exceed it, before that
@@ -48,6 +50,7 @@ internal object Zlib {
         maximumSize: Long,
         sizeHint: Int = if (maximumSize <= Int.MAX_VALUE) maximumSize.toInt() else 0,
         cancel: (() -> Unit)? = null,
+        checkAdler: Boolean = true,
     ): ByteArray {
         require(maximumSize > 0) { "maximumSize must be > 0" }
         if (input.size < 2) throw InflateException(InflateError.INVALID_ZLIB_HEADER)
@@ -60,12 +63,19 @@ internal object Zlib {
         if ((flg and 0x20) != 0) throw InflateException(InflateError.INVALID_ZLIB_HEADER) // FDICT
         if (((cmf shl 8) or flg) % 31 != 0) throw InflateException(InflateError.INVALID_ZLIB_HEADER)
 
-        return Inflate.inflate(
+        val inflated = Inflate.inflateWithEnd(
             input,
             offset = 2,
             sizeHint = sizeHint,
             maxOutput = maximumSize,
             cancel = cancel,
         )
+        if (!checkAdler) return inflated.data
+        val at = inflated.end
+        if (at > input.size - 4) throw InflateException(InflateError.MISSING_DATA_CHECK)
+        var stored = 0L
+        for (i in 0 until 4) stored = (stored shl 8) or (input[at + i].toLong() and 0xFF)
+        if (stored != Adler32.of(inflated.data)) throw InflateException(InflateError.INCORRECT_DATA_CHECK)
+        return inflated.data
     }
 }
