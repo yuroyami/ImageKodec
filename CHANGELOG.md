@@ -14,6 +14,19 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.auxiliaryImages` lists the auxiliary images of a HEIC or AVIF file's primary image,
+  alpha, depth and gain maps among them, each with its `auxC` URN, its size, its bit depth and the
+  subtype bytes after the URN, unparsed; `decodeAuxiliaryImage` decodes one as a gray `KiteBitmap16`
+  of its coded samples, widened to 16 bits. `pug.heic`, an iPhone photo, lists its 768x576 depth
+  image and its 2016x1512 gain map, and both equal libde265's decode of their items (#154).
+- `ImageKodec.decodeGainMap` returns the HDR gain map of a HEIC or AVIF file as a `HeifGainMap`: the
+  decoded map, one or three channels at 16 bits, and its parameters. For a `tmap` item that is
+  `GainMapMetadata`, the ISO 21496-1 fields of its payload with the payload itself; for an Apple
+  photo's `urn:com:apple:photo:2020:aux:hdrgainmap` image, MakerNote tags 33 and 48 of its EXIF and,
+  when both are there, the headroom Apple's formula gives. The map is returned, not applied, and
+  `readMetadata` still decodes no picture. `HeifGainMap` is a new type beside `GainMap`, which stays
+  the gain map of an Ultra HDR JPEG and keeps its `jpeg` bytes, so no code that reads it changes
+  (#153).
 - `decodeScaled` and `decodeDownscaledTo` reduce a HEIC or AVIF grid while it decodes. One row of
   tiles at a time is converted to RGB and fed to the box filter, so a 48-megapixel grid never exists
   at full size; the result equals `decode` followed by the same scale, pixel for pixel (#151).

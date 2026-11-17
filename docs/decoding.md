@@ -84,6 +84,11 @@ JPEG, and `applyOrientation` applies them. The clean aperture always crops. An i
 plays through `decodeAnimation` with the duration its track gives each frame and the loop count
 its edit list gives, alpha track included. `decode` shows its first frame.
 
+A tone-mapped image (`tmap`) shows its base image. `decodeGainMap` gives its gain map image and the
+ISO 21496-1 metadata of its payload, and `auxiliaryImages` and `decodeAuxiliaryImage` reach the
+alpha, depth and other auxiliary images of the primary image, for AVIF and HEIC alike; the
+[HEIC page](heic.md#depth-maps-mattes-and-gain-maps) has an example.
+
 ### HEIC
 
 HEIC decodes with an HEVC decoder written from ITU-T H.265, in the `imagekodec-heic` module, after

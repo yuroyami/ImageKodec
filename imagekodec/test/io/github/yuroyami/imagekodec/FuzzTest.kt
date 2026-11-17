@@ -163,6 +163,8 @@ class FuzzTest {
         "jp2-ppm" to Jp2FeatureFixtures.ppm,
         // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
         *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
+        // A tmap with its gain map, and alpha and depth auxiliary images (#153, #154).
+        "heif-aux-tmap" to AuxiliaryFiles.everything(),
         // JPEG XL from libjxl: both coding modes, the container, an ICC profile, passes, an LF frame, patches,
         // splines, noise, upsampling, a recompressed JPEG, float samples and a blended animation (#42).
         *JxlFixtures.all.map { (name, data) -> "jxl-$name" to data }.toTypedArray(),
@@ -354,6 +356,17 @@ class FuzzTest {
             if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.JPEG) {
                 mustFailCleanly("$label decode16 to sRGB") { ImageKodec.decode16(bytes, colorTarget = ColorTarget.Srgb()) }
             }
+        }
+        // The auxiliary images and the gain map of a HEIF file read their own items (#153, #154).
+        if (format == ImageFormat.AVIF || format == ImageFormat.HEIC) {
+            mustFailCleanly("$label auxiliaryImages") { ImageKodec.auxiliaryImages(bytes) }
+            val auxiliary = try {
+                ImageKodec.auxiliaryImages(bytes).size
+            } catch (_: ImageDecodeException) {
+                0
+            }
+            for (i in 0 until minOf(auxiliary, 2)) mustFailCleanly("$label decodeAuxiliaryImage $i") { ImageKodec.decodeAuxiliaryImage(bytes, i) }
+            mustFailCleanly("$label decodeGainMap") { ImageKodec.decodeGainMap(bytes) }
         }
         // A damaged chain of TIFF pages: the last page the probe counts must be reachable.
         val pages = ImageKodec.probeOrNull(bytes)?.pageCount ?: 1

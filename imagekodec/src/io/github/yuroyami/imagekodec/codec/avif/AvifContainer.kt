@@ -40,8 +40,8 @@ internal sealed class AvifProperty {
     /** `colr` of type `prof` or `rICC`: an ICC profile. */
     class Icc(val profile: ByteArray) : AvifProperty()
 
-    /** `auxC`: the kind of auxiliary image, as a URN. */
-    class AuxType(val urn: String) : AvifProperty()
+    /** `auxC`: the kind of auxiliary image, as a URN, and the [subtype] bytes after it, unparsed. */
+    class AuxType(val urn: String, val subtype: ByteArray = ByteArray(0)) : AvifProperty()
 
     /** `irot`: a turn of [angle] times 90 degrees anticlockwise. */
     class Rotation(val angle: Int) : AvifProperty()
@@ -544,7 +544,7 @@ internal class AvifContainer(
                 }
                 "auxC" -> {
                     r.fullBox()
-                    AvifProperty.AuxType(r.string())
+                    AvifProperty.AuxType(r.string(), r.bytes(r.remaining))
                 }
                 "irot" -> AvifProperty.Rotation(r.u8() and 3)
                 "imir" -> AvifProperty.Mirror(r.u8() and 1)

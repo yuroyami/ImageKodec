@@ -1,11 +1,13 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
+import io.github.yuroyami.imagekodec.AuxiliaryImage
 import io.github.yuroyami.imagekodec.BandScaler
 import io.github.yuroyami.imagekodec.ColorProfile
 import io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi
 import io.github.yuroyami.imagekodec.HeifCodec
 import io.github.yuroyami.imagekodec.HeifCodecInfo
 import io.github.yuroyami.imagekodec.HeifCodecSession
+import io.github.yuroyami.imagekodec.HeifGainMap
 import io.github.yuroyami.imagekodec.HeifPlanes
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.ImageFormat
@@ -16,6 +18,8 @@ import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.KiteFrame
 import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.UnsupportedImageException
+import io.github.yuroyami.imagekodec.codec.AppleMakerNote
+import io.github.yuroyami.imagekodec.codec.MetadataIo
 import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALPHA_URN
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALPHA_URN_HEVC
@@ -379,6 +383,104 @@ internal object AvifDecoder {
         val chosen = covering.minByOrNull { w(it).toLong() * h(it) } ?: usable.maxBy { w(it).toLong() * h(it) }
         val shown = render(chosen, wide = false, cancel).bitmap
         Thumbnail(shown, chosen.orientation, chosen.icc, chosen.cicp?.toIntArray())
+    }
+
+    // ---- auxiliary images and gain maps (#153, #154) ---------------------------------
+
+    const val APPLE_GAIN_MAP_URN = "urn:com:apple:photo:2020:aux:hdrgainmap"
+
+    /**
+     * The auxiliary images of [c]'s primary item, in the order of the `auxl` references that tie
+     * them to it: items with an `auxC` property, the primary item itself left out. A tone-mapped
+     * primary item shows its base image, so the base image's auxiliary images are its own too.
+     */
+    private fun auxiliaryItems(c: AvifContainer): List<AvifItem> {
+        val primary = c.primary?.let { c.items[it] } ?: return emptyList()
+        val owners = linkedSetOf(primary.id)
+        if (primary.type == TMAP) c.referencesFrom(primary.id, DIMG).firstOrNull()?.let { owners += it }
+        val out = LinkedHashMap<Long, AvifItem>()
+        for (owner in owners) {
+            for (id in c.referencesTo(owner, AUXL)) {
+                if (id in owners || id in out) continue
+                val item = c.items[id] ?: continue
+                if (item.property<AvifProperty.AuxType>() != null) out[id] = item
+            }
+        }
+        return out.values.toList()
+    }
+
+    /** What [io.github.yuroyami.imagekodec.ImageKodec.auxiliaryImages] lists. */
+    fun auxiliaryImages(data: ByteArray): List<AuxiliaryImage> = labelled(data) {
+        val c = AvifContainer.parse(data)
+        auxiliaryItems(c).map { item ->
+            val aux = item.property<AvifProperty.AuxType>()!!
+            val (w, h) = itemSize(c, item, 0)
+            AuxiliaryImage(aux.urn, w, h, itemDepth(c, item, 0), aux.subtype.copyOf())
+        }
+    }
+
+    /** Auxiliary image [index] of [data]: the first plane of its item, each sample widened to 16 bits. */
+    fun decodeAuxiliary(data: ByteArray, index: Int, cancel: (() -> Unit)?): KiteBitmap16 = labelled(data) {
+        val c = AvifContainer.parse(data)
+        val items = auxiliaryItems(c)
+        require(index in items.indices) { "auxiliary image $index asked of a file with ${items.size}" }
+        val item = items[index]
+        (unsupported(c, item, 0) ?: frames(c, item, 0))?.let { throw UnsupportedImageException(it) }
+        widened(planes(c, item, 0, cancel))
+    }
+
+    /** Plane 0 of [p] at 16 bits, an n-bit sample `v` as `v * 65535 / (2^n - 1)` rounded to the nearest. */
+    private fun widened(p: AvifPlanes): KiteBitmap16 {
+        if (p.depth !in 1..16) throw ImageDecodeException("AVIF: a picture of ${p.depth} bits")
+        val max = (1L shl p.depth) - 1
+        val plane = p.planes[0]
+        val stride = p.strides[0]
+        val out = ShortArray(p.width * p.height)
+        for (y in 0 until p.height) for (x in 0 until p.width) {
+            val v = minOf((plane[y * stride + x].toInt() and 0xFFFF).toLong(), max)
+            out[y * p.width + x] = ((v * 65535 + max / 2) / max).toInt().toShort()
+        }
+        return KiteBitmap16(p.width, p.height, 1, out)
+    }
+
+    /**
+     * The gain map of [data]'s primary image: that of a `tmap` item that is the primary item or
+     * that has the primary item as its base image, else the Apple auxiliary image, else null.
+     */
+    fun gainMap(data: ByteArray, cancel: (() -> Unit)?): HeifGainMap? = labelled(data) {
+        val c = AvifContainer.parse(data)
+        val primary = c.primary?.let { c.items[it] } ?: return@labelled null
+        val tmap = if (primary.type == TMAP) {
+            primary
+        } else {
+            c.items.values.firstOrNull { it.type == TMAP && c.referencesFrom(it.id, DIMG).firstOrNull() == primary.id }
+        }
+        if (tmap != null) {
+            val ids = c.referencesFrom(tmap.id, DIMG)
+            // ISO/IEC 23008-12 6.6.2.4: the base image, then the gain map image.
+            if (ids.size != 2) throw ImageDecodeException("AVIF: tone-mapped item ${tmap.id} has ${ids.size} inputs, not a base image and a gain map")
+            val map = c.items[ids[1]] ?: throw ImageDecodeException("AVIF: tone-mapped item ${tmap.id} refers to a missing item ${ids[1]}")
+            if (map.id == tmap.id) throw ImageDecodeException("AVIF: tone-mapped item ${tmap.id} is its own gain map")
+            val metadata = AvifToneMap.read(c.itemData(tmap))
+            return@labelled HeifGainMap(HeifGainMap.Form.Iso21496, gainMapBitmap(c, map, cancel), metadata, null, null, null)
+        }
+        val apple = auxiliaryItems(c).firstOrNull { it.property<AvifProperty.AuxType>()?.urn == APPLE_GAIN_MAP_URN } ?: return@labelled null
+        val bitmap = gainMapBitmap(c, apple, cancel)
+        val tags = MetadataIo.read(data).exif?.let { AppleMakerNote.tags(it, setOf(33, 48)) } ?: emptyMap()
+        val m33 = tags[33]
+        val m48 = tags[48]
+        val headroom = if (m33 != null && m48 != null) AppleMakerNote.headroom(m33, m48) else null
+        HeifGainMap(HeifGainMap.Form.Apple, bitmap, null, m33, m48, headroom)
+    }
+
+    /** The samples of gain map image [item], converted as [decode16] converts a picture: one channel for a monochrome image. */
+    private fun gainMapBitmap(c: AvifContainer, item: AvifItem, cancel: (() -> Unit)?): KiteBitmap16 {
+        (unsupported(c, item, 0) ?: frames(c, item, 0))?.let { throw UnsupportedImageException(it) }
+        val p = planes(c, item, 0, cancel)
+        val out16 = ShortArray(p.width * p.height * 3)
+        AvifColor.convert(p, itemCicp(c, item, 0) ?: AvifCicp(2, 2, 2, p.fullRange), null, false, IntArray(p.width * p.height), out16)
+        if (!p.monochrome) return KiteBitmap16(p.width, p.height, 3, out16)
+        return KiteBitmap16(p.width, p.height, 1, ShortArray(p.width * p.height) { out16[it * 3] })
     }
 
     // ---- choosing what to show ------------------------------------------------------

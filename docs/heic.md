@@ -56,7 +56,7 @@ finds the video of a Motion Photo, with or without the module.
   profile says more than it uses still decodes.
 - The HEIF structure that the core reads for AVIF too: grids, overlays, identity items, alpha, the
   clean aperture, rotation and mirror, EXIF, XMP and ICC metadata, thumbnails, the pages of a file
-  with several images, stereo pairs and Motion Photos.
+  with several images, stereo pairs, Motion Photos, auxiliary images and gain maps.
 
 ## Pages, stereo pairs and thumbnails
 
@@ -73,6 +73,30 @@ if (info.stereoLeftPage >= 0) {
 
 `decodeThumbnail` gives one of the thumbnails a camera stores beside the photo, without decoding
 the photo itself. [Resizing](resizing.md#use-the-thumbnail-the-file-carries) has the details.
+
+## Depth maps, mattes and gain maps
+
+A portrait photo carries a depth map, and often mattes, as auxiliary images of the primary image.
+`auxiliaryImages` lists them without decoding a picture, and `decodeAuxiliaryImage` decodes one:
+
+```kotlin
+val list = ImageKodec.auxiliaryImages(bytes)
+val i = list.indexOfFirst { it.urn == "urn:mpeg:hevc:2015:auxid:2" }    // HEVC depth
+if (i >= 0) {
+    val depth = ImageKodec.decodeAuxiliaryImage(bytes, i)   // one channel, 16 bits
+    val v = depth[x, y, 0] / 257                             // the 8-bit coded sample
+}
+```
+
+A sample keeps its coded value, widened to 16 bits: an n-bit `v` becomes `v * 65535 / (2^n - 1)`,
+rounded, with no range stretch and no clean aperture, rotation or mirror. What a depth sample
+measures is in the entry's `subtype` bytes, which carry a HEVC depth image's depth representation
+information SEI message unparsed, and in Apple's XMP.
+
+`decodeGainMap` returns the HDR gain map: a `tmap` item's gain map image with its ISO 21496-1
+metadata, or an Apple photo's `urn:com:apple:photo:2020:aux:hdrgainmap` image with MakerNote tags
+33 and 48 of its EXIF. Apple's headroom formula needs both tags; `pug.heic`, written by iOS 16.2, has
+only tag 33, so its `appleHeadroom` is null. The map is returned, not applied.
 
 ## Platforms
 

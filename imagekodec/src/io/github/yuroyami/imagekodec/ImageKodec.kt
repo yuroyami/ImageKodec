@@ -179,6 +179,65 @@ public object ImageKodec {
     }
 
     /**
+     * The auxiliary images of the primary image of a HEIC or AVIF file (#154): the items that an
+     * `auxl` reference ties to it, in the order of those references, alpha among them. Each gives
+     * its URN, the size and bit depth of its picture and the subtype bytes of its `auxC`;
+     * [AuxiliaryImage] names the URNs this library knows. A file with none, and a file of any other
+     * format, gives an empty list. No picture is decoded.
+     *
+     * @throws ImageDecodeException on a malformed HEIF file
+     */
+    @Throws(ImageDecodeException::class)
+    public fun auxiliaryImages(data: ByteArray): List<AuxiliaryImage> = when (detect(data)) {
+        ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.auxiliaryImages(data)
+        else -> emptyList()
+    }
+
+    /**
+     * Decode auxiliary image [index] of [auxiliaryImages] as one channel of 16-bit samples: the
+     * item's luma or gray plane as its codec gives it, at [AuxiliaryImage.width] by
+     * [AuxiliaryImage.height], before the item's clean aperture, rotation and mirror. A coded sample
+     * `v` of n bits becomes `v * 65535 / (2^n - 1)`, rounded to the nearest, so an 8-bit `v` is
+     * `v * 257` and [AuxiliaryImage.bitDepth] gives `v` back. Nothing else changes it: a limited
+     * range is not stretched and chroma planes are left out, as alpha and depth are carried in luma
+     * alone. What a depth sample measures is in
+     * [AuxiliaryImage.subtype] or the file's XMP. [cancellationCheck] works as for [decode].
+     *
+     * @throws ImageDecodeException on a malformed file or item
+     * @throws UnsupportedImageException when the item needs a codec this build lacks
+     * @throws IllegalArgumentException if [index] is not an index of [auxiliaryImages]
+     */
+    @Throws(ImageDecodeException::class, IllegalArgumentException::class)
+    public fun decodeAuxiliaryImage(data: ByteArray, index: Int, cancellationCheck: (() -> Unit)? = null): KiteBitmap16 =
+        cancellable(cancellationCheck) { cancel ->
+            when (detect(data)) {
+                ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.decodeAuxiliary(data, index, cancel)
+                else -> throw IllegalArgumentException("auxiliary image $index asked of a file with none")
+            }
+        }
+
+    /**
+     * The HDR gain map of a HEIC or AVIF file, decoded, with its parameters, or null when it has
+     * none (#153): the gain map image of a tone-mapped (`tmap`) item that is the primary item or
+     * whose base image the primary item is, with its ISO 21496-1 metadata, else the Apple gain map
+     * auxiliary image with the MakerNote tags that go with it. [HeifGainMap] says what its samples
+     * mean. The map is returned, not applied. A file of any other format gives null; the gain map of
+     * an Ultra HDR JPEG comes from [readMetadata]. [cancellationCheck] works as for [decode].
+     *
+     * @throws ImageDecodeException on a malformed file, gain map item or `tmap` payload
+     * @throws UnsupportedImageException when the gain map image needs a codec this build lacks, or
+     *   the metadata is of a version this reader does not know
+     */
+    @Throws(ImageDecodeException::class)
+    public fun decodeGainMap(data: ByteArray, cancellationCheck: (() -> Unit)? = null): HeifGainMap? =
+        cancellable(cancellationCheck) { cancel ->
+            when (detect(data)) {
+                ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.gainMap(data, cancel)
+                else -> null
+            }
+        }
+
+    /**
      * Decode page [page] of [data], counting from 0. A TIFF has a page for each
      * image file directory in its main chain, as libtiff, ImageIO and libvips count
      * them, and [decode] gives the first; [ImageInfo.pageCount] says how many there
@@ -938,7 +997,8 @@ public object ImageKodec {
      * `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an [ImageMetadata] write them
      * again, so a re-encode keeps them (#129). A HEIF file gives those of its primary image (#149);
      * its orientation is in `irot` and `imir`, which `decode` applies, never in the EXIF tag. The gain map of an Ultra HDR JPEG comes too, found
-     * through its Multi-Picture Format segment (#130). A file of another format, or one that has none,
+     * through its Multi-Picture Format segment (#130); the gain map of a HEIF file, which needs a decode,
+     * comes from [decodeGainMap] (#153). A file of another format, or one that has none,
      * gives empty metadata; a damaged segment or chunk is left out.
      */
     public fun readMetadata(data: ByteArray): ImageMetadata = MetadataIo.read(data)

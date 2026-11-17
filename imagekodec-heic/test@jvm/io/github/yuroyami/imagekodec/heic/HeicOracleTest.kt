@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec.heic
 import io.github.yuroyami.imagekodec.AnnexB
 import io.github.yuroyami.imagekodec.ColorTarget
 import io.github.yuroyami.imagekodec.HeifBuilder
+import io.github.yuroyami.imagekodec.HeifGainMap
 import io.github.yuroyami.imagekodec.HeifPlanes
 import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.ImageKodec
@@ -10,6 +11,7 @@ import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.Tools
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import org.junit.Assume.assumeTrue
 import kotlin.math.abs
@@ -18,6 +20,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -559,6 +562,82 @@ class HeicOracleTest {
         }
         assertTrue(high > 0, "the low byte of the samples is kept where the level allows")
         assertContentEquals(ImageKodec.decode(file).argb, wide.toBitmap().argb)
+    }
+
+    /** The luma plane of the coded item [item], as libde265's `dec265` writes it: 8-bit samples, the conformance window applied. */
+    private fun libde265Luma(name: String, item: HeifItems.Item, width: Int, height: Int): ByteArray {
+        val hvcC = item.property("hvcC") ?: fail("$name has no hvcC")
+        val stream = temp(".hevc").apply { writeBytes(AnnexB.stream(hvcC, listOf(item.data))) }
+        val yuv = temp(".yuv")
+        val (code, log) = run(Tools.require("dec265").path, "-q", "-o", yuv.path, stream.path)
+        assertEquals(0, code, "$name: libde265 failed: ${log.decodeToString()}")
+        val bytes = yuv.readBytes()
+        assertEquals(width * height, bytes.size, "$name: dec265 wrote one 4:0:0 picture of ${width}x$height")
+        return bytes
+    }
+
+    /** The item whose `auxC` names [urn]. */
+    private fun auxiliaryItem(items: HeifItems, urn: String): HeifItems.Item =
+        items.items.values.first { item -> item.property("auxC")?.let { String(it, 4, it.size - 4, Charsets.ISO_8859_1).substringBefore('\u0000') } == urn }
+
+    /**
+     * pug.heic, an iPhone photo, lists a depth image and an Apple gain map (#154), and both decode
+     * to libde265's decode of their items and to the gray of heif-convert's `--with-aux` output; the
+     * gain map comes from decodeGainMap with the Apple MakerNote tags of its EXIF (#153).
+     */
+    @Test
+    fun theDepthImageAndGainMapOfAnIphonePhoto() {
+        val dir = samples()
+        assumeTrue("no HEIC samples; run tools/heic_data.py", dir != null)
+        assumeTrue("dec265 or heif-convert not installed", Tools.hasAll("dec265", "heif-convert"))
+        val file = File(dir, "pug.heic")
+        val data = file.readBytes()
+        val list = ImageKodec.auxiliaryImages(data)
+        println("pug.heic auxiliary images: $list")
+        val depthUrn = "urn:mpeg:hevc:2015:auxid:2"
+        val gainUrn = "urn:com:apple:photo:2020:aux:hdrgainmap"
+        assertEquals(setOf(depthUrn, gainUrn), list.map { it.urn }.toSet())
+        val depthIndex = list.indexOfFirst { it.urn == depthUrn }
+        val depth = list[depthIndex]
+        assertEquals(Triple(768, 576, 8), Triple(depth.width, depth.height, depth.bitDepth))
+        println("pug.heic depth subtype: ${depth.subtype.joinToString("") { "%02x".format(it) }}")
+        assertEquals(21, depth.subtype.size, "an Apple depth image's auxC subtype")
+        val gain = list.first { it.urn == gainUrn }
+        assertEquals(Triple(2016, 1512, 8), Triple(gain.width, gain.height, gain.bitDepth))
+
+        // heif-convert writes each auxiliary image as an RGB PNG of its gray.
+        val out = Files.createTempDirectory("kite-aux").toFile().apply { deleteOnExit() }
+        val (code, log) = run(Tools.require("heif-convert").path, "--with-aux", "--no-colons", file.path, File(out, "pug.png").path)
+        assertEquals(0, code, "heif-convert failed: ${log.decodeToString()}")
+        fun heifConvert(suffix: String): KiteBitmap = ImageKodec.decode(File(out, "pug-$suffix.png").readBytes())
+
+        val items = HeifItems(data)
+        val bitmap = ImageKodec.decodeAuxiliaryImage(data, depthIndex)
+        assertEquals(Triple(768, 576, 1), Triple(bitmap.width, bitmap.height, bitmap.channels))
+        val theirs = libde265Luma("the depth item", auxiliaryItem(items, depthUrn), 768, 576)
+        val converted = heifConvert("depth")
+        for (i in theirs.indices) {
+            val v = theirs[i].toInt() and 0xFF
+            assertEquals(v * 257, bitmap.samples[i].toInt() and 0xFFFF, "depth sample $i against libde265")
+            assertEquals(v * 0x010101, converted.argb[i] and 0xFFFFFF, "depth sample $i against heif-convert")
+        }
+
+        val gm = assertNotNull(ImageKodec.decodeGainMap(data))
+        assertEquals(HeifGainMap.Form.Apple, gm.form)
+        assertEquals(Triple(2016, 1512, 1), Triple(gm.bitmap.width, gm.bitmap.height, gm.bitmap.channels))
+        val mapTheirs = libde265Luma("the gain map item", auxiliaryItem(items, gainUrn), 2016, 1512)
+        val mapConverted = heifConvert("urn_com_apple_photo_2020_aux_hdrgainmap")
+        for (i in mapTheirs.indices) {
+            val v = mapTheirs[i].toInt() and 0xFF
+            assertEquals(v * 257, gm.bitmap.samples[i].toInt() and 0xFFFF, "gain map sample $i against libde265")
+            assertEquals(v * 0x010101, mapConverted.argb[i] and 0xFFFFFF, "gain map sample $i against heif-convert")
+        }
+        assertContentEquals(gm.bitmap.samples, ImageKodec.decodeAuxiliaryImage(data, list.indexOf(gain)).samples)
+        // ExifTool reads tag 0x0021 of this photo's MakerNote as 22307/25388 (HDRHeadroom 0.8786434536), and it has no tag 0x0030.
+        println("pug.heic Apple MakerNote: tag 33 ${gm.appleMakerNote33}, tag 48 ${gm.appleMakerNote48}, headroom ${gm.appleHeadroom}")
+        assertEquals(22307.0 / 25388.0, gm.appleMakerNote33)
+        assertNull(gm.appleMakerNote48)
+        assertNull(gm.appleHeadroom, "Apple's formula needs both tags")
     }
 
     /** cat.hif carries thumbnails of 1616x1080, 320x212 and 160x120, as heif-info lists them (#150). */

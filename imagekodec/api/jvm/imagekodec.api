@@ -1,3 +1,12 @@
+public final class io/github/yuroyami/imagekodec/AuxiliaryImage {
+	public final fun getBitDepth ()I
+	public final fun getHeight ()I
+	public final fun getSubtype ()[B
+	public final fun getUrn ()Ljava/lang/String;
+	public final fun getWidth ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/github/yuroyami/imagekodec/ColorProfile {
 	public fun <init> ()V
 	public fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[I[I[I)V
@@ -49,6 +58,23 @@ public final class io/github/yuroyami/imagekodec/GainMap {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/yuroyami/imagekodec/GainMapMetadata {
+	public final fun getAlternateHdrHeadroom ()D
+	public final fun getAlternateOffset ()[D
+	public final fun getBaseHdrHeadroom ()D
+	public final fun getBaseOffset ()[D
+	public final fun getChannelCount ()I
+	public final fun getGainMapMax ()[D
+	public final fun getGainMapMin ()[D
+	public final fun getGamma ()[D
+	public final fun getMinimumVersion ()I
+	public final fun getRaw ()[B
+	public final fun getUseBaseColorSpace ()Z
+	public final fun getVersion ()I
+	public final fun getWriterVersion ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public abstract interface class io/github/yuroyami/imagekodec/HeifCodec {
 	public abstract fun getConfigurationType ()Ljava/lang/String;
 	public abstract fun getItemType ()Ljava/lang/String;
@@ -74,6 +100,24 @@ public final class io/github/yuroyami/imagekodec/HeifCodecInfo {
 
 public abstract interface class io/github/yuroyami/imagekodec/HeifCodecSession {
 	public abstract fun decode ([BLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/HeifPlanes;
+}
+
+public final class io/github/yuroyami/imagekodec/HeifGainMap {
+	public final fun getAppleHeadroom ()Ljava/lang/Double;
+	public final fun getAppleMakerNote33 ()Ljava/lang/Double;
+	public final fun getAppleMakerNote48 ()Ljava/lang/Double;
+	public final fun getBitmap ()Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public final fun getForm ()Lio/github/yuroyami/imagekodec/HeifGainMap$Form;
+	public final fun getMetadata ()Lio/github/yuroyami/imagekodec/GainMapMetadata;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/HeifGainMap$Form : java/lang/Enum {
+	public static final field Apple Lio/github/yuroyami/imagekodec/HeifGainMap$Form;
+	public static final field Iso21496 Lio/github/yuroyami/imagekodec/HeifGainMap$Form;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/HeifGainMap$Form;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/HeifGainMap$Form;
 }
 
 public final class io/github/yuroyami/imagekodec/HeifPlanes {
@@ -144,6 +188,7 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 
 public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/ImageKodec;
+	public final fun auxiliaryImages ([B)Ljava/util/List;
 	public final fun convertCmykToSrgb (II[BLio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun convertCmykToSrgb (II[SLio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public static synthetic fun convertCmykToSrgb$default (Lio/github/yuroyami/imagekodec/ImageKodec;II[BLio/github/yuroyami/imagekodec/ColorProfile;Lio/github/yuroyami/imagekodec/RenderingIntent;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
@@ -158,8 +203,12 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun decode16$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public final fun decodeAnimation ([BZILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static synthetic fun decodeAnimation$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteAnimation;
+	public final fun decodeAuxiliaryImage ([BILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
+	public static synthetic fun decodeAuxiliaryImage$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap16;
 	public final fun decodeDownscaledTo ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decodeDownscaledTo$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeGainMap ([BLkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/HeifGainMap;
+	public static synthetic fun decodeGainMap$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/HeifGainMap;
 	public final fun decodeJpegComponents ([BILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/JpegComponents;
 	public static synthetic fun decodeJpegComponents$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/JpegComponents;
 	public final fun decodeJpxComponents ([BILkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/JpxComponents;
