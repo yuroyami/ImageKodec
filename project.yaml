@@ -4,6 +4,7 @@ modules:
   - imagekodec
   - imagekodec-coil
   - imagekodec-compose
+  - imagekodec-heic
   - imagekodec-testkit
   - sample
 

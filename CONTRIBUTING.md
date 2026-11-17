@@ -11,7 +11,7 @@ It downloads the toolchain, the JDKs, Kotlin/Native and Node on its first run.
 ```
 
 That command is the quickest check while you work. Before you open a pull
-request, run the JVM tests of all three modules and the public API check:
+request, run the JVM tests of every module and the public API check:
 
 ```sh
 ./kotlin test -p jvm

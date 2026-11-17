@@ -167,3 +167,8 @@ being true.
 - `JxrEncApp` writes the size of the whole file as a planar alpha plane's AlphaByteCount, and it
   writes only codec subversion 1. Rewriting the subversion nibble of its codestreams gives HD
   Photo's 0 and the hard tiles of 9, which `JxrDecApp` reads as the new subversion asks (#125).
+- x265 3.5, given a scaling list file whose inter lists equal its intra ones, writes an SPS that
+  ffmpeg 6 refuses ("Invalid delta in scaling list data"). `HevcHeaderOracleTest` gives every list
+  its own values; the conformance streams cover predicted lists (#140).
+- ffmpeg's `trace_headers` names two HEVC elements otherwise than H.265 does: `matrix_coefficients`
+  for `matrix_coeffs` and `scaling_list_delta_coeff` for `scaling_list_delta_coef` (#140).

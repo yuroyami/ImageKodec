@@ -14,6 +14,13 @@ reviewable in the diff.
 
 ### Added
 
+- `imagekodec-heic`, the module that will hold the HEVC decoder of HEIC, kept out of the core so that
+  an app that reads no HEIC carries none of its code. `ImageKodecHeic.install()` registers its codec
+  for `hvc1` items and `hvc1` and `hev1` tracks; a second call changes nothing. It reads the HEVC
+  parameter sets and slice segment headers of ITU-T H.265, from `hvcC` or from the sample data, so
+  `probe` reports a HEIC file's coded size after the conformance window, its depths, chroma format
+  and VUI colour. Decoding the pictures is not implemented yet, and every item says so in
+  `unsupportedReason`. The module is not published (#139, #140).
 - `ImageFormat.HEIC`: `detect` and `probe` recognise a HEIF file whose image is not AV1, by its HEVC
   brands, or by the type of the image it shows when it names only `mif1` or `msf1`. `probe` reports
   its size and depth from the container. Until a codec reads its HEVC items, `isDecodable` is false

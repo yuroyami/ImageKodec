@@ -28,6 +28,9 @@ FRAMEWORKS = {
     "ImageKodec": {"module": "imagekodec", "platforms": ["iosArm64", "iosSimulatorArm64", "iosX64"], "export": []},
     "ImageKodecCompose": {"module": "imagekodec-compose", "platforms": ["iosArm64", "iosSimulatorArm64"], "export": []},
     "ImageKodecCoil": {"module": "imagekodec-coil", "platforms": ["iosArm64", "iosSimulatorArm64"], "export": []},
+    # An app cannot share Kotlin state across two frameworks, so the HEIC framework carries the core
+    # and its registry with it, and an app links this framework instead of ImageKodec.
+    "ImageKodecHeic": {"module": "imagekodec-heic", "platforms": ["iosArm64", "iosSimulatorArm64", "iosX64"], "export": ["imagekodec"]},
 }
 # The file that holds settings.kotlin.version.
 KOTLIN_VERSION_FILE = "library.module-template.yaml"
