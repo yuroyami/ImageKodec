@@ -105,6 +105,26 @@ metadata, or an Apple photo's `urn:com:apple:photo:2020:aux:hdrgainmap` image wi
 33 and 48 of its EXIF. Apple's headroom formula needs both tags; `pug.heic`, written by iOS 16.2, has
 only tag 33, so its `appleHeadroom` is null. The map is returned, not applied.
 
+## Speed and threads
+
+A 12-megapixel photo decodes in about 1.4 seconds on one core of a 2.1 GHz Xeon, on the JVM and as
+a native release build; [Limits](limits.md#speed-and-memory) has the measured table beside
+libde265. The decoder starts no threads. A phone photo is a grid of tiles that decode
+independently, and a caller can hand them to its own threads with one runner, set once:
+
+```kotlin
+val pool = Executors.newFixedThreadPool(4)
+ImageKodec.setTileRunner { jobs -> jobs.map { pool.submit(it::run) }.forEach { it.get() } }
+```
+
+Each job decodes one tile with a codec session of its own and copies it into the picture at once,
+so a decode holds the picture and one tile for each thread. The result and the error do not depend
+on the runner: of several tiles that fail, the first in tile order gives the exception. The same
+runner decodes AVIF grids, and a reduced decode (`decodeScaled`, `decodeDownscaledTo`) gives it one
+row of tiles at a time, which keeps its memory bound. On four threads the 48-tile grid of the
+benchmark decodes in 584 ms where one thread takes 1,469 ms. JS and Wasm have no threads, so the
+default runner, `TileRunner.Serial`, is the one to keep there.
+
 ## Platforms
 
 The module builds for the same 22 targets as the core. CI runs its tests on the JVM, linuxX64, the

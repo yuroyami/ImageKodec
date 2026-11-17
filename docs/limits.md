@@ -90,6 +90,31 @@ and fail during the decode.
 - Chroma is upsampled bilinearly, as for AVIF. libheif's `heif-convert` takes the nearest sample,
   so the two differ at sharp colour edges of a subsampled image.
 
+### Speed and memory
+
+`HeicBenchmarkTest` codes two 4096 by 3072 pictures (12.6 megapixels) with x265 at test time, as
+the tests build every HEIC file, so nothing large is committed: a grid of 48 tiles of 512 by 512 at
+8 bits 4:2:0, and one picture with wavefront rows at 10 bits 4:2:0, both near 2.8 MB. It reports the
+fastest of five decodes to RGB after two to warm up, and libde265 1.0.15's `dec265 -q -t 0`, one
+thread, on the same Annex B stream, fastest of three, starting the tool included and writing no
+output. The dec265 column is from the JVM run; the other runs read within 100 ms of it. The machine:
+a 4-core Intel Xeon at 2.10 GHz (KVM), one thread unless the column says four.
+
+| Picture | dec265 | JVM | JVM, 4 threads (#152) | Peak heap, JVM | linuxX64 release | Peak resident, linuxX64 | JS (Node 22) | wasmJs release | wasmJs debug |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Grid of 8x6 tiles, 8 bits | 614 ms | 1,469 ms | 584 ms | 188 MB | 1,505 ms | 102 MB | 2,363 ms | 4,513 ms | 6,214 ms |
+| One picture with WPP, 10 bits | 1,409 ms | 1,447 ms | | 144 MB | 1,416 ms | 128 MB | 2,111 ms | 4,500 ms | 6,115 ms |
+
+The JVM peak is the growth of the heap during the first measured decode, and the linuxX64 peak that
+of the resident memory, as `JxlBenchmarkTest` and `JxlNativeBenchmarkTest` read them. The ARGB
+result alone is 50 MB and the YUV planes 38 MB. The decoder reads the wavefront rows of a picture one
+after another, so a single picture gains nothing from a tile runner. On four threads the grid's
+peak heap is 194 MB, 6 MB more than on one: a tile at a time for each thread.
+The tests fail past 30 seconds or 1,500 MB on the JVM and linuxX64, and past 120 seconds on JS and
+wasmJs: an order of magnitude, which catches a regression and not a loaded machine. On JS, wasmJs
+and linuxX64 the benchmark skips, printing so, where ffmpeg has no libx265, as on CI's runners for
+those targets.
+
 ## JPEG XL
 
 ### Color

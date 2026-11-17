@@ -83,6 +83,19 @@ final enum class io.github.yuroyami.imagekodec/RenderingIntent : kotlin/Enum<io.
     final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/RenderingIntent> // io.github.yuroyami.imagekodec/RenderingIntent.values|values#static(){}[0]
 }
 
+abstract fun interface io.github.yuroyami.imagekodec/TileJob { // io.github.yuroyami.imagekodec/TileJob|null[0]
+    abstract fun run() // io.github.yuroyami.imagekodec/TileJob.run|run(){}[0]
+}
+
+abstract fun interface io.github.yuroyami.imagekodec/TileRunner { // io.github.yuroyami.imagekodec/TileRunner|null[0]
+    abstract fun run(kotlin.collections/List<io.github.yuroyami.imagekodec/TileJob>) // io.github.yuroyami.imagekodec/TileRunner.run|run(kotlin.collections.List<io.github.yuroyami.imagekodec.TileJob>){}[0]
+
+    final object Companion { // io.github.yuroyami.imagekodec/TileRunner.Companion|null[0]
+        final val Serial // io.github.yuroyami.imagekodec/TileRunner.Companion.Serial|{}Serial[0]
+            final fun <get-Serial>(): io.github.yuroyami.imagekodec/TileRunner // io.github.yuroyami.imagekodec/TileRunner.Companion.Serial.<get-Serial>|<get-Serial>(){}[0]
+    }
+}
+
 abstract interface io.github.yuroyami.imagekodec/HeifCodec { // io.github.yuroyami.imagekodec/HeifCodec|null[0]
     abstract val configurationType // io.github.yuroyami.imagekodec/HeifCodec.configurationType|{}configurationType[0]
         abstract fun <get-configurationType>(): kotlin/String // io.github.yuroyami.imagekodec/HeifCodec.configurationType.<get-configurationType>|<get-configurationType>(){}[0]
@@ -597,6 +610,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun registerHeifCodec(io.github.yuroyami.imagekodec/HeifCodec) // io.github.yuroyami.imagekodec/ImageKodec.registerHeifCodec|registerHeifCodec(io.github.yuroyami.imagekodec.HeifCodec){}[0]
     final fun removeMotion(kotlin/ByteArray): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.removeMotion|removeMotion(kotlin.ByteArray){}[0]
     final fun repackJpeg(kotlin/ByteArray, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.repackJpeg|repackJpeg(kotlin.ByteArray;kotlin.Boolean){}[0]
+    final fun setTileRunner(io.github.yuroyami.imagekodec/TileRunner) // io.github.yuroyami.imagekodec/ImageKodec.setTileRunner|setTileRunner(io.github.yuroyami.imagekodec.TileRunner){}[0]
     final fun ssimulacra2(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/KiteBitmap): kotlin/Double // io.github.yuroyami.imagekodec/ImageKodec.ssimulacra2|ssimulacra2(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.KiteBitmap){}[0]
 }
 

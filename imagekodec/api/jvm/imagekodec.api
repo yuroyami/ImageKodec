@@ -257,6 +257,7 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun removeMotion ([B)[B
 	public final fun repackJpeg ([BZ)[B
 	public static synthetic fun repackJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BZILjava/lang/Object;)[B
+	public final fun setTileRunner (Lio/github/yuroyami/imagekodec/TileRunner;)V
 	public final fun ssimulacra2 (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/KiteBitmap;)D
 }
 
@@ -405,6 +406,19 @@ public final class io/github/yuroyami/imagekodec/ScalingKt {
 	public static final fun downscaledTo (Lio/github/yuroyami/imagekodec/KiteBitmap;II)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static final fun scaled (Lio/github/yuroyami/imagekodec/KiteAnimation;II)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun scaled (Lio/github/yuroyami/imagekodec/KiteBitmap;II)Lio/github/yuroyami/imagekodec/KiteBitmap;
+}
+
+public abstract interface class io/github/yuroyami/imagekodec/TileJob {
+	public abstract fun run ()V
+}
+
+public abstract interface class io/github/yuroyami/imagekodec/TileRunner {
+	public static final field Companion Lio/github/yuroyami/imagekodec/TileRunner$Companion;
+	public abstract fun run (Ljava/util/List;)V
+}
+
+public final class io/github/yuroyami/imagekodec/TileRunner$Companion {
+	public final fun getSerial ()Lio/github/yuroyami/imagekodec/TileRunner;
 }
 
 public final class io/github/yuroyami/imagekodec/TransformsKt {

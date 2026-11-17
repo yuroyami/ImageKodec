@@ -930,11 +930,14 @@ internal object AvifDecoder {
             cancel?.invoke()
             return planes(c, t, 1, cancel)
         }
-        val color = AvifGridWindow(grid, tiles.size, maxPlanes = 3, tile = { tile(tiles[it]) })
+        val color = AvifGridWindow(grid, tiles.size, maxPlanes = 3, tile = { tile(tiles[it]) }, parallel = parallelTiles(c, tiles))
         val alphaItem = p.alphaItem
         val alphaGrid = alphaItem?.takeIf { it.type == GRID }?.let { a ->
             val alphaTiles = inputs(c, a)
-            AvifGridWindow(AvifGrid.read(c.itemData(a)), alphaTiles.size, maxPlanes = 1, tile = { tile(alphaTiles[it]) }, prepare = ::fullRangeAlpha)
+            AvifGridWindow(
+                AvifGrid.read(c.itemData(a)), alphaTiles.size, maxPlanes = 1, tile = { tile(alphaTiles[it]) },
+                prepare = ::fullRangeAlpha, parallel = parallelTiles(c, alphaTiles),
+            )
         }
         val scaler = BandScaler(shownWidth, shownHeight, width, height)
         val w = grid.width
@@ -1038,6 +1041,14 @@ internal object AvifDecoder {
         return planesOf(session.decode(data, cancel) ?: throw ImageDecodeException("AVIF: an item of type '${codec.itemType}' shows no picture"))
     }
 
+    /**
+     * Whether the tile runner may decode [tiles] at the same time (#152): only coded items that no
+     * other input names, since those go through the shared cache of [AvifContainer.decoded] and a
+     * derived tile would hand its own inputs to the runner from inside a job.
+     */
+    private fun parallelTiles(c: AvifContainer, tiles: List<AvifItem>): Boolean =
+        tiles.all { it.type !in DERIVED_TYPES && c.inputUses(it.id) < 2 }
+
     /** The YUV or gray planes of [item], before conversion to RGB. */
     private fun planes(c: AvifContainer, item: AvifItem, depth: Int, cancel: (() -> Unit)? = null): AvifPlanes {
         // An item that several derived images name, or one names twice, decodes once.
@@ -1071,7 +1082,10 @@ internal object AvifDecoder {
         return when (item.type) {
             GRID -> {
                 val tiles = inputs(c, item)
-                AvifGrid.assemble(AvifGrid.read(c.itemData(item)), tiles.size) { planes(c, tiles[it], depth + 1, cancel) }
+                AvifGrid.assemble(AvifGrid.read(c.itemData(item)), tiles.size, parallelTiles(c, tiles)) {
+                    cancel?.invoke()
+                    planes(c, tiles[it], depth + 1, cancel)
+                }
             }
             SATO -> {
                 val sources = inputs(c, item).map { planes(c, it, depth + 1, cancel) }

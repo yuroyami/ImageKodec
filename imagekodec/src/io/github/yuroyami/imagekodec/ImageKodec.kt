@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec
 
 import io.github.yuroyami.imagekodec.internal.cancellable
+import io.github.yuroyami.imagekodec.internal.Tiles
 import io.github.yuroyami.imagekodec.codec.BmpDecoder
 import io.github.yuroyami.imagekodec.codec.BmpEncoder
 import io.github.yuroyami.imagekodec.codec.GifDecoder
@@ -28,8 +29,10 @@ import io.github.yuroyami.imagekodec.internal.color.SrgbConverter
 import io.github.yuroyami.imagekodec.internal.color.reducedBy
 
 /**
- * The ImageKodec facade. Everything is pure computation on byte arrays: no I/O,
- * no threads, no platform types: so it behaves identically on every KMP target.
+ * The ImageKodec facade. Everything is pure computation on byte arrays: no I/O and
+ * no platform types, so it behaves identically on every KMP target. It starts no
+ * threads of its own; a caller can hand the tiles of a grid image to its own threads
+ * through [setTileRunner].
  *
  * ```kotlin
  * val bitmap = ImageKodec.decode(bytes)          // sniffs the format, dispatches
@@ -47,6 +50,21 @@ public object ImageKodec {
      */
     @ExperimentalHeifCodecApi
     public fun registerHeifCodec(codec: HeifCodec): Unit = HeifCodecs.register(codec)
+
+    /**
+     * Sets the [TileRunner] that every decode from now on hands its independent jobs to: the tiles
+     * of a HEIC or AVIF grid, in [decode], [decode16], [decodeScaled] and the other decodes of a grid
+     * image (#152). The default, [TileRunner.Serial], runs them in order on the calling thread,
+     * which is all JS and Wasm can do. Set it once, at startup; a decode already running keeps the
+     * runner it started with.
+     *
+     * A decode's result does not depend on the runner, and neither does its error: of several tiles
+     * that fail, the first in tile order gives the exception. With a runner that uses several
+     * threads, a decode's cancellation check runs on them, possibly at the same time. A grid whose
+     * tiles are derived images, or that names one tile more than once, decodes in order whatever the
+     * runner.
+     */
+    public fun setTileRunner(runner: TileRunner): Unit = Tiles.set(runner)
 
     /** Identify [data]'s format from its magic bytes, or null if unrecognised. */
     public fun detect(data: ByteArray): ImageFormat? = ImageFormat.sniff(data)

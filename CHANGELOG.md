@@ -14,6 +14,20 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.setTileRunner` sets one `TileRunner` that every decode hands the tiles of a HEIC or
+  AVIF grid to, as `TileJob`s, so a caller can decode them on its own threads. Each job decodes one
+  tile with its own codec session and copies it into the picture at once, so a decode holds the
+  picture and one tile for each job running; a reduced decode hands it one row of tiles at a time.
+  The default, `TileRunner.Serial`, runs the jobs in order on the calling thread, as before, and is
+  the one to keep on JS and Wasm. The pixels and the error do not depend on the runner: the first
+  tile in tile order that fails gives the exception. A grid whose tiles are derived images, or that
+  names a tile twice, still decodes in order. On four threads a 12-megapixel grid of 48 tiles
+  decodes in 584 ms instead of 1,469 ms (#152).
+- `HeicBenchmarkTest`, `HeicNativeBenchmarkTest` and `HeicWebBenchmarkTest` measure the decode of a
+  12-megapixel HEIC grid of 48 tiles and of one 10-bit picture with wavefront rows, which x265 writes
+  at test time, on the JVM, linuxX64, JS and wasmJs, beside libde265 on one thread.
+  `docs/limits.md` has the table (#169).
+
 - `decodeAnimation` plays HEIC image sequences with the `imagekodec-heic` module: every frame of a
   track whose sample entry is `hvc1` or `hev1` and whose handler is `pict` or `vide`, in presentation
   order from the composition offsets of `ctts`, each with its duration, the loop count from the edit
