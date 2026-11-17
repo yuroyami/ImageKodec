@@ -161,8 +161,8 @@ skipped test reports as a pass. If you touch those codecs, install the tools and
 check the skip count, not only whether the run passed:
 
 ```sh
-brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif libde265 x265 pillow little-cms2 jpeg-xl     # macOS
-sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples libheif-plugin-x265 libheif-plugin-libde265 libde265-examples x265 hm hm-highbitdepth python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools   # Debian/Ubuntu
+brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif libde265 x265 exiftool pillow little-cms2 jpeg-xl     # macOS
+sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples libheif-plugin-x265 libheif-plugin-libde265 libde265-examples x265 hm hm-highbitdepth libimage-exiftool-perl python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools   # Debian/Ubuntu
 ```
 
 The HEIC suites also need their test data, which is fetched and checked, never committed:
