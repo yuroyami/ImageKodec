@@ -42,7 +42,7 @@ internal object ImageProbe {
         ImageFormat.TIFF -> tiff(data)
         ImageFormat.JP2 -> jp2(data)
         ImageFormat.WEBP -> webp(data)
-        ImageFormat.AVIF -> AvifDecoder.probe(data)
+        ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.probe(data)
         ImageFormat.JXL -> JxlDecoder.probe(data)
         ImageFormat.JXR -> JxrDecoder.probe(data)
         null -> throw ImageDecodeException(

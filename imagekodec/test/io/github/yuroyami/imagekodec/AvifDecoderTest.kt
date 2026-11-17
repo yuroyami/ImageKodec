@@ -120,7 +120,7 @@ class AvifDecoderTest {
             add(1, "av01", plainData, listOf(av1C(plainConfig) to true, ispe(24, 16)))
         }.build()
         assertEquals(ImageFormat.AVIF, ImageFormat.sniff(compatible))
-        assertNull(ImageFormat.sniff(HeifBuilder(major = "heic", brands = listOf("mif1", "heic")).build()))
+        assertEquals(ImageFormat.HEIC, ImageFormat.sniff(HeifBuilder(major = "heic", brands = listOf("mif1", "heic")).build()))
     }
 
     @Test

@@ -327,7 +327,7 @@ class FuzzTest {
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
         // The 16-bit paths read their own samples; the others widen what decode gives.
         val format = ImageFormat.sniff(bytes)
-        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.JXL || format == ImageFormat.JXR) {
+        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.HEIC || format == ImageFormat.JXL || format == ImageFormat.JXR) {
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
         }
         // A file that declares its colour converts through it when asked, so a profile's tables

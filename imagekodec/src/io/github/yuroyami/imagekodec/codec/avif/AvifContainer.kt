@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.codec.ColorChunks
 
@@ -212,35 +213,82 @@ internal class AvifContainer(
         val DIMG = fourcc("dimg")
         val PREM = fourcc("prem")
         val ALTR = fourcc("altr")
+        val HVC1 = fourcc("hvc1")
+        val HEV1 = fourcc("hev1")
+        val LHV1 = fourcc("lhv1")
+        val HVCC = fourcc("hvcC")
 
-        const val ALPHA_URN = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
-        const val ALPHA_URN_HEVC = "urn:mpeg:hevc:2015:auxid:1"
+        /** The brands of HEVC images and sequences (ISO/IEC 23008-12 Annex B). */
+        private val HEVC_BRANDS = listOf("heic", "heix", "heim", "heis", "hevc", "hevx", "hevm", "hevs").map { fourcc(it) }.toSet()
 
-        /**
-         * True when [data] starts with an `ftyp` box naming the `avif` or `avis` brand, as its major
-         * brand or among its compatible brands, as libavif checks. A box cut short is read as far as
-         * it goes, so the first bytes of a file are enough when the major brand says it.
-         */
-        fun isAvif(data: ByteArray): Boolean {
+        /** The HEVC brands of multi-view and scalable coding, which need layered HEVC. */
+        val LAYERED_BRANDS = listOf("heim", "heis", "hevm", "hevs").map { fourcc(it) }.toSet()
+
+        /** The structural brands of HEIF, which name no codec. */
+        private val HEIF_BRANDS = listOf("mif1", "msf1", "miaf", "mif2").map { fourcc(it) }.toSet()
+
+        /** The major brand, then the compatible brands, of the `ftyp` box [data] starts with, as far as [data] holds them. */
+        fun brands(data: ByteArray): List<Int>? {
             fun u32(at: Int): Long {
                 var v = 0L
                 for (i in 0 until 4) v = (v shl 8) or (data[at + i].toLong() and 0xFF)
                 return v
             }
-            if (data.size < 12 || u32(4).toInt() != FTYP) return false
-            val major = u32(8).toInt()
-            if (major == AVIF || major == AVIS) return true
+            if (data.size < 12 || u32(4).toInt() != FTYP) return null
+            val out = arrayListOf(u32(8).toInt())
             val size = u32(0)
-            if (size < 16) return false
             val end = minOf(size, data.size.toLong()).toInt()
             var at = 16
             while (at + 4 <= end) {
-                val brand = u32(at).toInt()
-                if (brand == AVIF || brand == AVIS) return true
+                out += u32(at).toInt()
                 at += 4
             }
-            return false
+            return out
         }
+
+        /**
+         * AVIF or HEIC for a HEIF file, from its brands: an AVIF brand alone means AVIF, an HEVC brand
+         * alone means HEIC. A file that names both, or only `mif1` or `msf1`, is classified by the type
+         * of the image it shows, when [data] holds its `meta` box, and else by its brands.
+         */
+        fun heifFormat(data: ByteArray): ImageFormat? {
+            val brands = brands(data) ?: return null
+            val avif = AVIF in brands || AVIS in brands
+            val hevc = brands.any { it in HEVC_BRANDS }
+            if (avif != hevc) return if (avif) ImageFormat.AVIF else ImageFormat.HEIC
+            if (!avif && brands.none { it in HEIF_BRANDS }) return null
+            val shown = try {
+                shownType(parse(data))
+            } catch (_: ImageDecodeException) {
+                null
+            }
+            return when {
+                shown == AV01 -> ImageFormat.AVIF
+                shown != null -> ImageFormat.HEIC
+                avif -> ImageFormat.AVIF
+                else -> ImageFormat.HEIC
+            }
+        }
+
+        /** The coded type of what [c] shows: its first picture track's sample entry, else the primary item's, through derived images. */
+        private fun shownType(c: AvifContainer): Int? {
+            c.tracks.firstOrNull { it.handler == PICT && it.sizes.isNotEmpty() }?.let { return it.sampleEntry }
+            var item = c.primary?.let { c.items[it] } ?: return null
+            repeat(8) {
+                if (item.type != GRID && item.type != IOVL && item.type != TMAP && item.type != SATO) return item.type
+                item = c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] } ?: return null
+            }
+            return null
+        }
+
+        /** The chroma format and the luma and chroma bit depths in the fixed header of `hvcC` (ISO/IEC 14496-15 section 8.3.2.1). */
+        fun hevcConfigDepths(hvcC: ByteArray): IntArray? {
+            if (hvcC.size < 23) return null
+            return intArrayOf(hvcC[16].toInt() and 3, (hvcC[17].toInt() and 7) + 8, (hvcC[18].toInt() and 7) + 8)
+        }
+
+        const val ALPHA_URN = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
+        const val ALPHA_URN_HEVC = "urn:mpeg:hevc:2015:auxid:1"
 
         /** The descriptive properties whose meaning a reader that shows the image may leave aside. */
         private val KNOWN_DESCRIPTIVE = setOf(
@@ -475,8 +523,8 @@ internal class AvifContainer(
                 "lsel" -> AvifProperty.LayerSelector(r.u16())
                 else -> AvifProperty.Other(
                     box.type,
-                    known = box.type in KNOWN_DESCRIPTIVE || HeifCodecs.isConfiguration(box.type),
-                    payload = if (HeifCodecs.isConfiguration(box.type)) data.copyOfRange(box.start, box.end) else ByteArray(0),
+                    known = box.type in KNOWN_DESCRIPTIVE || box.type == HVCC || HeifCodecs.isConfiguration(box.type),
+                    payload = if (box.type == HVCC || HeifCodecs.isConfiguration(box.type)) data.copyOfRange(box.start, box.end) else ByteArray(0),
                 )
             }
         }

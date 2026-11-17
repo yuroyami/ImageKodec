@@ -221,7 +221,7 @@ public object ImageKodec {
             throw IllegalArgumentException("page $page asked of a one-page $format image")
         }
         when (format) {
-            ImageFormat.TIFF, ImageFormat.PNG, ImageFormat.JP2, ImageFormat.AVIF, ImageFormat.JPEG, ImageFormat.JXL, ImageFormat.JXR -> {}
+            ImageFormat.TIFF, ImageFormat.PNG, ImageFormat.JP2, ImageFormat.AVIF, ImageFormat.HEIC, ImageFormat.JPEG, ImageFormat.JXL, ImageFormat.JXR -> {}
             // A BMP that holds a PNG keeps that PNG's precision.
             ImageFormat.BMP -> return BmpDecoder.embedded(data)?.let { decode16With(it, 0, applyOrientation, colorTarget, cancel) }
                 ?: widened(data, applyOrientation, colorTarget, cancel)
@@ -232,7 +232,7 @@ public object ImageKodec {
                 ImageFormat.TIFF -> TiffDecoder.decode16(data, page, cancel)
                 ImageFormat.PNG -> PngDecoder.decode16(data, cancel)
                 ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data, cancel)
-                ImageFormat.AVIF -> AvifDecoder.decode16(data, cancel)
+                ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.decode16(data, cancel)
                 ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
                 ImageFormat.JXR -> JxrDecoder.decode16(data, cancel)
                 else -> JpegDecoder.decode16(data, cancel)
@@ -584,7 +584,7 @@ public object ImageKodec {
         ImageFormat.TIFF -> TiffDecoder.decode16(data, page, cancel)
         ImageFormat.PNG -> PngDecoder.decode16(data, cancel)
         ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data, cancel)
-        ImageFormat.AVIF -> AvifDecoder.decode16(data, cancel)
+        ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.decode16(data, cancel)
         ImageFormat.JPEG -> JpegDecoder.decode16(data, cancel)
         ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
         ImageFormat.JXR -> JxrDecoder.decode16(data, cancel)
@@ -635,7 +635,7 @@ public object ImageKodec {
             WebpDecoder.decode(data)
         }
         ImageFormat.TIFF -> TiffDecoder.decode(data, cancel = cancel)
-        ImageFormat.AVIF -> AvifDecoder.decode(data, cancel)
+        ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.decode(data, cancel)
         ImageFormat.JXL -> JxlDecoder.decode(data, cancel)
         ImageFormat.JXR -> JxrDecoder.decode(data, cancel)
         null -> throw ImageDecodeException(
@@ -944,13 +944,13 @@ public object ImageKodec {
         // precision, so the two give the same pixels: narrowed first, a steep curve crushes the
         // tones that only the low byte holds (#113).
         val deepStill = colorTarget is ColorTarget.Srgb &&
-            (format == ImageFormat.PNG || format == ImageFormat.AVIF || format == ImageFormat.JXL) &&
+            (format == ImageFormat.PNG || format == ImageFormat.AVIF || format == ImageFormat.HEIC || format == ImageFormat.JXL) &&
             probeOrNull(data)?.let { it.frameCount == 1 && it.bitDepth > 8 } == true
         val animation = when (if (deepStill) null else format) {
             ImageFormat.GIF -> GifDecoder.decode(data, maxFrames, cancellationCheck)
             ImageFormat.PNG -> PngDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             ImageFormat.WEBP -> WebpDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
-            ImageFormat.AVIF -> AvifDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
+            ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             ImageFormat.JXL -> JxlDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             else -> {
                 // A still converts as decode converts it, CMYK ink included.

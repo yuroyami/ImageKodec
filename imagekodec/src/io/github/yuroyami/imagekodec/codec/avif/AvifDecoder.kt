@@ -22,6 +22,10 @@ import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALTR
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.AUXL
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.DIMG
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.GRID
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HEV1
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVC1
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVCC
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.LHV1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IOVL
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PICT
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PREM
@@ -68,10 +72,10 @@ internal object AvifDecoder {
         val masteringDisplay: IntArray? = null,
     )
 
-    fun probe(data: ByteArray): ImageInfo {
+    fun probe(data: ByteArray): ImageInfo = labelled(data) {
         val p = plan(data, probing = true)
-        return ImageInfo(
-            format = ImageFormat.AVIF,
+        ImageInfo(
+            format = AvifContainer.heifFormat(data) ?: ImageFormat.AVIF,
             width = p.crop?.get(2) ?: p.width,
             height = p.crop?.get(3) ?: p.height,
             bitDepth = p.bitDepth,
@@ -93,9 +97,27 @@ internal object AvifDecoder {
     }
 
     /** [cancel] runs once a row of superblocks of each AV1 picture the image is made of (#123). */
-    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap = render(plan(data, probing = false), wide = false, cancel).bitmap
+    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap = labelled(data) { render(plan(data, probing = false), wide = false, cancel).bitmap }
 
-    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 = render(plan(data, probing = false), wide = true, cancel).wide!!
+    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 = labelled(data) { render(plan(data, probing = false), wide = true, cancel).wide!! }
+
+    /** The reason [unsupported] gives a HEVC item while no codec reads it. */
+    const val NEEDS_HEIC_MODULE = "HEIC item of type 'hvc1' needs the imagekodec-heic module: add it and call ImageKodecHeic.install()"
+
+    /**
+     * Runs [block] and names the format of a HEIC file in its errors. The reader is shared with
+     * AVIF, whose name its messages start with.
+     */
+    private inline fun <T> labelled(data: ByteArray, block: () -> T): T {
+        try {
+            return block()
+        } catch (e: ImageDecodeException) {
+            val message = e.message ?: throw e
+            if (!message.startsWith("AVIF") || AvifContainer.heifFormat(data) != ImageFormat.HEIC) throw e
+            val text = "HEIC" + message.removePrefix("AVIF")
+            throw if (e is UnsupportedImageException) UnsupportedImageException(text, e) else ImageDecodeException(text, e)
+        }
+    }
 
     /**
      * Every frame of an AV1 image sequence with its duration, or a still image as one frame. The
@@ -104,7 +126,10 @@ internal object AvifDecoder {
      * the first, which AV1 allows mid-sequence, is scaled to the first frame's size, as a player
      * shows every frame in one window.
      */
-    fun decodeAnimation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation {
+    fun decodeAnimation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation =
+        labelled(data) { animation(data, maxFrames, cancellationCheck) }
+
+    private fun animation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation {
         val p = plan(data, probing = false)
         val track = p.track
         if (track == null) {
@@ -249,6 +274,9 @@ internal object AvifDecoder {
         val c = AvifContainer.parse(data)
         val track = c.tracks.firstOrNull { HeifCodecs.forSampleEntry(it.sampleEntry) != null && it.handler == PICT && it.sizes.isNotEmpty() }
         if (track != null) return trackPlan(c, track, probing)
+        if (c.tracks.any { (it.sampleEntry == HVC1 || it.sampleEntry == HEV1) && it.handler == PICT && it.sizes.isNotEmpty() } && c.primary == null) {
+            throw UnsupportedImageException(NEEDS_HEIC_MODULE)
+        }
         val primaryId = c.primary ?: throw ImageDecodeException("AVIF: no primary item and no image sequence")
         val primary = c.items[primaryId] ?: throw ImageDecodeException("AVIF: the primary item $primaryId is not described in 'iinf'")
         // An 'altr' group lists alternatives in order of preference: show the first this reader can.
@@ -280,6 +308,8 @@ internal object AvifDecoder {
     private fun unsupported(c: AvifContainer, item: AvifItem, depth: Int): String? {
         if (depth > MAX_DEPTH) return "AVIF derived images nested more than $MAX_DEPTH deep"
         val codec = codecOf(item)
+        if (item.type == HVC1 && codec == null) return NEEDS_HEIC_MODULE
+        if (item.type == LHV1) return "HEIC with layered HEVC ('lhv1')"
         if (item.type !in DERIVED_TYPES && codec == null) return "AVIF item of type '${fourccName(item.type)}'"
         item.unknownEssential.firstOrNull()?.let { return "AVIF item property '${fourccName(it)}' marked essential" }
         if (codec != null) {
@@ -433,6 +463,11 @@ internal object AvifDecoder {
         if (depth > MAX_DEPTH) return 8
         if (item.type == SATO) item.property<AvifProperty.PixelInfo>()?.depths?.firstOrNull()?.let { return it }
         codecOf(item)?.let { codec -> configuration(item.properties, codec)?.let { return codec.inspect(it, null).bitDepthLuma } }
+        // An HEVC item's depth is in the fixed header of its 'hvcC', which the core reads itself.
+        if (item.type == HVC1) {
+            item.properties.firstNotNullOfOrNull { p -> (p as? AvifProperty.Other)?.takeIf { it.type == HVCC }?.payload }
+                ?.let { AvifContainer.hevcConfigDepths(it) }?.let { return it[1] }
+        }
         val next = if (item.type == TMAP) base(c, item, depth) else c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] }
         return next?.let { itemDepth(c, it, depth + 1) } ?: 8
     }
