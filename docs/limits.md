@@ -7,7 +7,13 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 
 - Every entry point takes a complete `ByteArray`. There is no streaming or partial-decode API.
   `decodeScaled`, `decodeDownscaledTo` and `decodeReduced` shrink a JPEG, JPEG 2000 or JPEG XR image
-  inside the decoder, and `scaled` works after a full-size decode.
+  inside the decoder, and `scaled` works after a full-size decode. `decodeScaled` and
+  `decodeDownscaledTo` also reduce a HEIC or AVIF `grid` while it decodes: one row of tiles at a
+  time is converted to RGB and scaled, so memory holds two rows of tiles and the output, not the
+  picture, and the pixels equal those of `decode` then `scaled`. The tiles still decode at full size,
+  so this saves memory, not time. An alpha image that is one coded item, not a grid, decodes whole
+  beside the rows. A grid whose alpha is neither one coded item nor a grid of the same layout, and
+  any other HEIF image, decodes in full first (#151).
 - `decode` keeps only the high byte of a 16-bit sample, because `KiteBitmap` holds 8 bits a
   channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000, JPEG XL, JPEG XR and 12-bit or
   lossless JPEG, and it converts AVIF and HEIC at 16 bits. Other formats come through it at 8 bits,

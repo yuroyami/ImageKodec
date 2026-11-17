@@ -89,6 +89,12 @@ internal object AvifColor {
      * Converts [image] to straight-alpha ARGB in [out8] and, when [out16] is given, to 16-bit
      * samples of [channels16] channels (3, or 4 with [alpha]) whose top byte is [out8]'s value.
      * [alpha] is a full-range plane the size of [image]; [premultiplied] divides the colour by it.
+     *
+     * Only luma rows [top] to [bottom] convert, into rows 0 to `bottom - top` of the output, so a
+     * grid can convert one band of rows at a time (#151). The planes of [image] may then hold a
+     * window of the picture: their row 0 is luma row [planeTop] (chroma row `planeTop shr subY`),
+     * and row 0 of [alpha]'s plane is row [alphaTop]. The edges of the upsampling stay those of the
+     * whole picture, [image]'s width and height.
      */
     fun convert(
         image: AvifPlanes,
@@ -97,6 +103,10 @@ internal object AvifColor {
         premultiplied: Boolean,
         out8: IntArray,
         out16: ShortArray?,
+        top: Int = 0,
+        bottom: Int = image.height,
+        planeTop: Int = 0,
+        alphaTop: Int = 0,
     ) {
         unsupported(cicp.matrix)?.let { throw UnsupportedImageException(it) }
         val depth = image.depth
@@ -127,7 +137,8 @@ internal object AvifColor {
         val alphaStride = alpha?.strides?.get(0) ?: 0
         val alphaMax = alpha?.let { ((1 shl it.depth) - 1).toDouble() } ?: 1.0
         val channels16 = if (alpha != null) 4 else 3
-        for (j in 0 until h) {
+        val chromaTop = planeTop shr subY
+        for (j in top until bottom) {
             val uvJ = j shr subY
             val adjRow = when {
                 !subsampled || subY == 0 -> uvJ
@@ -136,7 +147,7 @@ internal object AvifColor {
                 else -> uvJ - 1
             }
             for (i in 0 until w) {
-                val yy = tableY[minOf(y0[j * sy + i].toInt() and 0xFFFF, max)]
+                val yy = tableY[minOf(y0[(j - planeTop) * sy + i].toInt() and 0xFFFF, max)]
                 var r: Double
                 var g: Double
                 var b: Double
@@ -145,18 +156,18 @@ internal object AvifColor {
                     val cb: Double
                     val cr: Double
                     if (!subsampled) {
-                        cb = tableUV[minOf(u0!![uvJ * suv + uvI].toInt() and 0xFFFF, max)]
-                        cr = tableUV[minOf(v0!![uvJ * suv + uvI].toInt() and 0xFFFF, max)]
+                        cb = tableUV[minOf(u0!![(uvJ - chromaTop) * suv + uvI].toInt() and 0xFFFF, max)]
+                        cr = tableUV[minOf(v0!![(uvJ - chromaTop) * suv + uvI].toInt() and 0xFFFF, max)]
                     } else {
                         val adjCol = when {
                             i == 0 || (i == w - 1 && i % 2 != 0) -> uvI
                             i % 2 != 0 -> uvI + 1
                             else -> uvI - 1
                         }
-                        val a = uvJ * suv + uvI
-                        val c = uvJ * suv + adjCol
-                        val rr = adjRow * suv + uvI
-                        val d = adjRow * suv + adjCol
+                        val a = (uvJ - chromaTop) * suv + uvI
+                        val c = (uvJ - chromaTop) * suv + adjCol
+                        val rr = (adjRow - chromaTop) * suv + uvI
+                        val d = (adjRow - chromaTop) * suv + adjCol
                         cb = tableUV[minOf(u0!![a].toInt() and 0xFFFF, max)] * (9.0 / 16) + tableUV[minOf(u0[c].toInt() and 0xFFFF, max)] * (3.0 / 16) +
                             tableUV[minOf(u0[rr].toInt() and 0xFFFF, max)] * (3.0 / 16) + tableUV[minOf(u0[d].toInt() and 0xFFFF, max)] * (1.0 / 16)
                         cr = tableUV[minOf(v0!![a].toInt() and 0xFFFF, max)] * (9.0 / 16) + tableUV[minOf(v0[c].toInt() and 0xFFFF, max)] * (3.0 / 16) +
@@ -186,7 +197,7 @@ internal object AvifColor {
                 b = b.coerceIn(0.0, 1.0)
                 var a = 1.0
                 if (alphaPlane != null) {
-                    a = ((alphaPlane[j * alphaStride + i].toInt() and 0xFFFF) / alphaMax).coerceIn(0.0, 1.0)
+                    a = ((alphaPlane[(j - alphaTop) * alphaStride + i].toInt() and 0xFFFF) / alphaMax).coerceIn(0.0, 1.0)
                     if (premultiplied) {
                         if (a == 0.0) {
                             r = 0.0
@@ -203,7 +214,7 @@ internal object AvifColor {
                 val g8 = (0.5 + g * 255).toInt()
                 val b8 = (0.5 + b * 255).toInt()
                 val a8 = (0.5 + a * 255).toInt()
-                val at = j * w + i
+                val at = (j - top) * w + i
                 out8[at] = (a8 shl 24) or (r8 shl 16) or (g8 shl 8) or b8
                 if (out16 != null) {
                     val o = at * channels16

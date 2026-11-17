@@ -1,5 +1,6 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
+import io.github.yuroyami.imagekodec.BandScaler
 import io.github.yuroyami.imagekodec.ColorProfile
 import io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi
 import io.github.yuroyami.imagekodec.HeifCodec
@@ -721,6 +722,118 @@ internal object AvifDecoder {
         val crop = p.crop?.takeIf { it[0] + it[2] <= out.bitmap.width && it[1] + it[3] <= out.bitmap.height } ?: return out
         return Rendered(cropped(out.bitmap, crop), out.wide?.let { cropped(it, crop) })
     }
+
+    // ---- reducing a grid while it decodes (#151) ------------------------------------------
+
+    /**
+     * Whether [downscaledGrid] reduces [data] band by band: a still image whose shown item is a
+     * `grid` of coded tiles, with no alpha, or an alpha item that is coded or is a grid of coded
+     * tiles laid out as the colour grid's.
+     */
+    fun reducesWhileDecoding(data: ByteArray): Boolean = try {
+        banded(plan(data, probing = false))
+    } catch (_: ImageDecodeException) {
+        false
+    }
+
+    private fun banded(p: Plan): Boolean {
+        if (p.track != null || p.alphaTrack != null || p.unsupported != null) return false
+        val item = p.item?.takeIf { it.type == GRID } ?: return false
+        val c = p.c
+        if (inputs(c, item).any { codecOf(it) == null }) return false
+        val alpha = p.alphaItem ?: return true
+        if (codecOf(alpha) != null) return true
+        if (alpha.type != GRID || inputs(c, alpha).any { codecOf(it) == null }) return false
+        val g = AvifGrid.read(c.itemData(item))
+        val a = AvifGrid.read(c.itemData(alpha))
+        return g.rows == a.rows && g.columns == a.columns && g.width == a.width && g.height == a.height
+    }
+
+    /**
+     * [data] as `decode(data).downscaledTo(width, height)` gives it, with [transform] applied to
+     * each band of rows after the conversion to RGB, as the facade converts colour before it scales.
+     * The grid decodes one row of tiles at a time, its rows convert to RGB once the chroma rows
+     * their upsampling reads are in, and they go to a [BandScaler] and are dropped, so the picture
+     * never exists at full size. With [wide], each band also comes at 16 bits a sample, as
+     * [decode16] gives it. Null when [reducesWhileDecoding] is false, when the size is not a
+     * reduction, when [grayOnly] and the picture is in colour, or when the alpha grid's tiles are
+     * not the size of the colour grid's: the caller then decodes in full.
+     */
+    fun downscaledGrid(
+        data: ByteArray,
+        width: Int,
+        height: Int,
+        wide: Boolean,
+        grayOnly: Boolean,
+        cancel: (() -> Unit)?,
+        transform: (KiteBitmap, KiteBitmap16?) -> KiteBitmap,
+    ): KiteBitmap? = labelled(data) {
+        val p = plan(data, probing = false)
+        if (!banded(p)) return@labelled null
+        val c = p.c
+        val item = p.item!!
+        val crop = p.crop ?: intArrayOf(0, 0, p.width, p.height)
+        val (cropLeft, cropTop, shownWidth, shownHeight) = crop.toList()
+        if (width !in 1..shownWidth || height !in 1..shownHeight || (width == shownWidth && height == shownHeight)) return@labelled null
+        val grid = AvifGrid.read(c.itemData(item))
+        val tiles = inputs(c, item)
+        fun tile(t: AvifItem): AvifPlanes {
+            cancel?.invoke()
+            return planes(c, t, 1, cancel)
+        }
+        val color = AvifGridWindow(grid, tiles.size, maxPlanes = 3, tile = { tile(tiles[it]) })
+        val alphaItem = p.alphaItem
+        val alphaGrid = alphaItem?.takeIf { it.type == GRID }?.let { a ->
+            val alphaTiles = inputs(c, a)
+            AvifGridWindow(AvifGrid.read(c.itemData(a)), alphaTiles.size, maxPlanes = 1, tile = { tile(alphaTiles[it]) }, prepare = ::fullRangeAlpha)
+        }
+        val scaler = BandScaler(shownWidth, shownHeight, width, height)
+        val w = grid.width
+        val h = grid.height
+        var alphaWhole: AvifPlanes? = null
+        var cicp: AvifCicp? = null
+        var done = 0
+        for (row in 0 until grid.rows) {
+            color.load(row)
+            alphaGrid?.load(row)
+            val f = color.first!!
+            if (row == 0) {
+                if (grayOnly && !f.monochrome) return@labelled null
+                if (alphaGrid != null && alphaGrid.first!!.height != f.height) return@labelled null
+                cicp = p.cicp ?: AvifCicp(2, 2, 2, f.fullRange)
+            }
+            // A luma row of 4:2:0 reads the chroma row below its own when it is odd, which the next row of tiles holds.
+            val end = if (row == grid.rows - 1) h else color.loaded - (if (!f.monochrome && f.subY != 0) 1 else 0)
+            if (alphaItem != null && alphaGrid == null && alphaWhole == null) {
+                alphaWhole = fullRangeAlpha(planes(c, alphaItem, 0, cancel)).also { a ->
+                    if (a.width != w || a.height != h) {
+                        throw ImageDecodeException("AVIF: the alpha image is ${a.width} by ${a.height}, the colour image $w by $h")
+                    }
+                }
+            }
+            val alpha = alphaGrid?.view() ?: alphaWhole
+            val alphaTop = alphaGrid?.top ?: 0
+            val image = color.view()
+            val channels = if (alpha != null) 4 else 3
+            val bandRows = maxOf(1, BAND_PIXELS / w)
+            var from = maxOf(done, cropTop)
+            val until = minOf(end, cropTop + shownHeight)
+            while (from < until) {
+                val to = minOf(until, from + bandRows)
+                val out8 = IntArray(w * (to - from))
+                val out16 = if (wide) ShortArray(w * (to - from) * channels) else null
+                AvifColor.convert(image, cicp!!, alpha, p.premultiplied, out8, out16, from, to, color.top, alphaTop)
+                val band = transform(KiteBitmap(w, to - from, out8), out16?.let { KiteBitmap16(w, to - from, channels, it) })
+                for (j in from until to) scaler.add(band.argb, (j - from) * w + cropLeft)
+                from = to
+            }
+            done = end
+        }
+        scaler.result()
+    }
+
+    /** About how many pixels [downscaledGrid] converts at once: a band of rows this size or one row. */
+    private const val BAND_PIXELS = 1 shl 16
 
     private fun convert(color: AvifPlanes, alpha: AvifPlanes?, premultiplied: Boolean, cicp: AvifCicp, wide: Boolean): Rendered {
         val a = alpha?.let { fullRangeAlpha(it) }

@@ -366,9 +366,13 @@ public object ImageKodec {
      * A JPEG, JPEG 2000 or JPEG XR decodes at the largest reduction [decodeReduced] offers whose output
      * still covers that size, as libjpeg's scaled decode or Android's sample size is chosen, and
      * the box filter of [scaled] finishes the rest. The full-size pixels never exist, and the
-     * result differs from the full decode only by the reduced inverse transform. Other formats
-     * decode in full and filter once. [colorTarget] converts as for [decode], and
-     * [cancellationCheck] runs as for [decode].
+     * result differs from the full decode only by the reduced inverse transform. A HEIC or AVIF
+     * image made of a `grid` of tiles reduces while it decodes: one row of tiles at a time is
+     * decoded, converted to RGB and fed to the box filter, so the full-size pixels never exist
+     * either, and the result equals the full decode then [scaled], pixel for pixel. Its tiles still
+     * decode at full size, so this saves memory, not time. Other formats decode in full and filter
+     * once. [colorTarget] converts as for [decode], and [cancellationCheck] runs as for [decode],
+     * and at least once a tile of a grid.
      *
      * @throws IllegalArgumentException if [maxWidth] or [maxHeight] is not positive
      * @throws ImageDecodeException on malformed/truncated input or unknown format
@@ -390,7 +394,8 @@ public object ImageKodec {
             val width = if (applyOrientation) info.displayWidth else info.width
             val height = if (applyOrientation) info.displayHeight else info.height
             val (dw, dh) = fittedSize(width, height, maxWidth, maxHeight) ?: return@cancellable decodeWith(data, applyOrientation, colorTarget, cancel)
-            reducedTo(data, info, dw, dh, applyOrientation, colorTarget, cancel)
+            if (isHeif(data)) heifReducedTo(data, info, dw, dh, applyOrientation, colorTarget, cancel)
+            else reducedTo(data, info, dw, dh, applyOrientation, colorTarget, cancel)
         }
     }
 
@@ -398,8 +403,8 @@ public object ImageKodec {
      * Decode [data] at exactly [width] by [height], the size
      * `decode(data, applyOrientation).downscaledTo(width, height)` gives. The caller chooses the
      * aspect ratio: use it for the size of a centre crop, computed from [probe], or for a size a
-     * layout has already worked out. It reduces a JPEG, JPEG 2000 or JPEG XR while decoding as
-     * [decodeScaled] does. [colorTarget] converts as for [decode], and [cancellationCheck] runs
+     * layout has already worked out. It reduces a JPEG, JPEG 2000 or JPEG XR, and a HEIC or AVIF
+     * grid, while decoding as [decodeScaled] does. [colorTarget] converts as for [decode], and [cancellationCheck] runs
      * as for [decode].
      *
      * @throws IllegalArgumentException if [width] or [height] is not positive or exceeds the side of
@@ -419,17 +424,62 @@ public object ImageKodec {
         require(width > 0 && height > 0) { "target must be positive: ${width}x$height" }
         return cancellable(cancellationCheck) { cancel ->
             if (!reducesWhileDecoding(data)) return@cancellable decodeWith(data, applyOrientation, colorTarget, cancel).downscaledTo(width, height)
-            reducedTo(data, probe(data), width, height, applyOrientation, colorTarget, cancel)
+            if (isHeif(data)) heifReducedTo(data, probe(data), width, height, applyOrientation, colorTarget, cancel)
+            else reducedTo(data, probe(data), width, height, applyOrientation, colorTarget, cancel)
         }
     }
 
     private fun ceilDiv(side: Int, reduction: Int): Int = ((side.toLong() + reduction - 1) / reduction).toInt()
 
-    /** Whether [decodeReduced] reduces [data] inside its decoder, so that a smaller result costs less. */
+    /**
+     * Whether [decodeScaled] reduces [data] inside its decoder, so that a smaller result costs less:
+     * [decodeReduced] does for a JPEG, JPEG 2000 or JPEG XR, and a HEIC or AVIF grid scales band by
+     * band (#151).
+     */
     private fun reducesWhileDecoding(data: ByteArray): Boolean = when (detect(data)) {
         ImageFormat.JPEG, ImageFormat.JP2, ImageFormat.JXR -> true
         ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { detect(it) == ImageFormat.JPEG } ?: false
+        ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.reducesWhileDecoding(data)
         else -> false
+    }
+
+    private fun isHeif(data: ByteArray): Boolean = detect(data).let { it == ImageFormat.AVIF || it == ImageFormat.HEIC }
+
+    /**
+     * The HEIC or AVIF grid [data], whose header [info] describes, at exactly [width] by [height],
+     * scaled band by band as it decodes (#151). Each band converts as [inColor] converts the whole
+     * picture, before the scale, and the reduction comes before the orientation, which moves the
+     * same pixels either way. Where the band path declines, the image decodes in full.
+     */
+    private fun heifReducedTo(
+        data: ByteArray,
+        info: ImageInfo,
+        width: Int,
+        height: Int,
+        applyOrientation: Boolean,
+        colorTarget: ColorTarget,
+        cancel: (() -> Unit)?,
+    ): KiteBitmap {
+        val orientation = if (applyOrientation) info.orientation else Orientation.Normal
+        val storedWidth = if (orientation.swapsAxes) height else width
+        val storedHeight = if (orientation.swapsAxes) width else height
+        // A CMYK profile converts nothing in a HEIF file, as inColor finds no ink in it.
+        val conversion = conversion(data, 0, colorTarget)?.takeIf { it.converter.channels != 4 }
+        val converter = conversion?.converter
+        val reduced = AvifDecoder.downscaledGrid(
+            data, storedWidth, storedHeight,
+            wide = conversion != null && conversion.bitDepth > 8,
+            // A gray profile applies only to gray pixels, which only a monochrome picture promises band by band.
+            grayOnly = converter?.channels == 1,
+            cancel = cancel,
+        ) { band, band16 ->
+            if (converter == null) {
+                band
+            } else {
+                band16?.let { applied(converter, it) }?.toBitmap() ?: applied(converter, band) ?: band
+            }
+        } ?: return decodeWith(data, applyOrientation, colorTarget, cancel).downscaledTo(width, height)
+        return reduced.oriented(orientation)
     }
 
     /**

@@ -18,7 +18,8 @@ package io.github.yuroyami.imagekodec
  * This is a post-decode scale: the decoder still materialises the full-size
  * image transiently. What it saves is *retained* memory (the thumbnail you keep
  * vs the 12MP original). [ImageKodec.decodeScaled] gives the same size from the
- * encoded bytes, and shrinks a JPEG or JPEG 2000 while it decodes.
+ * encoded bytes, and shrinks a JPEG, JPEG 2000 or JPEG XR image, or a HEIC or AVIF grid, while it
+ * decodes.
  *
  * @throws IllegalArgumentException if either target dimension is not positive
  */
@@ -106,6 +107,86 @@ public fun KiteBitmap.downscaledTo(targetWidth: Int, targetHeight: Int): KiteBit
         }
     }
     return KiteBitmap(dw, dh, out)
+}
+
+/**
+ * [downscaledTo] fed one source row at a time, top to bottom, so that a decoder can scale a band
+ * of rows and drop it (#151). Each output pixel sums the same whole-number products as
+ * [downscaledTo] and divides them the same way, so the result is the same, pixel for pixel. It
+ * keeps the sums of two output rows, as a source row reaches into at most two bins of a reduction.
+ */
+internal class BandScaler(
+    private val sourceWidth: Int,
+    private val sourceHeight: Int,
+    private val targetWidth: Int,
+    private val targetHeight: Int,
+) {
+    init {
+        require(targetWidth in 1..sourceWidth && targetHeight in 1..sourceHeight) {
+            "downscale target ${targetWidth}x$targetHeight outside ${sourceWidth}x$sourceHeight"
+        }
+    }
+
+    private val xs = AxisWeights(sourceWidth, targetWidth)
+    private val ys = AxisWeights(sourceHeight, targetHeight)
+    private val area = sourceWidth.toLong() * sourceHeight
+
+    /** A, R, G and B sums of output rows of even and of odd index, interleaved by pixel. */
+    private val sums = LongArray(2 * 4 * targetWidth)
+    private val out = IntArray(targetWidth * targetHeight)
+    private var rowsIn = 0
+    private var rowsOut = 0
+
+    /** Adds the next source row, [sourceWidth] pixels of [argb] from [offset]. */
+    fun add(argb: IntArray, offset: Int) {
+        check(rowsIn < sourceHeight) { "all $sourceHeight rows were already added" }
+        val y = rowsIn++
+        // Bin d covers [d * sh, (d + 1) * sh) and row y covers [y * dh, (y + 1) * dh), as in downscaledTo.
+        var dy = (y.toLong() * targetHeight / sourceHeight).toInt()
+        while (dy < targetHeight && dy.toLong() * sourceHeight < (y + 1).toLong() * targetHeight) {
+            val wy = ys.weight(dy, y).toLong()
+            val base = (dy and 1) * 4 * targetWidth
+            for (x in 0 until sourceWidth) {
+                val p = argb[offset + x]
+                if (p ushr 24 == 0) continue
+                var dx = (x.toLong() * targetWidth / sourceWidth).toInt()
+                while (dx < targetWidth && dx.toLong() * sourceWidth < (x + 1).toLong() * targetWidth) {
+                    val wa = (p ushr 24) * wy * xs.weight(dx, x)
+                    val s = base + dx * 4
+                    sums[s] += wa
+                    sums[s + 1] += ((p ushr 16) and 0xFF) * wa
+                    sums[s + 2] += ((p ushr 8) and 0xFF) * wa
+                    sums[s + 3] += (p and 0xFF) * wa
+                    dx++
+                }
+            }
+            dy++
+        }
+        while (rowsOut < targetHeight && ys.first(rowsOut) + ys.count(rowsOut) <= rowsIn) finish(rowsOut++)
+    }
+
+    private fun finish(dy: Int) {
+        val base = (dy and 1) * 4 * targetWidth
+        for (dx in 0 until targetWidth) {
+            val s = base + dx * 4
+            val sumA = sums[s]
+            out[dy * targetWidth + dx] = if (sumA == 0L) {
+                0
+            } else {
+                (((sumA + area / 2) / area).toInt() shl 24) or
+                    (((sums[s + 1] + sumA / 2) / sumA).toInt() shl 16) or
+                    (((sums[s + 2] + sumA / 2) / sumA).toInt() shl 8) or
+                    ((sums[s + 3] + sumA / 2) / sumA).toInt()
+            }
+        }
+        sums.fill(0L, base, base + 4 * targetWidth)
+    }
+
+    /** The scaled image, once every source row is in. */
+    fun result(): KiteBitmap {
+        check(rowsIn == sourceHeight) { "$rowsIn of $sourceHeight rows added" }
+        return KiteBitmap(targetWidth, targetHeight, out)
+    }
 }
 
 /**

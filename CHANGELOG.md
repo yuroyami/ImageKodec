@@ -14,6 +14,9 @@ reviewable in the diff.
 
 ### Added
 
+- `decodeScaled` and `decodeDownscaledTo` reduce a HEIC or AVIF grid while it decodes. One row of
+  tiles at a time is converted to RGB and fed to the box filter, so a 48-megapixel grid never exists
+  at full size; the result equals `decode` followed by the same scale, pixel for pixel (#151).
 - A HEIC or AVIF file with several top-level images has a page for each, the primary first:
   `pageCount`, `probePage`, `decodePage` and `decode16(page =)` reach them as they reach the pages
   of a TIFF. `ImageInfo.stereoLeftPage` and `stereoRightPage` name the two eyes of a `ster` group,

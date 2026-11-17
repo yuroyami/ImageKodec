@@ -69,12 +69,14 @@ class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf(
             var ipco = ByteArray(0)
             var ipma = be32(items.size)
             var index = 0
+            // Past 127 properties an index takes 15 bits, which ipma's flag 1 asks for.
+            val wide = items.sumOf { it.properties.size } > 127
             for (item in items) {
                 ipma += be16(item.id) + byteArrayOf(item.properties.size.toByte())
                 for ((p, essential) in item.properties) {
                     ipco += p
                     index++
-                    ipma += byteArrayOf(((if (essential) 0x80 else 0) or index).toByte())
+                    ipma += if (wide) be16((if (essential) 0x8000 else 0) or index) else byteArrayOf(((if (essential) 0x80 else 0) or index).toByte())
                 }
             }
             var iref = ByteArray(0)
@@ -86,7 +88,7 @@ class HeifBuilder(val major: String = "avif", val brands: List<String> = listOf(
             children += fullBox("iloc", 1, 0, iloc)
             children += fullBox("iinf", 0, 0, iinf)
             if (references.isNotEmpty()) children += fullBox("iref", 0, 0, iref)
-            children += box("iprp", box("ipco", ipco) + fullBox("ipma", 0, 0, ipma))
+            children += box("iprp", box("ipco", ipco) + fullBox("ipma", 0, if (wide) 1 else 0, ipma))
             if (idat.isNotEmpty()) children += box("idat", idat)
             if (groups.isNotEmpty()) {
                 var grpl = ByteArray(0)
