@@ -332,7 +332,8 @@ jobs:
   build:
     name: Build every non-Apple platform, check the public API
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The test kit and the HEIC module add two modules to compile for every platform here.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
