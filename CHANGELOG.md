@@ -22,9 +22,12 @@ reviewable in the diff.
   and VUI colour. The module is not published (#139, #140).
 - `imagekodec-heic` decodes intra HEVC pictures: the CABAC slice data with wavefront rows, entry
   points and several slices, and intra reconstruction in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 12
-  bits, with scaling lists, transform skip, lossless coding and PCM. A picture that turns on the
-  deblocking filter or sample adaptive offset, which are not implemented yet, still reports so in
-  `unsupportedReason`; so do tiles, dependent slice segments and inter slices (#141, #142).
+  bits, with scaling lists, transform skip, lossless coding and PCM (#141, #142), the deblocking
+  filter and sample adaptive offset, tiles and dependent slice segments (#143, #144). An inter slice
+  or a range extension coding tool is named in `unsupportedReason`.
+- With `imagekodec-heic` installed, `ImageKodec.decode` and `decode16` read HEIC photos end to end:
+  grids, alpha, crops, rotation, mirror, overlays and thumbnails. Colour comes from the item's `nclx`,
+  else from the VUI of the stream, also beside an ICC profile (#145).
 - `ImageFormat.HEIC`: `detect` and `probe` recognise a HEIF file whose image is not AV1, by its HEVC
   brands, or by the type of the image it shows when it names only `mif1` or `msf1`. `probe` reports
   its size and depth from the container. Until a codec reads its HEVC items, `isDecodable` is false

@@ -183,3 +183,7 @@ being true.
   (72x56 and 80x48 4:4:4 12 bits, 256x192 4:2:0 with `slices=3`). Kill it with SIGKILL (#143).
 - libde265 1.0's dec265 fails the MD5 SEI of an x265 picture with several slices and SAO on, so the
   sample-for-sample comparisons with it use one slice; the hash SEI covers several (#143).
+- libheif 1.17.6 turns the colour of an image with alpha by its `irot` but not the alpha, so `HeicOracleTest`
+  holds the alpha of a turned file to heif-convert's reading of the same file with `irot` set to 0 (#145).
+- libheif 1.17.6 converts a grid by its tiles' colour properties, not the grid item's, so a grid whose nclx
+  only the grid item carries reads up to 54 levels away; the synthetic tiles carry the grid's nclx too (#145).
