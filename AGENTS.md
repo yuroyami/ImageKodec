@@ -63,6 +63,9 @@ being true.
 - GitHub keeps 10 GB of caches for a repository and drops the oldest past that. A cache
   key with the commit in it adds an entry on every push, so the toolchain caches of CI
   are keyed on the build files alone.
+- Homebrew's libaom, unlike Ubuntu's, used no distance weighted compound in two macOS runs, and the
+  dual filter in only the first of them, so the macOS AV1 job sets
+  `IMAGEKODEC_AV1_TOOL_COVERAGE=report` and lists missing tools; frames still have to match dav1d (#110).
 - A runner that runs out of memory stops with exit code 143 and "The runner has received a shutdown
   signal", which reads like a fault of GitHub's. One `./kotlin build` of every non-Apple platform did
   this once the HEIC module was in, so CI builds the native platforms one at a time.

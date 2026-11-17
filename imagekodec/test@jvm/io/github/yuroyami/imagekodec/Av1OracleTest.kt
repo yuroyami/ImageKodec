@@ -331,9 +331,10 @@ class Av1OracleTest {
             }
         }
         // A sequence dav1d refused reached nothing that was checked, so its tools may be missing; that skips below.
-        if (refused.isEmpty()) {
-            for ((tool, first) in wanted) if (used[tool] == 0) failures += "no sequence used $tool (written for $first)"
-        }
+        // Homebrew's libaom picks other tools from run to run, so the macOS job only reports the ones it missed;
+        // the Linux jobs, on Ubuntu's libaom, hold every tool (#110).
+        val missed = if (refused.isEmpty()) wanted.filter { used[it.key] == 0 }.map { (tool, first) -> "no sequence used $tool (written for $first)" } else emptyList()
+        if (System.getenv("IMAGEKODEC_AV1_TOOL_COVERAGE") == "report") missed.forEach(::println) else failures += missed
         assertTrue(failures.isEmpty(), failures.joinToString("\n"))
         // Every other sequence has been checked by now; one dav1d cannot read reports as skipped.
         assumeTrue("dav1d could not decode ${refused.joinToString("; ")}", refused.isEmpty())

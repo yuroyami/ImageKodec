@@ -432,6 +432,9 @@ jobs:
     timeout-minutes: 40
     env:
       IMAGEKODEC_REQUIRE_ORACLES: '1'
+      # Every frame must still equal dav1d's, but Homebrew's libaom picks other inter tools from run
+      # to run, so this job lists the tools no sequence used; the Linux jobs require them all.
+      IMAGEKODEC_AV1_TOOL_COVERAGE: report
     steps:
       - uses: actions/checkout@v7
         with:
