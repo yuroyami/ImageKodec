@@ -13,9 +13,10 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * Three tiny intra pictures from libx265, with the loop filters off, decoded on every platform and
- * held to the MD5 that each carries in its decoded picture hash SEI (D.3.20). Then every cut and many
- * altered bytes of one of them must give a picture or an ImageDecodeException, within a deadline.
+ * Four tiny intra pictures from libx265, three with the loop filters off and one with both on, decoded
+ * on every platform and held to the MD5 that each carries in its decoded picture hash SEI (D.3.20).
+ * Then every cut and many altered bytes of two of them must give a picture or an ImageDecodeException,
+ * within a deadline.
  */
 class HevcDecoderTest {
 
@@ -73,6 +74,24 @@ class HevcDecoderTest {
         nal("5001843100bab3089b57a7f247d091d5237ea3c6b14d296db0ededf7a5f650bd71176cb22f7dcfaa37d6f0a130e3abcc8b1ca1d1e180"),
     )
 
+    /**
+     * 48x32, 4:2:0, 8 bits, both loop filters with deblocking offsets, wavefront rows: x265 with
+     * keyint=1:hash=1:ctu=16:min-cu-size=8:deblock=-2,1:qp=34:ipratio=1:wpp=1:aq-mode=2:qg-size=16.
+     */
+    private val loopFilters420 = listOf(
+        nal("4201010408000003009fa800000300001ea06208596eaaf2bc05a02000000300200000030321"),
+        nal("4401c1718388a480"),
+        nal(
+            "2801af0850998cfdbe7df5ac16bf7d0747ece3cf9b206ef1efdaa729a6e60ed7ec209d46b890956543ee1d39b3fa975f72427caa823340d14720abc8",
+            "154c8d7641ee9201ab4a33d255c47fc49cd8f016f100404d49c74bafded238182a82387232e7f87cf07f60980a5a14455071707cd6d3783e4167d762",
+            "900458290fef6b8ab6a17c786521301c1ae56c4f0bcd2f3fd668534a0f6358f2d8f80b96c4d9ff6c17d1ed9c1fad456c00c5a4f2bb24270a9cee1b1b",
+            "852fe5818d220992edde0520ee5d9125ed9a2a303abf256fb616f825bb43ebce5a251bafae11e40001e80b89bac7274f3901eeb1c3a53732bce072c3",
+            "389b477c117451e466bf845ea8a15dee4a063decaa5cc8eff9197b69a4c9cb94caa86ba4f7df1b5d04d8569937d4d6afc0d40885b0ec2f1a795419e0",
+            "f77ed0f0cfd06acc3d8ed23a10e0cddafef2327443de8047b3bf69d6a3ae6db7db76343d04099b5348fbb700969e",
+        ),
+        nal("5001843100baec8acc647c2719dfa04925be31a1825f93985b6d167a1e75b39fcea7c59dc07042d5eff4e502493c230d351f5cfbc380"),
+    )
+
     private fun decode(units: List<ByteArray>): List<DecodedPicture> {
         val d = HevcDecoder()
         for (u in units) d.decodeNal(u, 0, u.size, null)
@@ -100,12 +119,7 @@ class HevcDecoderTest {
         val p = assertMatchesHash("4:2:0 WPP", wavefront420)
         assertEquals(48 to 48, p.sps.width to p.sps.height)
         // The features the fixture is for, read from the stream.
-        val store = ParameterSetStore()
-        val slices = wavefront420.mapNotNull { u ->
-            val r = BitReader(unescapeNal(u))
-            val nal = readNalHeader(r)
-            if (NalType.isSlice(nal.type)) readSliceHeader(r, nal, store, null, u.size) else null.also { store.add(nal, r) }
-        }
+        val slices = sliceHeaders(wavefront420)
         assertEquals(2, slices.size)
         assertTrue(slices[0].pps.entropyCodingSync)
         // The second slice holds two CTB rows, so its second row starts from the contexts the first stored.
@@ -123,6 +137,25 @@ class HevcDecoderTest {
     fun chroma444At12BitsWithTransformSkip() {
         val p = assertMatchesHash("4:4:4 12 bits", chroma444)
         assertEquals(3 to 12, p.sps.chromaFormatIdc to p.sps.bitDepthY)
+    }
+
+    @Test
+    fun bothLoopFiltersWithOffsets() {
+        val p = assertMatchesHash("4:2:0 loop filters", loopFilters420)
+        val h = sliceHeaders(loopFilters420).single()
+        // The features the fixture is for, read from the stream.
+        assertTrue(!h.deblockingFilterDisabled && h.saoLuma && h.saoChroma)
+        assertEquals(-2 to 1, h.tcOffsetDiv2 to h.betaOffsetDiv2)
+        assertEquals(48 to 32, p.sps.width to p.sps.height)
+    }
+
+    private fun sliceHeaders(units: List<ByteArray>): List<SliceHeader> {
+        val store = ParameterSetStore()
+        return units.mapNotNull { u ->
+            val r = BitReader(unescapeNal(u))
+            val nal = readNalHeader(r)
+            if (NalType.isSlice(nal.type)) readSliceHeader(r, nal, store, null, u.size) else null.also { store.add(nal, r) }
+        }
     }
 
     @Test
@@ -153,16 +186,18 @@ class HevcDecoderTest {
 
     @Test
     fun everyCutAndAlteredByteFailsCleanly() {
-        val index = chroma422.indexOfFirst { NalType.isSlice((it[0].toInt() shr 1) and 0x3F) }
-        val slice = chroma422[index]
-        withDeadline("HEVC truncation", 60_000) {
-            for (n in 2 until slice.size) survives(chroma422, index, slice.copyOf(n), "the slice cut to $n bytes")
-        }
-        withDeadline("HEVC mutation", 60_000) {
-            for (at in 2 until slice.size) for (x in intArrayOf(0x01, 0x10, 0x80, 0xFF)) {
-                val m = slice.copyOf()
-                m[at] = (m[at].toInt() xor x).toByte()
-                survives(chroma422, index, m, "byte $at of the slice xor $x")
+        for ((name, units) in listOf("4:2:2" to chroma422, "loop filters" to loopFilters420)) {
+            val index = units.indexOfFirst { NalType.isSlice((it[0].toInt() shr 1) and 0x3F) }
+            val slice = units[index]
+            withDeadline("HEVC truncation, $name", 60_000) {
+                for (n in 2 until slice.size) survives(units, index, slice.copyOf(n), "$name: the slice cut to $n bytes")
+            }
+            withDeadline("HEVC mutation, $name", 60_000) {
+                for (at in 2 until slice.size) for (x in intArrayOf(0x01, 0x10, 0x80, 0xFF)) {
+                    val m = slice.copyOf()
+                    m[at] = (m[at].toInt() xor x).toByte()
+                    survives(units, index, m, "$name: byte $at of the slice xor $x")
+                }
             }
         }
     }

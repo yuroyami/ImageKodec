@@ -2,6 +2,7 @@ package io.github.yuroyami.imagekodec.heic
 
 import io.github.yuroyami.imagekodec.AnnexB
 import io.github.yuroyami.imagekodec.HeifBuilder
+import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.ImageKodec
 import io.github.yuroyami.imagekodec.UnsupportedImageException
@@ -9,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** The module registers its codec, and the core hands it the `hvc1` items of a HEIC file (#139). */
 class ImageKodecHeicTest {
@@ -39,10 +41,11 @@ class ImageKodecHeicTest {
         assertEquals(ImageFormat.HEIC, info.format)
         assertEquals(24 to 20, info.width to info.height)
         assertEquals(8, info.bitDepth)
-        assertFalse(info.isDecodable)
-        // The reason comes from this module's codec, not from the core's note that the module is missing.
-        assertEquals(HevcSupport.DEBLOCKING, info.unsupportedReason)
-        val e = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(heic()) }
-        assertEquals(true, e.message?.contains("not implemented"), e.message)
+        // This module's codec takes the picture, where the core alone would say the module is missing.
+        assertTrue(info.isDecodable, info.unsupportedReason)
+        // The slice is cut after its header, so its data cannot decode.
+        val e = assertFailsWith<ImageDecodeException> { ImageKodec.decode(heic()) }
+        assertFalse(e is UnsupportedImageException, e.message)
+        assertEquals(true, e.message?.contains("HEVC"), e.message)
     }
 }

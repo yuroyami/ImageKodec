@@ -45,30 +45,17 @@ internal object HevcHeaderReader {
  * Apple's alpha and gain map images are of the Main Intra profile in 4:0:0, for one (#140).
  */
 internal object HevcSupport {
-    const val DEBLOCKING: String = "HEVC: the deblocking filter is not implemented yet"
-    const val SAO: String = "HEVC: sample adaptive offset is not implemented yet"
-
     /**
      * Why the picture of [h] cannot be decoded, or null when it can. Without a slice header the
-     * parameter sets decide, as if every slice turned on what they allow. Each issue that adds a tool
-     * removes its line here.
+     * parameter sets decide. Each issue that adds a tool removes its line here.
      */
     fun reason(h: HevcHeaders): String? {
-        h.slice?.let { return sliceReason(it, true) }
-        firstUnsupportedField(h.sps, h.pps, null)?.let { return "HEVC: $it is not supported yet" }
-        val p = h.pps
-        if (p != null && (!p.deblockingFilterDisabled || p.deblockingFilterOverrideEnabled)) return DEBLOCKING
-        if (h.sps.saoEnabled) return SAO
-        return null
+        h.slice?.let { return sliceReason(it) }
+        return firstUnsupportedField(h.sps, h.pps, null)?.let { "HEVC: $it is not supported yet" }
     }
 
-    /** Why the slice segment [h] cannot be decoded, or null; the loop filters count only when [loopFilters] is set. */
-    fun sliceReason(h: SliceHeader, loopFilters: Boolean): String? {
-        firstUnsupportedField(h.sps, h.pps, h)?.let { return "HEVC: $it is not supported yet" }
-        if (loopFilters && !h.deblockingFilterDisabled) return DEBLOCKING
-        if (loopFilters && (h.saoLuma || h.saoChroma)) return SAO
-        return null
-    }
+    /** Why the slice segment [h] cannot be decoded, or null. */
+    fun sliceReason(h: SliceHeader): String? = firstUnsupportedField(h.sps, h.pps, h)?.let { "HEVC: $it is not supported yet" }
 
     private fun firstUnsupportedField(s: Sps, p: Pps?, slice: SliceHeader?): String? = when {
         s.ctbLog2 < 4 -> "a CTB of ${s.ctbSize} samples (log2_diff_max_min_luma_coding_block_size)"
@@ -85,14 +72,12 @@ internal object HevcSupport {
         s.cabacBypassAlignment -> "cabac_bypass_alignment_enabled_flag"
         s.paletteMode -> "palette_mode_enabled_flag"
         s.intraBoundaryFilteringDisabled -> "intra_boundary_filtering_disabled_flag"
-        p != null && p.tilesEnabled -> "tiles_enabled_flag"
         p != null && p.log2MaxTransformSkipSize > 2 -> "log2_max_transform_skip_block_size_minus2 ${p.log2MaxTransformSkipSize - 2}"
         p != null && p.crossComponentPrediction -> "cross_component_prediction_enabled_flag"
         p != null && p.chromaQpOffsetListEnabled -> "chroma_qp_offset_list_enabled_flag"
         p != null && p.currPicRefEnabled -> "pps_curr_pic_ref_enabled_flag"
         p != null && p.residualAdaptiveColourTransform -> "residual_adaptive_colour_transform_enabled_flag"
         slice != null && slice.sliceType != SliceType.I -> "slice_type ${slice.sliceType}"
-        slice != null && slice.dependentSliceSegment -> "dependent_slice_segment_flag"
         else -> null
     }
 }

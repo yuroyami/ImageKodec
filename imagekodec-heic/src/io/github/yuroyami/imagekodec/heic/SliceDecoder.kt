@@ -42,8 +42,17 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     /** The FLAG_ bits of each unit. */
     val flags: ByteArray = ByteArray(w4 * (height shr 2))
 
+    /** The tiles and the tile scan of 6.5.1. */
+    val layout: CtbLayout = CtbLayout(sps, pps)
+
+    /** TileId of each CTB in raster scan. */
+    val tileIdRs: IntArray = IntArray(sizeInCtbs) { layout.tileId[layout.ctbAddrRsToTs[it]] }
+
     /** SliceAddrRs of the slice that holds each CTB, or -1 before it is decoded. */
-    private val ctbSlice = IntArray(sizeInCtbs) { -1 }
+    val ctbSlice: IntArray = IntArray(sizeInCtbs) { -1 }
+
+    /** The slice segment header of each CTB, whose flags and offsets the loop filters read. */
+    val ctbHeader: Array<SliceHeader?> = arrayOfNulls(sizeInCtbs)
 
     /** The SAO parameters of each CTB (7.4.9.3): per component its type, class or band and four offsets. */
     val sao: IntArray? = if (sps.saoEnabled) IntArray(sizeInCtbs * 18) else null
@@ -60,6 +69,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
     private val cabac = Cabac()
     private val wppStates = ByteArray(Ctx.COUNT)
+    private val dsStates = ByteArray(Ctx.COUNT)
+    private val tiles = pps.tilesEnabled
+    private val wpp = pps.entropyCodingSync
+    private val heightInCtbs = sps.picHeightInCtbs
     private val intra = IntraPredictor(this)
     private val transform = InverseTransform()
     private val coeff = IntArray(32 * 32)
@@ -92,6 +105,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private var sliceAddrRs = 0
     private var sliceQpY = 0
     private var ctbAddr = 0
+    private var ctbTs = 0
+    /** CtbAddrInTs after the last CTB of the previous slice segment, where a dependent one starts. */
+    private var nextCtbTs = 0
     private var stopBit = 0
     private lateinit var rbsp: ByteArray
     private var substreamEnd = 0
@@ -117,63 +133,73 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
     /**
      * Decodes the slice segment [h], whose RBSP is [rbsp] with the emulation prevention bytes removed
-     * from the escaped positions [escapes]. [cancel] runs once per CTB row.
+     * from the escaped positions [escapes], in tile scan (7.3.8.1). [cancel] runs once per CTB row of a tile.
      */
     fun decodeSliceSegment(h: SliceHeader, rbsp: ByteArray, escapes: IntArray, cancel: (() -> Unit)?) {
-        if (h.dependentSliceSegment) throw UnsupportedImageException("HEVC: dependent slice segments are not supported yet")
         if (h.sliceType != SliceType.I) throw UnsupportedImageException("HEVC: slice_type ${h.sliceType} is not supported yet")
         slice = h
         this.rbsp = rbsp
-        sliceAddrRs = h.sliceSegmentAddress
+        sliceAddrRs = h.sliceAddrRs
         sliceQpY = h.sliceQpY
         stopBit = BitReader(rbsp).stopBit
-        if (ctbSlice[sliceAddrRs] != -1) hevcError("slice_segment_address $sliceAddrRs names a CTB already decoded")
+        ctbAddr = h.sliceSegmentAddress
+        if (ctbSlice[ctbAddr] != -1) hevcError("slice_segment_address $ctbAddr names a CTB already decoded")
+        ctbTs = layout.ctbAddrRsToTs[ctbAddr]
+        // 9.3.2.1: a dependent slice segment takes the contexts that the segment just before it stored.
+        if (h.dependentSliceSegment && ctbTs != nextCtbTs) hevcError("the dependent slice segment at slice_segment_address $ctbAddr does not follow the one before it")
         val starts = substreamStarts(h, escapes)
-        val wpp = pps.entropyCodingSync
         var substream = 0
         substreamEnd = if (starts.size > 1) starts[1] else rbsp.size
         cabac.start(rbsp, starts[0], substreamEnd)
-        ctbAddr = sliceAddrRs
-        initContexts(wpp)
-        lastQpY = sliceQpY
+        startContexts(h.dependentSliceSegment)
         while (true) {
-            if (cancel != null && ctbAddr % widthInCtbs == 0) cancel()
+            val x = ctbAddr % widthInCtbs
+            if (cancel != null && (x == 0 || tileIdRs[ctbAddr] != tileIdRs[ctbAddr - 1])) cancel()
             ctbSlice[ctbAddr] = sliceAddrRs
+            ctbHeader[ctbAddr] = h
             codingTreeUnit()
             decodedCtbs++
-            // 9.3.1: the contexts after the second CTB of a row seed the row below.
-            if (wpp && ctbAddr % widthInCtbs == 1) cabac.states.copyInto(wppStates)
+            // 9.3.1: under WPP the contexts after the second CTB of a row of a tile seed the row below.
+            if (wpp && (x == 1 || (ctbAddr > 1 && tileIdRs[ctbAddr] != tileIdRs[ctbAddr - 2]))) cabac.states.copyInto(wppStates)
             val end = cabac.terminate()
-            ctbAddr++
+            ctbTs++
+            ctbDecoded(ctbAddr)
             if (end == 1) {
                 // 9.3.4.3.5: the last bit read is rbsp_stop_one_bit, so the data must end there.
                 if (cabac.bitPosition - 1 != stopBit) hevcError("end_of_slice_segment_flag is 1 before the end of the slice segment data")
                 if (substream != starts.size - 1) {
                     hevcError("num_entry_point_offsets ${starts.size - 1} but the slice segment has ${substream + 1} subsets")
                 }
+                // 9.3.2.4: kept for a dependent slice segment that may follow.
+                if (pps.dependentSliceSegmentsEnabled) cabac.states.copyInto(dsStates)
+                nextCtbTs = ctbTs
                 return
             }
-            if (ctbAddr >= sizeInCtbs) hevcError("the slice segment passes the last CTB of the picture")
+            if (ctbTs >= sizeInCtbs) hevcError("the slice segment passes the last CTB of the picture")
+            ctbAddr = layout.ctbAddrTsToRs[ctbTs]
             if (ctbSlice[ctbAddr] != -1) hevcError("the slice segment runs into a CTB already decoded")
-            if (wpp && ctbAddr % widthInCtbs == 0) {
+            // 7.3.8.1: a subset ends with each tile, and under WPP with each CTB row of a tile.
+            val newTile = tiles && layout.tileId[ctbTs] != layout.tileId[ctbTs - 1]
+            if (newTile || (wpp && rowStartInTile())) {
                 if (cabac.terminate() != 1) hevcError("end_of_subset_one_bit is 0")
                 substream++
-                if (substream >= starts.size) hevcError("num_entry_point_offsets ${starts.size - 1} is fewer than the CTB rows of the slice segment")
+                if (substream >= starts.size) hevcError("num_entry_point_offsets ${starts.size - 1} is fewer than the subsets of the slice segment")
                 val next = cabac.alignedByte
                 // 9.3.4.3.5: the last bit read is alignment_bit_equal_to_one, then zero bits to the byte.
                 val one = cabac.bitPosition - 1
-                if (next > substreamEnd) hevcError("the subset of CTB row ${ctbAddr / widthInCtbs - 1} is cut off")
+                if (next > substreamEnd) hevcError("the subset before CTB $ctbAddr is cut off")
                 if ((rbsp[one shr 3].toInt() shr (7 - (one and 7))) and 1 != 1) hevcError("alignment_bit_equal_to_one is 0")
                 checkZeroBits(cabac.bitPosition, next * 8, "alignment_bit_equal_to_zero")
                 if (next != starts[substream]) hevcError("entry_point_offset_minus1[ ${substream - 1} ] does not match the slice segment data")
                 substreamEnd = if (substream + 1 < starts.size) starts[substream + 1] else rbsp.size
                 cabac.start(rbsp, next, substreamEnd)
-                initContexts(true)
-                // 8.6.1: the first quantization group of a CTB row predicts from SliceQpY under WPP.
-                lastQpY = sliceQpY
+                startContexts(false)
             }
         }
     }
+
+    /** The current CTB is the first of its CTB row within its tile. */
+    private fun rowStartInTile(): Boolean = ctbAddr % widthInCtbs == 0 || tileIdRs[ctbAddr] != tileIdRs[ctbAddr - 1]
 
     /** The RBSP byte at which each subset of the slice segment data starts (7.4.7.1, 7-55). */
     private fun substreamStarts(h: SliceHeader, escapes: IntArray): IntArray {
@@ -207,30 +233,76 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     }
 
     /**
-     * Initialises the contexts at the start of a slice segment or of a CTB row (9.3.2.1): under WPP, a
-     * row takes the contexts the row above stored, when its CTB above right is available.
+     * Initialises the contexts at the start of a slice segment or of a subset (9.3.2.1): afresh at a
+     * tile; under WPP, at a CTB row of a tile, from the row above when its CTB above right is available;
+     * in a [dependent] slice segment, from the segment before it.
      */
-    private fun initContexts(wpp: Boolean) {
-        if (wpp && ctbAddr % widthInCtbs == 0) {
+    private fun startContexts(dependent: Boolean) {
+        val firstInTile = ctbTs == 0 || layout.tileId[ctbTs] != layout.tileId[ctbTs - 1]
+        val rowStart = wpp && rowStartInTile()
+        if (firstInTile) {
+            Ctx.init(cabac.states, 0, sliceQpY)
+        } else if (rowStart) {
             val above = ctbAddr - widthInCtbs + 1
-            // (xNbT, yNbT) of 9-3: inside the picture, decoded and in the same slice.
-            if (ctbAddr >= widthInCtbs && widthInCtbs > 1 && ctbSlice[above] == sliceAddrRs) {
+            // (xNbT, yNbT) of 9-3, available by 6.4.1: inside the picture, decoded, in the slice and the tile.
+            val x = ctbAddr % widthInCtbs
+            if (ctbAddr >= widthInCtbs && x + 1 < widthInCtbs && ctbSlice[above] == sliceAddrRs && tileIdRs[above] == tileIdRs[ctbAddr]) {
                 wppStates.copyInto(cabac.states)
-                return
+            } else {
+                Ctx.init(cabac.states, 0, sliceQpY)
             }
+        } else if (dependent) {
+            dsStates.copyInto(cabac.states)
+        } else {
+            Ctx.init(cabac.states, 0, sliceQpY)
         }
-        Ctx.init(cabac.states, 0, sliceQpY)
+        // 8.6.1: qPY_PREV is SliceQpY in the first quantization group of a slice, a tile, or a CTB row of a tile under WPP.
+        if (firstInTile || rowStart || !dependent) lastQpY = sliceQpY
     }
 
     /**
-     * availableN of 6.4.1 for the block at ([xCurr], [yCurr]) and its neighbour at ([xN], [yN]). With no
-     * tiles, a CTB before the current one in raster order is decoded; within a CTB, z-scan order decides.
+     * Counts the decoded CTB at [rs], and runs the loop filters over the CTB rows that no later CTB
+     * reads before deblocking: a row is deblocked once the row below it is decoded, as intra prediction
+     * reads the last line of the row above (8.4.4.2.1), and given SAO once the row below is deblocked.
+     */
+    private fun ctbDecoded(rs: Int) {
+        if (++rowCtbs[rs / widthInCtbs] != widthInCtbs) return
+        while (completeRows < heightInCtbs && rowCtbs[completeRows] == widthInCtbs) completeRows++
+        runLoopFilters(completeRows - 1)
+    }
+
+    private val rowCtbs = IntArray(heightInCtbs)
+    private var completeRows = 0
+    private var deblockedRows = 0
+    private var saoRows = 0
+    private val deblocker = Deblocker(this)
+    private val saoFilter: SaoFilter? = if (sps.saoEnabled) SaoFilter(this) else null
+
+    /** Deblocks the CTB rows before [rows], then applies SAO to every row whose neighbours below are deblocked. */
+    private fun runLoopFilters(rows: Int) {
+        while (deblockedRows < rows) deblocker.filterRow(deblockedRows++)
+        val last = if (deblockedRows == heightInCtbs) heightInCtbs else deblockedRows - 1
+        while (saoRows < last) {
+            saoFilter?.filterRow(saoRows)
+            saoRows++
+        }
+    }
+
+    /** Runs the loop filters over the rows still owed, once every CTB of the picture is decoded (8.7.1). */
+    fun finishLoopFilters() {
+        runLoopFilters(heightInCtbs)
+    }
+
+    /**
+     * availableN of 6.4.1 for the block at ([xCurr], [yCurr]) and its neighbour at ([xN], [yN]). Within
+     * a CTB, z-scan order decides.
      */
     fun available(xCurr: Int, yCurr: Int, xN: Int, yN: Int): Boolean {
         if (xN < 0 || yN < 0 || xN >= width || yN >= height) return false
         val ctbN = (yN shr ctbLog2) * widthInCtbs + (xN shr ctbLog2)
         val ctbC = (yCurr shr ctbLog2) * widthInCtbs + (xCurr shr ctbLog2)
-        if (ctbN != ctbC) return ctbN < ctbC && ctbSlice[ctbN] == sliceAddrRs
+        // Another CTB is decoded before the current one if it is in the slice at all, and must share its tile.
+        if (ctbN != ctbC) return ctbSlice[ctbN] == sliceAddrRs && tileIdRs[ctbN] == tileIdRs[ctbC]
         val m = ctbSize - 1
         val zN = zScan[(((yN and m) shr minTbLog2) shl zShift) + ((xN and m) shr minTbLog2)]
         val zC = zScan[(((yCurr and m) shr minTbLog2) shl zShift) + ((xCurr and m) shr minTbLog2)]
@@ -255,9 +327,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         val params = sao ?: hevcError("slice_sao_luma_flag is 1 where sample_adaptive_offset_enabled_flag is 0")
         var mergeLeft = 0
         var mergeUp = 0
-        // No tiles, so a CTB in the slice is also in the tile.
-        if (rx > 0 && ctbAddr > sliceAddrRs) mergeLeft = cabac.decode(Ctx.SAO_MERGE)
-        if (ry > 0 && mergeLeft == 0 && ctbAddr - widthInCtbs >= sliceAddrRs) mergeUp = cabac.decode(Ctx.SAO_MERGE)
+        if (rx > 0 && ctbAddr > sliceAddrRs && tileIdRs[ctbAddr - 1] == tileIdRs[ctbAddr]) mergeLeft = cabac.decode(Ctx.SAO_MERGE)
+        val up = ctbAddr - widthInCtbs
+        if (ry > 0 && mergeLeft == 0 && up >= sliceAddrRs && tileIdRs[up] == tileIdRs[ctbAddr]) mergeUp = cabac.decode(Ctx.SAO_MERGE)
         val at = ctbAddr * 18
         if (mergeLeft == 1 || mergeUp == 1) {
             val from = (if (mergeLeft == 1) ctbAddr - 1 else ctbAddr - widthInCtbs) * 18
@@ -810,7 +882,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         return v + cabac.bypassBits(k) + (4 shl rice)
     }
 
-    private companion object {
+    internal companion object {
         const val FLAG_INTRA = 1
         const val FLAG_PCM = 2
         const val FLAG_BYPASS = 4

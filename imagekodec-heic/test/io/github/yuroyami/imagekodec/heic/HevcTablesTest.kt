@@ -54,6 +54,8 @@ class HevcTablesTest {
             "CHROMA_422_MODE" to (0x30E2CB16L to HevcTables.CHROMA_422_MODE),
             "INTRA_PRED_ANGLE" to (0x49FE7E1BL to HevcTables.INTRA_PRED_ANGLE),
             "QPC_30_TO_43" to (0xD4DC21E9L to HevcTables.QPC_30_TO_43),
+            "BETA_PRIME" to (0x5D5117BEL to HevcTables.BETA_PRIME),
+            "TC_PRIME" to (0x693A18DAL to HevcTables.TC_PRIME),
             "DST_4" to (0x69BDEB20L to HevcTables.DST_4),
             "DCT_32" to (0xB73974B1L to HevcTables.DCT_32),
         )

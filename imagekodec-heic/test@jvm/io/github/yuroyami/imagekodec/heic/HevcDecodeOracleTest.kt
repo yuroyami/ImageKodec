@@ -132,8 +132,8 @@ class HevcDecodeOracleTest {
         return out
     }
 
-    private fun decode(units: List<ByteArray>, checkLoopFilters: Boolean = true): List<DecodedPicture> {
-        val d = HevcDecoder(checkLoopFilters)
+    private fun decode(units: List<ByteArray>): List<DecodedPicture> {
+        val d = HevcDecoder()
         for (u in units) d.decodeNal(u, 0, u.size, null)
         return d.finish()
     }
@@ -224,79 +224,153 @@ class HevcDecodeOracleTest {
         requireTools()
         assumeTrue("dec265 not installed", Tools.hasAll("dec265"))
         val fixtures = listOf(
-            Triple("66x38", "yuv420p", ""),
-            Triple("80x48", "yuv422p10le", ""),
-            Triple("72x56", "yuv444p12le", "tskip=1"),
-            Triple("64x40", "gray", "lossless=1"),
-            Triple("256x128", "yuv420p", "wpp=1:slices=2:ctu=32"),
+            Triple("66x38", "yuv420p", loopFiltersOff),
+            Triple("80x48", "yuv422p10le", loopFiltersOff),
+            Triple("72x56", "yuv444p12le", "$loopFiltersOff:tskip=1"),
+            Triple("64x40", "gray", "$loopFiltersOff:lossless=1"),
+            Triple("256x128", "yuv420p", "$loopFiltersOff:wpp=1:slices=2:ctu=32"),
+            // The loop filters on, as x265 writes by default.
+            Triple("66x38", "yuv420p", "keyint=1"),
+            Triple("96x64", "yuv422p10le", "keyint=1:deblock=-3,2"),
+            Triple("64x64", "yuv444p12le", "keyint=1:hash=1:no-deblock=1"),
+            Triple("256x192", "yuv420p", "keyint=1:wpp=1:ctu=32:cu-lossless=1"),
         )
         for ((size, pixFmt, params) in fixtures) {
-            val file = encode(size, pixFmt, "$loopFiltersOff:$params")
-            val yuv = File.createTempFile("kite-hevc", ".yuv").apply { deleteOnExit() }
-            val (code, log) = run(Tools.require("dec265").path, "-q", "-o", yuv.path, file.path)
-            assertEquals(0, code, "dec265 failed: ${log.decodeToString()}")
-            val planes = decode(AnnexB.split(file.readBytes())).single().toHeifPlanes()
-            val wide = planes.bitDepthLuma > 8
-            val theirs = yuv.readBytes()
-            var at = 0
-            for (c in planes.planes.indices) {
-                val w = if (c == 0) planes.width else planes.width shr planes.subX
-                val h = if (c == 0) planes.height else planes.height shr planes.subY
-                for (y in 0 until h) for (x in 0 until w) {
-                    val v = if (wide) (theirs[at].toInt() and 0xFF) or ((theirs[at + 1].toInt() and 0xFF) shl 8) else theirs[at].toInt() and 0xFF
-                    at += if (wide) 2 else 1
-                    val mine = planes.planes[c][y * planes.strides[c] + x].toInt()
-                    if (mine != v) fail("$size $pixFmt $params: plane $c differs from libde265 at ($x, $y): $mine, not $v")
-                }
-            }
-            assertEquals(theirs.size, at, "$size $pixFmt: the size of libde265's output")
+            val units = AnnexB.split(encode(size, pixFmt, params).readBytes())
+            val planes = decode(units).single().toHeifPlanes()
+            libde265Differs(units, planes)?.let { fail("$size $pixFmt $params: $it") }
             println("$size $pixFmt $params: every sample matches libde265")
         }
     }
 
-    /**
-     * With the loop filters on, as x265 writes by default, the decoder refuses the picture; decoded
-     * without them it must still parse every slice to its last bit, SAO parameters included.
-     */
-    @Test
-    fun picturesWithLoopFiltersParseToTheirEnd() {
-        requireTools()
-        val fixtures = listOf(
-            Triple("128x96", "yuv420p", "keyint=1"),
-            Triple("96x64", "yuv422p10le", "keyint=1:sao=1"),
-            Triple("64x64", "yuv444p12le", "keyint=1"),
-            Triple("64x64", "gray", "keyint=1"),
-            Triple("256x192", "yuv420p", "keyint=1:wpp=1:slices=3:ctu=32"),
-        )
-        for ((size, pixFmt, params) in fixtures) {
-            val units = AnnexB.split(encode(size, pixFmt, params).readBytes())
-            val slices = sliceHeaders(units)
-            assertTrue(slices.any { it.saoLuma || it.saoChroma }, "$size $pixFmt: SAO is off")
-            val e = runCatching { decode(units) }.exceptionOrNull()
-            assertTrue(e is UnsupportedImageException, "$size $pixFmt: $e")
-            assertEquals(1, decode(units, checkLoopFilters = false).size)
-            println("$size $pixFmt $params: parsed to the end with SAO and deblocking on")
+    /** Where [planes] differ from libde265's decode of [units], or null when every sample matches. */
+    private fun libde265Differs(units: List<ByteArray>, planes: io.github.yuroyami.imagekodec.HeifPlanes): String? {
+        val input = File.createTempFile("kite-hevc", ".hevc").apply { deleteOnExit(); writeBytes(AnnexB.join(units)) }
+        val yuv = File.createTempFile("kite-hevc", ".yuv").apply { deleteOnExit() }
+        val (code, log) = run(Tools.require("dec265").path, "-q", "-o", yuv.path, input.path)
+        if (code != 0) return "$DEC265_FAILED: ${log.decodeToString().trim()}"
+        val wide = planes.bitDepthLuma > 8
+        val theirs = yuv.readBytes()
+        var at = 0
+        for (c in planes.planes.indices) {
+            val w = if (c == 0) planes.width else planes.width shr planes.subX
+            val h = if (c == 0) planes.height else planes.height shr planes.subY
+            if (at + w * h * (if (wide) 2 else 1) > theirs.size) return "libde265 gave ${theirs.size} bytes, fewer than the picture"
+            for (y in 0 until h) for (x in 0 until w) {
+                val v = if (wide) (theirs[at].toInt() and 0xFF) or ((theirs[at + 1].toInt() and 0xFF) shl 8) else theirs[at].toInt() and 0xFF
+                at += if (wide) 2 else 1
+                val mine = planes.planes[c][y * planes.strides[c] + x].toInt()
+                if (mine != v) return "plane $c differs from libde265 at ($x, $y): $mine, not $v"
+            }
         }
+        if (theirs.size != at) return "libde265 gave ${theirs.size} bytes, not $at"
+        return null
     }
 
-    /** The decode time of a 1920x1080 intra picture, printed for the record; it fails only past a generous bound. */
+    /** The loop filters on, as x265 writes by default; each case asserts from the stream which filters it runs. */
+    private val loopFilterCases = listOf(
+        Case("deblocking only", "128x96", "yuv420p", "no-sao=1") { s -> deblocks(s) && !sao(s) },
+        Case("SAO only", "128x96", "yuv420p", "no-deblock=1") { s -> !deblocks(s) && sao(s) },
+        Case("both filters", "128x96", "yuv420p", "") { s -> deblocks(s) && sao(s) },
+        Case("deblocking offsets -3:2", "128x96", "yuv420p", "deblock=-3,2") { s -> deblocks(s) && offsets(s) == (-3 to 2) },
+        Case("deblocking offsets 2:-1", "128x96", "yuv420p", "deblock=2,-1") { s -> deblocks(s) && offsets(s) == (2 to -1) },
+        Case("deblocking offsets 6:6 at qp 40", "96x64", "yuv420p", "deblock=6,6:qp=40:ipratio=1") { s -> offsets(s) == (6 to 6) },
+        Case("deblocking offsets -6:-6", "96x64", "yuv420p", "deblock=-6,-6") { s -> offsets(s) == (-6 to -6) },
+        Case("limit-sao", "128x96", "yuv420p", "limit-sao=1") { s -> sao(s) },
+        Case("sao-non-deblock", "128x96", "yuv420p", "sao-non-deblock=1") { s -> sao(s) },
+        Case("4:0:0 8 bits", "64x64", "gray", "") { s -> s[0].sps.chromaFormatIdc == 0 && deblocks(s) && sao(s) },
+        Case("4:0:0 10 bits", "72x40", "gray10le", "") { s -> s[0].sps.chromaFormatIdc == 0 && s[0].sps.bitDepthY == 10 },
+        Case("4:0:0 12 bits", "64x64", "gray12le", "") { s -> s[0].sps.chromaFormatIdc == 0 && s[0].sps.bitDepthY == 12 },
+        Case("4:2:0 8 bits, partial CTBs", "66x38", "yuv420p", "") { s -> s[0].sps.chromaFormatIdc == 1 && s[0].sps.width % 64 != 0 },
+        Case("4:2:0 10 bits", "90x70", "yuv420p10le", "") { s -> s[0].sps.chromaFormatIdc == 1 && s[0].sps.bitDepthY == 10 },
+        Case("4:2:0 12 bits", "96x64", "yuv420p12le", "") { s -> s[0].sps.chromaFormatIdc == 1 && s[0].sps.bitDepthY == 12 },
+        Case("4:2:2 8 bits", "64x64", "yuv422p", "") { s -> s[0].sps.chromaFormatIdc == 2 && s[0].sps.bitDepthY == 8 },
+        Case("4:2:2 10 bits", "80x48", "yuv422p10le", "") { s -> s[0].sps.chromaFormatIdc == 2 && s[0].sps.bitDepthY == 10 },
+        Case("4:2:2 12 bits", "64x64", "yuv422p12le", "") { s -> s[0].sps.chromaFormatIdc == 2 && s[0].sps.bitDepthY == 12 },
+        Case("4:4:4 8 bits", "64x64", "yuv444p", "") { s -> s[0].sps.chromaFormatIdc == 3 && s[0].sps.bitDepthY == 8 },
+        Case("4:4:4 10 bits", "72x56", "yuv444p10le", "") { s -> s[0].sps.chromaFormatIdc == 3 && s[0].sps.bitDepthY == 10 },
+        Case("4:4:4 12 bits", "64x64", "yuv444p12le", "") { s -> s[0].sps.chromaFormatIdc == 3 && s[0].sps.bitDepthC == 12 },
+        Case("ctu 16", "200x120", "yuv420p", "ctu=16:min-cu-size=8") { s -> s[0].sps.ctbLog2 == 4 },
+        Case("ctu 16 4:2:2", "96x80", "yuv422p10le", "ctu=16:min-cu-size=8") { s -> s[0].sps.ctbLog2 == 4 && s[0].sps.chromaFormatIdc == 2 },
+        Case("ctu 64", "200x120", "yuv420p", "ctu=64") { s -> s[0].sps.ctbLog2 == 6 },
+        // x265 writes several slices only with wavefront rows.
+        Case("two slices", "256x192", "yuv420p", "slices=2:ctu=32") { s -> s.size == 2 },
+        Case("four slices with wavefront rows", "256x256", "yuv420p", "slices=4:ctu=32:wpp=1") { s -> s.size == 4 && s[0].pps.entropyCodingSync },
+        Case("wavefront rows", "512x256", "yuv420p", "wpp=1:ctu=32") { s -> s[0].pps.entropyCodingSync && s[0].entryPointOffsets.isNotEmpty() },
+        Case("no wavefront rows", "512x256", "yuv420p", "wpp=0:ctu=32") { s -> !s[0].pps.entropyCodingSync },
+        Case("lossless coding units", "128x96", "yuv420p", "cu-lossless=1") { s -> s[0].pps.transquantBypassEnabled },
+        Case("lossless coding units in three slices", "256x192", "yuv420p", "wpp=1:slices=3:ctu=32:cu-lossless=1") { s -> s.size == 3 && s[0].pps.transquantBypassEnabled },
+        Case("lossless", "64x48", "yuv422p10le", "lossless=1") { s -> s[0].pps.transquantBypassEnabled },
+        Case("transform skip", "64x64", "yuv420p", "tskip=1") { s -> s[0].pps.transformSkipEnabled },
+        Case("adaptive QP with deltas", "128x96", "yuv420p", "aq-mode=2:aq-strength=2:qg-size=16") { s -> s[0].pps.cuQpDeltaEnabled },
+        Case("adaptive QP 4:4:4 12 bits", "96x64", "yuv444p12le", "aq-mode=3:aq-strength=3:qg-size=8:ctu=16:min-cu-size=8") { s -> s[0].pps.cuQpDeltaEnabled },
+        Case("chroma QP offsets", "64x64", "yuv420p", "cbqpoffs=-5:crqpoffs=7") { s -> s[0].pps.cbQpOffset == -5 && s[0].pps.crQpOffset == 7 },
+        Case("chroma QP offsets 4:2:2", "64x64", "yuv422p", "cbqpoffs=9:crqpoffs=-12") { s -> s[0].pps.cbQpOffset == 9 },
+        Case("qp 51", "64x48", "yuv420p", "qp=51:ipratio=1") { s -> s[0].sliceQpY == 51 },
+        Case("qp 45 12 bits", "64x48", "yuv420p12le", "qp=45:ipratio=1") { s -> s[0].sliceQpY == 45 },
+        Case("constrained intra", "64x64", "yuv420p", "constrained-intra=1") { s -> s[0].pps.constrainedIntraPred },
+        Case("several pictures", "96x64", "yuv420p", "", frames = 3) { s -> s.size >= 3 },
+    )
+
+    private fun deblocks(s: List<SliceHeader>) = s.any { !it.deblockingFilterDisabled }
+    private fun sao(s: List<SliceHeader>) = s.any { it.saoLuma || it.saoChroma }
+
+    /** x265's deblock=tC,beta (ffmpeg splits -x265-params at colons) as the slice applies them, in units of the _div2 fields. */
+    private fun offsets(s: List<SliceHeader>) = s[0].tcOffsetDiv2 to s[0].betaOffsetDiv2
+
     @Test
-    fun decodeTimeOf1080p() {
+    fun loopFiltersMatchTheHashSei() {
         requireTools()
-        val units = AnnexB.split(encode("1920x1080", "yuv420p", "$loopFiltersOff:crf=22", source = "testsrc2").readBytes())
-        decode(units)
-        val runs = 5
-        val start = System.nanoTime()
-        repeat(runs) { checkHashes("1080p", decode(units)) }
-        val ms = (System.nanoTime() - start) / 1_000_000.0 / runs
-        println("1920x1080 8-bit intra picture of ${units.sumOf { it.size }} bytes: %.1f ms a decode on the JVM".format(ms))
-        assertTrue(ms < 5000, "$ms ms")
+        val failures = ArrayList<String>()
+        for (c in loopFilterCases) {
+            val units = AnnexB.split(encode(c.size, c.pixFmt, "keyint=1:hash=1:${c.params}", c.frames).readBytes())
+            val slices = sliceHeaders(units)
+            if (!c.check(slices)) {
+                failures += "${c.name}: the stream lacks the feature the case is for"
+                continue
+            }
+            try {
+                val pictures = decode(units)
+                assertEquals(c.frames, pictures.size, "${c.name}: pictures")
+                val planes = checkHashes(c.name, pictures)
+                println("${c.name}: ${pictures.size} pictures, $planes planes match their MD5 (${slices.size} slice segments)")
+            } catch (e: AssertionError) {
+                failures += "${c.name}: ${e.message}"
+            } catch (e: Exception) {
+                failures += "${c.name}: ${e::class.simpleName} ${e.message}\n${e.stackTrace.take(6).joinToString("\n")}"
+            }
+        }
+        for (f in failures) println("FAILED $f")
+        assertTrue(failures.isEmpty(), "${failures.size} of ${loopFilterCases.size} cases failed:\n${failures.joinToString("\n")}")
+    }
+
+    /**
+     * The decode time of a 1920x1080 intra picture without and with the loop filters, and of a 4032x3024
+     * one with them, printed for the record; it fails only past a generous bound.
+     */
+    @Test
+    fun decodeTimeOfLargePictures() {
+        requireTools()
+        for ((size, params) in listOf("1920x1080" to "$loopFiltersOff:crf=22", "1920x1080" to "keyint=1:hash=1:crf=22", "4032x3024" to "keyint=1:hash=1:crf=22")) {
+            val units = AnnexB.split(encode(size, "yuv420p", params, source = "testsrc2").readBytes())
+            checkHashes(size, decode(units))
+            decode(units)
+            val runs = 5
+            val start = System.nanoTime()
+            repeat(runs) { decode(units) }
+            val ms = (System.nanoTime() - start) / 1_000_000.0 / runs
+            val filters = if (params.startsWith(loopFiltersOff)) "without" else "with"
+            println("$size 8-bit intra picture of ${units.sumOf { it.size }} bytes, $filters the loop filters: %.1f ms a decode on the JVM".format(ms))
+            assertTrue(ms < 10_000, "$ms ms")
+        }
     }
 
     /**
      * Each H.265.1 conformance stream: whether its first picture is intra and supported, and if so
-     * whether it matches its hash SEI. Streams that need the loop filters are listed, not asserted;
-     * every supported intra stream must match.
+     * whether it matches its hash SEI, the MD5 of its YUV file when it has one picture, or else
+     * libde265's decode of the same units. Every supported picture must match, and the streams that
+     * do are asserted: every first picture of HEVC_v1 but one, and the range extension streams that
+     * use none of the tools #148 adds.
      */
     @Test
     fun conformanceStreams() {
@@ -308,7 +382,8 @@ class HevcDecodeOracleTest {
         val streams = root.walkTopDown().filter { it.isFile && (it.name.endsWith(".bit") || it.name.endsWith(".bin")) }.sortedBy { it.path }.toList()
         val failures = ArrayList<String>()
         var matched = 0
-        var parsed = 0
+        val matchedNames = HashSet<String>()
+        val withLibde265 = Tools.hasAll("dec265")
         for (file in streams) {
             val name = file.parentFile.name
             val units = AnnexB.split(file.readBytes())
@@ -340,25 +415,20 @@ class HevcDecodeOracleTest {
                     val ok = hex(PictureHash.md5(yuvBytes(p.toHeifPlanes()))) == expected
                     if (ok) matched++ else failures += "$name: the picture does not match the MD5 of its YUV file"
                     if (ok) "MATCHES the MD5 of its YUV file" else "DIFFERS from the MD5 of its YUV file"
+                } else if (withLibde265) {
+                    // No hash for the first picture alone: libde265's decode of the same units instead.
+                    val diff = libde265Differs(first, p.toHeifPlanes())
+                    if (diff == null) matched++ else if (!diff.startsWith(DEC265_FAILED)) failures += "$name: $diff"
+                    when {
+                        diff == null -> "MATCHES libde265"
+                        diff.startsWith(DEC265_FAILED) -> "decoded, with no hash to compare ($diff)"
+                        else -> "DIFFERS from libde265: $diff"
+                    }
                 } else {
                     "decoded, with no hash to compare"
                 }
             } catch (e: UnsupportedImageException) {
-                if (e.message == HevcSupport.DEBLOCKING || e.message == HevcSupport.SAO) {
-                    // Decoded without the loop filters, the picture must still parse to its last bit.
-                    try {
-                        decode(first, checkLoopFilters = false)
-                        parsed++
-                        "parses; needs ${if (e.message == HevcSupport.SAO) "SAO" else "the deblocking filter"}"
-                    } catch (e2: UnsupportedImageException) {
-                        "unsupported: ${e2.message}"
-                    } catch (e2: Exception) {
-                        failures += "$name: ${e2::class.simpleName} ${e2.message}"
-                        "FAILED to parse: ${e2.message}"
-                    }
-                } else {
-                    "unsupported: ${e.message}"
-                }
+                "unsupported: ${e.message}"
             } catch (e: ImageDecodeException) {
                 failures += "$name: ${e.message}"
                 "FAILED: ${e.message}"
@@ -366,9 +436,44 @@ class HevcDecodeOracleTest {
                 failures += "$name: ${e::class.simpleName} ${e.message}"
                 "FAILED: ${e::class.simpleName} ${e.message}"
             }
+            if (line.startsWith("MATCHES")) matchedNames += name
             println("  $name: $line")
         }
-        println("HEVC conformance: ${streams.size} streams, $matched first pictures match their hash, $parsed more parse without the loop filters")
+        println("HEVC conformance: ${streams.size} streams, $matched first pictures match")
         assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
+        val v1 = File(root, "HEVC_v1").listFiles { f -> f.isDirectory }.orEmpty().map { it.name }
+        // Its parameter sets defeat libde265, and it has no hash to compare.
+        val expected = v1.toSet() - "VPSSPSPPS_A_MainConcept_1" + MATCHING_REXT
+        if (withLibde265) {
+            assertEquals(expected.sorted(), matchedNames.sorted(), "the streams whose first picture matches")
+        } else {
+            assertTrue(expected.containsAll(matchedNames), "streams match that the list leaves out: ${matchedNames - expected}")
+        }
+    }
+
+    private companion object {
+        const val DEC265_FAILED = "libde265 cannot decode it"
+
+        /**
+         * The range extension streams that decode now. The others need transform_skip_rotation and the
+         * rest of #148, 16-bit samples, chroma QP offset lists, or intra_smoothing_disabled_flag.
+         */
+        val MATCHING_REXT = setOf(
+            "ADJUST_IPRED_ANGLE_A_RExt_Mitsubishi_2",
+            "EXTPREC_MAIN_444_16_INTRA_10BIT_RExt_Sony_1",
+            "EXTPREC_MAIN_444_16_INTRA_12BIT_RExt_Sony_1",
+            "EXTPREC_MAIN_444_16_INTRA_8BIT_RExt_Sony_1",
+            "GENERAL_10b_420_RExt_Sony_1",
+            "GENERAL_10b_422_RExt_Sony_1",
+            "GENERAL_10b_444_RExt_Sony_2",
+            "GENERAL_12b_400_RExt_Sony_1",
+            "GENERAL_12b_420_RExt_Sony_1",
+            "GENERAL_12b_422_RExt_Sony_1",
+            "GENERAL_12b_444_RExt_Sony_2",
+            "GENERAL_8b_400_RExt_Sony_1",
+            "GENERAL_8b_420_RExt_Sony_1",
+            "GENERAL_8b_444_RExt_Sony_2",
+            "IPCM_A_RExt_NEC_2",
+        )
     }
 }

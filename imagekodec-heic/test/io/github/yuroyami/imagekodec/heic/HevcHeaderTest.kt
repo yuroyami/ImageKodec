@@ -82,7 +82,8 @@ class HevcHeaderTest {
         assertEquals(1, info.chromaFormat)
         assertEquals(listOf(1, 16, 9), listOf(info.colorPrimaries, info.transferCharacteristics, info.matrixCoefficients))
         assertEquals(true, info.fullRange)
-        assertEquals(HevcSupport.DEBLOCKING, info.unsupportedReason)
+        // An intra picture with both loop filters on, which the decoder takes.
+        assertNull(info.unsupportedReason)
         // Probing a depth reads hvcC alone, with the SPS inside it.
         assertEquals(24, HevcCodec.inspect(hvcC, null).width)
         // Parameter sets in the sample data, with an hvcC that holds none.

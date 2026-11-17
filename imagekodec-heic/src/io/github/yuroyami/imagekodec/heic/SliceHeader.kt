@@ -40,6 +40,8 @@ internal class SliceHeader {
     lateinit var sps: Sps
     var dependentSliceSegment = false
     var sliceSegmentAddress = 0
+    /** SliceAddrRs (7.4.7.1): the address of the independent slice segment that starts the slice. */
+    var sliceAddrRs = 0
     var sliceType = SliceType.I
     var picOutput = true
     var colourPlaneId = 0
@@ -89,6 +91,7 @@ internal class SliceHeader {
 
     /** The fields a dependent slice segment takes from the slice segment before it (7.4.7.1). */
     fun copySliceFields(from: SliceHeader) {
+        sliceAddrRs = from.sliceAddrRs
         sliceType = from.sliceType; picOutput = from.picOutput; colourPlaneId = from.colourPlaneId
         picOrderCntLsb = from.picOrderCntLsb; shortTermRpsSpsFlag = from.shortTermRpsSpsFlag
         shortTermRpsIdx = from.shortTermRpsIdx; shortTermRps = from.shortTermRps
@@ -134,6 +137,7 @@ internal fun readSliceHeader(r: BitReader, nal: NalHeader, store: ParameterSetSt
         val from = previous ?: hevcError("a dependent slice segment has no slice segment before it")
         h.copySliceFields(from)
     } else {
+        h.sliceAddrRs = h.sliceSegmentAddress
         readIndependentFields(r, h, nal, sps, pps)
     }
     if (pps.tilesEnabled || pps.entropyCodingSync) {

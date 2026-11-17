@@ -234,6 +234,22 @@ internal object HevcTables {
         29, 30, 31, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37,
     )
 
+    /** Table 8-12: beta' of the deblocking filter for Q 0..51. CRC-32 of the bytes: 0x5D5117BE. */
+    val BETA_PRIME: IntArray = intArrayOf(
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24,
+        26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56,
+        58, 60, 62, 64,
+    )
+
+    /** Table 8-12: tC' of the deblocking filter for Q 0..53. CRC-32 of the bytes: 0x693A18DA. */
+    val TC_PRIME: IntArray = intArrayOf(
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3,
+        3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 9, 10, 11, 13,
+        14, 16, 18, 20, 22, 24,
+    )
+
     /** 8-316: the 4x4 DST, row k the k-th basis function over the four samples. CRC-32 of the bytes: 0x69BDEB20. */
     val DST_4: IntArray = intArrayOf(
         29, 55, 74, 84, 74, 74, 0, -74, 84, -29, -74, 55, 55, -84, 74, -29,

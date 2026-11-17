@@ -174,3 +174,9 @@ being true.
   of 0. Add `ipratio=1` to pin it (#142).
 - ffmpeg's `trace_headers` names two HEVC elements otherwise than H.265 does: `matrix_coefficients`
   for `matrix_coeffs` and `scaling_list_delta_coeff` for `scaling_list_delta_coef` (#140).
+- ffmpeg splits `-x265-params` at every colon, so x265's `deblock=tC:beta` arrives as `deblock=tC` and
+  sets both offsets to tC. Write `deblock=-3,2`. x265 writes several slices only with WPP on (#143).
+- x265 3.5 hangs for good, deaf to SIGTERM, on some small pictures with `no-deblock=1` and SAO on
+  (72x56 and 80x48 4:4:4 12 bits, 256x192 4:2:0 with `slices=3`). Kill it with SIGKILL (#143).
+- libde265 1.0's dec265 fails the MD5 SEI of an x265 picture with several slices and SAO on, so the
+  sample-for-sample comparisons with it use one slice; the hash SEI covers several (#143).

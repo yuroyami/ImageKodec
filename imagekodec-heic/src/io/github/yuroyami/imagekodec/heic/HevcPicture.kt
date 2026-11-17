@@ -37,10 +37,8 @@ internal class DecodedPicture(val sps: Sps, val planes: Array<ShortArray>, val s
 /**
  * Decodes the NAL units of a stream, one at a time and in order, into pictures. Parameter sets stay
  * between calls, so a HEIF session hands it the units of hvcC once and then those of each sample.
- * With [checkLoopFilters] false, a picture whose slices turn on the loop filters is decoded without
- * them, which only a test of the parsing wants.
  */
-internal class HevcDecoder(private val checkLoopFilters: Boolean = true) {
+internal class HevcDecoder {
     private val store = ParameterSetStore()
     private var picture: PictureDecoder? = null
     private var current: DecodedPicture? = null
@@ -66,7 +64,7 @@ internal class HevcDecoder(private val checkLoopFilters: Boolean = true) {
                 val p = picture ?: hevcError("a slice segment has no first_slice_segment_in_pic_flag before it")
                 // 7.4.7.1: the slice segments of a picture share one PPS.
                 if (h.pps !== p.pps) hevcError("the slice segments of a picture name different PPSs")
-                HevcSupport.sliceReason(h, checkLoopFilters)?.let { throw UnsupportedImageException(it) }
+                HevcSupport.sliceReason(h)?.let { throw UnsupportedImageException(it) }
                 p.decodeSliceSegment(h, rbsp, emulationPreventionBytes(bytes, from, to), cancel)
             }
             nal.type == NalType.SUFFIX_SEI -> current?.let { readSei(r, it) }
@@ -86,6 +84,7 @@ internal class HevcDecoder(private val checkLoopFilters: Boolean = true) {
         val p = picture ?: return
         val total = p.sps.picSizeInCtbs
         if (p.decodedCtbs != total) hevcError("the slice segments of a picture hold ${p.decodedCtbs} of its $total CTBs")
+        p.finishLoopFilters()
         done += current!!
         picture = null
         current = null

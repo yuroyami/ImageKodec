@@ -5,11 +5,11 @@ ITU-T H.265 itself, so no table is typed by hand.
 
 The tables are the ones the specification gives as data, which nothing derives: the default scaling
 lists of Table 7-6, the context initialisation values of Tables 9-5 to 9-31, the arithmetic decoder's
-Tables 9-50, 9-52 and 9-53, the intra tables 8-3 and 8-5, the chroma QP table 8-10 and the transform
-matrices of 8-316, 8-319 and 8-321. The script reads the text that `pdftotext -layout` makes of the
-07/2024 edition (V10), checks each table's element count, and writes the tables with the SHA-256 of
-the text it read and the CRC-32 of every table. HevcTablesTest holds the Kotlin file to those CRCs,
-so an edit by hand fails.
+Tables 9-50, 9-52 and 9-53, the intra tables 8-3 and 8-5, the chroma QP table 8-10, the deblocking
+thresholds of Table 8-12 and the transform matrices of 8-316, 8-319 and 8-321. The script reads the
+text that `pdftotext -layout` makes of the 07/2024 edition (V10), checks each table's element count,
+and writes the tables with the SHA-256 of the text it read and the CRC-32 of every table.
+HevcTablesTest holds the Kotlin file to those CRCs, so an edit by hand fails.
 
     pdftotext -layout T-REC-H.265-202407-I.pdf h265.txt
     python3 tools/hevc_tables.py h265.txt > \\
@@ -179,6 +179,21 @@ def table_8_10(text):
     raise SystemExit("Table 8-10: no row")
 
 
+def table_8_12(text):
+    """beta' for Q 0..51 and tC' for Q 0..53, from the rows of Table 8-12, whose beta' row ends in two dashes."""
+    body = body_after(text, "Table 8-12 – Derivation of threshold variables β′ and tC′ from input Q", "8.7.2.5.4")
+    beta, tc = [], []
+    for line in body.splitlines():
+        s = line.strip()
+        if s.startswith("β′"):
+            beta.extend(ints(s[2:]))
+        elif s.startswith("t C′"):
+            tc.extend(ints(s[4:]))
+    if len(beta) != 52 or len(tc) != 54:
+        raise SystemExit(f"Table 8-12: {len(beta)} beta' and {len(tc)} tC' values")
+    return beta, tc
+
+
 def matrix_rows(text, start_marker, rows, cols):
     start = text.index(start_marker)
     out = []
@@ -232,6 +247,9 @@ def main():
     parts.append(kotlin_array("CHROMA_422_MODE", table_8_3(text), "Table 8-3: IntraPredModeC of 4:2:2 for modeIdx 0..34."))
     parts.append(kotlin_array("INTRA_PRED_ANGLE", table_8_5(text), "Table 8-5: intraPredAngle of predModeIntra 2..34, at predModeIntra - 2."))
     parts.append(kotlin_array("QPC_30_TO_43", table_8_10(text), "Table 8-10: QpC of 4:2:0 for qPi 30..43."))
+    beta, tc = table_8_12(text)
+    parts.append(kotlin_array("BETA_PRIME", beta, "Table 8-12: beta' of the deblocking filter for Q 0..51."))
+    parts.append(kotlin_array("TC_PRIME", tc, "Table 8-12: tC' of the deblocking filter for Q 0..53."))
     parts.append(kotlin_array("DST_4", [x for row in matrix_rows(text, "transMatrix =  ", 4, 4) for x in row],
                               "8-316: the 4x4 DST, row k the k-th basis function over the four samples."))
     parts.append(kotlin_array("DCT_32", dct_matrix(text),
