@@ -1,8 +1,10 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer
+
 /**
  * Where the video of a Motion Photo sits in its file (#131): [videoOffset] bytes from the start,
- * [videoLength] bytes long, to the end of the file. [format] says how the file named it.
+ * [videoLength] bytes long. [format] says how the file named it.
  */
 public class MotionPhotoInfo(
     public val videoOffset: Int,
@@ -11,7 +13,10 @@ public class MotionPhotoInfo(
 ) {
     /** How a file names its video. */
     public enum class Format {
-        /** Google's Motion Photo format: `GCamera:MotionPhoto` and a `Container:Directory` item of semantic `MotionPhoto`. */
+        /**
+         * Google's Motion Photo format: `Camera:MotionPhoto` and a `Container:Directory` item of semantic
+         * `MotionPhoto` in a JPEG, or the top-level `mpvd` box of a HEIC or AVIF file (#155).
+         */
         GOOGLE_MOTION_PHOTO,
 
         /** The older Google format: `GCamera:MicroVideo` and `GCamera:MicroVideoOffset`. */
@@ -29,18 +34,34 @@ internal object MotionPhoto {
 
     private val SAMSUNG_MARKER = "MotionPhoto_Data".encodeToByteArray()
 
+    // The namespaces of Motion Photo 1.0 (developer.android.com/media/platform/motion-photo-format).
+    private const val CAMERA_NS = "http://ns.google.com/photos/1.0/camera/"
+    private const val CONTAINER_NS = "http://ns.google.com/photos/1.0/container/"
+    private const val ITEM_NS = "http://ns.google.com/photos/1.0/container/item/"
+
+    /** A namespace's prefixes in [xmp]: those its `xmlns` declarations bind, then the usual ones. */
+    private fun prefixes(xmp: String, uri: String, usual: List<String>): List<String> =
+        (Regex("""xmlns:([A-Za-z_][\w.-]*)\s*=\s*"${Regex.escape(uri)}"""").findAll(xmp).map { it.groupValues[1] }.toList() + usual).distinct()
+
+    private fun camera(xmp: String) = prefixes(xmp, CAMERA_NS, listOf("Camera", "GCamera"))
+
+    /** The value of the property [local] in any of [prefixes]. */
+    private fun flag(xmp: String, prefixes: List<String>, local: String): String? =
+        prefixes.firstNotNullOfOrNull { flag(xmp, "$it:$local") }
+
     fun find(data: ByteArray): MotionPhotoInfo? {
+        if (AvifContainer.heifFormat(data) != null) return findHeif(data)
         if (data.size < 4 || (data[0].toInt() and 0xFF) != 0xFF || (data[1].toInt() and 0xFF) != 0xD8) return null
         val xmp = ImageKodec.readMetadata(data).xmp
         if (xmp != null) {
-            if (flag(xmp, "GCamera:MotionPhoto") == "1") {
+            if (flag(xmp, camera(xmp), "MotionPhoto") == "1") {
                 val length = videoItemLength(xmp)
                 if (length != null && length in 1..data.size) {
                     return MotionPhotoInfo(data.size - length, length, MotionPhotoInfo.Format.GOOGLE_MOTION_PHOTO)
                 }
             }
-            if (flag(xmp, "GCamera:MicroVideo") == "1") {
-                val offset = flag(xmp, "GCamera:MicroVideoOffset")?.toIntOrNull()
+            if (flag(xmp, camera(xmp), "MicroVideo") == "1") {
+                val offset = flag(xmp, camera(xmp), "MicroVideoOffset")?.toIntOrNull()
                 if (offset != null && offset in 1..data.size) {
                     return MotionPhotoInfo(data.size - offset, offset, MotionPhotoInfo.Format.GOOGLE_MICRO_VIDEO)
                 }
@@ -57,8 +78,48 @@ internal object MotionPhoto {
         return MotionPhotoInfo(start, stop - start, MotionPhotoInfo.Format.SAMSUNG)
     }
 
+    /**
+     * The video of a HEIF Motion Photo: the payload of its top-level `mpvd` box, when its XMP says
+     * `MotionPhoto` 1. A box of size 0, which Motion Photo 1.0 forbids there, names no video.
+     */
+    private fun findHeif(data: ByteArray): MotionPhotoInfo? {
+        val box = mpvd(data) ?: return null
+        val xmp = ImageKodec.readMetadata(data).xmp ?: return null
+        if (flag(xmp, camera(xmp), "MotionPhoto") != "1") return null
+        return MotionPhotoInfo(box[1], box[2] - box[1], MotionPhotoInfo.Format.GOOGLE_MOTION_PHOTO)
+    }
+
+    /** The start, payload start and end of the top-level `mpvd` box of [data], or null. */
+    private fun mpvd(data: ByteArray): IntArray? {
+        var at = 0
+        while (at + 8 <= data.size) {
+            var size = 0L
+            for (i in 0 until 4) size = (size shl 8) or (data[at + i].toLong() and 0xFF)
+            val type = CharArray(4) { (data[at + 4 + it].toInt() and 0xFF).toChar() }.concatToString()
+            var header = 8
+            if (size == 1L) {
+                if (at + 16 > data.size) return null
+                size = 0
+                for (i in 0 until 8) size = (size shl 8) or (data[at + 8 + i].toLong() and 0xFF)
+                header = 16
+            }
+            if (size == 0L || size < header || size > data.size - at) return null
+            if (type == "mpvd") return intArrayOf(at, at + header, (at + size).toInt())
+            at += size.toInt()
+        }
+        return null
+    }
+
     fun remove(data: ByteArray): ByteArray {
         val info = find(data) ?: return data.copyOf()
+        if (AvifContainer.heifFormat(data) != null) {
+            val box = mpvd(data)!!
+            // The XMP stays as it is, which Motion Photo 1.0 allows when no video follows, so no item moves.
+            if (box[2] != data.size) {
+                throw ImageDecodeException("Motion Photo: boxes follow the 'mpvd' box, so removing it would move their data")
+            }
+            return data.copyOfRange(0, box[0])
+        }
         return when (info.format) {
             MotionPhotoInfo.Format.SAMSUNG -> data.copyOfRange(0, jpegEnd(data) ?: info.videoOffset)
             else -> {
@@ -76,31 +137,42 @@ internal object MotionPhoto {
     }
 
     /** The `Item:Length` of the directory item whose semantic is `MotionPhoto`. */
-    private fun videoItemLength(xmp: String): Int? = directoryItems(xmp).firstOrNull { flag(it, "Item:Semantic") == "MotionPhoto" }
-        ?.let { flag(it, "Item:Length")?.toIntOrNull() }
+    private fun videoItemLength(xmp: String): Int? {
+        val item = prefixes(xmp, ITEM_NS, listOf("Item"))
+        return directoryItems(xmp).firstOrNull { flag(it, item, "Semantic") == "MotionPhoto" }
+            ?.let { flag(it, item, "Length")?.toIntOrNull() }
+    }
 
     /** The `rdf:li` items of the `Container:Directory`, each as its text. */
     private fun directoryItems(xmp: String): List<String> {
-        val directory = Regex("""<Container:Directory>([\s\S]*?)</Container:Directory>""").find(xmp) ?: return emptyList()
+        val directory = prefixes(xmp, CONTAINER_NS, listOf("Container")).firstNotNullOfOrNull { p ->
+            Regex("""<${Regex.escape(p)}:Directory>([\s\S]*?)</${Regex.escape(p)}:Directory>""").find(xmp)
+        } ?: return emptyList()
         return Regex("""<rdf:li\b[\s\S]*?</rdf:li>""").findAll(directory.groupValues[1]).map { it.value }.toList()
     }
 
     /**
-     * [xmp] for the still photo: `GCamera:MotionPhoto` 0, the directory item of the video and the
+     * [xmp] for the still photo: `Camera:MotionPhoto` 0, the directory item of the video and the
      * MicroVideo fields gone, and the timestamp of the still frame gone. A gain map item stays.
      */
     private fun stillXmp(xmp: String): String {
         var s = xmp
-        s = Regex("""(GCamera:MotionPhoto\s*=\s*)"1"""").replace(s) { it.groupValues[1] + "\"0\"" }
-        s = Regex("""<GCamera:MotionPhoto>\s*1\s*</GCamera:MotionPhoto>""").replace(s, "<GCamera:MotionPhoto>0</GCamera:MotionPhoto>")
-        for (name in listOf("GCamera:MotionPhotoPresentationTimestampUs", "GCamera:MicroVideo", "GCamera:MicroVideoVersion", "GCamera:MicroVideoOffset", "GCamera:MicroVideoPresentationTimestampUs")) {
-            s = Regex("""\s${Regex.escape(name)}\s*=\s*"[^"]*"""").replace(s, "")
-            s = Regex("""<${Regex.escape(name)}>[^<]*</${Regex.escape(name)}>""").replace(s, "")
+        for (cam in camera(xmp)) {
+            val c = Regex.escape(cam)
+            s = Regex("""($c:MotionPhoto\s*=\s*)"1"""").replace(s) { it.groupValues[1] + "\"0\"" }
+            s = Regex("""<$c:MotionPhoto>\s*1\s*</$c:MotionPhoto>""").replace(s, "<$cam:MotionPhoto>0</$cam:MotionPhoto>")
+            for (local in listOf("MotionPhotoPresentationTimestampUs", "MicroVideo", "MicroVideoVersion", "MicroVideoOffset", "MicroVideoPresentationTimestampUs")) {
+                s = Regex("""\s$c:$local\s*=\s*"[^"]*"""").replace(s, "")
+                s = Regex("""<$c:$local>[^<]*</$c:$local>""").replace(s, "")
+            }
         }
         // The video's item of the directory; matched within one rdf:li, so a gain map item stays.
         // [\s\S] spans lines on every platform; DOT_MATCHES_ALL is the JVM's alone.
-        s = Regex("""<rdf:li\b(?:(?!</rdf:li>)[\s\S])*?Item:Semantic\s*=\s*"MotionPhoto"(?:(?!</rdf:li>)[\s\S])*?</rdf:li>""")
-            .replace(s, "")
+        for (item in prefixes(xmp, ITEM_NS, listOf("Item"))) {
+            val i = Regex.escape(item)
+            s = Regex("""<rdf:li\b(?:(?!</rdf:li>)[\s\S])*?$i:Semantic\s*=\s*"MotionPhoto"(?:(?!</rdf:li>)[\s\S])*?</rdf:li>""")
+                .replace(s, "")
+        }
         return s
     }
 
