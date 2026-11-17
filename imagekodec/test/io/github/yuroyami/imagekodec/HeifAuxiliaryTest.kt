@@ -200,12 +200,15 @@ class HeifAuxiliaryTest {
             references += Triple("auxl", 2L, longArrayOf(1))
             references += Triple("cdsc", 3L, longArrayOf(1))
         }.build()
+        // 0.005 as the 32-bit float the EXIF stores, widened. Kotlin/JS keeps a Float literal at
+        // 64 bits, so `0.005f.toDouble()` is 0.005 there and the stored value is not.
+        val tag48 = 0.004999999888241291
         val gm = assertNotNull(ImageKodec.decodeGainMap(file))
         assertEquals(HeifGainMap.Form.Apple, gm.form)
         assertNull(gm.metadata)
         assertEquals(1.25, gm.appleMakerNote33)
-        assertEquals(0.005f.toDouble(), gm.appleMakerNote48)
-        assertEquals(2.0.pow(-70.0 * 0.005f.toDouble() + 3.0), gm.appleHeadroom)
+        assertEquals(tag48, gm.appleMakerNote48)
+        assertEquals(2.0.pow(-70.0 * tag48 + 3.0), gm.appleHeadroom)
         assertContentEquals(gm.bitmap.samples, ImageKodec.decodeAuxiliaryImage(file, 0).samples)
         // The other three lines of Apple's formula, and its floor of no stops.
         assertEquals(2.0.pow(-0.101 * 0.5 + 1.601), AppleMakerNote.headroom(0.5, 0.5))
@@ -215,7 +218,7 @@ class HeifAuxiliaryTest {
         // A block cut anywhere gives what it can read, never an exception.
         val exif = appleExif(1.25f, 0.005f)
         for (cut in 0 until exif.size) AppleMakerNote.tags(exif.copyOf(cut), setOf(33, 48))
-        assertEquals(mapOf(33 to 1.25, 48 to 0.005f.toDouble()), AppleMakerNote.tags(exif, setOf(33, 48)))
+        assertEquals(mapOf(33 to 1.25, 48 to tag48), AppleMakerNote.tags(exif, setOf(33, 48)))
     }
 
     @Test
