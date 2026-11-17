@@ -14,6 +14,14 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageFormat.HEIC`: `detect` and `probe` recognise a HEIF file whose image is not AV1, by its HEVC
+  brands, or by the type of the image it shows when it names only `mif1` or `msf1`. `probe` reports
+  its size and depth from the container. Until a codec reads its HEVC items, `isDecodable` is false
+  and the reason names the `imagekodec-heic` module (#138).
+- `ImageKodec.registerHeifCodec` and the `HeifCodec` interface, marked `ExperimentalHeifCodecApi`, let
+  a module supply the codec of a HEIF item type. The shared HEIF reader joins grids, applies alpha,
+  crops and turns, and converts to RGB; a codec only turns coded samples into planes. AV1 is the
+  built-in codec (#137).
 - `encodeJpeg(bitmap, quality, JpegEncoderKind.Jpegli)`, and the overload with metadata, write a
   JPEG with a port of Google's Jpegli encoder at the settings its library gives by default: its
   quantization matrices scaled by the distance the quality maps to, adaptive quantization, 4:2:0
@@ -82,6 +90,8 @@ reviewable in the diff.
 
 ### Changed
 
+- `ImageFormat` has a new value, `HEIC`, so an exhaustive `when` over `ImageFormat` in caller code
+  needs a branch for it (#138).
 - The build moves from Gradle to the Kotlin Toolchain 0.13 (`./kotlin`, with
   `project.yaml` and a `module.yaml` for each module). Kotlin stays at 2.4.21. The
   coordinates, the targets and the klib names do not change, so libraries built
