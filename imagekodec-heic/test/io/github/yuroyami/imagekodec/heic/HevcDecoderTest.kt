@@ -13,11 +13,11 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * Four tiny intra pictures from libx265, three with the loop filters off and one with both on, decoded
- * on every platform and held to the MD5 that each carries in its decoded picture hash SEI (D.3.20), and
- * two with their headers rewritten to turn on the range extension tools. Then every cut and many
- * altered bytes of two of the first and of both of the others must give a picture or an
- * ImageDecodeException, within a deadline.
+ * Four tiny intra pictures from libx265, three with the loop filters off and one with both on, and a
+ * tiny sequence of P and B pictures, decoded on every platform and held to the MD5 that each picture
+ * carries in its decoded picture hash SEI (D.3.20), and two intra pictures with their headers rewritten
+ * to turn on the range extension tools. Then every cut and many altered bytes of the slices must give
+ * pictures or an ImageDecodeException, within a deadline.
  */
 class HevcDecoderTest {
 
@@ -94,6 +94,45 @@ class HevcDecoderTest {
     )
 
     /**
+     * 48x32, 4:2:0, 8 bits, four pictures that refer to one another: in decoding order an IDR picture, a
+     * P picture with explicit weights and two B pictures, of picture order counts 0, 3, 2 and 1. x265 with
+     * hash=1:keyint=30:scenecut=0:bframes=2:b-adapt=0:weightp=1:weightb=1:amp=1:rect=1:ctu=16:min-cu-size=8:
+     * qp=34:ipratio=1:pbratio=1 on testsrc2 through scroll=h=0.03:v=0.02,fade=out:2:10, so the picture moves
+     * and fades; its user data SEI and its second copy of the parameter sets are left out.
+     */
+    internal val interPictures = listOf(
+        nal("40010c01ffff01600000030090000003000003001e959009"),
+        nal("42010101600000030090000003000003001ea06208596564abdaf0168080000003008000000c84"),
+        nal("4401c171b312"),
+        nal(
+            "2801af0850998cfdbe7df5ac16bf7d0747ece3cf9b206ef1efdaa729a6e60ed7ec209d46b890956543ee1d39b3fa975f72427caa823340d14720abc8",
+            "154c8d7641ee9201ab4a33d255c47fc49cd8f016f100404d49c74bafded238182a82387232e7f87cf07f60980a5a14455071707cd6d3783e4167d762",
+            "900458290fef6b8ab6a17c786521301c1ae56c4f0bcd2f3fd668534a0f6358f2d8f80b96c4d9ff6c17d1ed9c1fad456c00c5a4f2bb24270a9cee1b1b",
+            "852fe5818d220992edde0520ee5d9125ed9a2a303abf256fb616f825bb43ebce5a251bafae11e40001e80b89bac7274f3901eeb1c3a53732bce072c3",
+            "389b477c117451e466bf845ea8a15dee4a063decaa5cc8eff9197b69a4c9cb94caa86ba4f7df1b5d04d8569937d4d6afc0d40885b0ec2f1a795419e0",
+            "f77ed0f0cfd06acc3d8ed23a10e0cddafef2327443de8047b3bf69d6a3ae6db7db76343d04099b5348fbb700969e",
+        ),
+        nal("50018431003a83b19929db28930ac51e379095f1735cffc5403dc2966255b22c2b7b83caa45b5b5d802e0ccb98ec4cee74270ab89680"),
+        nal(
+            "0201d0195f8eb1f0464046561023d880c15560184133ffe0b77f3861d0b5158c5863ccfdfa7587d9f5885ce576b5ee6c5f654184ba58ec32e9d4814c",
+            "be6557b060ea454608e057493a3a70b9fd06256a155be0cee08464ead05a21a8b7951bc86c287bb6cb74b95680fcc8ecb5c94281cc316c89dd6dcf85",
+            "33f02153308d037a360357f6ec6f434fc5684b3077924c42375d02912015a0eab44a8dc405fa19215a67875b5eae7ac0d8f4d1f1f1bb82f0ea84f81d",
+            "148b11f5ec23cbeecae1fc",
+        ),
+        nal("500184310020de40cf49dc30318aa88638e864a6d0c1f8b98c42fe360ba19993bba011f83a7599bbbb5cc9d6f7bc42e852c330089980"),
+        nal(
+            "0201e04497e043061023c78029710fffaeef63f22930677754f365db2f9103ac47a1cb4b6565bffff71557d527648ea46924a005fd7128e299b10e5f",
+            "ee98ada777f1bd5795dcde4ffe7fea686fb2a8016f5ba5185e79127d6e087c87d17f4ae8",
+        ),
+        nal("5001843100c8164d5a333a64c6185e659fefd36a9271ef0af9e92a67af6c8ac3ebcec98624749b053846948e1dc28b8c29491cbb9d80"),
+        nal(
+            "0001e024fffa22180c2147a1300cdffebb44114912f6b127e70a793313b2e502e94b0459066a9370b272d7948d324deb0015c25d33a9e335729cf9ba",
+            "6bf7fe785b7cdd3096d25bdf13bbc034045dcc52f8257fafd9b221e32526f52c780e88c5cd0b14417defa837ebb4a8c37584c5822f67",
+        ),
+        nal("5001843100290cf5fb1a940a7618815fa719457f12fb6d27aae458cbb436a83adde5ad75ddfa38bffc063293de96ddff122a1ef6e180"),
+    )
+
+    /**
      * The slice data of two 32x16 4:4:4 streams for the range extension tools, which no encoder at hand
      * writes: x265 writes none, and the conformance pictures are tens of kilobytes. Both are x265 with
      * keyint=1:ctu=16:min-cu-size=8:tskip=1:qp=30:ipratio=1:cu-lossless=1 on yuv444p12le, with its VPS
@@ -143,8 +182,15 @@ class HevcDecoderTest {
 
     private fun hex(b: ByteArray) = b.joinToString("") { (it.toInt() and 0xFF).toString(16).padStart(2, '0') }
 
-    private fun assertMatchesHash(name: String, units: List<ByteArray>): DecodedPicture {
-        val p = decode(units).single()
+    private fun assertMatchesHash(name: String, units: List<ByteArray>): DecodedPicture = assertEveryPictureMatches(name, units).single()
+
+    private fun assertEveryPictureMatches(name: String, units: List<ByteArray>): List<DecodedPicture> {
+        val pictures = decode(units)
+        for (p in pictures) assertPictureMatches(name, p)
+        return pictures
+    }
+
+    private fun assertPictureMatches(name: String, p: DecodedPicture): DecodedPicture {
         val hash = assertNotNull(p.hash, "$name: no hash SEI")
         assertEquals(0, hash.hashType)
         for (c in p.planes.indices) {
@@ -152,7 +198,7 @@ class HevcDecoderTest {
             val h = if (c == 0) p.sps.height else p.sps.height / p.sps.subHeightC
             val depth = if (c == 0) p.sps.bitDepthY else p.sps.bitDepthC
             val md5 = PictureHash.md5(PictureHash.pictureData(p.planes[c], 0, p.strides[c], w, h, depth))
-            assertEquals(hex(hash.values[c]), hex(md5), "$name: plane $c")
+            assertEquals(hex(hash.values[c]), hex(md5), "$name: picture ${p.poc}, plane $c")
         }
         return p
     }
@@ -190,6 +236,42 @@ class HevcDecoderTest {
         assertTrue(!h.deblockingFilterDisabled && h.saoLuma && h.saoChroma)
         assertEquals(-2 to 1, h.tcOffsetDiv2 to h.betaOffsetDiv2)
         assertEquals(48 to 32, p.sps.width to p.sps.height)
+    }
+
+    @Test
+    fun pAndBPicturesMatchTheirHashes() {
+        val pictures = assertEveryPictureMatches("P and B", interPictures)
+        assertEquals(listOf(0, 3, 2, 1), pictures.map { it.poc })
+        // The features the fixture is for, read from the stream.
+        val slices = sliceHeaders(interPictures)
+        assertEquals(listOf(SliceType.I, SliceType.P, SliceType.B, SliceType.B), slices.map { it.sliceType })
+        val p = slices[1]
+        assertTrue(p.pps.weightedPred && p.sps.ampEnabled && p.temporalMvpEnabled)
+        assertTrue(p.weights!!.lumaWeight[0][0] != 1 shl p.weights!!.lumaLog2Denom, "the P picture weighs its reference")
+        // The buffer outputs them in picture order count order.
+        val d = HevcDecoder(keepOutput = true)
+        for (u in interPictures) d.decodeNal(u, 0, u.size, null)
+        assertEquals(listOf(0, 1, 2, 3), (d.takeOutput() + d.flush()).map { it.poc })
+    }
+
+    @Test
+    fun aSessionDecodesTheSamplesOfASequenceInOrder() {
+        // One sample a picture, in decoding order, through the codec's session as the core drives it.
+        val sets = interPictures.filter { (it[0].toInt() shr 1) and 0x3F in 32..34 }
+        val samples = ArrayList<ArrayList<ByteArray>>()
+        for (u in interPictures.filter { (it[0].toInt() shr 1) and 0x3F !in 32..34 }) {
+            if (NalType.isSlice((u[0].toInt() shr 1) and 0x3F)) samples += ArrayList<ByteArray>()
+            samples.last() += u
+        }
+        val session = HevcCodec.open(AnnexB.hvcC(sets))
+        val expected = decode(interPictures)
+        assertEquals(4, samples.size)
+        for ((i, sample) in samples.withIndex()) {
+            val planes = assertNotNull(session.decode(AnnexB.sample(sample), null), "sample $i")
+            assertEquals(48 to 32, planes.width to planes.height)
+            val want = expected[i].toHeifPlanes()
+            for (c in planes.planes.indices) assertTrue(planes.planes[c].contentEquals(want.planes[c]), "sample $i, plane $c")
+        }
     }
 
     @Test
@@ -259,8 +341,12 @@ class HevcDecoderTest {
 
     @Test
     fun everyCutAndAlteredByteFailsCleanly() {
-        for ((name, units) in listOf("4:2:2" to chroma422, "loop filters" to loopFilters420, "range extension" to rangeExtensionReconstruction, "range extension parsing" to rangeExtensionParsing)) {
-            val index = units.indexOfFirst { NalType.isSlice((it[0].toInt() shr 1) and 0x3F) }
+        val inter = interPictures.indices.filter { NalType.isSlice((interPictures[it][0].toInt() shr 1) and 0x3F) }
+        val cases = listOf("4:2:2" to chroma422, "loop filters" to loopFilters420, "range extension" to rangeExtensionReconstruction, "range extension parsing" to rangeExtensionParsing)
+            .map { (name, units) -> Triple(name, units, units.indexOfFirst { NalType.isSlice((it[0].toInt() shr 1) and 0x3F) }) } +
+            // Every slice of the sequence, the inter syntax of the P and B slices among them.
+            inter.map { Triple("P and B, slice unit $it", interPictures, it) }
+        for ((name, units, index) in cases) {
             val slice = units[index]
             withDeadline("HEVC truncation, $name", 60_000) {
                 for (n in 2 until slice.size) survives(units, index, slice.copyOf(n), "$name: the slice cut to $n bytes")

@@ -26,6 +26,7 @@ class HevcHeaderFuzzTest {
         listOf(
             "wavefront" to it.wavefront420, "4:2:2" to it.chroma422, "4:4:4" to it.chroma444, "loop filters" to it.loopFilters420,
             "range extension" to it.rangeExtensionReconstruction, "range extension parsing" to it.rangeExtensionParsing,
+            "P and B" to it.interPictures,
         )
     }
 

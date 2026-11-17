@@ -36,6 +36,17 @@ reviewable in the diff.
   bits, with scaling lists, transform skip, lossless coding and PCM (#141, #142), the deblocking
   filter and sample adaptive offset, tiles and dependent slice segments (#143, #144). An inter slice
   or a screen content coding tool is named in `unsupportedReason`.
+- `imagekodec-heic` decodes P and B pictures: the picture order count, short-term and long-term
+  reference picture sets with the pictures 8.3.3 generates, reference picture lists with their
+  modification, and a decoded picture buffer with its output order and bumping, which the codec's
+  session keeps from sample to sample; RASL pictures of a CRA picture that starts the stream are
+  skipped (#156). Merge mode with its spatial, temporal, combined bi-predictive and zero
+  candidates and the parallel merge level, AMVP, temporal candidates from a 16x16 motion grid, skip
+  mode and every partition mode with the asymmetric ones (#171). Fractional sample interpolation in
+  every chroma format, default and explicit weighted prediction, the inter residual quadtree with
+  explicit residual DPCM, and the motion cases of the deblocking filter's boundary strength (#172).
+  Every picture of every HEVC_v1 and RExt conformance stream matches its hash SEI or the MD5 of
+  the package's output.
 - `imagekodec-heic` decodes the coding tools of the range extensions in intra pictures: transform
   skip rotation, context and sizes above 4x4, implicit residual DPCM, cross-component prediction,
   extended precision and bit depths up to 16, persistent Rice adaptation, CABAC bypass alignment,

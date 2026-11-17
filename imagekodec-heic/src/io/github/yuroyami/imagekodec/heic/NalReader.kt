@@ -4,6 +4,7 @@ import io.github.yuroyami.imagekodec.ImageDecodeException
 
 /** The NAL unit types of ITU-T H.265 Table 7-1 that the decoder acts on. */
 internal object NalType {
+    const val RASL_N = 8
     const val RASL_R = 9
     const val BLA_W_LP = 16
     const val IDR_W_RADL = 19
@@ -13,6 +14,7 @@ internal object NalType {
     const val VPS = 32
     const val SPS = 33
     const val PPS = 34
+    const val EOS = 36
     const val SUFFIX_SEI = 40
 
     /** The coded slice segments. The reserved VCL types 10 to 15 and 22 to 31 are ignored, as 7.4.2.2 asks. */

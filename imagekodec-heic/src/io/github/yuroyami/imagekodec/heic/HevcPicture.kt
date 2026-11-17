@@ -6,9 +6,31 @@ import io.github.yuroyami.imagekodec.UnsupportedImageException
 /** decoded_picture_hash( ), D.2.20: [hashType] 0 (MD5), 1 (CRC) or 2 (checksum), and the hash of each component, big-endian. */
 internal class PictureHashSei(val hashType: Int, val values: Array<ByteArray>)
 
-/** A decoded picture before the conformance window, and the picture hash SEI that followed its slices, if any. */
+/**
+ * A decoded picture before the conformance window, and the picture hash SEI that followed its slices, if
+ * any, with what the decoded picture buffer keeps of it (C.5.2): its picture order count, its marking, its
+ * output state and the motion that later pictures take temporal candidates from.
+ */
 internal class DecodedPicture(val sps: Sps, val planes: Array<ShortArray>, val strides: IntArray) {
     var hash: PictureHashSei? = null
+    /** PicOrderCntVal (8.3.1). */
+    var poc: Int = 0
+    /** UNUSED, SHORT_TERM or LONG_TERM: "unused for reference", "used for short-term reference" or "used for long-term reference". */
+    var reference: Int = UNUSED
+    /** PicOutputFlag (8.1.3). */
+    var outputFlag: Boolean = true
+    /** Marked "needed for output" (C.5.2.3). */
+    var neededForOutput: Boolean = false
+    /** PicLatencyCount (C.5.2.3). */
+    var latency: Int = 0
+    /** The motion for temporal candidates, or null when every block is coded in intra mode. */
+    var motion: CollocatedMotion? = null
+
+    companion object {
+        const val UNUSED = 0
+        const val SHORT_TERM = 1
+        const val LONG_TERM = 2
+    }
 
     /** The planes cropped to the conformance window (7.4.3.2.1), as the core takes them. */
     fun toHeifPlanes(): HeifPlanes {
@@ -35,14 +57,24 @@ internal class DecodedPicture(val sps: Sps, val planes: Array<ShortArray>, val s
 }
 
 /**
- * Decodes the NAL units of a stream, one at a time and in order, into pictures. Parameter sets stay
- * between calls, so a HEIF session hands it the units of hvcC once and then those of each sample.
+ * Decodes the NAL units of a stream, one at a time and in order, into pictures. Parameter sets and the
+ * decoded picture buffer stay between calls, so a HEIF session hands it the units of hvcC once and then
+ * those of each sample, and a picture may refer to the pictures of the samples before it.
+ *
+ * [finish] gives the pictures in decoding order, which is what a caller that shows each sample as it
+ * comes wants. With [keepOutput], [takeOutput] and [flush] give them in output order, as the "bumping"
+ * process of C.5.2.4 outputs them.
  */
-internal class HevcDecoder {
+internal class HevcDecoder(keepOutput: Boolean = false) {
     private val store = ParameterSetStore()
+    private val buffer = PictureBuffer(keepOutput)
     private var picture: PictureDecoder? = null
     private var current: DecodedPicture? = null
     private var previous: SliceHeader? = null
+    /** PicOrderCntVal of the picture being decoded. */
+    private var poc = 0
+    /** The slices of a RASL picture that is not decoded are skipped up to the next picture. */
+    private var skipping = false
     private val done = ArrayList<DecodedPicture>()
 
     /** Decodes the NAL unit of [bytes] from [from] to [to]. [cancel] runs once per CTB row. */
@@ -54,25 +86,40 @@ internal class HevcDecoder {
         when {
             NalType.isSlice(nal.type) -> {
                 val h = readSliceHeader(r, nal, store, previous, to - from)
-                previous = h
                 if (h.firstSliceSegmentInPic) {
                     finishPicture()
+                    HevcSupport.sliceReason(h)?.let { throw UnsupportedImageException(it) }
+                    val pictureOrder = buffer.beginPicture(h)
+                    skipping = pictureOrder == null
+                    if (pictureOrder == null) return
+                    poc = pictureOrder
                     val p = PictureDecoder(h.sps, h.pps)
                     picture = p
-                    current = DecodedPicture(h.sps, p.planes, p.strides)
+                    current = DecodedPicture(h.sps, p.planes, p.strides).also {
+                        it.poc = pictureOrder
+                        it.outputFlag = h.picOutput
+                    }
+                } else if (skipping) {
+                    return
                 }
+                previous = h
                 val p = picture ?: hevcError("a slice segment has no first_slice_segment_in_pic_flag before it")
                 // 7.4.7.1: the slice segments of a picture share one PPS.
                 if (h.pps !== p.pps) hevcError("the slice segments of a picture name different PPSs")
                 HevcSupport.sliceReason(h)?.let { throw UnsupportedImageException(it) }
+                if (h.sliceType != SliceType.I) h.refs = if (h.dependentSliceSegment) h.refs else buffer.refLists(h, poc)
                 p.decodeSliceSegment(h, rbsp, emulationPreventionBytes(bytes, from, to), cancel)
             }
             nal.type == NalType.SUFFIX_SEI -> current?.let { readSei(r, it) }
+            nal.type == NalType.EOS -> {
+                finishPicture()
+                buffer.endOfSequence()
+            }
             else -> store.add(nal, r)
         }
     }
 
-    /** The pictures completed since the last call: every picture whose slices have all arrived. */
+    /** The pictures completed since the last call, in decoding order: every picture whose slices have all arrived. */
     fun finish(): List<DecodedPicture> {
         finishPicture()
         val out = ArrayList(done)
@@ -80,12 +127,25 @@ internal class HevcDecoder {
         return out
     }
 
+    /** The pictures the decoded picture buffer has output since the last call, in output order (needs keepOutput). */
+    fun takeOutput(): List<DecodedPicture> = buffer.takeOutput()
+
+    /** Ends the stream: completes the last picture and outputs every picture still waiting, in output order. */
+    fun flush(): List<DecodedPicture> {
+        finishPicture()
+        buffer.flush()
+        return buffer.takeOutput()
+    }
+
     private fun finishPicture() {
         val p = picture ?: return
         val total = p.sps.picSizeInCtbs
         if (p.decodedCtbs != total) hevcError("the slice segments of a picture hold ${p.decodedCtbs} of its $total CTBs")
         p.finishLoopFilters()
-        done += current!!
+        val c = current!!
+        c.motion = p.collocatedMotion()
+        buffer.endPicture(c)
+        done += c
         picture = null
         current = null
     }

@@ -71,7 +71,12 @@ and fail during the decode.
 
 - Decoding needs the `imagekodec-heic` module and a call to `ImageKodecHeic.install()`. Without it,
   `decode` throws `UnsupportedImageException`, and `probe` reports the file as not decodable.
-- Only intra pictures decode. An image sequence or a picture with inter slices is refused.
+- The decoder decodes intra, P and B pictures, but the core does not read an HEVC image sequence
+  yet: `decodeAnimation` of a HEIC sequence gives its primary item, as for a still (#157).
+- An inter picture whose reference picture set names a picture the decoder does not hold is a
+  decode error, except for the RASL pictures of a CRA picture that starts the stream, which are
+  skipped as H.265 allows. All the pictures the decoded picture buffer holds count together
+  against the pixel ceiling.
 - The tools of the screen content extensions (palette mode, current picture referencing, the
   adaptive colour transform and disabled intra boundary filtering), separate colour planes and CTBs
   of 8 samples are refused, and `unsupportedReason` names the field that asks for them.

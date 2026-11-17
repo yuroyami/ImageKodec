@@ -40,11 +40,14 @@ internal object Ctx {
     const val CU_CHROMA_QP_OFFSET_IDX = 158
     const val LOG2_RES_SCALE_ABS = 159
     const val RES_SCALE_SIGN = 167
+    /** explicit_rdpcm_flag and explicit_rdpcm_dir_flag: one context for luma, then one for both chroma components. */
+    const val EXPLICIT_RDPCM = 169
+    const val EXPLICIT_RDPCM_DIR = 171
     /** The number of context variables. */
-    const val CONTEXTS = 169
+    const val CONTEXTS = 173
     /** StatCoeff[ 0..3 ], each 0 to about 90 (9-23 stops it near the largest level), so a byte holds it. */
-    const val STAT_COEFF = 169
-    const val COUNT = 173
+    const val STAT_COEFF = 173
+    const val COUNT = 177
 
     /** The initValue of every entry for initType 0, 1 and 2. */
     private val initValues: Array<IntArray> = Array(3) { t -> layout(t) }
@@ -99,6 +102,11 @@ internal object Ctx {
             v[MVP_FLAG] = T.INIT_MVP_FLAG[t - 1]
             v[ABS_MVD_GREATER0] = T.INIT_ABS_MVD[(t - 1) * 2]
             v[ABS_MVD_GREATER1] = T.INIT_ABS_MVD[(t - 1) * 2 + 1]
+            // Tables 9-32 and 9-33: ctxIdx t - 1 for luma and 2 + t - 1 for chroma (Table 9-4).
+            v[EXPLICIT_RDPCM] = T.INIT_EXPLICIT_RDPCM[t - 1]
+            v[EXPLICIT_RDPCM + 1] = T.INIT_EXPLICIT_RDPCM[2 + t - 1]
+            v[EXPLICIT_RDPCM_DIR] = T.INIT_EXPLICIT_RDPCM_DIR[t - 1]
+            v[EXPLICIT_RDPCM_DIR + 1] = T.INIT_EXPLICIT_RDPCM_DIR[2 + t - 1]
         }
         return v
     }

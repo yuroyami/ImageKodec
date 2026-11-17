@@ -5,7 +5,7 @@ ITU-T H.265 itself, so no table is typed by hand.
 
 The tables are the ones the specification gives as data, which nothing derives: the default scaling
 lists of Table 7-6, the context initialisation values of Tables 9-5 to 9-31 and of the range
-extension elements of intra pictures in Tables 9-34 to 9-37, the arithmetic decoder's Tables 9-50,
+extension elements in Tables 9-32 to 9-37, the arithmetic decoder's Tables 9-50,
 9-52 and 9-53, the intra tables 8-3 and 8-5, the chroma QP table 8-10, the deblocking thresholds
 of Table 8-12 and the transform matrices of 8-316, 8-319 and 8-321. The script reads the text that
 `pdftotext -layout` makes of the 07/2024 edition (V10), checks each table's element count, and
@@ -55,7 +55,7 @@ def table_7_6(text):
     return intra, inter
 
 
-# Tables 9-5 to 9-31: the syntax element each gives initValue for, and its number of ctxIdx.
+# Tables 9-5 to 9-37: the syntax element each gives initValue for, and its number of ctxIdx.
 INIT_TABLES = [
     (5, "SAO_MERGE", "sao_merge_left_flag and sao_merge_up_flag", 3),
     (6, "SAO_TYPE", "sao_type_idx_luma and sao_type_idx_chroma", 3),
@@ -84,6 +84,8 @@ INIT_TABLES = [
     (29, "SIG_COEFF", "sig_coeff_flag", 132),
     (30, "GREATER1", "coeff_abs_level_greater1_flag", 72),
     (31, "GREATER2", "coeff_abs_level_greater2_flag", 18),
+    (32, "EXPLICIT_RDPCM", "explicit_rdpcm_flag", 4),
+    (33, "EXPLICIT_RDPCM_DIR", "explicit_rdpcm_dir_flag", 4),
     (34, "CU_CHROMA_QP_OFFSET_FLAG", "cu_chroma_qp_offset_flag", 3),
     (35, "CU_CHROMA_QP_OFFSET_IDX", "cu_chroma_qp_offset_idx", 3),
     (36, "LOG2_RES_SCALE_ABS", "log2_res_scale_abs_plus1", 24),

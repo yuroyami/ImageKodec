@@ -1,11 +1,10 @@
 package io.github.yuroyami.imagekodec.heic
 
-import io.github.yuroyami.imagekodec.UnsupportedImageException
-
 /**
- * Decodes the slice segments of one intra picture: it parses each CTU (7.3.8) with CABAC (9.3) and
- * reconstructs it at once (8.4, 8.6). The picture keeps, in units of 4x4 luma samples, only what a
- * later stage needs: the prediction mode, QpY, the PCM and bypass flags and the transform edges.
+ * Decodes the slice segments of one picture: it parses each CTU (7.3.8) with CABAC (9.3) and
+ * reconstructs it at once (8.4, 8.5, 8.6). The picture keeps, in units of 4x4 luma samples, only what a
+ * later stage needs: the prediction mode, QpY, the PCM and bypass flags, the transform and prediction
+ * edges, and for a picture with P or B slices the motion of [MotionField].
  * [sps] and [pps] must have passed [Pps.checkAgainst].
  */
 internal class PictureDecoder(val sps: Sps, val pps: Pps) {
@@ -98,6 +97,13 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private val wpp = pps.entropyCodingSync
     private val heightInCtbs = sps.picHeightInCtbs
     private val intra = IntraPredictor(this)
+    /** The motion of the picture, made by its first P or B slice segment. */
+    var motion: MotionField? = null
+        private set
+    private var motionPredictor: MotionPredictor? = null
+    private var interPredictor: InterPredictor? = null
+    /** initType of 9.3.2.2 for the slice segment being decoded. */
+    private var initType = 0
     private val transform = InverseTransform()
     private val coeff = IntArray(32 * 32)
     private val residual = IntArray(32 * 32)
@@ -140,6 +146,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
     // The coding unit and quantization group being decoded.
     private var cuBypass = false
+    /** CuPredMode is MODE_INTER (or MODE_SKIP). */
+    private var cuInter = false
+    private var partMode = PartMode.PART_2Nx2N
     private var intraSplit = false
     private var maxTrafoDepth = 0
     private var xCu = 0
@@ -170,8 +179,20 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
      * from the escaped positions [escapes], in tile scan (7.3.8.1). [cancel] runs once per CTB row of a tile.
      */
     fun decodeSliceSegment(h: SliceHeader, rbsp: ByteArray, escapes: IntArray, cancel: (() -> Unit)?) {
-        if (h.sliceType != SliceType.I) throw UnsupportedImageException("HEVC: slice_type ${h.sliceType} is not supported yet")
         slice = h
+        // 9.3.2.2, Table 9-4.
+        initType = when (h.sliceType) {
+            SliceType.I -> 0
+            SliceType.P -> if (h.cabacInit) 2 else 1
+            else -> if (h.cabacInit) 1 else 2
+        }
+        if (h.sliceType != SliceType.I) {
+            val refs = h.refs ?: hevcError("a P or B slice has no reference picture lists")
+            val m = motion ?: MotionField(width, height).also { motion = it }
+            val mp = motionPredictor ?: MotionPredictor(this).also { motionPredictor = it }
+            if (interPredictor == null) interPredictor = InterPredictor(this)
+            mp.startSlice(h, refs, m)
+        }
         this.rbsp = rbsp
         sliceAddrRs = h.sliceAddrRs
         sliceQpY = h.sliceQpY
@@ -278,7 +299,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         val firstInTile = ctbTs == 0 || layout.tileId[ctbTs] != layout.tileId[ctbTs - 1]
         val rowStart = wpp && rowStartInTile()
         if (firstInTile) {
-            Ctx.init(cabac.states, 0, sliceQpY)
+            Ctx.init(cabac.states, initType, sliceQpY)
         } else if (rowStart) {
             val above = ctbAddr - widthInCtbs + 1
             // (xNbT, yNbT) of 9-3, available by 6.4.1: inside the picture, decoded, in the slice and the tile.
@@ -286,12 +307,12 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             if (ctbAddr >= widthInCtbs && x + 1 < widthInCtbs && ctbSlice[above] == sliceAddrRs && tileIdRs[above] == tileIdRs[ctbAddr]) {
                 wppStates.copyInto(cabac.states)
             } else {
-                Ctx.init(cabac.states, 0, sliceQpY)
+                Ctx.init(cabac.states, initType, sliceQpY)
             }
         } else if (dependent) {
             dsStates.copyInto(cabac.states)
         } else {
-            Ctx.init(cabac.states, 0, sliceQpY)
+            Ctx.init(cabac.states, initType, sliceQpY)
         }
         // 8.6.1: qPY_PREV is SliceQpY in the first quantization group of a slice, a tile, or a CTB row of a tile under WPP.
         if (firstInTile || rowStart || !dependent) lastQpY = sliceQpY
@@ -324,6 +345,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             saoRows++
         }
     }
+
+    /** The motion that later pictures take temporal candidates from, or null for a picture of I slices only. */
+    fun collocatedMotion(): CollocatedMotion? = motion?.collocated
 
     /** Runs the loop filters over the rows still owed, once every CTB of the picture is decoded (8.7.1). */
     fun finishLoopFilters() {
@@ -448,12 +472,32 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         yCu = y0
         log2Cu = log2
         cuBypass = pps.transquantBypassEnabled && cabac.decode(Ctx.TRANSQUANT_BYPASS) == 1
-        // An I slice: every coding unit is intra, and part_mode is coded only at the smallest size.
-        intraSplit = log2 == minCbLog2 && cabac.decode(Ctx.PART_MODE) == 0
-        cuQpY = currentQpY()
-        val pcm = !intraSplit && sps.pcmEnabled && log2 >= sps.log2MinPcmCb && log2 <= sps.log2MaxPcmCb && cabac.terminate() == 1
         val size = 1 shl log2
-        val unitFlags = FLAG_INTRA or (if (pcm) FLAG_PCM else 0) or (if (cuBypass) FLAG_BYPASS else 0)
+        var skip = false
+        val m = motion
+        if (m != null && slice.sliceType != SliceType.I) {
+            // 9.3.4.2.2 with Table 9-49.
+            var inc = 0
+            if (available(x0, y0, x0 - 1, y0) && m.skip[(y0 shr 2) * w4 + ((x0 - 1) shr 2)].toInt() != 0) inc++
+            if (available(x0, y0, x0, y0 - 1) && m.skip[((y0 - 1) shr 2) * w4 + (x0 shr 2)].toInt() != 0) inc++
+            skip = cabac.decode(Ctx.CU_SKIP + inc) == 1
+            fillUnits(m.skip, x0, y0, size, size, if (skip) 1 else 0)
+        }
+        // pred_mode_flag 1 is MODE_INTRA; an I slice codes every unit in intra mode.
+        val isIntra = !skip && (slice.sliceType == SliceType.I || cabac.decode(Ctx.PRED_MODE) == 1)
+        cuInter = !isIntra
+        intraSplit = false
+        partMode = PartMode.PART_2Nx2N
+        if (isIntra) {
+            // part_mode of an intra unit is coded only at the smallest size: 1 is PART_2Nx2N, 0 PART_NxN.
+            intraSplit = log2 == minCbLog2 && cabac.decode(Ctx.PART_MODE) == 0
+            if (intraSplit) partMode = PartMode.PART_NxN
+        } else if (!skip) {
+            partMode = interPartMode(log2)
+        }
+        cuQpY = currentQpY()
+        val pcm = isIntra && !intraSplit && sps.pcmEnabled && log2 >= sps.log2MinPcmCb && log2 <= sps.log2MaxPcmCb && cabac.terminate() == 1
+        val unitFlags = (if (isIntra) FLAG_INTRA else 0) or (if (pcm) FLAG_PCM else 0) or (if (cuBypass) FLAG_BYPASS else 0)
         for (y in (y0 shr 2) until ((y0 + size) shr 2)) {
             val row = y * w4
             for (x in (x0 shr 2) until ((x0 + size) shr 2)) {
@@ -464,27 +508,191 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         if (pcm) {
             fillUnits(predModeY, x0, y0, size, size, IntraPredictor.INTRA_DC)
             pcmSample(x0, y0, log2)
-        } else {
+        } else if (isIntra) {
             intraModes(x0, y0, log2)
             maxTrafoDepth = sps.maxTransformHierarchyDepthIntra + (if (intraSplit) 1 else 0)
             transformTree(x0, y0, x0, y0, log2, 0, 0, 0, 0)
+        } else {
+            val merged = predictionUnits(x0, y0, log2, depth, skip)
+            // rqt_root_cbf, inferred 1 for a merged 2Nx2N unit that is not skipped (7.4.9.5).
+            val rootCbf = !skip && ((partMode == PartMode.PART_2Nx2N && merged) || cabac.decode(Ctx.RQT_ROOT_CBF) == 1)
+            if (rootCbf) {
+                maxTrafoDepth = sps.maxTransformHierarchyDepthInter
+                transformTree(x0, y0, x0, y0, log2, 0, 0, 0, 0)
+            }
         }
         markEdges(x0, y0, size)
         fillUnits(qpY, x0, y0, size, size, cuQpY)
         lastQpY = cuQpY
     }
 
+    /** part_mode of an inter unit, with the binarization of Table 9-45 and the contexts of Table 9-48. */
+    private fun interPartMode(log2: Int): Int {
+        val c = cabac
+        if (c.decode(Ctx.PART_MODE) == 1) return PartMode.PART_2Nx2N
+        if (log2 == minCbLog2) {
+            if (c.decode(Ctx.PART_MODE + 1) == 1) return PartMode.PART_2NxN
+            if (log2 == 3) return PartMode.PART_Nx2N
+            return if (c.decode(Ctx.PART_MODE + 2) == 1) PartMode.PART_Nx2N else PartMode.PART_NxN
+        }
+        val horizontal = c.decode(Ctx.PART_MODE + 1) == 1
+        if (!sps.ampEnabled) return if (horizontal) PartMode.PART_2NxN else PartMode.PART_Nx2N
+        // The third bin tells a symmetric split from an asymmetric one, whose side a bypass bin gives.
+        if (c.decode(Ctx.PART_MODE + 3) == 1) return if (horizontal) PartMode.PART_2NxN else PartMode.PART_Nx2N
+        val second = c.bypass() == 1
+        return if (horizontal) (if (second) PartMode.PART_2NxnD else PartMode.PART_2NxnU) else (if (second) PartMode.PART_nRx2N else PartMode.PART_nLx2N)
+    }
+
+    /**
+     * The prediction units of the inter coding unit at ([x0], [y0]) (7.3.8.5): each one's syntax, its
+     * motion (8.5.3.2) and its samples (8.5.3.3), in order, as a later unit may predict its motion from an
+     * earlier one. The edges between the units are marked for the deblocking filter (8.7.2.3). Returns
+     * merge_flag of the first unit.
+     */
+    private fun predictionUnits(x0: Int, y0: Int, log2: Int, depth: Int, skip: Boolean): Boolean {
+        val n = 1 shl log2
+        val half = n shr 1
+        val quarter = n shr 2
+        var merged = false
+        fun pu(dx: Int, dy: Int, w: Int, h: Int, idx: Int) {
+            val m = predictionUnit(x0, y0, n, x0 + dx, y0 + dy, w, h, idx, depth, skip)
+            if (idx == 0) merged = m
+        }
+        when (partMode) {
+            PartMode.PART_2Nx2N -> pu(0, 0, n, n, 0)
+            PartMode.PART_2NxN -> { pu(0, 0, n, half, 0); pu(0, half, n, half, 1); markPredictionEdge(x0, y0 + half, n, false) }
+            PartMode.PART_Nx2N -> { pu(0, 0, half, n, 0); pu(half, 0, half, n, 1); markPredictionEdge(x0 + half, y0, n, true) }
+            PartMode.PART_2NxnU -> { pu(0, 0, n, quarter, 0); pu(0, quarter, n, n - quarter, 1); markPredictionEdge(x0, y0 + quarter, n, false) }
+            PartMode.PART_2NxnD -> { pu(0, 0, n, n - quarter, 0); pu(0, n - quarter, n, quarter, 1); markPredictionEdge(x0, y0 + n - quarter, n, false) }
+            PartMode.PART_nLx2N -> { pu(0, 0, quarter, n, 0); pu(quarter, 0, n - quarter, n, 1); markPredictionEdge(x0 + quarter, y0, n, true) }
+            PartMode.PART_nRx2N -> { pu(0, 0, n - quarter, n, 0); pu(n - quarter, 0, quarter, n, 1); markPredictionEdge(x0 + n - quarter, y0, n, true) }
+            else -> {
+                pu(0, 0, half, half, 0); pu(half, 0, half, half, 1); pu(0, half, half, half, 2); pu(half, half, half, half, 3)
+                markPredictionEdge(x0 + half, y0, n, true)
+                markPredictionEdge(x0, y0 + half, n, false)
+            }
+        }
+        return merged
+    }
+
+    /** Marks a prediction block edge of [length] samples from ([x], [y]), vertical or horizontal, that is no transform edge. */
+    private fun markPredictionEdge(x: Int, y: Int, length: Int, vertical: Boolean) {
+        val at = (y shr 2) * w4 + (x shr 2)
+        for (i in 0 until (length shr 2)) {
+            val u = if (vertical) at + i * w4 else at + i
+            flags[u] = (flags[u].toInt() or (if (vertical) FLAG_EDGE_LEFT else FLAG_EDGE_TOP)).toByte()
+        }
+    }
+
+    /**
+     * prediction_unit( ) of 7.3.8.6 for the block at ([xPb], [yPb]) of [w] by [h], partition [partIdx] of
+     * the coding block at ([xCb], [yCb]) of [nCbS] and depth [depth]; then its motion and its samples.
+     * Returns merge_flag.
+     */
+    private fun predictionUnit(xCb: Int, yCb: Int, nCbS: Int, xPb: Int, yPb: Int, w: Int, h: Int, partIdx: Int, depth: Int, skip: Boolean): Boolean {
+        val c = cabac
+        val mp = motionPredictor!!
+        val refs = slice.refs!!
+        val merge = skip || c.decode(Ctx.MERGE_FLAG) == 1
+        var r0 = -1
+        var r1 = -1
+        var m0 = 0
+        var m1 = 0
+        if (merge) {
+            // merge_idx: TR with cMax MaxNumMergeCand - 1, its first bin in a context.
+            val max = slice.maxNumMergeCand - 1
+            var idx = 0
+            while (idx < max && (if (idx == 0) c.decode(Ctx.MERGE_IDX) else c.bypass()) == 1) idx++
+            mp.merge(xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, partMode, idx)
+            r0 = mp.ref0; r1 = mp.ref1; m0 = mp.mv0; m1 = mp.mv1
+        } else {
+            // inter_pred_idc, 9.3.3.9: PRED_L0 0, PRED_L1 1, PRED_BI 2.
+            var idc = 0
+            if (slice.sliceType == SliceType.B) {
+                idc = if (w + h != 12 && c.decode(Ctx.INTER_PRED_IDC + depth) == 1) 2 else c.decode(Ctx.INTER_PRED_IDC + 4)
+            }
+            var mvd0 = 0
+            var mvd1 = 0
+            var flag0 = 0
+            var flag1 = 0
+            if (idc != 1) {
+                r0 = refIdx(slice.numRefIdxL0ActiveMinus1)
+                mvd0 = mvdCoding()
+                flag0 = c.decode(Ctx.MVP_FLAG)
+            }
+            if (idc != 0) {
+                r1 = refIdx(slice.numRefIdxL1ActiveMinus1)
+                mvd1 = if (slice.mvdL1Zero && idc == 2) 0 else mvdCoding()
+                flag1 = c.decode(Ctx.MVP_FLAG)
+            }
+            if (r0 >= 0) m0 = addMvd(mp.predictor(0, r0, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag0), mvd0)
+            if (r1 >= 0) m1 = addMvd(mp.predictor(1, r1, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag1), mvd1)
+        }
+        mp.store(xPb, yPb, w, h, r0, m0, r1, m1)
+        interPredictor!!.predict(slice, refs, xPb, yPb, w, h, r0, m0, r1, m1)
+        return merge
+    }
+
+    /** 8-94 to 8-101: mvpLX + mvdLX wrapped to 16 bits, or in whole samples under use_integer_mv_flag. */
+    private fun addMvd(mvp: Int, mvd: Int): Int {
+        val px = MotionField.x(mvp)
+        val py = MotionField.y(mvp)
+        val dx = MotionField.x(mvd)
+        val dy = MotionField.y(mvd)
+        if (slice.useIntegerMv) return MotionField.pack(((px shr 2) + dx) shl 2, ((py shr 2) + dy) shl 2)
+        return MotionField.pack(px + dx, py + dy)
+    }
+
+    /** ref_idx_l0 or ref_idx_l1: TR with cMax [max], two bins in contexts and the rest bypass. */
+    private fun refIdx(max: Int): Int {
+        var i = 0
+        while (i < max && (if (i < 2) cabac.decode(Ctx.REF_IDX + i) else cabac.bypass()) == 1) i++
+        return i
+    }
+
+    /** mvd_coding( ), 7.3.8.9: the difference packed as a motion vector, each component in -2^15..2^15 - 1. */
+    private fun mvdCoding(): Int {
+        val c = cabac
+        val g0x = c.decode(Ctx.ABS_MVD_GREATER0)
+        val g0y = c.decode(Ctx.ABS_MVD_GREATER0)
+        val g1x = if (g0x == 1) c.decode(Ctx.ABS_MVD_GREATER1) else 0
+        val g1y = if (g0y == 1) c.decode(Ctx.ABS_MVD_GREATER1) else 0
+        val x = mvdComponent(g0x, g1x)
+        val y = mvdComponent(g0y, g1y)
+        return MotionField.pack(x, y)
+    }
+
+    /** One component of mvd_coding( ): abs_mvd_minus2 as EG1 (9.3.3.3), then mvd_sign_flag, all bypass. */
+    private fun mvdComponent(greater0: Int, greater1: Int): Int {
+        if (greater0 == 0) return 0
+        var abs = 1
+        if (greater1 == 1) {
+            var k = 1
+            var v = 0
+            while (cabac.bypass() == 1) {
+                v += 1 shl k
+                // A difference of 16 bits needs no longer prefix.
+                if (++k > 16) hevcError("abs_mvd_minus2 is out of range")
+            }
+            abs = v + cabac.bypassBits(k) + 2
+        }
+        val negative = cabac.bypass() == 1
+        // 7.4.9.9: MvdLX is in -2^15..2^15 - 1.
+        if (abs > 32768 || (abs == 32768 && !negative)) hevcError("a motion vector difference of ${if (negative) -abs else abs} is out of range")
+        return if (negative) -abs else abs
+    }
+
     private fun fillUnits(a: ByteArray, x0: Int, y0: Int, w: Int, h: Int, v: Int) {
         for (y in (y0 shr 2) until ((y0 + h) shr 2)) a.fill(v.toByte(), y * w4 + (x0 shr 2), y * w4 + ((x0 + w) shr 2))
     }
 
-    /** Marks the left and top edges of a block as transform or prediction block edges, for the deblocking filter. */
+    /** Marks the left and top edges of a coding or transform block as transform block edges, for the deblocking filter. */
     private fun markEdges(x0: Int, y0: Int, size: Int) {
         val n = size shr 2
         val top = (y0 shr 2) * w4 + (x0 shr 2)
         for (i in 0 until n) {
-            flags[top + i] = (flags[top + i].toInt() or FLAG_EDGE_TOP).toByte()
-            flags[top + i * w4] = (flags[top + i * w4].toInt() or FLAG_EDGE_LEFT).toByte()
+            flags[top + i] = (flags[top + i].toInt() or (FLAG_EDGE_TOP or FLAG_TRANSFORM_TOP)).toByte()
+            flags[top + i * w4] = (flags[top + i * w4].toInt() or (FLAG_EDGE_LEFT or FLAG_TRANSFORM_LEFT)).toByte()
         }
     }
 
@@ -601,8 +809,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         val split = if (log2 <= sps.maxTbLog2 && log2 > minTbLog2 && depth < maxTrafoDepth && !(intraSplit && depth == 0)) {
             cabac.decode(Ctx.SPLIT_TRANSFORM + 5 - log2) == 1
         } else {
-            // 7.4.9.8: a block larger than the largest transform, or the four blocks of an NxN unit, split.
-            log2 > sps.maxTbLog2 || (intraSplit && depth == 0)
+            // 7.4.9.8: a block larger than the largest transform, the four blocks of an NxN unit, and with
+            // max_transform_hierarchy_depth_inter 0 an inter unit of several prediction blocks (interSplitFlag) split.
+            log2 > sps.maxTbLog2 || (intraSplit && depth == 0) ||
+                (cuInter && sps.maxTransformHierarchyDepthInter == 0 && partMode != PartMode.PART_2Nx2N && depth == 0)
         }
         var cb = 0
         var cr = 0
@@ -628,8 +838,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             transformTree(x0, y0 + half, x0, y0, log2 - 1, depth + 1, 2, cb, cr)
             transformTree(x0 + half, y0 + half, x0, y0, log2 - 1, depth + 1, 3, cb, cr)
         } else {
-            // An intra unit always codes cbf_luma.
-            val cbfLuma = cabac.decode(Ctx.CBF_LUMA + (if (depth == 0) 1 else 0))
+            // cbf_luma is inferred 1 for an inter unit's undivided block with no chroma residual.
+            val cbfLuma = if (!cuInter || depth != 0 || cb != 0 || cr != 0) cabac.decode(Ctx.CBF_LUMA + (if (depth == 0) 1 else 0)) else 1
             transformUnit(x0, y0, xBase, yBase, log2, blkIdx, cbfLuma, cb, cr)
         }
     }
@@ -641,7 +851,15 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             if ((cb != 0 || cr != 0) && !cuBypass) chromaQpOffset()
         }
         markEdges(x0, y0, 1 shl log2)
-        val lumaMode = predModeY[(y0 shr 2) * w4 + (x0 shr 2)].toInt()
+        if (cbfLuma != 0) {
+            val n = 1 shl (log2 - 2)
+            for (y in 0 until n) for (x in 0 until n) {
+                val u = ((y0 shr 2) + y) * w4 + (x0 shr 2) + x
+                flags[u] = (flags[u].toInt() or FLAG_CODED).toByte()
+            }
+        }
+        // An inter block has no intra prediction mode; -1 picks the diagonal scan and no implicit DPCM.
+        val lumaMode = if (cuInter) -1 else predModeY[(y0 shr 2) * w4 + (x0 shr 2)].toInt()
         block(0, x0, y0, log2, lumaMode, cbfLuma != 0)
         if (chromaArrayType == 0) return
         val log2C: Int
@@ -661,10 +879,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         // The chroma mode of the prediction block that holds the transform block (four in 4:4:4 NxN).
         val half = (1 shl log2Cu) shr 1
         val k = if (chromaArrayType == 3 && intraSplit) (if (yC - yCu >= half) 2 else 0) + (if (xC - xCu >= half) 1 else 0) else 0
-        val mode = chromaMode[k]
+        val mode = if (cuInter) -1 else chromaMode[k]
         val blocks = if (chromaArrayType == 2) 2 else 1
         // 7.3.8.10: cross_comp_pred( ) only in 4:4:4 (Pps.checkAgainst), whose chroma blocks are the luma block's.
-        val ccp = crossComponent && cbfLuma != 0 && chromaSyntax[k] == 4
+        val ccp = crossComponent && cbfLuma != 0 && (cuInter || chromaSyntax[k] == 4)
         for (c in 1..2) {
             val cbf = if (c == 1) cb else cr
             if (ccp) crossComponentPrediction(c) else if (c == 1) resScaleCb = 0 else resScaleCr = 0
@@ -702,7 +920,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
      * (8.6.5) and cross-component prediction (8.6.6), added with clipping (8.6.7).
      */
     private fun block(cIdx: Int, x0: Int, y0: Int, log2: Int, mode: Int, coded: Boolean) {
-        intra.predict(cIdx, x0, y0, log2, mode, cuBypass && implicitRdpcm)
+        // An inter unit's prediction is already in the picture (8.5.1).
+        if (!cuInter) intra.predict(cIdx, x0, y0, log2, mode, cuBypass && implicitRdpcm)
         // 8.4.4.1, step 8: a chroma block takes a share of the luma residual even with no residual of its own.
         val resScale = if (cIdx == 0) 0 else if (cIdx == 1) resScaleCb else resScaleCr
         if (!coded && resScale == 0) return
@@ -751,8 +970,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         val maxX = packed and 0xFF
         val maxY = (packed shr 8) and 0xFF
         val skip = packed and TRANSFORM_SKIPPED != 0
-        // rotateCoeffs of 8.6.2: a 4x4 block without a transform, read back to front.
-        val rotate = rotation && log2 == 2 && (skip || cuBypass)
+        // rotateCoeffs of 8.6.2: a 4x4 intra block without a transform, read back to front.
+        val rotate = rotation && !cuInter && log2 == 2 && (skip || cuBypass)
         val r: IntArray
         if (cuBypass) {
             if (rotate) {
@@ -782,12 +1001,14 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             } else if (log2 >= (if (cIdx == 0) wideLog2Y else wideLog2C)) {
                 transform.inverseWide(coeff, r, log2, maxX, maxY, bdShift, if (cIdx == 0) coeffMaxY else coeffMaxC)
             } else {
-                transform.inverse(coeff, r, log2, cIdx == 0 && log2 == 2, maxX, maxY, bdShift, if (cIdx == 0) coeffMaxY else coeffMaxC)
+                transform.inverse(coeff, r, log2, !cuInter && cIdx == 0 && log2 == 2, maxX, maxY, bdShift, if (cIdx == 0) coeffMaxY else coeffMaxC)
             }
         }
-        // 8.4.4.1, step 7: residualDpcm, along the direction of prediction (mDir = predModeIntra / 26).
-        if (implicitRdpcm && (skip || cuBypass) && (mode == 10 || mode == 26)) {
-            if (mode == 10) {
+        // 8.4.4.1, step 7: residualDpcm, along the direction of prediction (mDir = predModeIntra / 26); or
+        // 8.5.4.2, step 3, and 8.5.4.3, step 4: along explicit_rdpcm_dir_flag.
+        val explicit = packed and (EXPLICIT_HORIZONTAL or EXPLICIT_VERTICAL)
+        if (explicit != 0 || (implicitRdpcm && (skip || cuBypass) && (mode == 10 || mode == 26))) {
+            if (explicit == EXPLICIT_HORIZONTAL || mode == 10) {
                 for (y in 0 until n) for (x in 1 until n) r[y * n + x] += r[y * n + x - 1]
             } else {
                 for (y in 1 until n) for (x in 0 until n) r[y * n + x] += r[(y - 1) * n + x]
@@ -851,6 +1072,11 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         val chroma = cIdx > 0
         val skip = pps.transformSkipEnabled && !cuBypass && log2 <= pps.log2MaxTransformSkipSize &&
             c.decode(Ctx.TRANSFORM_SKIP + (if (chroma) 1 else 0)) == 1
+        // explicit_rdpcm_flag and explicit_rdpcm_dir_flag, of an inter block without a transform.
+        var explicit = 0
+        if (cuInter && sps.explicitRdpcm && (skip || cuBypass) && c.decode(Ctx.EXPLICIT_RDPCM + (if (chroma) 1 else 0)) == 1) {
+            explicit = if (c.decode(Ctx.EXPLICIT_RDPCM_DIR + (if (chroma) 1 else 0)) == 1) EXPLICIT_VERTICAL else EXPLICIT_HORIZONTAL
+        }
         // last_sig_coeff_x_prefix and _y_prefix: TR with cMax ( log2 << 1 ) - 1 and the contexts of 9.3.4.2.3.
         val cMax = (log2 shl 1) - 1
         val ctxOffset = if (chroma) 15 else 3 * (log2 - 2) + ((log2 - 1) shr 2)
@@ -878,8 +1104,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         subFlags.fill(0, 0, subSide * subSide)
         // The scaling of 8.6.3, applied to each coefficient as it is read.
         val factor = scalingFactor?.let { f ->
-            // 7.4.5 Table 7-4 for an intra block: matrixId is cIdx; 8.6.3 keeps m = 16 for a larger skipped block.
-            if (skip && n > 4) null else f[subLog2 * 6 + cIdx]
+            // 7.4.5 Table 7-4: matrixId is cIdx in an intra block and 3 + cIdx in an inter one; 8.6.3 keeps
+            // m = 16 for a larger skipped block.
+            if (skip && n > 4) null else f[subLog2 * 6 + (if (cuInter) 3 else 0) + cIdx]
         }
         val levelScale = LEVEL_SCALE[qp % 6]
         val coeffMax = if (chroma) coeffMaxC else coeffMaxY
@@ -887,8 +1114,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         // 15 unless extended precision raises it (8-300).
         val log2Range = if (chroma) log2RangeC else log2RangeY
         val shift = qp / 6 - (bitDepth + log2 + 10 - log2Range)
-        // 7.3.8.11: neither a bypass block nor one that implicit residual DPCM changes hides a sign.
-        val hide = pps.signDataHiding && !cuBypass && !(implicitRdpcm && skip && (predMode == 10 || predMode == 26))
+        // 7.3.8.11: neither a bypass block nor one that residual DPCM changes hides a sign.
+        val hide = pps.signDataHiding && !cuBypass && explicit == 0 && !(implicitRdpcm && skip && (predMode == 10 || predMode == 26))
         // sbType of 9-20 and 9-21, whose StatCoeff seeds the Rice parameter of each sub-block.
         val statIdx = Ctx.STAT_COEFF + (if (chroma) 0 else 2) + (if (skip || cuBypass) 1 else 0)
         val skipSig = skipContext && (skip || cuBypass)
@@ -1002,7 +1229,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
                 coeff[yC * n + xC] = if (cuBypass) level else if (extendedPrecision) scaleWide(level, m, levelScale, shift, coeffMax) else scale(level, m, levelScale, shift)
             }
         }
-        return maxX or (maxY shl 8) or (if (skip) TRANSFORM_SKIPPED else 0)
+        return maxX or (maxY shl 8) or (if (skip) TRANSFORM_SKIPPED else 0) or explicit
     }
 
     /** sigCtx of 9.3.4.2.5, as an offset from the first sig_coeff_flag context of the component. */
@@ -1058,7 +1285,14 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         const val FLAG_BYPASS = 4
         const val FLAG_EDGE_LEFT = 8
         const val FLAG_EDGE_TOP = 16
+        /** The left or top edge of the unit is a transform block edge, not only a prediction block edge (8.7.2.4). */
+        const val FLAG_TRANSFORM_LEFT = 32
+        const val FLAG_TRANSFORM_TOP = 64
+        /** The unit's luma transform block holds a non-zero coefficient level (8.7.2.4). */
+        const val FLAG_CODED = 128
         const val TRANSFORM_SKIPPED = 1 shl 16
+        const val EXPLICIT_HORIZONTAL = 1 shl 17
+        const val EXPLICIT_VERTICAL = 1 shl 18
 
         /** Table 8-2: the mode that intra_chroma_pred_mode 0 to 3 names. */
         val CHROMA_CANDIDATES = intArrayOf(0, 26, 10, 1)

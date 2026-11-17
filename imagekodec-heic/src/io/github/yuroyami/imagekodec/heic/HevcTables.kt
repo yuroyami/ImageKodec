@@ -174,6 +174,16 @@ internal object HevcTables {
         107, 167,
     )
 
+    /** Table 9-32: initValue of each ctxIdx of explicit_rdpcm_flag. CRC-32 of the bytes: 0x5461016F. */
+    val INIT_EXPLICIT_RDPCM: IntArray = intArrayOf(
+        139, 139, 139, 139,
+    )
+
+    /** Table 9-33: initValue of each ctxIdx of explicit_rdpcm_dir_flag. CRC-32 of the bytes: 0x5461016F. */
+    val INIT_EXPLICIT_RDPCM_DIR: IntArray = intArrayOf(
+        139, 139, 139, 139,
+    )
+
     /** Table 9-34: initValue of each ctxIdx of cu_chroma_qp_offset_flag. CRC-32 of the bytes: 0x94B1FCFE. */
     val INIT_CU_CHROMA_QP_OFFSET_FLAG: IntArray = intArrayOf(
         154, 154, 154,

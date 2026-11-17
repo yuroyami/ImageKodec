@@ -68,7 +68,6 @@ internal object HevcSupport {
         s.intraBoundaryFilteringDisabled -> "intra_boundary_filtering_disabled_flag"
         p != null && p.currPicRefEnabled -> "pps_curr_pic_ref_enabled_flag"
         p != null && p.residualAdaptiveColourTransform -> "residual_adaptive_colour_transform_enabled_flag"
-        slice != null && slice.sliceType != SliceType.I -> "slice_type ${slice.sliceType}"
         else -> null
     }
 }
@@ -116,19 +115,35 @@ internal object HevcCodec : HeifCodec {
 
     /**
      * A session that decodes each sample into one picture. The parameter sets of hvcC, and any a sample
-     * carries, stay for the samples after it. A picture the decoder lacks a tool for throws
-     * UnsupportedImageException with the reason [inspect] gives.
+     * carries, stay for the samples after it, and so do the decoded pictures a later sample refers to. A
+     * picture the decoder lacks a tool for throws UnsupportedImageException with the reason [inspect] gives.
      */
-    override fun open(configuration: ByteArray?): HeifCodecSession {
-        val config = configuration?.let { HevcConfig.parse(it) }
-        val decoder = HevcDecoder()
+    override fun open(configuration: ByteArray?): HeifCodecSession = HevcSession(configuration?.let { HevcConfig.parse(it) })
+}
+
+/**
+ * The samples of an item or a track, decoded in order by one [HevcDecoder], so the decoded picture
+ * buffer carries the reference pictures from sample to sample. [decode] returns the picture each sample
+ * codes, in decoding order. A caller that shows a sequence in output order creates the session with
+ * [keepOutput] and takes the pictures from [takeOutput] after each sample and from [flush] at the end,
+ * as the "bumping" process of C.5.2.4 outputs them.
+ */
+internal class HevcSession(private val config: HevcConfig?, keepOutput: Boolean = false) : HeifCodecSession {
+    private val decoder = HevcDecoder(keepOutput)
+
+    init {
         config?.nalUnits?.forEach { decoder.decodeNal(it, 0, it.size, null) }
-        return object : HeifCodecSession {
-            override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes? {
-                cancellationCheck?.invoke()
-                for (range in splitSample(sample, config?.lengthSize ?: 4)) decoder.decodeNal(sample, range.first, range.last + 1, cancellationCheck)
-                return decoder.finish().lastOrNull()?.toHeifPlanes()
-            }
-        }
     }
+
+    override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes? {
+        cancellationCheck?.invoke()
+        for (range in splitSample(sample, config?.lengthSize ?: 4)) decoder.decodeNal(sample, range.first, range.last + 1, cancellationCheck)
+        return decoder.finish().lastOrNull()?.toHeifPlanes()
+    }
+
+    /** The pictures output since the last call, in output order; empty unless the session keeps output. */
+    fun takeOutput(): List<HeifPlanes> = decoder.takeOutput().map { it.toHeifPlanes() }
+
+    /** Ends the sequence: the pictures still waiting for output, in output order. */
+    fun flush(): List<HeifPlanes> = decoder.flush().map { it.toHeifPlanes() }
 }

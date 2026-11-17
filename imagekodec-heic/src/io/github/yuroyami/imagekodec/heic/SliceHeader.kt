@@ -27,10 +27,7 @@ internal class ParameterSetStore {
     }
 }
 
-/**
- * A slice segment header (7.3.6.1) with its active parameter sets. The weights of pred_weight_table
- * (7.3.6.3) are read and dropped until inter prediction needs them.
- */
+/** A slice segment header (7.3.6.1) with its active parameter sets. */
 internal class SliceHeader {
     var nalType = 0
     var temporalId = 0
@@ -53,17 +50,28 @@ internal class SliceHeader {
     var numLongTermSps = 0
     var numLongTermPics = 0
     var usedByCurrPicLt = BooleanArray(0)
+    /** PocLsbLt (7.4.7.1), delta_poc_msb_present_flag and DeltaPocMsbCycleLt (7-52) of each long-term entry. */
+    var pocLsbLt = IntArray(0)
+    var deltaPocMsbPresent = BooleanArray(0)
+    var deltaPocMsbCycleLt = LongArray(0)
     var temporalMvpEnabled = false
     var saoLuma = false
     var saoChroma = false
     var numRefIdxL0ActiveMinus1 = 0
     var numRefIdxL1ActiveMinus1 = 0
     var mvdL1Zero = false
+    /** list_entry_l0 and list_entry_l1 of ref_pic_lists_modification( ), or null for a list that is not modified. */
+    var listEntryL0: IntArray? = null
+    var listEntryL1: IntArray? = null
     var cabacInit = false
     var collocatedFromL0 = true
     var collocatedRefIdx = 0
     var maxNumMergeCand = 5
     var useIntegerMv = false
+    /** The explicit weights of pred_weight_table, or null when the slice predicts with the default weights. */
+    var weights: PredWeights? = null
+    /** The reference picture lists of a P or B slice, which the decoder builds after the header (8.3.4). */
+    var refs: RefLists? = null
     var qpDelta = 0
     var cbQpOffset = 0
     var crQpOffset = 0
@@ -97,9 +105,11 @@ internal class SliceHeader {
         shortTermRpsIdx = from.shortTermRpsIdx; shortTermRps = from.shortTermRps
         numLongTermSps = from.numLongTermSps; numLongTermPics = from.numLongTermPics
         usedByCurrPicLt = from.usedByCurrPicLt; temporalMvpEnabled = from.temporalMvpEnabled
+        pocLsbLt = from.pocLsbLt; deltaPocMsbPresent = from.deltaPocMsbPresent; deltaPocMsbCycleLt = from.deltaPocMsbCycleLt
+        weights = from.weights; refs = from.refs
         saoLuma = from.saoLuma; saoChroma = from.saoChroma
         numRefIdxL0ActiveMinus1 = from.numRefIdxL0ActiveMinus1; numRefIdxL1ActiveMinus1 = from.numRefIdxL1ActiveMinus1
-        mvdL1Zero = from.mvdL1Zero; cabacInit = from.cabacInit; collocatedFromL0 = from.collocatedFromL0
+        mvdL1Zero = from.mvdL1Zero; listEntryL0 = from.listEntryL0; listEntryL1 = from.listEntryL1; cabacInit = from.cabacInit; collocatedFromL0 = from.collocatedFromL0
         collocatedRefIdx = from.collocatedRefIdx; maxNumMergeCand = from.maxNumMergeCand; useIntegerMv = from.useIntegerMv
         qpDelta = from.qpDelta; cbQpOffset = from.cbQpOffset; crQpOffset = from.crQpOffset
         actYQpOffset = from.actYQpOffset; actCbQpOffset = from.actCbQpOffset; actCrQpOffset = from.actCrQpOffset
@@ -243,17 +253,26 @@ private fun readLongTerm(r: BitReader, h: SliceHeader, sps: Sps, pps: Pps) {
     h.numLongTermPics = r.ue("num_long_term_pics", 0, maxOf(max, 0))
     val n = h.numLongTermSps + h.numLongTermPics
     h.usedByCurrPicLt = BooleanArray(n)
+    h.pocLsbLt = IntArray(n)
+    h.deltaPocMsbPresent = BooleanArray(n)
+    h.deltaPocMsbCycleLt = LongArray(n)
     for (i in 0 until n) {
         if (i < h.numLongTermSps) {
             val idx = if (numSps > 1) r.u(ceilLog2(numSps), "lt_idx_sps", 0, numSps - 1) else 0
+            h.pocLsbLt[i] = sps.ltRefPicPocLsb[idx]
             h.usedByCurrPicLt[i] = sps.usedByCurrPicLt[idx]
         } else {
-            r.u(sps.log2MaxPocLsb, "poc_lsb_lt")
+            h.pocLsbLt[i] = r.u(sps.log2MaxPocLsb, "poc_lsb_lt")
             h.usedByCurrPicLt[i] = r.flag("used_by_curr_pic_lt_flag")
         }
-        if (r.flag("delta_poc_msb_present_flag")) {
-            BitReader.check("delta_poc_msb_cycle_lt", r.ueLong("delta_poc_msb_cycle_lt"), 0, 1L shl (32 - sps.log2MaxPocLsb))
+        h.deltaPocMsbPresent[i] = r.flag("delta_poc_msb_present_flag")
+        var cycle = 0L
+        if (h.deltaPocMsbPresent[i]) {
+            cycle = r.ueLong("delta_poc_msb_cycle_lt")
+            BitReader.check("delta_poc_msb_cycle_lt", cycle, 0, 1L shl (32 - sps.log2MaxPocLsb))
         }
+        // 7-52: the cycles add up within the entries of the SPS and within those of the slice header.
+        h.deltaPocMsbCycleLt[i] = if (i == 0 || i == h.numLongTermSps) cycle else cycle + h.deltaPocMsbCycleLt[i - 1]
     }
 }
 
@@ -280,6 +299,8 @@ private fun readInterFields(r: BitReader, h: SliceHeader, sps: Sps, pps: Pps) {
             entriesL1 = IntArray(h.numRefIdxL1ActiveMinus1 + 1) { r.u(bits, "list_entry_l1", 0, total - 1) }
         }
     }
+    h.listEntryL0 = entriesL0
+    h.listEntryL1 = entriesL1
     if (b) h.mvdL1Zero = r.flag("mvd_l1_zero_flag")
     if (pps.cabacInitPresent) h.cabacInit = r.flag("cabac_init_flag")
     if (h.temporalMvpEnabled) {
@@ -290,7 +311,7 @@ private fun readInterFields(r: BitReader, h: SliceHeader, sps: Sps, pps: Pps) {
     if ((pps.weightedPred && !b) || (pps.weightedBipred && b)) {
         val l0 = currentPictureEntries(h, 0, entriesL0)
         val l1 = if (b) currentPictureEntries(h, 1, entriesL1) else null
-        skipPredWeightTable(r, sps, l0, l1)
+        h.weights = readPredWeightTable(r, sps, l0, l1)
     }
     h.maxNumMergeCand = 5 - r.ue("five_minus_max_num_merge_cand", 0, 4)
     if (sps.motionVectorResolutionControlIdc == 2) h.useIntegerMv = r.flag("use_integer_mv_flag")
@@ -323,12 +344,33 @@ private fun currentPictureEntries(h: SliceHeader, list: Int, entries: IntArray?)
     return out
 }
 
-/** pred_weight_table( ), 7.3.6.3, with the ranges of 7.4.7.3. */
-private fun skipPredWeightTable(r: BitReader, sps: Sps, l0: BooleanArray, l1: BooleanArray?) {
-    val lumaDenom = r.ue("luma_log2_weight_denom", 0, 7)
-    if (sps.chromaArrayType != 0) {
-        BitReader.check("delta_chroma_log2_weight_denom", lumaDenom.toLong() + r.se("delta_chroma_log2_weight_denom", -7, 7), 0, 7)
+/**
+ * The weights and offsets of pred_weight_table( ) (7.4.7.3) as 8.5.3.3.4.3 uses them, per list and
+ * reference index: LumaWeightLX, luma_offset_lX, ChromaWeightLX and ChromaOffsetLX, with the offsets not
+ * yet shifted by WpOffsetBdShiftY or WpOffsetBdShiftC.
+ */
+internal class PredWeights(val lumaLog2Denom: Int, val chromaLog2Denom: Int, lists: Int) {
+    val lumaWeight: Array<IntArray> = Array(lists) { IntArray(MAX_REFS) { 1 shl lumaLog2Denom } }
+    val lumaOffset: Array<IntArray> = Array(lists) { IntArray(MAX_REFS) }
+    /** At refIdx * 2 + j, j 0 for Cb and 1 for Cr. */
+    val chromaWeight: Array<IntArray> = Array(lists) { IntArray(2 * MAX_REFS) { 1 shl chromaLog2Denom } }
+    val chromaOffset: Array<IntArray> = Array(lists) { IntArray(2 * MAX_REFS) }
+
+    companion object {
+        /** num_ref_idx_lX_active_minus1 is at most 14 (7.4.7.1). */
+        const val MAX_REFS = 15
     }
+}
+
+/** pred_weight_table( ), 7.3.6.3, with the ranges and the derived variables of 7.4.7.3. */
+private fun readPredWeightTable(r: BitReader, sps: Sps, l0: BooleanArray, l1: BooleanArray?): PredWeights {
+    val lumaDenom = r.ue("luma_log2_weight_denom", 0, 7)
+    var chromaDenom = lumaDenom
+    if (sps.chromaArrayType != 0) {
+        chromaDenom = lumaDenom + r.se("delta_chroma_log2_weight_denom", -7, 7)
+        BitReader.check("delta_chroma_log2_weight_denom", chromaDenom.toLong(), 0, 7)
+    }
+    val w = PredWeights(lumaDenom, chromaDenom, if (l1 == null) 1 else 2)
     // WpOffsetHalfRangeY and WpOffsetHalfRangeC, 7-33 and 7-34.
     val halfY = 1 shl (if (sps.highPrecisionOffsets) sps.bitDepthY - 1 else 7)
     val halfC = 1 shl (if (sps.highPrecisionOffsets) sps.bitDepthC - 1 else 7)
@@ -339,13 +381,18 @@ private fun skipPredWeightTable(r: BitReader, sps: Sps, l0: BooleanArray, l1: Bo
         if (sps.chromaArrayType != 0) for (i in isCurrent.indices) chroma[i] = !isCurrent[i] && r.flag("chroma_weight_${x}_flag")
         for (i in isCurrent.indices) {
             if (luma[i]) {
-                r.se("delta_luma_weight_$x", -128, 127)
-                r.se("luma_offset_$x", -halfY, halfY - 1)
+                w.lumaWeight[k][i] = (1 shl lumaDenom) + r.se("delta_luma_weight_$x", -128, 127)
+                w.lumaOffset[k][i] = r.se("luma_offset_$x", -halfY, halfY - 1)
             }
-            if (chroma[i]) repeat(2) {
-                r.se("delta_chroma_weight_$x", -128, 127)
-                r.se("delta_chroma_offset_$x", -4 * halfC, 4 * halfC - 1)
+            if (chroma[i]) for (j in 0..1) {
+                val weight = (1 shl chromaDenom) + r.se("delta_chroma_weight_$x", -128, 127)
+                val delta = r.se("delta_chroma_offset_$x", -4 * halfC, 4 * halfC - 1)
+                w.chromaWeight[k][2 * i + j] = weight
+                // 7-58.
+                val offset = halfC + delta - ((halfC * weight) shr chromaDenom)
+                w.chromaOffset[k][2 * i + j] = if (offset < -halfC) -halfC else if (offset > halfC - 1) halfC - 1 else offset
             }
         }
     }
+    return w
 }

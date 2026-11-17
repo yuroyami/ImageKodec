@@ -18,10 +18,10 @@ import kotlin.test.fail
  * of each plane that x265 writes in the decoded picture hash SEI (D.3.20), over every chroma format,
  * depths 8 to 12, CTB sizes, scaling lists, transform skip, lossless coding, constrained intra
  * prediction, several slices, wavefront rows on and off, extreme QPs and sizes that leave partial CTBs
- * and a conformance window. Each case checks from the stream that it has the feature it is there for.
- * A few fixtures are also compared sample for sample with libde265. Pictures with the loop filters on
- * must still parse to their last bit. Then the intra streams of the H.265.1 conformance packages are
- * listed with their outcome.
+ * and a conformance window; then the same with the loop filters on, and sequences of P and B pictures.
+ * Each case checks from the stream that it has the feature it is there for. A few fixtures are also
+ * compared sample for sample with libde265. Then every picture of the H.265.1 conformance packages is
+ * held to its hash SEI or to the MD5 of the package's output, and the streams are listed with their outcome.
  */
 class HevcDecodeOracleTest {
 
@@ -31,6 +31,7 @@ class HevcDecodeOracleTest {
         val pixFmt: String,
         val params: String,
         val frames: Int = 1,
+        val filter: String = "",
         val check: (List<SliceHeader>) -> Boolean = { true },
     )
 
@@ -109,11 +110,11 @@ class HevcDecodeOracleTest {
         return File.createTempFile("kite-hevc-lists", ".txt").apply { deleteOnExit(); writeText(text.toString()) }
     }
 
-    private fun encode(size: String, pixFmt: String, params: String, frames: Int = 1, source: String = "testsrc2"): File {
+    private fun encode(size: String, pixFmt: String, params: String, frames: Int = 1, source: String = "testsrc2", filter: String = ""): File {
         val out = File.createTempFile("kite-hevc", ".hevc").apply { deleteOnExit() }
         val p = params.replace("{lists}", if ("{lists}" in params) scalingListFile().path else "")
         val (code, log) = run(
-            Tools.require("ffmpeg").path, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "$source=size=$size:rate=25",
+            Tools.require("ffmpeg").path, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "$source=size=$size:rate=25$filter",
             "-frames:v", frames.toString(), "-pix_fmt", pixFmt, "-c:v", "libx265",
             "-x265-params", "${p.trim(':')}:log-level=none".trimStart(':'), "-f", "hevc", "-y", out.path,
         )
@@ -171,13 +172,17 @@ class HevcDecodeOracleTest {
         }
     }
 
-    /** The planes as a YUV file holds them: one byte a sample, or two low first above 8 bits. */
+    /**
+     * The planes as a YUV file holds them: one byte a sample, or two low first when either depth passes
+     * 8 bits, as HM writes a picture whose luma and chroma depths differ.
+     */
     private fun yuvBytes(p: io.github.yuroyami.imagekodec.HeifPlanes): ByteArray {
         val out = java.io.ByteArrayOutputStream()
+        val depth = maxOf(p.bitDepthLuma, p.bitDepthChroma)
         for (c in p.planes.indices) {
             val w = if (c == 0) p.width else p.width shr p.subX
             val h = if (c == 0) p.height else p.height shr p.subY
-            out.write(PictureHash.pictureData(p.planes[c], 0, p.strides[c], w, h, if (c == 0) p.bitDepthLuma else p.bitDepthChroma))
+            out.write(PictureHash.pictureData(p.planes[c], 0, p.strides[c], w, h, depth))
         }
         return out.toByteArray()
     }
@@ -351,6 +356,144 @@ class HevcDecodeOracleTest {
     }
 
     /**
+     * Sequences of P and B pictures, each with the loop filters as x265 sets them; each case asserts from the
+     * stream the tool it is there for. x265 writes no tiles (the conformance streams TILES_A and TILES_B
+     * have them), nor long-term pictures (LTRPSPS_A has them).
+     */
+    private val interCases = listOf(
+        Case("P pictures only", "128x96", "yuv420p", "bframes=0", frames = 6) { s -> s.count { it.sliceType == SliceType.P } >= 5 && s.none { it.sliceType == SliceType.B } },
+        Case("B pictures in a pyramid", "128x96", "yuv420p", "bframes=3:b-pyramid=1", frames = 9) { s -> s.count { it.sliceType == SliceType.B } >= 4 },
+        Case("asymmetric partitions", "128x96", "yuv420p", "amp=1:rect=1:bframes=2", frames = 8) { s -> s[0].sps.ampEnabled },
+        Case("explicit weights in P pictures", "128x96", "yuv420p", "weightp=1:bframes=0", frames = 10, filter = ",fade=in:0:10") { s ->
+            s.any { it.sliceType == SliceType.P && it.weights != null && it.pps.weightedPred }
+        },
+        Case("explicit weights in B pictures", "128x96", "yuv420p", "weightp=1:weightb=1:bframes=3:b-pyramid=1", frames = 10, filter = ",fade=out:0:10") { s ->
+            s.any { it.sliceType == SliceType.B && it.weights != null && it.pps.weightedBipred }
+        },
+        Case("explicit weights at 10 bits", "128x96", "yuv420p10le", "weightp=1:weightb=1:bframes=2", frames = 8, filter = ",fade=out:0:8") { s ->
+            s[0].sps.bitDepthY == 10 && s.any { it.weights != null }
+        },
+        Case("4:2:2 8 bits", "128x96", "yuv422p", "bframes=2", frames = 6) { s -> s[0].sps.chromaFormatIdc == 2 },
+        Case("4:2:2 10 bits", "128x96", "yuv422p10le", "bframes=2", frames = 6) { s -> s[0].sps.chromaFormatIdc == 2 && s[0].sps.bitDepthY == 10 },
+        Case("4:4:4 8 bits", "128x96", "yuv444p", "bframes=2", frames = 6) { s -> s[0].sps.chromaFormatIdc == 3 },
+        Case("4:4:4 12 bits", "128x96", "yuv444p12le", "bframes=2", frames = 6) { s -> s[0].sps.chromaFormatIdc == 3 && s[0].sps.bitDepthY == 12 },
+        Case("4:0:0", "128x96", "gray", "bframes=2", frames = 6) { s -> s[0].sps.chromaFormatIdc == 0 },
+        Case("10 bits", "128x96", "yuv420p10le", "bframes=2", frames = 6) { s -> s[0].sps.bitDepthY == 10 },
+        Case("12 bits", "128x96", "yuv420p12le", "bframes=2", frames = 6) { s -> s[0].sps.bitDepthY == 12 },
+        Case("wide motion search", "160x96", "yuv420p", "merange=92:subme=7:me=star:bframes=3", frames = 8) { s -> s.any { it.sliceType == SliceType.B } },
+        Case("four reference pictures", "128x96", "yuv420p", "ref=4:bframes=3:b-pyramid=1", frames = 10) { s -> s.any { it.numRefIdxL0ActiveMinus1 >= 3 } },
+        Case("wavefront rows and two slices", "256x160", "yuv420p", "wpp=1:ctu=32:slices=2:bframes=2", frames = 6) { s ->
+            s[0].pps.entropyCodingSync && s.any { !it.firstSliceSegmentInPic && it.sliceType != SliceType.I }
+        },
+        Case("open GOP with CRA and RASL pictures", "128x96", "yuv420p", "keyint=6:min-keyint=6:open-gop=1:bframes=3:scenecut=0", frames = 16) { s ->
+            s.any { it.nalType == NalType.CRA_NUT } && s.any { it.nalType == NalType.RASL_N || it.nalType == NalType.RASL_R }
+        },
+        Case("IDR and CRA pictures", "128x96", "yuv420p", "keyint=5:min-keyint=5:open-gop=0:bframes=2:scenecut=0", frames = 14) { s ->
+            s.count { it.nalType == NalType.IDR_W_RADL || it.nalType == NalType.IDR_N_LP } >= 2
+        },
+        Case("CTBs of 16 and deep inter transform trees", "128x96", "yuv420p", "ctu=16:min-cu-size=8:tu-inter-depth=3:bframes=2", frames = 6) { s ->
+            s[0].sps.ctbLog2 == 4 && s[0].sps.maxTransformHierarchyDepthInter >= 2
+        },
+        Case("no temporal candidates", "128x96", "yuv420p", "temporal-mvp=0:bframes=2", frames = 6) { s -> s.none { it.temporalMvpEnabled } },
+        Case("one merge candidate", "128x96", "yuv420p", "max-merge=1:bframes=2", frames = 8) { s -> s.any { it.sliceType != SliceType.I && it.maxNumMergeCand == 1 } },
+        Case("two merge candidates", "128x96", "yuv420p", "max-merge=2:bframes=2:rd=6", frames = 8) { s -> s.any { it.sliceType != SliceType.I && it.maxNumMergeCand == 2 } },
+        Case("adaptive QP and chroma offsets", "128x96", "yuv420p", "aq-mode=2:qg-size=16:cbqpoffs=-3:crqpoffs=4:bframes=2", frames = 8) { s -> s[0].pps.cuQpDeltaEnabled },
+        Case("lossless", "128x96", "yuv420p", "lossless=1:bframes=2", frames = 5) { s -> s[0].pps.transquantBypassEnabled },
+        Case("lossless coding units", "128x96", "yuv420p", "cu-lossless=1:bframes=2", frames = 6) { s -> s[0].pps.transquantBypassEnabled },
+        Case("transform skip", "128x96", "yuv420p", "tskip=1:bframes=2", frames = 5) { s -> s[0].pps.transformSkipEnabled },
+        Case("default scaling lists", "128x96", "yuv420p", "scaling-list=default:bframes=2", frames = 6) { s -> s[0].sps.scalingListEnabled },
+        Case("the loop filters off", "128x96", "yuv420p", "no-deblock=1:no-sao=1:bframes=2", frames = 6) { s -> !deblocks(s) && !sao(s) },
+        Case("deblocking offsets", "128x96", "yuv420p", "deblock=-3,2:bframes=2", frames = 6) { s -> deblocks(s) && offsets(s) == (-3 to 2) },
+        Case("partial CTBs", "132x68", "yuv420p", "bframes=2", frames = 6) { s -> s[0].sps.width % 64 != 0 && s[0].sps.confWin.any { it != 0 } },
+    )
+
+    @Test
+    fun interPicturesMatchTheHashSei() {
+        requireTools()
+        val failures = ArrayList<String>()
+        var pictures = 0
+        for (c in interCases) {
+            val units = AnnexB.split(encode(c.size, c.pixFmt, "keyint=30:hash=1:${c.params}", c.frames, filter = c.filter).readBytes())
+            val slices = sliceHeaders(units)
+            if (!c.check(slices)) {
+                failures += "${c.name}: the stream lacks the feature the case is for"
+                continue
+            }
+            try {
+                val decoded = decode(units)
+                assertEquals(c.frames, decoded.size, "${c.name}: pictures")
+                val planes = checkHashes(c.name, decoded)
+                pictures += decoded.size
+                val types = slices.map { "IPB"[2 - it.sliceType] }.joinToString("")
+                println("${c.name}: ${decoded.size} pictures ($types), $planes planes match their MD5")
+            } catch (e: AssertionError) {
+                failures += "${c.name}: ${e.message}"
+            } catch (e: Exception) {
+                failures += "${c.name}: ${e::class.simpleName} ${e.message}\n${e.stackTrace.take(6).joinToString("\n")}"
+            }
+        }
+        for (f in failures) println("FAILED $f")
+        println("HEVC inter sequences: $pictures pictures in ${interCases.size} cases")
+        assertTrue(failures.isEmpty(), "${failures.size} of ${interCases.size} cases failed:\n${failures.joinToString("\n")}")
+    }
+
+    /** P and B sequences against libde265, sample for sample, in output order. */
+    @Test
+    fun interSamplesMatchLibde265() {
+        requireTools()
+        assumeTrue("dec265 not installed", Tools.hasAll("dec265"))
+        val fixtures = listOf(
+            Triple("128x96", "yuv420p", "bframes=3:b-pyramid=1:amp=1:rect=1"),
+            Triple("96x64", "yuv422p10le", "bframes=2:weightp=1:weightb=1"),
+            Triple("96x64", "yuv444p12le", "bframes=2:ref=3"),
+            // libde265 1.0 fails x265's hash with several slices and SAO (AGENTS.md), so one slice here.
+            Triple("256x160", "yuv420p", "wpp=1:ctu=32:bframes=2:no-sao=1:slices=2"),
+        )
+        for ((size, pixFmt, params) in fixtures) {
+            val units = AnnexB.split(encode(size, pixFmt, "keyint=30:hash=1:$params", 8).readBytes())
+            val d = HevcDecoder(keepOutput = true)
+            for (u in units) d.decodeNal(u, 0, u.size, null)
+            val pictures = (d.takeOutput() + d.flush()).map { it.toHeifPlanes() }
+            assertEquals(8, pictures.size, "$size $pixFmt $params: pictures")
+            libde265Differs(units, pictures)?.let { fail("$size $pixFmt $params: $it") }
+            println("$size $pixFmt $params: every sample of ${pictures.size} pictures matches libde265")
+        }
+    }
+
+    /**
+     * The decode time of a 1920x1080 P picture and B picture of x265's default settings, printed for the
+     * record and bounded only generously. The sequence is decoded from its start each time; the P and B
+     * times are the differences from decoding it up to the picture before.
+     */
+    @Test
+    fun decodeTimeOfInterPictures() {
+        requireTools()
+        val units = AnnexB.split(encode("1920x1080", "yuv420p", "keyint=30:hash=1:crf=22:bframes=1:b-adapt=0", 3).readBytes())
+        val slices = sliceHeaders(units)
+        assertEquals(listOf(SliceType.I, SliceType.P, SliceType.B), slices.map { it.sliceType })
+        checkHashes("1920x1080 inter", decode(units))
+        // The units of the first one, two and three pictures.
+        val starts = units.indices.filter { NalType.isSlice((units[it][0].toInt() shr 1) and 0x3F) } + units.size
+        // The fastest of several runs, as a difference of two means wanders with the JIT and the collector.
+        fun time(pictures: Int): Double {
+            val part = units.subList(0, starts[pictures])
+            repeat(3) { decode(part) }
+            return (0 until 9).minOf {
+                val start = System.nanoTime()
+                decode(part)
+                (System.nanoTime() - start) / 1_000_000.0
+            }
+        }
+        val i = time(1)
+        val ip = time(2)
+        val ipb = time(3)
+        val sizes = (0 until 3).map { units.subList(starts[it], starts[it + 1]).sumOf { u -> u.size } }
+        println("1920x1080 8-bit P picture of ${sizes[1]} bytes: %.1f ms a decode on the JVM".format(ip - i))
+        println("1920x1080 8-bit B picture of ${sizes[2]} bytes: %.1f ms a decode on the JVM".format(ipb - ip))
+        assertTrue(ipb < 30_000, "$ipb ms")
+    }
+
+    /**
      * The decode time of a 1920x1080 intra picture without and with the loop filters, and of a 4032x3024
      * one with them, printed for the record; it fails only past a generous bound.
      */
@@ -371,203 +514,125 @@ class HevcDecodeOracleTest {
         }
     }
 
-    /**
-     * Each H.265.1 conformance stream: whether its first picture is intra and supported, and if so
-     * whether it matches its hash SEI, the MD5 of its YUV file when it has one picture, or else
-     * libde265's decode of the same units. Every supported picture must match, and the streams that
-     * do are asserted: every first picture of HEVC_v1 but one, and of the range extension package.
-     */
-    @Test
-    fun conformanceStreams() {
-        val root = File(System.getenv("IMAGEKODEC_HEIC_DATA") ?: "../reference/heic", "conformance")
+    /** The conformance streams of [package] under the data folder, or a skip (a failure in CI) without them. */
+    private fun conformanceRoot(pkg: String): File {
+        val root = File(System.getenv("IMAGEKODEC_HEIC_DATA") ?: "../reference/heic", "conformance/$pkg")
         if (!root.isDirectory) {
             if (System.getenv(Tools.REQUIRE_ENV) == "1") error("no conformance streams at $root, and ${Tools.REQUIRE_ENV}=1 forbids skipping; run tools/heic_data.py")
             assumeTrue("no conformance streams at $root; run tools/heic_data.py", false)
         }
-        val streams = root.walkTopDown().filter { it.isFile && (it.name.endsWith(".bit") || it.name.endsWith(".bin")) }.sortedBy { it.path }.toList()
-        val failures = ArrayList<String>()
-        var matched = 0
-        val matchedNames = HashSet<String>()
-        val withLibde265 = Tools.hasAll("dec265")
-        for (file in streams) {
-            val name = file.parentFile.name
-            val units = AnnexB.split(file.readBytes())
-            // The units of the first picture: up to the next slice that starts a picture.
-            val first = ArrayList<ByteArray>()
-            var slices = 0
-            for (u in units) {
-                if (u.size < 3) continue
-                val type = (u[0].toInt() shr 1) and 0x3F
-                val layer = ((u[0].toInt() and 1) shl 5) or ((u[1].toInt() and 0xFF) shr 3)
-                if (layer == 0 && NalType.isSlice(type)) {
-                    // first_slice_segment_in_pic_flag is the first bit after the header.
-                    if (slices > 0 && u[2].toInt() and 0x80 != 0) break
-                    slices++
-                }
-                first += u
-            }
-            val line = try {
-                val p = decode(first).singleOrNull() ?: error("no picture")
-                val hash = p.hash
-                val yuvMd5 = file.parentFile.listFiles()?.firstOrNull { it.name.endsWith("_yuv.md5") }
-                if (hash != null) {
-                    val ok = matchesHash(p, hash)
-                    if (ok) matched++ else failures += "$name: the first picture does not match its hash SEI"
-                    if (ok) "MATCHES its hash SEI (type ${hash.hashType})" else "DIFFERS from its hash SEI"
-                } else if (yuvMd5 != null && first.size == units.size) {
-                    // A stream of one picture without a hash SEI: the MD5 of its whole output.
-                    val expected = yuvMd5.readText().trim().substringBefore(' ').lowercase()
-                    val ok = hex(PictureHash.md5(yuvBytes(p.toHeifPlanes()))) == expected
-                    if (ok) matched++ else failures += "$name: the picture does not match the MD5 of its YUV file"
-                    if (ok) "MATCHES the MD5 of its YUV file" else "DIFFERS from the MD5 of its YUV file"
-                } else if (withLibde265) {
-                    // No hash for the first picture alone: libde265's decode of the same units instead.
-                    val diff = libde265Differs(first, p.toHeifPlanes())
-                    if (diff == null) matched++ else if (!diff.startsWith(DEC265_FAILED)) failures += "$name: $diff"
-                    when {
-                        diff == null -> "MATCHES libde265"
-                        diff.startsWith(DEC265_FAILED) -> "decoded, with no hash to compare ($diff)"
-                        else -> "DIFFERS from libde265: $diff"
-                    }
-                } else {
-                    "decoded, with no hash to compare"
-                }
-            } catch (e: UnsupportedImageException) {
-                "unsupported: ${e.message}"
-            } catch (e: ImageDecodeException) {
-                failures += "$name: ${e.message}"
-                "FAILED: ${e.message}"
-            } catch (e: Exception) {
-                failures += "$name: ${e::class.simpleName} ${e.message}"
-                "FAILED: ${e::class.simpleName} ${e.message}"
-            }
-            if (line.startsWith("MATCHES")) matchedNames += name
-            println("  $name: $line")
-        }
-        println("HEVC conformance: ${streams.size} streams, $matched first pictures match")
-        assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
-        val v1 = File(root, "HEVC_v1").listFiles { f -> f.isDirectory }.orEmpty().map { it.name }
-        // Its parameter sets defeat libde265, and it has no hash to compare.
-        val expected = v1.toSet() - "VPSSPSPPS_A_MainConcept_1" + MATCHING_REXT_STREAMS
-        if (withLibde265) {
-            assertEquals(expected.sorted(), matchedNames.sorted(), "the streams whose first picture matches")
-        } else {
-            assertTrue(expected.containsAll(matchedNames), "streams match that the list leaves out: ${matchedNames - expected}")
-        }
+        return root
     }
 
     /**
-     * Every picture of each range extension stream up to its first inter picture, held to its hash SEI,
-     * or, for a stream without one, to the MD5 of its YUV file when it decodes whole, and else to
-     * libde265's decode of the same pictures. The streams whose every intra picture matches are
-     * asserted; the others are listed with the reason.
+     * Every picture of each stream of [root], held to its hash SEI, and the pictures the decoded picture
+     * buffer outputs, in output order and cropped, to the MD5 of the package's YUV file. Returns the
+     * folders whose stream matches; every other outcome but "unsupported" is a failure.
      */
-    @Test
-    fun rangeExtensionStreams() {
-        val root = File(System.getenv("IMAGEKODEC_HEIC_DATA") ?: "../reference/heic", "conformance/RExt")
-        if (!root.isDirectory) {
-            if (System.getenv(Tools.REQUIRE_ENV) == "1") error("no conformance streams at $root, and ${Tools.REQUIRE_ENV}=1 forbids skipping; run tools/heic_data.py")
-            assumeTrue("no conformance streams at $root; run tools/heic_data.py", false)
-        }
+    private fun conformance(root: File, failures: MutableList<String>): List<String> {
         val matching = ArrayList<String>()
-        val failures = ArrayList<String>()
-        val withLibde265 = Tools.hasAll("dec265")
         for (dir in root.listFiles { f -> f.isDirectory }.orEmpty().sortedBy { it.name }) {
             val file = dir.listFiles()?.firstOrNull { it.name.endsWith(".bit") || it.name.endsWith(".bin") } ?: continue
             val line = try {
-                rangeExtensionStream(file, withLibde265)
+                wholeStream(file)
             } catch (e: UnsupportedImageException) {
                 "unsupported: ${e.message}"
+            } catch (e: ImageDecodeException) {
+                "FAILED: ${e.message}"
             } catch (e: Exception) {
-                failures += "${dir.name}: ${e::class.simpleName} ${e.message}"
                 "FAILED: ${e::class.simpleName} ${e.message}"
             }
             if (line.startsWith("MATCHES")) matching += dir.name
-            if (line.startsWith("DIFFERS")) failures += "${dir.name}: $line"
+            if (line.startsWith("DIFFERS") || line.startsWith("FAILED") || line.startsWith("decoded")) failures += "${dir.name}: $line"
             println("  ${dir.name}: $line")
         }
-        println("HEVC range extension conformance: ${matching.size} streams match")
-        assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
-        val expected = if (withLibde265) MATCHING_REXT_STREAMS else MATCHING_REXT_STREAMS - MATCHING_REXT_LIBDE265
-        assertEquals(expected.sorted(), matching.sorted(), "the range extension streams whose every intra picture matches")
+        return matching
     }
 
-    /** The outcome of one range extension stream: MATCHES, DIFFERS or why it stops. */
-    private fun rangeExtensionStream(file: File, withLibde265: Boolean): String {
-        // The units of each picture: a slice with first_slice_segment_in_pic_flag starts the next one.
-        val pictures = ArrayList<ArrayList<ByteArray>>()
-        var current = ArrayList<ByteArray>()
-        var slices = 0
-        for (u in AnnexB.split(file.readBytes())) {
-            if (u.size < 3) continue
+    /**
+     * The outcome of one conformance stream. Its pictures are checked as they complete, so a long stream
+     * holds no more than its decoded picture buffer. The MD5 is the one in the package's md5 file: the HM
+     * output of the whole stream in output order, RASL pictures of the first CRA picture left out.
+     */
+    private fun wholeStream(file: File): String {
+        val units = AnnexB.split(file.readBytes())
+        val d = HevcDecoder(keepOutput = true)
+        val md5 = java.security.MessageDigest.getInstance("MD5")
+        var pictures = 0
+        var hashed = 0
+        var output = 0
+        val bad = ArrayList<Int>()
+        fun check(list: List<DecodedPicture>) {
+            for (p in list) {
+                pictures++
+                val hash = p.hash ?: continue
+                hashed++
+                if (!matchesHash(p, hash)) bad += p.poc
+            }
+        }
+        fun out(list: List<DecodedPicture>) {
+            for (p in list) {
+                md5.update(yuvBytes(p.toHeifPlanes()))
+                output++
+            }
+        }
+        var started = false
+        for (u in units) {
+            if (u.size < 2) continue
             val type = (u[0].toInt() shr 1) and 0x3F
-            val layer = ((u[0].toInt() and 1) shl 5) or ((u[1].toInt() and 0xFF) shr 3)
-            if (layer == 0 && NalType.isSlice(type)) {
-                if (slices > 0 && u[2].toInt() and 0x80 != 0) {
-                    pictures += current
-                    current = ArrayList()
-                }
-                slices++
+            // first_slice_segment_in_pic_flag is the first bit after the header: the picture before is complete.
+            if (NalType.isSlice(type) && u.size > 2 && u[2].toInt() and 0x80 != 0) {
+                if (started) check(d.finish())
+                started = true
             }
-            current += u
+            d.decodeNal(u, 0, u.size, null)
+            out(d.takeOutput())
         }
-        pictures += current
-        // Decode the pictures whose slices are all intra, up to the first that is not (#156).
-        val store = ParameterSetStore()
-        var previous: SliceHeader? = null
-        val decoder = HevcDecoder()
-        val intraUnits = ArrayList<ByteArray>()
-        var inter: Int? = null
-        for ((i, units) in pictures.withIndex()) {
-            for (u in units) {
-                val r = BitReader(unescapeNal(u))
-                val nal = readNalHeader(r)
-                if (nal.layerId != 0) continue
-                if (NalType.isSlice(nal.type)) {
-                    val h = readSliceHeader(r, nal, store, previous, u.size)
-                    previous = h
-                    if (h.sliceType != SliceType.I) inter = i
-                } else if (nal.type != NalType.SUFFIX_SEI) {
-                    store.add(nal, r)
-                }
-            }
-            if (inter != null) break
-            for (u in units) decoder.decodeNal(u, 0, u.size, null)
-            intraUnits += units
-        }
-        val decoded = decoder.finish()
-        if (decoded.isEmpty()) return "no intra picture before the first inter one (#156)"
-        val stop = if (inter != null) ", up to the inter picture $inter of ${pictures.size} (#156)" else ""
-        if (decoded.all { it.hash != null }) {
-            val bad = decoded.indices.filter { !matchesHash(decoded[it], decoded[it].hash!!) }
-            if (bad.isNotEmpty()) return "DIFFERS from the hash SEI of pictures $bad of ${decoded.size}$stop"
-            return "MATCHES the hash SEI of all ${decoded.size} pictures$stop"
-        }
-        // No hash SEI: the MD5 of the YUV file, which needs every picture.
-        val expected = file.parentFile.listFiles().orEmpty().filter { it.name.endsWith(".md5") || it.name.endsWith("md5sum.txt") }
-            .flatMap { it.readLines() }.map { it.trim().split(Regex("\\s+\\*?|\\*")) }
-            .firstOrNull { it.size >= 2 && (it[1].endsWith(".yuv") || it[1].endsWith(".gbr")) }?.get(0)?.lowercase()
-        if (inter != null || expected == null) {
-            if (!withLibde265) return "decoded ${decoded.size} pictures with no hash to compare$stop"
-            // No hash for the intra pictures alone: libde265's decode of the same units instead.
-            val diff = libde265Differs(intraUnits, decoded.map { it.toHeifPlanes() })
-                ?: return "MATCHES libde265 over all ${decoded.size} pictures$stop"
-            return if (diff.startsWith(DEC265_FAILED)) "decoded ${decoded.size} pictures with no hash to compare ($diff)$stop" else "DIFFERS from libde265: $diff"
-        }
-        val out = java.io.ByteArrayOutputStream()
-        for (p in decoded) out.write(yuvBytes(p.toHeifPlanes()))
-        val md5 = hex(PictureHash.md5(out.toByteArray()))
-        if (md5 != expected) return "DIFFERS from the MD5 of its YUV file over ${decoded.size} pictures"
-        return "MATCHES the MD5 of its YUV file over all ${decoded.size} pictures"
+        check(d.finish())
+        out(d.flush())
+        if (bad.isNotEmpty()) return "DIFFERS from the hash SEI of ${bad.size} of $pictures pictures, the first of PicOrderCntVal ${bad.first()}"
+        val expected = file.parentFile.listFiles().orEmpty().filter { "md5" in it.name.lowercase() }
+            .flatMap { it.readLines() }.flatMap { line -> Regex("[0-9a-fA-F]{32}").findAll(line).map { it.value.lowercase() }.toList() }
+        val mine = hex(md5.digest())
+        val hashes = if (hashed == pictures) "the hash SEI of all $pictures pictures" else "the hash SEI of $hashed of $pictures pictures"
+        if (mine in expected) return "MATCHES $hashes and the MD5 of its $output output pictures"
+        if (expected.isNotEmpty()) return "DIFFERS from the MD5 of its $output output pictures ($mine)"
+        if (hashed == pictures && pictures > 0) return "MATCHES $hashes; the package has no MD5 of its output"
+        return "decoded $pictures pictures, $hashed with a hash SEI, and the package has no MD5 of its output"
+    }
+
+    /**
+     * Every picture of the HEVC_v1 and SCC packages. Every HEVC_v1 stream matches; the SCC streams all use
+     * palette mode, which is not supported, and are listed as such.
+     */
+    @Test
+    fun conformanceStreams() {
+        val failures = ArrayList<String>()
+        val v1 = conformanceRoot("HEVC_v1")
+        val matching = conformance(v1, failures)
+        val scc = File(v1.parentFile, "SCC")
+        val sccMatching = if (scc.isDirectory) conformance(scc, failures) else emptyList()
+        println("HEVC conformance: ${matching.size} HEVC_v1 streams and ${sccMatching.size} SCC streams match in every picture")
+        assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
+        val expected = v1.listFiles { f -> f.isDirectory }.orEmpty().map { it.name }
+        assertEquals(expected.sorted(), matching.sorted(), "the HEVC_v1 streams that match in every picture")
+        assertEquals(emptyList(), sccMatching, "the SCC streams, all with palette mode")
+    }
+
+    /** Every picture of each range extension stream; the whole package matches. */
+    @Test
+    fun rangeExtensionStreams() {
+        val failures = ArrayList<String>()
+        val matching = conformance(conformanceRoot("RExt"), failures)
+        println("HEVC range extension conformance: ${matching.size} streams match in every picture")
+        assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
+        assertEquals(MATCHING_REXT_STREAMS.sorted(), matching.sorted(), "the range extension streams that match in every picture")
     }
 
     private companion object {
         const val DEC265_FAILED = "libde265 cannot decode it"
 
-        /**
-         * The range extension streams whose every intra picture matches: the whole package. Nineteen of
-         * them hold inter pictures after the first (#156), which this checks up to the first one.
-         */
+        /** The range extension package: every stream, inter pictures included. */
         val MATCHING_REXT_STREAMS = setOf(
             "ADJUST_IPRED_ANGLE_A_RExt_Mitsubishi_2",
             "Bitdepth_A_RExt_Sony_1",
@@ -619,11 +684,5 @@ class HevcDecodeOracleTest {
             "WPP_AND_TILE_HIGH_TP_444_8BIT_RExt_Apple_2",
             "WPP_HIGH_TP_444_8BIT_RExt_Apple_2",
         )
-
-        /**
-         * The streams of [MATCHING_REXT_STREAMS] with neither a hash SEI nor, as an inter picture follows
-         * the first, a YUV file to hold their intra picture to: only libde265 checks them.
-         */
-        val MATCHING_REXT_LIBDE265 = setOf("CCP_10bit_RExt_QCOM_1", "CCP_12bit_RExt_QCOM_1", "CCP_8bit_RExt_QCOM_1", "SAO_A_RExt_MediaTek_1")
     }
 }

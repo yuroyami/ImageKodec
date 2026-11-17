@@ -50,10 +50,49 @@ internal class Deblocker(private val d: PictureDecoder) {
     }
 
     /**
-     * bS of 8.7.2.4 for an edge between units with flags [fp] and [fq]: 2 with an intra block on either
-     * side. Only intra pictures decode yet; the motion cases come with inter prediction (#172).
+     * bS of 8.7.2.4 for the edge between the units [up] and [uq], whose flags are [fp] and [fq]; [transform]
+     * is the flag that marks the edge of [uq] as a transform block edge. 2 with an intra block on either
+     * side; 1 at a transform block edge with coefficients on either side, or when the two blocks predict
+     * from different pictures, from a different number of vectors, or with vectors 4 quarter samples apart.
      */
-    private fun strength(fp: Int, fq: Int): Int = if ((fp or fq) and PictureDecoder.FLAG_INTRA != 0) 2 else 0
+    private fun strength(up: Int, uq: Int, fp: Int, fq: Int, transform: Int): Int {
+        if ((fp or fq) and PictureDecoder.FLAG_INTRA != 0) return 2
+        if (fq and transform != 0 && (fp or fq) and PictureDecoder.FLAG_CODED != 0) return 1
+        val m = d.motion ?: return 0
+        val pr0 = m.ref[2 * up] >= 0
+        val pr1 = m.ref[2 * up + 1] >= 0
+        val qr0 = m.ref[2 * uq] >= 0
+        val qr1 = m.ref[2 * uq + 1] >= 0
+        val np = (if (pr0) 1 else 0) + (if (pr1) 1 else 0)
+        val nq = (if (qr0) 1 else 0) + (if (qr1) 1 else 0)
+        if (np != nq) return 1
+        // NOTE 1 of 8.7.2.4: the pictures count, not the lists or indices that name them.
+        if (np == 1) {
+            val pl = if (pr0) 0 else 1
+            val ql = if (qr0) 0 else 1
+            if (m.refPoc[2 * up + pl] != m.refPoc[2 * uq + ql]) return 1
+            return if (far(m.mv[2 * up + pl], m.mv[2 * uq + ql])) 1 else 0
+        }
+        val p0 = m.refPoc[2 * up]
+        val p1 = m.refPoc[2 * up + 1]
+        val q0 = m.refPoc[2 * uq]
+        val q1 = m.refPoc[2 * uq + 1]
+        if (!((p0 == q0 && p1 == q1) || (p0 == q1 && p1 == q0))) return 1
+        val mp0 = m.mv[2 * up]
+        val mp1 = m.mv[2 * up + 1]
+        val mq0 = m.mv[2 * uq]
+        val mq1 = m.mv[2 * uq + 1]
+        if (p0 != p1) {
+            // Two different pictures: compare the vectors that point into the same one.
+            return if (p0 == q0) (if (far(mp0, mq0) || far(mp1, mq1)) 1 else 0) else (if (far(mp0, mq1) || far(mp1, mq0)) 1 else 0)
+        }
+        // Both vectors of each block point into one picture: either pairing may match.
+        return if ((far(mp0, mq0) || far(mp1, mq1)) && (far(mp0, mq1) || far(mp1, mq0))) 1 else 0
+    }
+
+    /** The horizontal or the vertical components of two packed vectors differ by 4 quarter samples or more. */
+    private fun far(a: Int, b: Int): Boolean =
+        abs(MotionField.x(a) - MotionField.x(b)) >= 4 || abs(MotionField.y(a) - MotionField.y(b)) >= 4
 
     private fun verticalEdges(rs: Int, x0: Int, y0: Int, y1: Int) {
         val h = d.ctbHeader[rs] ?: return
@@ -72,7 +111,7 @@ internal class Deblocker(private val d: PictureDecoder) {
                 val fq = flags[uq].toInt()
                 if (fq and PictureDecoder.FLAG_EDGE_LEFT != 0) {
                     val fp = flags[uq - 1].toInt()
-                    val bs = strength(fp, fq)
+                    val bs = strength(uq - 1, uq, fp, fq, PictureDecoder.FLAG_TRANSFORM_LEFT)
                     if (bs > 0) filterLuma(luma, y * stride + x, 1, stride, bs, qpY[uq - 1].toInt(), qpY[uq].toInt(), betaOffset, tcOffset, fp, fq)
                 }
                 y += 4
@@ -92,7 +131,7 @@ internal class Deblocker(private val d: PictureDecoder) {
                 val fq = flags[uq].toInt()
                 if (fq and PictureDecoder.FLAG_EDGE_LEFT != 0) {
                     val fp = flags[uq - 1].toInt()
-                    if (strength(fp, fq) == 2) {
+                    if ((fp or fq) and PictureDecoder.FLAG_INTRA != 0) {
                         val at = yc * d.strides[1] + (x shr subW)
                         val qpP = qpY[uq - 1].toInt()
                         val qpQ = qpY[uq].toInt()
@@ -124,7 +163,7 @@ internal class Deblocker(private val d: PictureDecoder) {
                 val fq = flags[uq].toInt()
                 if (fq and PictureDecoder.FLAG_EDGE_TOP != 0) {
                     val fp = flags[uq - w4].toInt()
-                    val bs = strength(fp, fq)
+                    val bs = strength(uq - w4, uq, fp, fq, PictureDecoder.FLAG_TRANSFORM_TOP)
                     if (bs > 0) filterLuma(luma, y * stride + x, stride, 1, bs, qpY[uq - w4].toInt(), qpY[uq].toInt(), betaOffset, tcOffset, fp, fq)
                 }
                 x += 4
@@ -144,7 +183,8 @@ internal class Deblocker(private val d: PictureDecoder) {
                 val fq = flags[uq].toInt()
                 if (fq and PictureDecoder.FLAG_EDGE_TOP != 0) {
                     val fp = flags[uq - w4].toInt()
-                    if (strength(fp, fq) == 2) {
+                    // bS 2, the only strength a chroma edge is filtered at: an intra block on either side.
+                    if ((fp or fq) and PictureDecoder.FLAG_INTRA != 0) {
                         val at = (y shr subH) * d.strides[1] + xc
                         val qpP = qpY[uq - w4].toInt()
                         val qpQ = qpY[uq].toInt()
