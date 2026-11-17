@@ -124,6 +124,18 @@ public class ImageInfo(
     public var colorChannels: Int = 0
         internal set
 
+    /**
+     * The size of the largest thumbnail the file carries, or 0 by 0 for none: the `thmb` items of a
+     * HEIC or AVIF file, or the thumbnail in the EXIF of a JPEG. [ImageKodec.decodeThumbnail]
+     * decodes one (#150).
+     */
+    public var thumbnailWidth: Int = 0
+        internal set
+
+    /** See [thumbnailWidth]. */
+    public var thumbnailHeight: Int = 0
+        internal set
+
     /** [width] after [orientation] is applied: what the user will actually see. */
     public val displayWidth: Int get() = if (orientation.swapsAxes) height else width
 

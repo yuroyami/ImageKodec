@@ -233,6 +233,7 @@ internal class AvifContainer(
         val DIMG = fourcc("dimg")
         val PREM = fourcc("prem")
         val CDSC = fourcc("cdsc")
+        val THMB = fourcc("thmb")
         val IDEN = fourcc("iden")
         val JPEG = fourcc("jpeg")
         val MIAF = fourcc("miaf")

@@ -137,6 +137,45 @@ public object ImageKodec {
     }
 
     /**
+     * A thumbnail that [data] carries, or null when it carries none (#150): for a HEIC or AVIF file,
+     * the item with a `thmb` reference to its primary image, and for a JPEG, the thumbnail in its
+     * EXIF. Of several, it gives the smallest that reaches [maxWidth] or [maxHeight], else the
+     * largest, and skips one whose codec this build lacks. The thumbnail is not scaled; use
+     * [scaled] for an exact box. [ImageInfo.thumbnailWidth] gives the largest one's size.
+     *
+     * [applyOrientation] turns it as [decode] turns the image: a HEIF thumbnail by its own `irot`
+     * and `imir`, a JPEG's by the file's EXIF orientation. [colorTarget] converts it through its
+     * own colour description, and [cancellationCheck] works as for [decode].
+     *
+     * @throws ImageDecodeException on a malformed thumbnail
+     * @throws UnsupportedImageException when every thumbnail needs a codec this build lacks
+     */
+    @Throws(ImageDecodeException::class)
+    public fun decodeThumbnail(
+        data: ByteArray,
+        maxWidth: Int = Int.MAX_VALUE,
+        maxHeight: Int = Int.MAX_VALUE,
+        applyOrientation: Boolean = false,
+        colorTarget: ColorTarget = ColorTarget.Source,
+        cancellationCheck: (() -> Unit)? = null,
+    ): KiteBitmap? = cancellable(cancellationCheck) { cancel ->
+        when (detect(data)) {
+            ImageFormat.JPEG -> ImageProbe.jpegThumbnail(data)?.let { thumb ->
+                val bitmap = decodeWith(thumb, false, colorTarget, cancel)
+                if (applyOrientation) bitmap.oriented(probeOrNull(data)?.orientation ?: Orientation.Normal) else bitmap
+            }
+            ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.thumbnail(data, maxWidth, maxHeight, cancel)?.let { t ->
+                var bitmap = t.bitmap
+                if (colorTarget is ColorTarget.Srgb && (t.icc != null || t.cicp != null)) {
+                    ColorManagement.converter(ColorProfile(icc = t.icc, cicp = t.cicp), colorTarget.intent, 3)?.let { bitmap = it.convert(bitmap) }
+                }
+                if (applyOrientation) bitmap.oriented(t.orientation) else bitmap
+            }
+            else -> null
+        }
+    }
+
+    /**
      * Decode page [page] of [data], counting from 0. A TIFF has a page for each
      * image file directory in its main chain, as libtiff, ImageIO and libvips count
      * them, and [decode] gives the first; [ImageInfo.pageCount] says how many there

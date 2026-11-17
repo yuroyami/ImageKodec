@@ -32,6 +32,7 @@ import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IOVL
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PICT
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PREM
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.SATO
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.THMB
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.TMAP
 
 /**
@@ -76,6 +77,7 @@ internal object AvifDecoder {
 
     fun probe(data: ByteArray): ImageInfo = labelled(data) {
         val p = plan(data, probing = true)
+        val thumb = p.item?.let { thumbnails(p.c, it) }?.maxByOrNull { it.second.first.toLong() * it.second.second }
         ImageInfo(
             format = AvifContainer.heifFormat(data) ?: ImageFormat.AVIF,
             width = p.crop?.get(2) ?: p.width,
@@ -95,7 +97,12 @@ internal object AvifDecoder {
             } else {
                 null
             },
-        )
+        ).also { info ->
+            if (thumb != null) {
+                info.thumbnailWidth = thumb.second.first
+                info.thumbnailHeight = thumb.second.second
+            }
+        }
     }
 
     /** [cancel] runs once a row of superblocks of each AV1 picture the image is made of (#123). */
@@ -264,6 +271,45 @@ internal object AvifDecoder {
             }
         }
         return KiteBitmap(w, h, out)
+    }
+
+    // ---- thumbnails ----------------------------------------------------------------
+
+    /** The thumbnail [decodeThumbnail] gives: its picture, its own orientation and colour. */
+    class Thumbnail(val bitmap: KiteBitmap, val orientation: Orientation, val icc: ByteArray?, val cicp: IntArray?)
+
+    /** The items that a `thmb` reference names as thumbnails of [item], each with its size after its clean aperture. */
+    private fun thumbnails(c: AvifContainer, item: AvifItem): List<Pair<AvifItem, Pair<Int, Int>>> =
+        c.referencesTo(item.id, THMB).mapNotNull { c.items[it] }.mapNotNull { t ->
+            val size = try {
+                val (w, h) = itemSize(c, t, 0)
+                val crop = geometry(c, t, w, h).first
+                if (crop != null) crop[2] to crop[3] else w to h
+            } catch (_: ImageDecodeException) {
+                return@mapNotNull null
+            }
+            t to size
+        }
+
+    /**
+     * The thumbnail of the primary item to show for a box of [maxWidth] by [maxHeight]: the smallest
+     * that reaches the box in one side, else the largest, among those this build decodes (#150).
+     * Null when the file has none; [UnsupportedImageException] when it has only ones it cannot decode.
+     */
+    fun thumbnail(data: ByteArray, maxWidth: Int, maxHeight: Int, cancel: (() -> Unit)?): Thumbnail? = labelled(data) {
+        val c = AvifContainer.parse(data)
+        val primary = c.primary?.let { c.items[it] } ?: return@labelled null
+        val all = thumbnails(c, primary)
+        if (all.isEmpty()) return@labelled null
+        val plans = all.map { (t, _) -> itemPlan(c, t) }
+        val usable = plans.filter { it.unsupported == null }
+        if (usable.isEmpty()) throw UnsupportedImageException(plans.first().unsupported!!)
+        fun w(p: Plan) = p.crop?.get(2) ?: p.width
+        fun h(p: Plan) = p.crop?.get(3) ?: p.height
+        val covering = usable.filter { w(it) >= maxWidth || h(it) >= maxHeight }
+        val chosen = covering.minByOrNull { w(it).toLong() * h(it) } ?: usable.maxBy { w(it).toLong() * h(it) }
+        val shown = render(chosen, wide = false, cancel).bitmap
+        Thumbnail(shown, chosen.orientation, chosen.icc, chosen.cicp?.toIntArray())
     }
 
     // ---- choosing what to show ------------------------------------------------------
@@ -448,7 +494,7 @@ internal object AvifDecoder {
                 } catch (_: ImageDecodeException) {
                     null
                 }
-                if (coded != null && coded.width > 0 && coded.height > 0) return checkedSize(item, coded)
+                if (coded != null && coded.width > 0 && coded.height > 0) return shownSize(ispe, checkedSize(item, coded))
             }
             // The same ceiling as a grid or an overlay, so probe promises no size past it.
             if (ispe.width !in 1..MAX_SIDE || ispe.height !in 1..MAX_SIDE || ispe.width * ispe.height > Budget.MAX_PIXELS) {
@@ -467,6 +513,22 @@ internal object AvifDecoder {
     }
 
     private const val MAX_SIDE = 65536L
+
+    /**
+     * The size a coded item shows: its 'ispe' where the picture is larger in both directions, as Sony's
+     * HEIC thumbnails code 1664 by 1088 samples under an ispe of 1616 by 1080 with no conformance
+     * window, else the coded size (#150). The samples past the ispe are the encoder's padding.
+     */
+    private fun shownSize(ispe: AvifProperty.Extent?, coded: Pair<Int, Int>): Pair<Int, Int> {
+        if (ispe == null || ispe.width < 1 || ispe.height < 1) return coded
+        // Compared as Long: an ispe past 2^31 must not wrap to a negative size.
+        return if (ispe.width <= coded.first && ispe.height <= coded.second) ispe.width.toInt() to ispe.height.toInt() else coded
+    }
+
+    /** [p] cut to the [size] that [shownSize] gives; the planes stay, read through their strides. */
+    private fun shown(p: AvifPlanes, size: Pair<Int, Int>): AvifPlanes =
+        if (size.first == p.width && size.second == p.height) p
+        else AvifPlanes(size.first, size.second, p.depth, p.subX, p.subY, p.planes, p.strides, p.fullRange)
 
     /** The coded size of [item], within the same ceiling as its 'ispe'. */
     private fun checkedSize(item: AvifItem, h: HeifCodecInfo): Pair<Int, Int> {
@@ -657,12 +719,13 @@ internal object AvifDecoder {
                 val data = c.itemData(item)
                 // The coded size, within the ceiling, before the codec allocates for it.
                 checkedSize(item, codec.inspect(config, data))
-                still(
+                val planes = still(
                     codec, config, data,
                     item.property<AvifProperty.OperatingPoint>()?.index ?: 0,
                     item.property<AvifProperty.LayerSelector>()?.layer ?: 0xFFFF,
                     cancel,
                 )
+                shown(planes, shownSize(item.property<AvifProperty.Extent>(), planes.width to planes.height))
             }
         }
     }

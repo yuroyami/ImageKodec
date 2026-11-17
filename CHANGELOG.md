@@ -14,6 +14,10 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.decodeThumbnail` decodes the thumbnail that a file carries: a `thmb` item of a HEIC or
+  AVIF file, or the thumbnail in the EXIF of a JPEG. Of several, it gives the smallest that reaches
+  a requested box. `ImageInfo.thumbnailWidth` and `thumbnailHeight` give the largest one's size
+  (#150).
 - `imagekodec-heic`, the module that will hold the HEVC decoder of HEIC, kept out of the core so that
   an app that reads no HEIC carries none of its code. `ImageKodecHeic.install()` registers its codec
   for `hvc1` items and `hvc1` and `hev1` tracks; a second call changes nothing. It reads the HEVC
@@ -137,6 +141,9 @@ reviewable in the diff.
 
 ### Fixed
 
+- A HEIF item whose coded picture is larger than its `ispe` in both directions shows the `ispe`
+  size, from its top left. Sony's HEIC thumbnails code 1664 by 1088 samples under an `ispe` of 1616
+  by 1080 with no conformance window, and showed 48 columns of padding (#150).
 - A gray ICC profile whose PCS is Lab, such as `Gray-CIE_L.icc` of icc-profiles-free, converts to
   sRGB as lcms2 converts it: its curve gives L*, not luminance. Its mid gray came out up to 79
   levels too light (#110).

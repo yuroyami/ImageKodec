@@ -36,7 +36,20 @@ internal object ImageProbe {
 
     fun probe(data: ByteArray): ImageInfo = when (ImageFormat.sniff(data)) {
         ImageFormat.PNG -> png(data)
-        ImageFormat.JPEG -> jpeg(data)
+        ImageFormat.JPEG -> jpeg(data).also { info ->
+            // The EXIF thumbnail's size, from its own frame header (#150).
+            jpegThumbnail(data)?.let { t ->
+                val size = try {
+                    jpeg(t)
+                } catch (_: ImageDecodeException) {
+                    null
+                }
+                if (size != null) {
+                    info.thumbnailWidth = size.width
+                    info.thumbnailHeight = size.height
+                }
+            }
+        }
         ImageFormat.GIF -> gif(data)
         ImageFormat.BMP -> bmp(data)
         ImageFormat.TIFF -> tiff(data)
@@ -134,6 +147,9 @@ internal object ImageProbe {
     }
 
     // --- JPEG -------------------------------------------------------------------
+
+    /** The JPEG thumbnail in the EXIF block of the JPEG [data], or null. */
+    fun jpegThumbnail(data: ByteArray): ByteArray? = MetadataIo.read(data).exif?.let { Exif.thumbnailFromTiff(it) }
 
     private fun jpeg(data: ByteArray): ImageInfo {
         val r = ByteReader(data, pos = 2)

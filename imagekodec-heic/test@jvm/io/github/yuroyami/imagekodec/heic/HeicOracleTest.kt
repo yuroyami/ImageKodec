@@ -481,6 +481,21 @@ class HeicOracleTest {
         }
     }
 
+    /** cat.hif carries thumbnails of 1616x1080, 320x212 and 160x120, as heif-info lists them (#150). */
+    @Test
+    fun thumbnailsOfASonyPhoto() {
+        val dir = samples()
+        assumeTrue("no HEIC samples; run tools/heic_data.py", dir != null)
+        val data = File(dir, "cat.hif").readBytes()
+        val info = ImageKodec.probe(data)
+        assertEquals(1616 to 1080, info.thumbnailWidth to info.thumbnailHeight)
+        fun size(w: Int, h: Int) = ImageKodec.decodeThumbnail(data, w, h)!!.let { it.width to it.height }
+        assertEquals(320 to 212, size(300, 200))
+        assertEquals(160 to 120, size(100, 100))
+        assertEquals(1616 to 1080, size(2000, 2000))
+        assertEquals(1616 to 1080, ImageKodec.decodeThumbnail(data)!!.let { it.width to it.height })
+    }
+
     /** The decode time of the photos after warm-up, for the record; it fails only past a generous bound. */
     @Test
     fun decodeTimeOfThePhotos() {

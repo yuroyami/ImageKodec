@@ -131,6 +131,8 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 	public final fun getLoopCount ()J
 	public final fun getOrientation ()Lio/github/yuroyami/imagekodec/Orientation;
 	public final fun getPageCount ()I
+	public final fun getThumbnailHeight ()I
+	public final fun getThumbnailWidth ()I
 	public final fun getUnsupportedReason ()Ljava/lang/String;
 	public final fun getWidth ()I
 	public final fun isAnimated ()Z
@@ -166,6 +168,8 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun decodeReduced$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BILio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun decodeScaled ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decodeScaled$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public final fun decodeThumbnail ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
+	public static synthetic fun decodeThumbnail$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun detect ([B)Lio/github/yuroyami/imagekodec/ImageFormat;
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteAnimation;Z)[B
