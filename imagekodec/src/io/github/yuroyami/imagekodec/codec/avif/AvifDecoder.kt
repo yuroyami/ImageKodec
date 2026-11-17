@@ -77,8 +77,74 @@ internal object AvifDecoder {
 
     fun probe(data: ByteArray): ImageInfo = labelled(data) {
         val p = plan(data, probing = true)
+        val pages = if (p.track != null) emptyList() else pageItems(p.c)
+        info(data, p, maxOf(1, pages.size)).also { info ->
+            stereoPair(p.c, pages)?.let { (left, right) ->
+                info.stereoLeftPage = left
+                info.stereoRightPage = right
+            }
+        }
+    }
+
+    /** What [probe] says of page [page], a top-level image of the file (#168). */
+    fun probePage(data: ByteArray, page: Int): ImageInfo = labelled(data) {
+        if (page == 0) return@labelled probe(data)
+        val c = AvifContainer.parse(data)
+        val pages = pageItems(c)
+        require(page < pages.size) { "page $page asked of a HEIF file of ${maxOf(1, pages.size)} pages" }
+        info(data, itemPlan(c, base(c, pages[page], 0)), pages.size)
+    }
+
+    /** Page [page] of [data]: the primary image for 0, else another top-level image (#168). */
+    fun decodePage(data: ByteArray, page: Int, wide: Boolean, cancel: (() -> Unit)?): Pair<KiteBitmap, KiteBitmap16?> = labelled(data) {
+        val p = if (page == 0) {
+            plan(data, probing = false)
+        } else {
+            val c = AvifContainer.parse(data)
+            val pages = pageItems(c)
+            require(page < pages.size) { "page $page asked of a HEIF file of ${maxOf(1, pages.size)} pages" }
+            itemPlan(c, base(c, pages[page], 0))
+        }
+        val r = render(p, wide, cancel)
+        r.bitmap to r.wide
+    }
+
+    /**
+     * The top-level images of a HEIF file, the primary first: image items that are not hidden and
+     * that no thumbnail, auxiliary, description or derivation reference uses, and of an `altr`
+     * group only the member the primary is (#168).
+     */
+    private fun pageItems(c: AvifContainer): List<AvifItem> {
+        val used = HashSet<Long>()
+        for (r in c.references) {
+            when (r.type) {
+                THMB, AUXL, AvifContainer.CDSC -> used += r.from
+                DIMG -> used.addAll(r.to.toList())
+            }
+        }
+        for (g in c.groups) if (g.type == ALTR) used.addAll(g.entities.filter { it != c.primary })
+        val images = c.items.values.filter { item ->
+            !item.hidden && item.id !in used &&
+                (item.type in DERIVED_TYPES || codecOf(item) != null || item.type == HVC1 || item.type == LHV1)
+        }
+        val primary = images.firstOrNull { it.id == c.primary }
+        return listOfNotNull(primary) + images.filter { it !== primary }.sortedBy { it.id }
+    }
+
+    /** The pages of the left and right images of a `ster` entity group, ISO/IEC 23008-12 6.8.6.2. */
+    private fun stereoPair(c: AvifContainer, pages: List<AvifItem>): Pair<Int, Int>? {
+        val group = c.groups.firstOrNull { it.type == STER && it.entities.size == 2 } ?: return null
+        val left = pages.indexOfFirst { it.id == group.entities[0] }
+        val right = pages.indexOfFirst { it.id == group.entities[1] }
+        return if (left >= 0 && right >= 0) left to right else null
+    }
+
+    private val STER = fourcc("ster")
+
+    /** The description [probe] gives of plan [p]. */
+    private fun info(data: ByteArray, p: Plan, pageCount: Int): ImageInfo {
         val thumb = p.item?.let { thumbnails(p.c, it) }?.maxByOrNull { it.second.first.toLong() * it.second.second }
-        ImageInfo(
+        return ImageInfo(
             format = AvifContainer.heifFormat(data) ?: ImageFormat.AVIF,
             width = p.crop?.get(2) ?: p.width,
             height = p.crop?.get(3) ?: p.height,
@@ -89,6 +155,7 @@ internal object AvifDecoder {
             orientation = p.orientation,
             isDecodable = p.unsupported == null,
             unsupportedReason = p.unsupported,
+            pageCount = pageCount,
             colorProfile = if (p.icc != null || p.cicp != null || p.contentLight != null || p.masteringDisplay != null) {
                 ColorProfile(
                     icc = p.icc, cicp = p.cicp?.toIntArray(),

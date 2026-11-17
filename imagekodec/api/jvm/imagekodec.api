@@ -131,6 +131,8 @@ public final class io/github/yuroyami/imagekodec/ImageInfo {
 	public final fun getLoopCount ()J
 	public final fun getOrientation ()Lio/github/yuroyami/imagekodec/Orientation;
 	public final fun getPageCount ()I
+	public final fun getStereoLeftPage ()I
+	public final fun getStereoRightPage ()I
 	public final fun getThumbnailHeight ()I
 	public final fun getThumbnailWidth ()I
 	public final fun getUnsupportedReason ()Ljava/lang/String;

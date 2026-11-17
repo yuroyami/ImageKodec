@@ -47,6 +47,22 @@ finds the video of a Motion Photo, with or without the module.
   clean aperture, rotation and mirror, EXIF, XMP and ICC metadata, thumbnails, the pages of a file
   with several images, stereo pairs and Motion Photos.
 
+## Pages, stereo pairs and thumbnails
+
+Each top-level image of a HEIF file is a page, the primary first, as each directory of a TIFF is.
+An Apple spatial photo stores one image for each eye and names the two in a `ster` group:
+
+```kotlin
+val info = ImageKodec.probe(bytes)
+if (info.stereoLeftPage >= 0) {
+    val left = ImageKodec.decodePage(bytes, info.stereoLeftPage)
+    val right = ImageKodec.decodePage(bytes, info.stereoRightPage)
+}
+```
+
+`decodeThumbnail` gives one of the thumbnails a camera stores beside the photo, without decoding
+the photo itself. [Resizing](resizing.md#use-the-thumbnail-the-file-carries) has the details.
+
 ## Platforms
 
 The module builds for the same 22 targets as the core. CI runs its tests on the JVM, linuxX64, the

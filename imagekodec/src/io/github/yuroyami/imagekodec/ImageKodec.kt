@@ -71,7 +71,8 @@ public object ImageKodec {
      * [probe] for page [page] of [data], counting from 0: that page's dimensions,
      * depth, alpha, orientation and decodability, and the file's
      * [ImageInfo.pageCount]. A TIFF has a page for each image file directory in its
-     * main chain, and every other format has one.
+     * main chain, a HEIC or AVIF file one for each top-level image, the primary first,
+     * and every other format has one.
      *
      * @throws ImageDecodeException if the format is unrecognised or the header
      *   is malformed past the point of reading
@@ -80,7 +81,9 @@ public object ImageKodec {
     @Throws(ImageDecodeException::class, IllegalArgumentException::class)
     public fun probePage(data: ByteArray, page: Int): ImageInfo {
         require(page >= 0) { "page must not be negative, was $page" }
-        if (detect(data) == ImageFormat.TIFF) return ImageProbe.tiff(data, page)
+        val format = detect(data)
+        if (format == ImageFormat.TIFF) return ImageProbe.tiff(data, page)
+        if (format == ImageFormat.AVIF || format == ImageFormat.HEIC) return AvifDecoder.probePage(data, page)
         val info = ImageProbe.probe(data)
         require(page == 0) { "page $page asked of a one-page ${info.format} image" }
         return info
@@ -179,7 +182,10 @@ public object ImageKodec {
      * Decode page [page] of [data], counting from 0. A TIFF has a page for each
      * image file directory in its main chain, as libtiff, ImageIO and libvips count
      * them, and [decode] gives the first; [ImageInfo.pageCount] says how many there
-     * are. Every other format has one page. Pages are separate images with their own
+     * are. A HEIC or AVIF file has a page for each top-level image, the primary first,
+     * so the two eyes of a spatial photo are pages 0 and 1, as
+     * [ImageInfo.stereoLeftPage] and [ImageInfo.stereoRightPage] say. Every other
+     * format has one page. Pages are separate images with their own
      * size, depth and orientation, not animation frames, so [decodeAnimation]
      * gives a TIFF's first page alone.
      *
@@ -200,6 +206,10 @@ public object ImageKodec {
     ): KiteBitmap = cancellable(cancellationCheck) { cancel ->
         require(page >= 0) { "page must not be negative, was $page" }
         val format = detect(data)
+        if ((format == ImageFormat.AVIF || format == ImageFormat.HEIC) && page > 0) {
+            val bitmap = inColor(data, page, colorTarget, cancel = cancel) { AvifDecoder.decodePage(data, page, wide = false, cancel).first }
+            return@cancellable if (applyOrientation) bitmap.oriented(AvifDecoder.probePage(data, page).orientation) else bitmap
+        }
         if (format != ImageFormat.TIFF) {
             // Data that is no image fails as decode fails, whatever the page.
             if (format == null || page == 0) return@cancellable decodeWith(data, applyOrientation, colorTarget, cancel)
@@ -256,7 +266,8 @@ public object ImageKodec {
     private fun decode16With(data: ByteArray, page: Int, applyOrientation: Boolean, colorTarget: ColorTarget, cancel: (() -> Unit)?): KiteBitmap16 {
         require(page >= 0) { "page must not be negative, was $page" }
         val format = detect(data)
-        if (format != ImageFormat.TIFF && format != null && page != 0) {
+        val heif = format == ImageFormat.AVIF || format == ImageFormat.HEIC
+        if (format != ImageFormat.TIFF && !heif && format != null && page != 0) {
             throw IllegalArgumentException("page $page asked of a one-page $format image")
         }
         when (format) {
@@ -271,7 +282,8 @@ public object ImageKodec {
                 ImageFormat.TIFF -> TiffDecoder.decode16(data, page, cancel)
                 ImageFormat.PNG -> PngDecoder.decode16(data, cancel)
                 ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data, cancel)
-                ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.decode16(data, cancel)
+                ImageFormat.AVIF, ImageFormat.HEIC ->
+                    if (page == 0) AvifDecoder.decode16(data, cancel) else AvifDecoder.decodePage(data, page, wide = true, cancel).second!!
                 ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
                 ImageFormat.JXR -> JxrDecoder.decode16(data, cancel)
                 else -> JpegDecoder.decode16(data, cancel)
@@ -279,7 +291,11 @@ public object ImageKodec {
         }
         if (!applyOrientation) return wide
         val orientation = try {
-            if (format == ImageFormat.TIFF) ImageProbe.tiff(data, page).orientation else ImageProbe.probe(data).orientation
+            when {
+                format == ImageFormat.TIFF -> ImageProbe.tiff(data, page).orientation
+                heif -> AvifDecoder.probePage(data, page).orientation
+                else -> ImageProbe.probe(data).orientation
+            }
         } catch (_: ImageDecodeException) {
             Orientation.Normal
         }
@@ -623,7 +639,7 @@ public object ImageKodec {
         ImageFormat.TIFF -> TiffDecoder.decode16(data, page, cancel)
         ImageFormat.PNG -> PngDecoder.decode16(data, cancel)
         ImageFormat.JP2 -> JpxDecoder.decode16ForFacade(data, cancel)
-        ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.decode16(data, cancel)
+        ImageFormat.AVIF, ImageFormat.HEIC -> if (page == 0) AvifDecoder.decode16(data, cancel) else AvifDecoder.decodePage(data, page, wide = true, cancel).second
         ImageFormat.JPEG -> JpegDecoder.decode16(data, cancel)
         ImageFormat.JXL -> JxlDecoder.decode16(data, cancel)
         ImageFormat.JXR -> JxrDecoder.decode16(data, cancel)
@@ -646,7 +662,12 @@ public object ImageKodec {
     private fun conversion(data: ByteArray, page: Int, colorTarget: ColorTarget): Conversion? {
         if (colorTarget !is ColorTarget.Srgb) return null
         val info = try {
-            if (detect(data) == ImageFormat.TIFF) ImageProbe.tiff(data, page) else ImageProbe.probe(data)
+            when (detect(data)) {
+                ImageFormat.TIFF -> ImageProbe.tiff(data, page)
+                // A HEIF page has its own colour (#168).
+                ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.probePage(data, page)
+                else -> ImageProbe.probe(data)
+            }
         } catch (_: ImageDecodeException) {
             null
         } ?: return null

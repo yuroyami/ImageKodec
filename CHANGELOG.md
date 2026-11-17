@@ -14,6 +14,10 @@ reviewable in the diff.
 
 ### Added
 
+- A HEIC or AVIF file with several top-level images has a page for each, the primary first:
+  `pageCount`, `probePage`, `decodePage` and `decode16(page =)` reach them as they reach the pages
+  of a TIFF. `ImageInfo.stereoLeftPage` and `stereoRightPage` name the two eyes of a `ster` group,
+  such as an Apple spatial photo (#168).
 - `ImageKodec.decodeThumbnail` decodes the thumbnail that a file carries: a `thmb` item of a HEIC or
   AVIF file, or the thumbnail in the EXIF of a JPEG. Of several, it gives the smallest that reaches
   a requested box. `ImageInfo.thumbnailWidth` and `thumbnailHeight` give the largest one's size

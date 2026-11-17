@@ -481,6 +481,43 @@ class HeicOracleTest {
         }
     }
 
+    /**
+     * Each photo has the pages heif-info lists as top-level images, at its sizes, and the spatial
+     * photo's `ster` group pairs items 26 and 52, pages 0 and 1 (#168).
+     */
+    @Test
+    fun pagesOfThePhotosAreTheImagesHeifInfoLists() {
+        val dir = samples()
+        assumeTrue("no HEIC samples; run tools/heic_data.py", dir != null)
+        assumeTrue("heif-info not installed", Tools.hasAll("heif-info"))
+        val line = Regex("^image: (\\d+)x(\\d+) \\(id=(\\d+)\\)")
+        for (file in dir!!.listFiles { f -> f.name.endsWith(".heic") || f.name.endsWith(".hif") }!!.sortedBy { it.name }) {
+            val data = file.readBytes()
+            val (code, log) = run(Tools.require("heif-info").path, file.path)
+            assertEquals(0, code, "${file.name}: heif-info")
+            val listed = log.decodeToString().lines().mapNotNull { line.find(it)?.groupValues }
+            val info = ImageKodec.probe(data)
+            assertEquals(listed.size, info.pageCount, "${file.name}: pages")
+            for ((page, g) in listed.withIndex()) {
+                val bitmap = ImageKodec.decodePage(data, page)
+                assertEquals(g[1].toInt() to g[2].toInt(), bitmap.width to bitmap.height, "${file.name} page $page")
+                assertEquals(bitmap.width to bitmap.height, ImageKodec.probePage(data, page).let { it.width to it.height })
+                if (page > 0) {
+                    // The same image as the primary of a copy whose pitm names it.
+                    val copy = data.copyOf()
+                    val at = String(copy, Charsets.ISO_8859_1).indexOf("pitm")
+                    assertEquals(0, copy[at + 4].toInt(), "${file.name}: a pitm of version 0")
+                    val id = g[3].toInt()
+                    copy[at + 8] = (id ushr 8).toByte()
+                    copy[at + 9] = id.toByte()
+                    assertContentEquals(ImageKodec.decode(copy).argb, bitmap.argb, "${file.name} page $page")
+                }
+            }
+            val stereo = info.stereoLeftPage to info.stereoRightPage
+            assertEquals(if (file.name == "spatial_photo.heic") 0 to 1 else -1 to -1, stereo, file.name)
+        }
+    }
+
     /** cat.hif carries thumbnails of 1616x1080, 320x212 and 160x120, as heif-info lists them (#150). */
     @Test
     fun thumbnailsOfASonyPhoto() {

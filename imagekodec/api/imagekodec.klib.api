@@ -253,6 +253,10 @@ final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imag
 
     final var colorChannels // io.github.yuroyami.imagekodec/ImageInfo.colorChannels|{}colorChannels[0]
         final fun <get-colorChannels>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.colorChannels.<get-colorChannels>|<get-colorChannels>(){}[0]
+    final var stereoLeftPage // io.github.yuroyami.imagekodec/ImageInfo.stereoLeftPage|{}stereoLeftPage[0]
+        final fun <get-stereoLeftPage>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.stereoLeftPage.<get-stereoLeftPage>|<get-stereoLeftPage>(){}[0]
+    final var stereoRightPage // io.github.yuroyami.imagekodec/ImageInfo.stereoRightPage|{}stereoRightPage[0]
+        final fun <get-stereoRightPage>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.stereoRightPage.<get-stereoRightPage>|<get-stereoRightPage>(){}[0]
     final var thumbnailHeight // io.github.yuroyami.imagekodec/ImageInfo.thumbnailHeight|{}thumbnailHeight[0]
         final fun <get-thumbnailHeight>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.thumbnailHeight.<get-thumbnailHeight>|<get-thumbnailHeight>(){}[0]
     final var thumbnailWidth // io.github.yuroyami.imagekodec/ImageInfo.thumbnailWidth|{}thumbnailWidth[0]
