@@ -154,6 +154,15 @@ reviewable in the diff.
 
 ### Fixed
 
+- The Coil and Compose bindings decode a still at the size they draw it at through
+  `decodeDownscaledTo`, where only a JPEG or JPEG 2000 did in Coil and nothing did in Compose, so a
+  HEIC or AVIF grid, and a JPEG XR, reduce while they decode. A cancelled request or a composable
+  that leaves composition stops a still at the decoder's next step, such as a HEIC tile. The Coil
+  factory claims a HEIC or AVIF file whose `meta` box runs past its 64 KiB peek, by reading the
+  top-level boxes to the end of that box. `KiteImage` decodes once it has been laid out, and again
+  when its box grows. The KDoc says that HEIC needs `ImageKodecHeic.install()` (#170).
+- `decodeAnimation` runs its cancellation check for a still: an AVIF or HEIC still, and a format
+  that cannot animate, check as `decode` does (#170).
 - A HEIF item whose coded picture is larger than its `ispe` in both directions shows the `ispe`
   size, from its top left. Sony's HEIC thumbnails code 1664 by 1088 samples under an `ispe` of 1616
   by 1080 with no conformance window, and showed 48 columns of padding (#150).

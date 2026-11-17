@@ -30,6 +30,8 @@ test-dependencies@android:
   - $libs.robolectric
 
 test-dependencies@jvm:
+  # HeifBuilder, for the HEIF files of the tests.
+  - //imagekodec-testkit
   # Skiko native runtimes for headless tests. YAML has no host condition, so all six are listed.
   # Skiko loads only the one that matches the host.
   - $libs.skiko.awt.runtime.macos.arm64

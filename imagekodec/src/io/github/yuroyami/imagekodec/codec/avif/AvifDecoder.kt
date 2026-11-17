@@ -210,7 +210,8 @@ internal object AvifDecoder {
         val p = plan(data, probing = false)
         val track = p.track
         if (track == null) {
-            val still = render(p, wide = false).bitmap
+            // A still checks as decode does, once a row of superblocks of each picture it is made of (#170).
+            val still = render(p, wide = false, cancellationCheck).bitmap
             return KiteAnimation(still.width, still.height, listOf(KiteFrame(still, delayMillis = 0, delayRawCentiseconds = 0)), loopCount = 1)
         }
         p.unsupported?.let { throw UnsupportedImageException(it) }

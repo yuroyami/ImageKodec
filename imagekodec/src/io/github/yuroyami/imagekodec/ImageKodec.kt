@@ -1040,8 +1040,9 @@ public object ImageKodec {
      *
      * [cancellationCheck], when given, runs between frames of a multi-frame
      * decode and may throw to abandon work whose result no longer matters
-     * (pass `{ coroutineContext.ensureActive() }` from a coroutine). Static
-     * formats decode in one step and never invoke it.
+     * (pass `{ coroutineContext.ensureActive() }` from a coroutine). A still in a
+     * format that cannot animate, and an AVIF or HEIC still, run it as
+     * [decode] does.
      *
      * [applyOrientation] honours the EXIF orientation tag on every frame, the
      * same way [decode] does for a still.
@@ -1072,7 +1073,7 @@ public object ImageKodec {
             ImageFormat.JXL -> JxlDecoder.decodeAnimation(data, maxFrames, cancellationCheck)
             else -> {
                 // A still converts as decode converts it, CMYK ink included.
-                val single = decode(data, colorTarget = colorTarget)
+                val single = decode(data, colorTarget = colorTarget, cancellationCheck = cancellationCheck)
                 return KiteAnimation(
                     width = single.width,
                     height = single.height,

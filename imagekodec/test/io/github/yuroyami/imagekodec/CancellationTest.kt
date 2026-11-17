@@ -85,6 +85,19 @@ class CancellationTest {
     }
 
     @Test
+    fun aStillThroughDecodeAnimationTakesTheCheck() {
+        // The still path of decodeAnimation ran no check for a HEIF still or a format that cannot animate (#170).
+        val jpeg = ImageKodec.encodeJpeg(picture)
+        stops("decodeAnimation JPEG") { ImageKodec.decodeAnimation(jpeg, cancellationCheck = it) }
+        stops("decodeAnimation AVIF") { ImageKodec.decodeAnimation(AvifFixtures.plain, cancellationCheck = it) }
+        stops("decodeAnimation AVIF to sRGB") { ImageKodec.decodeAnimation(AvifFixtures.plain, colorTarget = ColorTarget.Srgb(), cancellationCheck = it) }
+        assertContentEquals(
+            ImageKodec.decode(AvifFixtures.plain).argb,
+            ImageKodec.decodeAnimation(AvifFixtures.plain, cancellationCheck = {}).frames.single().bitmap.argb,
+        )
+    }
+
+    @Test
     fun theDirectDecodersPassTheExceptionThroughTheirCatch() {
         // Both return null for any failure of their own, so the check's exception must get past that.
         val jp2 = Jp2ColorFixtures.palette
