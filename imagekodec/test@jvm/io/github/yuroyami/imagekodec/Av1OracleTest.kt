@@ -224,10 +224,15 @@ class Av1OracleTest {
     /** The sequences dav1d could not decode, with its reason, which skip instead of failing. */
     private val refused = ArrayList<String>()
 
-    /** A sequence: [frames] frames of [source] from [encoder] with [args], which must use every tool of [uses]. */
+    /**
+     * A sequence: [frames] frames of [source] from [encoder] with [args], written to reach each tool of [uses]. One
+     * libaom release picks a tool where another does not, so a tool has to appear in some sequence of the run, not in
+     * this one (#110).
+     */
     private class Sequence(val name: String, val source: String, val frames: Int, val pixFmt: String, val encoder: String, val args: List<String>, val uses: List<String>)
 
-    private fun checkSequence(c: Sequence) {
+    /** Decode [c] and compare every frame with dav1d. Gives the tools its frames used, or null when dav1d refused it. */
+    private fun checkSequence(c: Sequence): Av1ToolUse? {
         val out = temp(".obu")
         val ffmpeg = Tools.require("ffmpeg").path
         val (code, _) = run(
@@ -244,7 +249,7 @@ class Av1OracleTest {
         if (refCode != 0) {
             // The reference cannot read what the encoder wrote, so there is nothing to compare.
             refused += "${c.name} (exit $refCode): ${lastError.take(300)}"
-            return
+            return null
         }
         var at = 0
         for ((n, picture) in pictures.withIndex()) {
@@ -263,7 +268,7 @@ class Av1OracleTest {
         }
         assertEquals(ref.size, at, "${c.name}: dav1d shows another number of frames or sizes")
         assertTrue(use["inter frame"] > 0, "${c.name}: the encoder wrote no inter frame")
-        for (tool in c.uses) assertTrue(use[tool] > 0, "${c.name}: the encoder did not use $tool")
+        return use
     }
 
     private val allInterTools = listOf(
@@ -283,6 +288,8 @@ class Av1OracleTest {
         assumeTrue("ffmpeg with dav1d, libaom, SVT-AV1 and rav1e not installed", tools())
         val aom = { crf: Int, speed: Int -> listOf("-crf", "$crf", "-cpu-used", "$speed") }
         val failures = ArrayList<String>()
+        val used = Av1ToolUse()
+        val wanted = LinkedHashMap<String, String>()
         listOf(
             Sequence(
                 "libaom with every inter tool", rotating, 16, "yuv420p", "libaom-av1", aom(32, 1) + allInterTools,
@@ -316,11 +323,16 @@ class Av1OracleTest {
             Sequence("rav1e in tiles", fast, 12, "yuv420p", "librav1e", listOf("-qp", "120", "-speed", "9", "-tiles", "4"), listOf("tiles")),
         ).forEach { c ->
             // Every sequence runs, so one run names every failure, not only the first.
+            for (tool in c.uses) wanted.getOrPut(tool) { c.name }
             try {
-                checkSequence(c)
+                checkSequence(c)?.counts?.forEach { (tool, n) -> repeat(n) { used.add(tool) } }
             } catch (e: AssertionError) {
                 failures += e.message ?: c.name
             }
+        }
+        // A sequence dav1d refused reached nothing that was checked, so its tools may be missing; that skips below.
+        if (refused.isEmpty()) {
+            for ((tool, first) in wanted) if (used[tool] == 0) failures += "no sequence used $tool (written for $first)"
         }
         assertTrue(failures.isEmpty(), failures.joinToString("\n"))
         // Every other sequence has been checked by now; one dav1d cannot read reports as skipped.
