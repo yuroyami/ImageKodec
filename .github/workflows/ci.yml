@@ -422,7 +422,8 @@ jobs:
           path: build/dokka/html
 
   # The JVM oracle suites that once differed with Homebrew's newer tools (#110): ffmpeg's
-  # libaom, SVT-AV1, rav1e and dav1d, libtiff with ImageMagick, and OpenJPEG, on a Mac.
+  # libaom, SVT-AV1, rav1e and dav1d, libtiff with ImageMagick, and OpenJPEG, on a Mac. Run 166
+  # passed the TIFF and JPEG 2000 cases with libtiff 4.7.2 and OpenJPEG 2.5.4 there.
   test-jvm-macos:
     name: JVM oracle tests on macOS
     runs-on: macos-latest
@@ -436,8 +437,11 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      # Homebrew's ffmpeg has no libaom or rav1e; ffmpeg-full has every AV1 codec and is keg-only.
       - name: Install the oracle tools
-        run: brew install ffmpeg libtiff imagemagick openjpeg
+        run: |
+          brew install ffmpeg-full libtiff imagemagick openjpeg
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
 
       - name: AV1, 16-bit TIFF and JPEG 2000 oracle tests
         run: >
