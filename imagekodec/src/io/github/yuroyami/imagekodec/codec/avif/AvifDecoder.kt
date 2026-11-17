@@ -25,6 +25,8 @@ import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.GRID
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HEV1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVC1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVCC
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IDEN
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.MIAF
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.LHV1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IOVL
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PICT
@@ -297,7 +299,7 @@ internal object AvifDecoder {
 
     private const val MAX_DEPTH = 8
 
-    private val DERIVED_TYPES = setOf(GRID, IOVL, SATO, TMAP)
+    private val DERIVED_TYPES = setOf(GRID, IOVL, SATO, TMAP, IDEN)
 
     private fun inputs(c: AvifContainer, item: AvifItem): List<AvifItem> =
         c.referencesFrom(item.id, DIMG).map { id ->
@@ -319,16 +321,18 @@ internal object AvifDecoder {
         if (item.type !in DERIVED_TYPES && codec == null) return "AVIF item of type '${fourccName(item.type)}'"
         item.unknownEssential.firstOrNull()?.let { return "AVIF item property '${fourccName(it)}' marked essential" }
         if (codec != null) {
-            return if (configuration(item.properties, codec) == null) {
+            // A JPEG item may carry its tables in the stream, so 'jpgC' is optional (ISO/IEC 23008-12 H.3).
+            return if (configuration(item.properties, codec) == null && codec !== JpegItemCodec) {
                 "AVIF item ${item.id} of type '${codec.itemType}' without '${codec.configurationType}'"
             } else {
                 null
             }
         }
         return when (item.type) {
-            GRID, IOVL, SATO, TMAP -> {
+            GRID, IOVL, SATO, TMAP, IDEN -> {
                 val ids = c.referencesFrom(item.id, DIMG)
                 if (ids.isEmpty()) return "AVIF derived item ${item.id} without inputs"
+                if (item.type == IDEN && ids.size != 1) return "AVIF identity item ${item.id} with ${ids.size} inputs"
                 if (item.type == TMAP) {
                     return c.items[ids[0]]?.let { unsupported(c, it, depth + 1) } ?: "AVIF tone-mapped item without its base image"
                 }
@@ -359,10 +363,10 @@ internal object AvifDecoder {
         if (reason == null) reason = frames(c, item, 0)
         if (reason == null && alpha != null) reason = frames(c, alpha, 0)
         val premultiplied = alpha != null && alpha.id in c.referencesFrom(item.id, PREM)
-        val crop = item.property<AvifProperty.CleanAperture>()?.let { cleanAperture(it, size.first, size.second) }
+        val (crop, orientation) = geometry(c, item, size.first, size.second)
         return Plan(
             c, item, null, alpha, null, premultiplied, size.first, size.second, itemDepth(c, item, 0), crop,
-            orientation(item.property(), item.property()),
+            orientation,
             frameCount = 1, loopCount = 1, icc = itemIcc(c, item, 0), cicp = cicp, unsupported = reason,
             contentLight = itemProperty<AvifProperty.ContentLight>(c, item)?.let { intArrayOf(it.maxContent * 10000, it.maxFrameAverage * 10000) },
             masteringDisplay = itemProperty<AvifProperty.MasteringDisplay>(c, item)?.values,
@@ -429,6 +433,7 @@ internal object AvifDecoder {
         if (depth > MAX_DEPTH) throw UnsupportedImageException("AVIF derived images nested more than $MAX_DEPTH deep")
         when (item.type) {
             GRID -> c.itemDataOrNull(item)?.let { return AvifGrid.read(it).let { g -> g.width to g.height } }
+            IDEN -> c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] }?.let { return itemSize(c, it, depth + 1) }
             IOVL -> c.itemDataOrNull(item)?.let { return AvifOverlay.read(it, 0).let { o -> o.width to o.height } }
             TMAP -> return itemSize(c, base(c, item, depth), depth + 1)
         }
@@ -484,9 +489,24 @@ internal object AvifDecoder {
         return next?.let { itemDepth(c, it, depth + 1) } ?: 8
     }
 
+    /**
+     * The crop and orientation of [item]'s transformative properties: MIAF's fixed order when the
+     * file has the `miaf` brand, else the order of their association (#167).
+     */
+    private fun geometry(c: AvifContainer, item: AvifItem, width: Int, height: Int): Pair<IntArray?, Orientation> {
+        val steps = if (MIAF in c.brands) {
+            listOfNotNull(item.property<AvifProperty.CleanAperture>(), item.property<AvifProperty.Rotation>(), item.property<AvifProperty.Mirror>())
+        } else {
+            item.properties.filter { it is AvifProperty.CleanAperture || it is AvifProperty.Rotation || it is AvifProperty.Mirror }
+        }
+        return HeifGeometry.fold(width, height, steps, ::cleanAperture, ::orientation)
+    }
+
     /** The colour code points of [item]: its own `nclx`, else its first input's, else its AV1 sequence header's. */
     private fun itemCicp(c: AvifContainer, item: AvifItem, depth: Int): AvifCicp? {
         if (depth > MAX_DEPTH) return null
+        // A JPEG item's samples are the RGB its decoder gives, whatever an nclx says of its YCbCr.
+        if (item.type == AvifContainer.JPEG) return AvifCicp(item.property<AvifProperty.Nclx>()?.primaries ?: 2, 13, 0, true)
         item.property<AvifProperty.Nclx>()?.let { return AvifCicp(it.primaries, it.transfer, it.matrix, it.fullRange) }
         val codec = codecOf(item)
         if (codec != null) return inspect(c, item, codec)?.cicp()
@@ -633,7 +653,7 @@ internal object AvifDecoder {
             else -> {
                 val codec = codecOf(item) ?: throw UnsupportedImageException("AVIF item of type '${fourccName(item.type)}'")
                 val config = configuration(item.properties, codec)
-                    ?: throw ImageDecodeException("AVIF: item ${item.id} has no '${codec.configurationType}'")
+                if (config == null && codec !== JpegItemCodec) throw ImageDecodeException("AVIF: item ${item.id} has no '${codec.configurationType}'")
                 val data = c.itemData(item)
                 // The coded size, within the ceiling, before the codec allocates for it.
                 checkedSize(item, codec.inspect(config, data))
@@ -661,6 +681,7 @@ internal object AvifDecoder {
                 AvifSampleTransform.apply(c.itemData(item), sources, bits, full)
             }
             TMAP -> planes(c, base(c, item, depth), depth + 1, cancel)
+            IDEN -> planes(c, inputs(c, item).first(), depth + 1, cancel)
             else -> throw UnsupportedImageException("AVIF item of type '${fourccName(item.type)}'")
         }
     }

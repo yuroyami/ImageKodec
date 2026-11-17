@@ -25,7 +25,7 @@ internal object HeifCodecs {
         codecs.map { fourcc(it.configurationType) }.toSet(),
     )
 
-    private val builtIn: List<HeifCodec> = listOf(Av1Codec)
+    private val builtIn: List<HeifCodec> = listOf(Av1Codec, JpegItemCodec)
     private val current = AtomicReference(table(builtIn))
 
     fun register(codec: HeifCodec) {
@@ -97,6 +97,52 @@ internal object Av1Codec : HeifCodec {
                 val pic = if (still) decoder.decodeStill(config, sample, layer) else decoder.decodeTemporalUnit(sample) ?: return null
                 return HeifPlanes(pic.width, pic.height, pic.bitDepth, pic.bitDepth, pic.subX, pic.subY, pic.planes, pic.strides, pic.seq.colorRange)
             }
+        }
+    }
+}
+
+/**
+ * The core's JPEG decoder as the codec of `jpeg` items (ISO/IEC 23008-12 Annex H), as a camera
+ * writes its smallest thumbnail (#167). Its planes are the decoded RGB, as G, B and R planes for
+ * the identity matrix of ITU-T H.273, so the conversion to RGB gives them back unchanged.
+ */
+@OptIn(ExperimentalHeifCodecApi::class)
+internal object JpegItemCodec : HeifCodec {
+    override val itemType: String = "jpeg"
+    override val sampleEntryTypes: Set<String> = emptySet()
+    override val configurationType: String = "jpgC"
+
+    /** The stream of an item: the prefix of 'jpgC' first when the item has one, without a second SOI. */
+    private fun stream(configuration: ByteArray?, data: ByteArray): ByteArray {
+        if (configuration == null || configuration.isEmpty()) return data
+        val soi = data.size >= 2 && (data[0].toInt() and 0xFF) == 0xFF && (data[1].toInt() and 0xFF) == 0xD8
+        return configuration + if (soi) data.copyOfRange(2, data.size) else data
+    }
+
+    override fun inspect(configuration: ByteArray?, data: ByteArray?): HeifCodecInfo {
+        if (data == null) return HeifCodecInfo(0, 0, 8, 8, chromaFormat = 3)
+        val info = io.github.yuroyami.imagekodec.codec.ImageProbe.probe(stream(configuration, data))
+        return HeifCodecInfo(
+            info.width, info.height, 8, 8, chromaFormat = 3,
+            colorPrimaries = 2, transferCharacteristics = 13, matrixCoefficients = 0, fullRange = true,
+            unsupportedReason = if (info.isDecodable) null else info.unsupportedReason,
+        )
+    }
+
+    override fun open(configuration: ByteArray?): HeifCodecSession = object : HeifCodecSession {
+        override fun decode(sample: ByteArray, cancellationCheck: (() -> Unit)?): HeifPlanes {
+            val bitmap = io.github.yuroyami.imagekodec.codec.JpegDecoder.decode(stream(configuration, sample), cancel = cancellationCheck)
+            val n = bitmap.width * bitmap.height
+            val g = ShortArray(n)
+            val b = ShortArray(n)
+            val r = ShortArray(n)
+            for (i in 0 until n) {
+                val p = bitmap.argb[i]
+                r[i] = ((p ushr 16) and 0xFF).toShort()
+                g[i] = ((p ushr 8) and 0xFF).toShort()
+                b[i] = (p and 0xFF).toShort()
+            }
+            return HeifPlanes(bitmap.width, bitmap.height, 8, 8, 0, 0, arrayOf(g, b, r), IntArray(3) { bitmap.width }, true)
         }
     }
 }
