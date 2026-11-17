@@ -562,17 +562,28 @@ class HevcDecodeOracleTest {
         var hashed = 0
         var output = 0
         val bad = ArrayList<Int>()
+        var firstBad: DecodedPicture? = null
+        // The byte offset of each output picture in the output file, to find the first bad one in libde265's.
+        var outputBytes = 0L
+        var badAt: Pair<Long, io.github.yuroyami.imagekodec.HeifPlanes>? = null
         fun check(list: List<DecodedPicture>) {
             for (p in list) {
                 pictures++
                 val hash = p.hash ?: continue
                 hashed++
-                if (!matchesHash(p, hash)) bad += p.poc
+                if (!matchesHash(p, hash)) {
+                    bad += p.poc
+                    if (firstBad == null) firstBad = p
+                }
             }
         }
         fun out(list: List<DecodedPicture>) {
             for (p in list) {
-                md5.update(yuvBytes(p.toHeifPlanes()))
+                val planes = p.toHeifPlanes()
+                val bytes = yuvBytes(planes)
+                if (p === firstBad && badAt == null) badAt = outputBytes to planes
+                md5.update(bytes)
+                outputBytes += bytes.size
                 output++
             }
         }
@@ -590,15 +601,124 @@ class HevcDecodeOracleTest {
         }
         check(d.finish())
         out(d.flush())
-        if (bad.isNotEmpty()) return "DIFFERS from the hash SEI of ${bad.size} of $pictures pictures, the first of PicOrderCntVal ${bad.first()}"
+        if (bad.isNotEmpty()) {
+            val where = firstBad?.let { p -> badAt?.let { (at, planes) -> firstDifferingCtb(file, at, planes, p.sps) } }
+            return "DIFFERS from the hash SEI of ${bad.size} of $pictures pictures, the first of PicOrderCntVal ${bad.first()}" +
+                (where?.let { "; $it" } ?: "")
+        }
         val expected = file.parentFile.listFiles().orEmpty().filter { "md5" in it.name.lowercase() }
             .flatMap { it.readLines() }.flatMap { line -> Regex("[0-9a-fA-F]{32}").findAll(line).map { it.value.lowercase() }.toList() }
         val mine = hex(md5.digest())
         val hashes = if (hashed == pictures) "the hash SEI of all $pictures pictures" else "the hash SEI of $hashed of $pictures pictures"
         if (mine in expected) return "MATCHES $hashes and the MD5 of its $output output pictures"
-        if (expected.isNotEmpty()) return "DIFFERS from the MD5 of its $output output pictures ($mine)"
+        if (expected.isNotEmpty()) return "DIFFERS from the MD5 of its $output output pictures ($mine)" + (firstDifferingOutput(file, units)?.let { "; $it" } ?: "")
         if (hashed == pictures && pictures > 0) return "MATCHES $hashes; the package has no MD5 of its output"
         return "decoded $pictures pictures, $hashed with a hash SEI, and the package has no MD5 of its output"
+    }
+
+    /**
+     * Where the output picture [mine], at byte [at] of the output file, first differs from libde265's decode of
+     * [file] (#146): the CTB of the lowest address in raster scan (CtbAddrInRs) that holds a differing sample,
+     * and that sample. Null when libde265 is not installed; a sentence when it cannot decode the stream.
+     */
+    private fun firstDifferingCtb(file: File, at: Long, mine: io.github.yuroyami.imagekodec.HeifPlanes, sps: Sps): String? {
+        if (!Tools.hasAll("dec265")) return null
+        val yuv = File.createTempFile("kite-hevc", ".yuv").apply { deleteOnExit() }
+        val (code, log) = run("timeout", "-s", "KILL", "300", Tools.require("dec265").path, "-q", "-o", yuv.path, file.path)
+        if (code != 0) return "libde265 cannot decode the stream either: ${log.decodeToString().trim().take(200)}"
+        val size = yuvBytes(mine).size
+        if (yuv.length() < at + size) return "libde265 gave ${yuv.length()} bytes, fewer than the first bad picture needs"
+        val theirs = java.io.RandomAccessFile(yuv, "r").use { f -> ByteArray(size).also { f.seek(at); f.readFully(it) } }
+        return firstDifferingCtb(mine, theirs, sps.ctbLog2, sps.subWidthC * sps.confWin[0], sps.subHeightC * sps.confWin[2], sps.picWidthInCtbs)
+            ?: "the first bad picture equals libde265's, so the hash SEI or libde265 is wrong"
+    }
+
+    /**
+     * The first output picture of [file] that differs from libde265's, and its first differing CTB, for a stream
+     * whose whole output misses its MD5 (#146). It decodes the stream again, one output picture at a time, so it
+     * holds no more than the decoded picture buffer. Null when libde265 is not installed.
+     */
+    private fun firstDifferingOutput(file: File, units: List<ByteArray>): String? {
+        if (!Tools.hasAll("dec265")) return null
+        val yuv = File.createTempFile("kite-hevc", ".yuv").apply { deleteOnExit() }
+        val (code, log) = run("timeout", "-s", "KILL", "300", Tools.require("dec265").path, "-q", "-o", yuv.path, file.path)
+        if (code != 0) return "libde265 cannot decode the stream either: ${log.decodeToString().trim().take(200)}"
+        java.io.RandomAccessFile(yuv, "r").use { theirs ->
+            val d = HevcDecoder(keepOutput = true)
+            var index = 0
+            var at = 0L
+            fun compare(list: List<DecodedPicture>): String? {
+                for (p in list) {
+                    val planes = p.toHeifPlanes()
+                    val mine = yuvBytes(planes)
+                    if (theirs.length() < at + mine.size) return "libde265 gives $index output pictures, fewer than this decoder"
+                    val bytes = ByteArray(mine.size).also { theirs.seek(at); theirs.readFully(it) }
+                    if (!bytes.contentEquals(mine)) {
+                        val ctb = firstDifferingCtb(planes, bytes, p.sps.ctbLog2, p.sps.subWidthC * p.sps.confWin[0], p.sps.subHeightC * p.sps.confWin[2], p.sps.picWidthInCtbs)
+                        return "output picture $index (PicOrderCntVal ${p.poc}) is the first to differ from libde265: $ctb"
+                    }
+                    at += mine.size
+                    index++
+                }
+                return null
+            }
+            for (u in units) {
+                if (u.size < 2) continue
+                d.decodeNal(u, 0, u.size, null)
+                compare(d.takeOutput())?.let { return it }
+            }
+            d.finish()
+            compare(d.flush())?.let { return it }
+            return "every output picture equals libde265's, so the package MD5 or libde265 is wrong"
+        }
+    }
+
+    /**
+     * The first CTB in raster scan where [mine] differs from the raw output [theirs] (planes one after another, two
+     * bytes a sample little-endian above 8 bits), with the picture cropped by [left] and [top] luma samples, or null.
+     */
+    internal fun firstDifferingCtb(mine: io.github.yuroyami.imagekodec.HeifPlanes, theirs: ByteArray, ctbLog2: Int, left: Int, top: Int, widthInCtbs: Int): String? {
+        val wide = mine.bitDepthLuma > 8
+        var at = 0
+        var best: Triple<Int, Int, String>? = null
+        for (c in mine.planes.indices) {
+            val sx = if (c == 0) 0 else mine.subX
+            val sy = if (c == 0) 0 else mine.subY
+            val w = (mine.width + sx) shr sx
+            val h = (mine.height + sy) shr sy
+            for (y in 0 until h) for (x in 0 until w) {
+                val v = if (wide) (theirs[at].toInt() and 0xFF) or ((theirs[at + 1].toInt() and 0xFF) shl 8) else theirs[at].toInt() and 0xFF
+                at += if (wide) 2 else 1
+                val m = mine.planes[c][y * mine.strides[c] + x].toInt() and 0xFFFF
+                if (m == v) continue
+                // The sample's position in the coded picture, in luma samples, gives its CTB.
+                val ctbX = ((x shl sx) + left) shr ctbLog2
+                val ctbY = ((y shl sy) + top) shr ctbLog2
+                val address = ctbY * widthInCtbs + ctbX
+                if (best == null || address < best.first) {
+                    best = Triple(address, c, "CTB $address at ($ctbX, $ctbY) first differs, plane $c sample ($x, $y): $m, libde265 $v")
+                }
+            }
+        }
+        return best?.third
+    }
+
+    /** The diagnosis names the CTB of the lowest address, whichever plane differs first in file order. */
+    @Test
+    fun theFirstDifferingCtbIsTheLowestAddress() {
+        // 32x16 4:2:0 at 8 bits with CTBs of 16: two CTBs side by side.
+        val y = ShortArray(32 * 16) { 50 }
+        val u = ShortArray(16 * 8) { 60 }
+        val v = ShortArray(16 * 8) { 70 }
+        val planes = io.github.yuroyami.imagekodec.HeifPlanes(32, 16, 8, 8, 1, 1, arrayOf(y, u, v), intArrayOf(32, 16, 16), true)
+        val raw = ByteArray(32 * 16 + 2 * 16 * 8).also { b -> for (i in b.indices) b[i] = (if (i < 512) 50 else if (i < 640) 60 else 70).toByte() }
+        assertEquals(null, firstDifferingCtb(planes, raw, 4, 0, 0, 2))
+        // A luma sample in the second CTB and a Cr sample in the first: the first CTB is named, from the chroma plane.
+        raw[20] = 51
+        raw[640 + 3] = 71
+        assertEquals("CTB 0 at (0, 0) first differs, plane 2 sample (3, 0): 70, libde265 71", firstDifferingCtb(planes, raw, 4, 0, 0, 2))
+        // A crop of 16 luma samples on the left moves every sample one CTB right.
+        assertEquals("CTB 1 at (1, 0) first differs, plane 2 sample (3, 0): 70, libde265 71", firstDifferingCtb(planes, raw, 4, 16, 0, 3))
     }
 
     /**
