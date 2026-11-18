@@ -109,7 +109,9 @@ class CcittMixedTest {
         for (line in listOf("1" + "10100", "0" + "00110011000101")) {
             assertFailsWith<ImageDecodeException> { CcittFax.decode(faxBits(eol + line), 2, options(1)) }
         }
-        assertFailsWith<UnsupportedImageException> { CcittFax.decode(faxBits(eol + "0" + "0000001"), 2, options(1)) }
+        // An extension cut off, and one that T.4 Table 4 does not define (only 111, uncompressed, is).
+        assertFailsWith<ImageDecodeException> { CcittFax.decode(faxBits(eol + "0" + "0000001"), 2, options(1)) }
+        assertFailsWith<ImageDecodeException> { CcittFax.decode(faxBits(eol + "0" + "0000001" + "001" + "1"), 2, options(1)) }
     }
 
     @Test
@@ -135,15 +137,10 @@ class CcittMixedTest {
     }
 
     @Test
-    fun uncompressedTiffModeRemainsANamedUnsupportedFeature() {
-        for (t4 in listOf(2, 3)) {
-            val bytes = faxTiff(stream(), 3, height = 6, t4Options = t4)
-            val info = ImageKodec.probe(bytes)
-            assertTrue(!info.isDecodable)
-            assertTrue(info.unsupportedReason.orEmpty().contains("uncompressed mode"))
-            val e = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(bytes) }
-            assertTrue(e.message.orEmpty().contains("uncompressed mode"))
-        }
+    fun theUncompressedModeBitOfT4OptionsChangesNothingElse() {
+        val bytes = faxTiff(stream(), 3, height = 6, t4Options = 3)
+        assertTrue(ImageKodec.probe(bytes).isDecodable)
+        assertContentEquals(ImageKodec.decode(faxTiff(stream(), 3, height = 6, t4Options = 1)).argb, ImageKodec.decode(bytes).argb)
     }
 
     @Test

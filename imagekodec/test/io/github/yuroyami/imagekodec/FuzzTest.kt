@@ -130,6 +130,10 @@ class FuzzTest {
         "tiff-reference-rgb" to withReferences(referenceTiff(ycbcr = false),
             longArrayOf(255,1,0,1,0,1,255,1,0,1,255,1)),
         "tiff-ccitt-mixed" to faxTiff(CcittMixedTest().stream(fill = 3), 3, height = 6, t4Options = 5),
+        // Samples of other depths and formats, both predictors over them, 12-bit and separate-plane JPEG,
+        // and CCITT's uncompressed mode (#189).
+        *TiffSamplesTest().seeds().toTypedArray(),
+        "tiff-ccitt-uncompressed" to CcittUncompressedTest().seed(),
         "jp2-small-irreversible" to Jp2SingletonTest().encoded("corner"),
         "jp2-partial-reversible" to Jp2ReconstructionTest().encoded(),
         "jp2-derived-quantization" to Jp2DerivedQuantTest().encoded(),

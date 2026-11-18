@@ -2551,6 +2551,35 @@ internal object JpegDecoder {
         return Components(JpegComponents(outX, outSize(j.imgY, scale), n, samples, j.app14ColorTransform), colorModel(j))
     }
 
+    /** What [decodeWideComponents] returns: [count] components a pixel at [precision] bits, interleaved. */
+    internal class WideComponents(val width: Int, val height: Int, val count: Int, val precision: Int, val samples: IntArray)
+
+    /**
+     * The components of a frame deeper than 8 bits at their own precision, upsampled as
+     * [decodeComponents] upsamples them, and with [ycbcr] the three of a colour frame converted to
+     * RGB as [decode16] converts YCbCr. A frame of 8 bits or fewer gives its size and precision and
+     * no samples, since [decodeComponents] reads it.
+     */
+    fun decodeWideComponents(input: ByteArray, ycbcr: Boolean, cancel: (() -> Unit)? = null): WideComponents {
+        val j = decodeFrame(input, 0, cancel)
+        val n = j.imgN
+        if (!wide(j)) return WideComponents(j.imgX, j.imgY, n, j.precision, IntArray(0))
+        val out = IntArray(j.imgX * j.imgY * n)
+        val rgb = IntArray(3)
+        forEachWideRow(j) { row, rows ->
+            var at = row * j.imgX * n
+            for (i in 0 until j.imgX) {
+                if (ycbcr && n == 3) {
+                    wideYcc(rows, i, j.precision, rgb)
+                    out[at++] = rgb[0]; out[at++] = rgb[1]; out[at++] = rgb[2]
+                } else {
+                    for (k in 0 until n) out[at++] = rows[k][i]
+                }
+            }
+        }
+        return WideComponents(j.imgX, j.imgY, n, j.precision, out)
+    }
+
     /**
      * The upsampled components of lossless frame [j], each sample at 8 bits as [decode] narrows it,
      * and averaged over blocks of 2^reduceAfter a side for a reduced decode.

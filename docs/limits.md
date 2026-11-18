@@ -16,8 +16,8 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   any other HEIF image, decodes in full first (#151).
 - `decode` keeps only the high byte of a 16-bit sample, because `KiteBitmap` holds 8 bits a
   channel. `decode16` keeps the whole sample for PNG, TIFF, JPEG 2000, JPEG XL, JPEG XR and 12-bit or
-  lossless JPEG, and it converts AVIF and HEIC at 16 bits. Other formats come through it at 8 bits,
-  widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
+  lossless JPEG, a TIFF sample of another depth or a floating-point one at 16 bits, and it converts
+  AVIF and HEIC at 16 bits. Other formats come through it at 8 bits, widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
   `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
   can move by up to 255 sixteen-bit units to stay in that level.
 - The AVIF encoder writes still intra pictures only (see [AVIF](#avif)), and the JPEG XL
@@ -76,6 +76,39 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 tile-part headers with the coding and quantization readers of the decoder, and it skips packet
 bytes by their declared lengths. A corrupt packet payload can therefore still probe as decodable
 and fail during the decode.
+
+## TIFF
+
+- A sample that is not an unsigned integer of 1, 2, 4, 8 or 16 bits comes out at 16 bits, as
+  ImageMagick reads it through libtiff: an unsigned integer of 1 to 32 bits as v * 65535 / (2^bits - 1),
+  rounded; a signed one moved up by half its range first, so its most negative value is black; and an
+  IEEE float of 16, 24 (Adobe's DNG form), 32 or 64 bits as a fraction of full scale, clipped to 0 to 1,
+  NaN as 0. No transfer function is applied to a float: libtiff, ImageMagick and ImageIO show it as it
+  is. ImageMagick moves signed samples up only in 16-bit gray, and ImageIO clips the negative ones, so
+  the readers do not agree on signed colour.
+- The features below throw `UnsupportedImageException`, and `probe` names them, because no reader
+  gives them a picture to check a reading against:
+  - Complex samples (SampleFormat 5 and 6), integers of more than 32 bits, floats of another width,
+    and samples of several formats on one page. No TIFF reader here shows any of them.
+  - YCbCr of other than 8 bits. libtiff's RGBA interface refuses it, ImageMagick hands the samples on
+    without converting them, and ImageIO misreads them.
+  - A palette indexed by signed or floating-point samples, or by more than 16 bits. TIFF 6.0 indexes a
+    palette with unsigned integers, and a `ColorMap` holds 3 * 2^bits entries.
+  - Inks other than CMYK (`InkSet` 2, or `NumberOfInks` other than 4). TIFF 6.0 names such inks
+    (`InkNames`) without measuring them, so they have no colour, and libtiff's RGBA interface refuses them.
+  - The horizontal predictor over samples other than 8, 16, 32 or 64 bits, and the floating-point
+    predictor over integers. libtiff refuses both.
+  - Old-style lossless JPEG (`JPEGProc` 14). libtiff hands it to libjpeg, which has read no lossless
+    process before libjpeg-turbo 3, and ImageIO's JPEG reader has none. Old-style JPEG of other than 1
+    or 3 samples, which libtiff refuses, and old-style YCbCr in separate planes with subsampled chroma,
+    which libtiff's RGBA interface refuses, stay out too.
+- A 12-bit JPEG strip is held to ImageKodec's own 12-bit JPEG decoder, which `JpegTwelveBitOracleTest`
+  holds to libjpeg-turbo 3.1: the libtiff here reads 8-bit JPEG only.
+- JPEG YCbCr in separate planes, chroma subsampled, is read as libtiff lays it out: each chroma strip or
+  tile a JPEG stream at the subsampled size. libtiff's RGBA interface refuses the subsampled form, and
+  ImageIO reads one strip of it; the unsubsampled form matches `tiff2rgba`.
+- CCITT's uncompressed mode (T.4 4.2.3 and Table 5) decodes in Group 3 and Group 4, which no installed
+  reader takes: libtiff and ffmpeg stop at it. Its tests write the codes from T.4 and check the page.
 
 ## PNG
 

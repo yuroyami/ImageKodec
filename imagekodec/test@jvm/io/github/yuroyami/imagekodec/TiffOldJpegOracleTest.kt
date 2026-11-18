@@ -20,6 +20,10 @@ import kotlin.test.assertTrue
  * - No stream headers at all: bare tables behind JPEGQTables, JPEGDCTables and
  *   JPEGACTables, and strips of scan data only.
  * - The same in a column of tiles taller than the image.
+ * - Tiles in several columns: one frame a tile wide with the tiles stacked in order, each
+ *   a restart interval, the headers at JPEGInterchangeFormat (#189).
+ * - Separate planes: one frame with a non-interleaved scan for each component, each
+ *   plane's strips holding its scan, cut at its restart markers (#189).
  *
  * libtiff hands the samples on without upsampling, and converts them with the file's
  * ReferenceBlackWhite, which some of these files set to the studio range as LONG values.
@@ -46,12 +50,14 @@ class TiffOldJpegOracleTest {
     private val height = 75
 
     /** Gradients and hard-edged blocks, [w] by [h], as a PPM for cjpeg. */
-    private fun sourcePpm(w: Int, h: Int): File {
+    private fun sourcePpm(w: Int, h: Int, at: (Int, Int) -> Pair<Int, Int> = { x, y -> x to y }, pw: Int = w, ph: Int = h): File {
         val px = IntArray(w * h)
-        for (y in 0 until h) for (x in 0 until w) {
+        for (yy in 0 until h) for (xx in 0 until w) {
+            val (x, y) = at(xx, yy)
+            val i = yy * w + xx
             val block = (x / 13 + y / 11) % 3
-            px[y * w + x] = argb(0xFF, x * 255 / (w - 1), if (block == 0) 30 else y * 255 / (h - 1),
-                if (block == 2) 230 else (x + y) * 255 / (w + h - 2))
+            px[i] = argb(0xFF, x * 255 / (pw - 1), if (block == 0) 30 else y * 255 / (ph - 1),
+                if (block == 2) 230 else (x + y) * 255 / (pw + ph - 2))
         }
         val png = temp("src", ".png").apply { writeBytes(ImageKodec.encodePng(KiteBitmap(w, h, px))) }
         val ppm = temp("src", ".ppm")
@@ -215,6 +221,107 @@ class TiffOldJpegOracleTest {
         return tiff(fields, blobs)
     }
 
+    /**
+     * Every scan of [jpeg]: its header, and its entropy-coded data cut at its restart markers, which
+     * go. The Huffman tables libjpeg writes between scans are added to [tables].
+     */
+    private fun scans(jpeg: ByteArray, tables: MutableList<ByteArray>): List<Pair<ByteArray, List<ByteArray>>> {
+        val out = ArrayList<Pair<ByteArray, List<ByteArray>>>()
+        var at = 2
+        while (at < jpeg.size - 1) {
+            val marker = jpeg[at + 1].toInt() and 0xFF
+            if (marker == 0xD9) break
+            val length = ((jpeg[at + 2].toInt() and 0xFF) shl 8) or (jpeg[at + 3].toInt() and 0xFF)
+            if (marker != 0xDA) {
+                if (marker == 0xC4 && out.isNotEmpty()) tables += jpeg.copyOfRange(at, at + 2 + length)
+                at += 2 + length
+                continue
+            }
+            val header = jpeg.copyOfRange(at, at + 2 + length)
+            at += 2 + length
+            val parts = ArrayList<ByteArray>()
+            var start = at
+            while (true) {
+                val b = jpeg[at].toInt() and 0xFF
+                val next = jpeg[at + 1].toInt() and 0xFF
+                if (b == 0xFF && next in 0xD0..0xD7) {
+                    parts += jpeg.copyOfRange(start, at)
+                    at += 2
+                    start = at
+                } else if (b == 0xFF && next != 0) {
+                    parts += jpeg.copyOfRange(start, at)
+                    break
+                } else at++
+            }
+            out += header to parts
+        }
+        return out
+    }
+
+    /**
+     * Separate planes: cjpeg's three non-interleaved scans, the headers at JPEGInterchangeFormat
+     * without their DRI, and each plane's scan in strips of [mcuRows] block rows, its scan
+     * header at the head of the plane's first strip.
+     */
+    private fun separatePlanes(mcuRows: Int): ByteArray {
+        val script = temp("scans", ".txt").apply { writeText("0;\n1;\n2;\n") }
+        val out = temp("separate", ".jpg")
+        val (code, text) = run(Tools.require("cjpeg").path, "-quality", "90", "-sample", "1x1,1x1,1x1", "-scans", script.path,
+            "-restart", "$mcuRows", "-outfile", out.path, sourcePpm(width, height).path)
+        assertEquals(0, code, "cjpeg failed: $text")
+        val jpeg = out.readBytes()
+        val (segments, _) = segments(jpeg)
+        // The chroma tables libjpeg writes before the later scans join the headers, as a writer of
+        // these files keeps every table at JPEGInterchangeFormat.
+        val later = ArrayList<ByteArray>()
+        val strips = scans(jpeg, later).flatMap { (scanHeader, parts) -> parts.mapIndexed { i, part -> if (i == 0) scanHeader + part else part } }
+        val header = byteArrayOf(0xFF.toByte(), 0xD8.toByte()) +
+            (segments.filter { it.marker != 0xDD }.map { jpeg.copyOfRange(it.start, it.end) } + later).reduce { a, b -> a + b }
+        val fields = baseFields(1, 1, studio = false).filter { it.tag != 284 } + listOf(
+            short(284, 2),
+            long(273, *LongArray(strips.size) { -(it + 2L) }),
+            long(278, (mcuRows * 8).toLong()),
+            long(279, *LongArray(strips.size) { strips[it].size.toLong() }),
+            long(513, -1), long(514, header.size.toLong()),
+        )
+        return tiff(fields, listOf(header) + strips)
+    }
+
+    /**
+     * [across] columns of tiles 48 by 32: one cjpeg frame a tile wide with every tile below the one
+     * before, a restart interval each, the headers at JPEGInterchangeFormat without their DRI.
+     */
+    private fun tileColumns(h0: Int, v0: Int): ByteArray {
+        val tw = 48
+        val tl = 32
+        val across = (width + tw - 1) / tw
+        val down = (height + tl - 1) / tl
+        val count = across * down
+        // Each tile holds the image's pixels, its edge repeated past the image as libtiff's writers pad.
+        val ppm = sourcePpm(tw, tl * count, at = { x, y ->
+            val t = y / tl
+            minOf((t % across) * tw + x, width - 1) to minOf((t / across) * tl + y % tl, height - 1)
+        }, pw = width, ph = height)
+        val out = temp("columns", ".jpg")
+        val (code, text) = run(Tools.require("cjpeg").path, "-quality", "90", "-sample", "${h0}x$v0,1x1,1x1",
+            "-restart", "${tl / (8 * v0)}", "-outfile", out.path, ppm.path)
+        assertEquals(0, code, "cjpeg failed: $text")
+        val jpeg = out.readBytes()
+        val (segments, sos) = segments(jpeg)
+        val header = byteArrayOf(0xFF.toByte(), 0xD8.toByte()) +
+            segments.filter { it.marker != 0xDD }.map { jpeg.copyOfRange(it.start, it.end) }.reduce { a, b -> a + b }
+        val (scanHeader, parts) = intervals(jpeg, sos)
+        assertEquals(count, parts.size)
+        val tiles = parts.mapIndexed { i, part -> if (i == 0) scanHeader + part else part }
+        val fields = baseFields(h0, v0, studio = false) + listOf(
+            long(322, tw.toLong()), long(323, tl.toLong()),
+            long(324, *LongArray(tiles.size) { -(it + 2L) }),
+            long(325, *LongArray(tiles.size) { tiles[it].size.toLong() }),
+            long(513, -1), long(514, header.size.toLong()),
+        )
+        return tiff(fields, listOf(header) + tiles)
+    }
+
     /** Our decode of [bytes] against libtiff's, within a mean and a worst channel difference. */
     private fun compare(name: String, bytes: ByteArray, meanLimit: Double = 0.6, worstLimit: Int = 6): String {
         val file = temp(name, ".tif").apply { writeBytes(bytes) }
@@ -260,5 +367,19 @@ class TiffOldJpegOracleTest {
             compare("tables-tiles", bareTables(2, 2, mcuRows = 2, tileWidth = 112)),
         )
         println(reports.joinToString("\n"))
+    }
+
+    @Test
+    fun separatePlanesAndSeveralColumnsOfTilesMatchLibtiff() {
+        assumeTrue("cjpeg, ImageMagick or libtiff tools not installed", tools())
+        val reports = listOf(
+            "separate-planes" to { separatePlanes(mcuRows = 2) },
+            "separate-planes-one-strip" to { separatePlanes(mcuRows = 10) },
+            "tile-columns-2x2" to { tileColumns(2, 2) },
+            "tile-columns-2x1" to { tileColumns(2, 1) },
+            "tile-columns-1x1" to { tileColumns(1, 1) },
+        ).map { (name, file) -> runCatching { compare(name, file()) }.getOrElse { "$name FAILED: $it" } }
+        println(reports.joinToString("\n"))
+        assertTrue(reports.none { "FAILED" in it }, reports.joinToString("\n"))
     }
 }

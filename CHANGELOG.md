@@ -14,6 +14,13 @@ reviewable in the diff.
 
 ### Added
 
+- TIFF decodes unsigned samples of 1 to 32 bits, signed samples, and IEEE floats of 16, 24, 32 and 64
+  bits, which `decode16` gives at 16 bits, as ImageMagick reads them: floats as a fraction of full scale,
+  signed samples moved up by half their range. The floating-point predictor (3) and the horizontal
+  predictor at 32 and 64 bits decode, and so do 12-bit JPEG strips, JPEG YCbCr in separate planes,
+  old-style JPEG in separate planes and in tiles of several columns, and CCITT's uncompressed mode,
+  which `CcittFax` reads too. YCbCr past 8 bits, inks other than CMYK, old-style lossless JPEG and
+  complex samples stay refused, by name, because no reader gives a picture to check against (#189).
 - PNG decodes Apple's CgBI files, which Xcode writes into iOS apps: the raw deflate stream, and BGR
   and premultiplied BGRA samples at 8 bits, which come back as straight RGB and RGBA. A CgBI file of
   16-bit colour, which Xcode does not write, stays refused by name (#189).

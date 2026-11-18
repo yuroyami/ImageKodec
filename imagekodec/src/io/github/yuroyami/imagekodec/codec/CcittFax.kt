@@ -1,7 +1,6 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
-import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 
 /*
@@ -741,7 +740,16 @@ private fun decodeOneG4Row(reader: BitReader, reference: Changes, coding: Change
                 a0Color = 1 - a0Color
             }
             CcittFaxTables.MODE_EXTENSION -> {
-                if (strict) throw UnsupportedImageException("CCITT: uncompressed 2D extension is not supported")
+                // T.4 Table 4 and T.6 Table 2: the three bits after 0000001 name the extension,
+                // and 111 is the uncompressed mode, the only one either defines.
+                if (reader.hasBits(3) && reader.peekBits(3) == 0b111) {
+                    reader.skipBits(3)
+                    val exit = readUncompressed(reader, coding, maxOf(a0, 0))
+                    a0 = exit shr 1
+                    a0Color = exit and 1
+                    continue
+                }
+                if (strict) throw ImageDecodeException("CCITT: an undefined 2D extension")
                 // Extension codes signal end-of-page-block or escape sequences.
                 // Treat as end of row: emit what we have.
                 coding.fill(cols, a0Color)
@@ -825,6 +833,14 @@ private fun decodeOneG3Row(reader: BitReader, line: Changes, row: Int, allowEol:
     var pos = 0
     var color = 0
     while (pos < cols) {
+        // T.4 4.1.3 and Table 5: twelve bits 000000001111 in place of a run enter the uncompressed mode.
+        if (reader.hasBits(12) && reader.peekBits(12) == UNCOMPRESSED_1D) {
+            reader.skipBits(12)
+            val exit = readUncompressed(reader, line, pos)
+            pos = exit shr 1
+            color = exit and 1
+            continue
+        }
         val run = decodeRun(reader, color == 0)
         if (run == Int.MIN_VALUE && pos == 0 && allowEol) return false
         if (run < 0) throw ImageDecodeException("CCITT: row $row ends after $pos of $cols pixels")
@@ -835,6 +851,43 @@ private fun decodeOneG3Row(reader: BitReader, line: Changes, row: Int, allowEol:
     }
     line.finish()
     return true
+}
+
+/** The entrance to the uncompressed mode in one-dimensional coding (T.4 Table 5). */
+private const val UNCOMPRESSED_1D = 0b000000001111
+
+/**
+ * Reads the uncompressed mode of T.4 4.2.3 and Table 5 (T.6 Table 3 is the same), after its entrance
+ * code, painting [line] from column [from]. Each image pattern is n zeros and a one: n white pixels
+ * then one black for n of 0 to 4, and five white pixels for n of 5. An exit code is n zeros, a one
+ * and a bit T, for n of 6 to 10: n - 6 white pixels, then coding resumes in its own mode with the
+ * colour T (0 white, 1 black) at the next pixel. Returns that column shifted left once, or'ed with T.
+ */
+private fun readUncompressed(reader: BitReader, line: Changes, from: Int): Int {
+    val cols = line.cols
+    var pos = from
+    fun paint(n: Int, color: Int) {
+        if (n > cols - pos) throw ImageDecodeException("CCITT: uncompressed pixels pass the $cols columns")
+        line.fill(pos + n, color)
+        pos += n
+    }
+    while (true) {
+        var zeros = 0
+        while (true) {
+            if (!reader.hasBits(1)) throw ImageDecodeException("CCITT: the data ends in the uncompressed mode")
+            if (reader.readBit() == 1) break
+            if (++zeros > 10) throw ImageDecodeException("CCITT: an invalid code in the uncompressed mode")
+        }
+        when {
+            zeros <= 4 -> { paint(zeros, 0); paint(1, 1) }
+            zeros == 5 -> paint(5, 0)
+            else -> {
+                paint(zeros - 6, 0)
+                if (!reader.hasBits(1)) throw ImageDecodeException("CCITT: the data ends in the uncompressed mode")
+                return (pos shl 1) or reader.readBit()
+            }
+        }
+    }
 }
 
 /** T.4 section 4.2.4 uses six EOL+1 synchronization words for mixed-mode RTC. */
