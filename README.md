@@ -157,8 +157,8 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | PNG and APNG | every color type and depth, interlace, animation | every color type and depth, palette, interlace, and APNG |
 | JPEG | baseline, progressive, arithmetic, lossless and hierarchical, at 8 or 12 bits and lossless up to 16 | baseline, progressive and arithmetic at 8 or 12 bits, lossless at 2 to 16 bits |
 | GIF | still and animated | still and animated |
-| BMP | every header version and depth, RLE, embedded JPEG and PNG | 24-bit, or 32-bit with alpha |
-| TIFF | strips and tiles, the common compressions, every page, up to 16 bits | 8 or 16 bits, many pages |
+| BMP | every header version and depth, RLE, embedded JPEG and PNG | 1, 4 and 8-bit palettes with RLE, 16, 24, and 32-bit with alpha |
+| TIFF | strips and tiles, the common compressions, every page, up to 16 bits | none, PackBits, LZW, Deflate, CCITT G3 and G4, JPEG; strips or tiles; bi-level, gray, palette, RGB and CMYK; 8 or 16 bits, many pages |
 | WebP | lossy and lossless, still and animated | lossy and lossless, still and animated |
 | JPEG 2000 | all of Part 1, JP2 and raw codestream | Part 1, lossy and lossless, 1 to 16 bits, JP2 or raw codestream |
 | AVIF | stills and image sequences, 8 to 12 bits | intra stills and grids, 8 to 12 bits, alpha, lossless |

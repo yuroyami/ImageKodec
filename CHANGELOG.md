@@ -14,6 +14,16 @@ reviewable in the diff.
 
 ### Added
 
+- `encodeTiff(bitmap, TiffEncodeOptions, metadata, cancellationCheck)`, the same for pages, and
+  `encodeTiff16` with options write the layouts the TIFF decoder reads: no compression, PackBits,
+  LZW and Deflate with or without the predictor, CCITT Group 4 and Group 3 for a bi-level page
+  through the fax encoder of #185, and JPEG with JPEGTables (compression 7); strips of any height
+  or tiles; bi-level, gray, palette and RGB samples. `encodeTiffCmyk` writes CMYK separations from
+  8- or 16-bit ink. An ICC profile and an XMP packet go into the file. `encodeBmp(bitmap,
+  BmpEncodeOptions)` writes 1, 4 and 8-bit palettes, with RLE4 and RLE8 on request, and 16-bit
+  5-5-5. The calls without options write the bytes they wrote before. libtiff and ImageIO read
+  every TIFF variant to ImageKodec's samples, and ImageIO and ImageMagick every BMP variant.
+  See [Writing images](docs/encoding.md#tiff-and-bmp-layouts) (#184).
 - `encodeJpeg(bitmap, JpegEncodeOptions, metadata, cancellationCheck)` and
   `encodeJpeg16(bitmap16, JpegEncodeOptions, ...)` write every process of ITU-T T.81 but the
   hierarchical one: progressive files with libjpeg's default scan script, arithmetic coding with

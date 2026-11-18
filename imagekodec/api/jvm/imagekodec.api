@@ -7,6 +7,15 @@ public final class io/github/yuroyami/imagekodec/AuxiliaryImage {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/yuroyami/imagekodec/BmpEncodeOptions {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Integer;Z)V
+	public synthetic fun <init> (Ljava/lang/Integer;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBitsPerPixel ()Ljava/lang/Integer;
+	public final fun getRle ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/github/yuroyami/imagekodec/CcittEncodeOptions {
 	public fun <init> ()V
 	public fun <init> (IZZZZ)V
@@ -299,6 +308,7 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeAvif16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeAvif16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
+	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/BmpEncodeOptions;)[B
 	public final fun encodeCcitt (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeCcitt (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/CcittEncodeOptions;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeCcitt$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/CcittEncodeOptions;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
@@ -354,9 +364,21 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodePng16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodePng16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeTiff (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
+	public final fun encodeTiff (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public final fun encodeTiff (Ljava/util/List;)[B
+	public final fun encodeTiff (Ljava/util/List;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeTiff$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public static synthetic fun encodeTiff$default (Lio/github/yuroyami/imagekodec/ImageKodec;Ljava/util/List;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeTiff16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;)[B
+	public final fun encodeTiff16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public final fun encodeTiff16 (Ljava/util/List;)[B
+	public final fun encodeTiff16 (Ljava/util/List;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeTiff16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public static synthetic fun encodeTiff16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Ljava/util/List;Lio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeTiffCmyk (II[BLio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public final fun encodeTiffCmyk (II[SLio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeTiffCmyk$default (Lio/github/yuroyami/imagekodec/ImageKodec;II[BLio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public static synthetic fun encodeTiffCmyk$default (Lio/github/yuroyami/imagekodec/ImageKodec;II[SLio/github/yuroyami/imagekodec/TiffEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeWebp (Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/WebpEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public final fun encodeWebp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeWebp (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
@@ -676,6 +698,45 @@ public final class io/github/yuroyami/imagekodec/ScalingKt {
 	public static final fun downscaledTo (Lio/github/yuroyami/imagekodec/KiteBitmap;II)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static final fun scaled (Lio/github/yuroyami/imagekodec/KiteAnimation;II)Lio/github/yuroyami/imagekodec/KiteAnimation;
 	public static final fun scaled (Lio/github/yuroyami/imagekodec/KiteBitmap;II)Lio/github/yuroyami/imagekodec/KiteBitmap;
+}
+
+public final class io/github/yuroyami/imagekodec/TiffCompression : java/lang/Enum {
+	public static final field CcittG3 Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static final field CcittG4 Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static final field Deflate Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static final field Jpeg Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static final field Lzw Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static final field None Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static final field PackBits Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/TiffCompression;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/TiffCompression;
+}
+
+public final class io/github/yuroyami/imagekodec/TiffEncodeOptions {
+	public fun <init> ()V
+	public fun <init> (Lio/github/yuroyami/imagekodec/TiffCompression;Lio/github/yuroyami/imagekodec/TiffPhotometric;ZIIII)V
+	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/TiffCompression;Lio/github/yuroyami/imagekodec/TiffPhotometric;ZIIIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getCompression ()Lio/github/yuroyami/imagekodec/TiffCompression;
+	public final fun getPhotometric ()Lio/github/yuroyami/imagekodec/TiffPhotometric;
+	public final fun getPredictor ()Z
+	public final fun getQuality ()I
+	public final fun getRowsPerStrip ()I
+	public final fun getTileLength ()I
+	public final fun getTileWidth ()I
+	public final fun getTiled ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/TiffPhotometric : java/lang/Enum {
+	public static final field Auto Lio/github/yuroyami/imagekodec/TiffPhotometric;
+	public static final field BiLevel Lio/github/yuroyami/imagekodec/TiffPhotometric;
+	public static final field Gray Lio/github/yuroyami/imagekodec/TiffPhotometric;
+	public static final field Palette Lio/github/yuroyami/imagekodec/TiffPhotometric;
+	public static final field Rgb Lio/github/yuroyami/imagekodec/TiffPhotometric;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/TiffPhotometric;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/TiffPhotometric;
 }
 
 public abstract interface class io/github/yuroyami/imagekodec/TileJob {

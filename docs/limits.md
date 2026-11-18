@@ -32,6 +32,11 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 - The JPEG encoder writes baseline, progressive, arithmetic, 12-bit and lossless files (2 to 16
   bits), but no hierarchical, CMYK or alpha file. It keeps every coefficient of an image in memory,
   two bytes each, so a 4:2:0 encode takes about three bytes a pixel besides the bitmap.
+- The TIFF encoder's CCITT strips and tiles are at most 65536 pixels wide, its JPEG pages at most
+  65535 on a side, and a strip or tile, or a band of rows that tiles are cut from, at most 2^31 bytes
+  of samples. A JPEG strip that is not the last holds a multiple of 16 rows (8 at 4:4:4 or in gray).
+  A palette holds 256 colours at most and no alpha, in TIFF and BMP alike; a BMP of 1, 4, 8, 16 or 24
+  bits holds no alpha. Each is refused with `IllegalArgumentException` that names it (#184).
 
 ## Size ceilings
 

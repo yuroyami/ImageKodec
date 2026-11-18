@@ -21,6 +21,9 @@ ImageKodec.encodeBmp(bitmap)                    // 24-bit BI_RGB, or 32-bit V4 B
 ImageKodec.encodeTiff(bitmap)                   // gray or RGB, alpha when present, Deflate with the predictor
 ImageKodec.encodeTiff(pages)                    // one page a bitmap, read back with decodePage
 ImageKodec.encodeTiff16(bitmap16)               // the same at 16 bits, read back with decode16
+ImageKodec.encodeTiff(page, TiffEncodeOptions(TiffCompression.CcittG4)) // a bi-level page in Group 4
+ImageKodec.encodeTiffCmyk(width, height, ink)   // CMYK separations from ink samples
+ImageKodec.encodeBmp(bitmap, BmpEncodeOptions(8, rle = true)) // a palette of up to 256 colours, RLE8
 ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than the PNG
 ImageKodec.encodeWebp(bitmap, 75)               // lossy VP8 at cwebp's quality 75, alpha kept exact
 ImageKodec.encodeWebp(anim, WebpEncodeOptions(lossless = true)) // animated, lossless or lossy frames
@@ -149,6 +152,54 @@ val tiled = ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(quality = 60, tileSize
   dates become tags of the directory, and the EXIF and GPS directories are copied after it.
 - `cancellationCheck` runs before each row of macroblocks and may throw to stop the encode.
 - Every file decodes in jxrlib's `JxrDecApp` to the samples ImageKodec's decoder gives.
+
+## TIFF and BMP layouts
+
+`encodeTiff`, `encodeTiff16` and `encodeBmp` without options write what they always wrote. With
+`TiffEncodeOptions` and `BmpEncodeOptions` they write the other layouts their decoders read (#184):
+
+```kotlin
+val fax = ImageKodec.encodeTiff(page, TiffEncodeOptions(TiffCompression.CcittG4))
+val tiled = ImageKodec.encodeTiff(bitmap, TiffEncodeOptions(TiffCompression.Lzw, tileWidth = 256, tileLength = 256))
+val jpeg = ImageKodec.encodeTiff(photo, TiffEncodeOptions(TiffCompression.Jpeg, quality = 85))
+val palette = ImageKodec.encodeTiff(chart, TiffEncodeOptions(photometric = TiffPhotometric.Palette))
+val cmyk = ImageKodec.encodeTiffCmyk(width, height, ink, metadata = ImageMetadata(icc = pressProfile))
+val bmp4 = ImageKodec.encodeBmp(icon, BmpEncodeOptions(bitsPerPixel = 4, rle = true))
+```
+
+- TIFF compressions: none (1), PackBits (32773), LZW (5), Deflate (8, the default), CCITT Group 4
+  (4) and Group 3 one-dimensional with EOLs (3) for a bi-level page, and JPEG (7) as Technical Note
+  2 defines it. `predictor` adds the horizontal differencing predictor to LZW and Deflate on samples
+  of 8 or 16 bits.
+- JPEG writes the quantization and Huffman tables once, in JPEGTables, and each strip or tile as an
+  abbreviated stream of the core's baseline encoder, at `quality` as `encodeJpeg` reads it. Colour is
+  YCbCr (photometric 6), 4:2:0 at quality 90 and below and 4:4:4 above; a gray page is one gray
+  component. It takes 8-bit pages without alpha. libtiff and ImageIO read it within 3 levels of
+  ImageKodec's decoder in colour and 1 in gray, as JPEG decoders round each their own way.
+- `rowsPerStrip` sets the strips, 0 keeping strips of about 8 KiB. `tileWidth` and `tileLength`,
+  multiples of 16, write tiles instead; edge tiles are written whole, padded with zeros.
+- `photometric`: `Auto` writes gray when every pixel is gray and RGB otherwise, or bi-level under a
+  CCITT compression. `BiLevel` writes one bit a pixel, WhiteIsZero, black where the luma laid over
+  white is below half, as `encodeCcitt` decides. `Gray` writes one sample, the luma of a colour
+  pixel. `Palette` writes the page's colours at 1, 2, 4 or 8 bits, for an opaque page of at most
+  256 colours. `Rgb` writes three samples even for a gray page. Alpha goes along as an
+  unassociated extra sample, except under a palette, bi-level or JPEG.
+- `encodeTiffCmyk` takes four ink samples a pixel, cyan, magenta, yellow and black, from no ink to
+  full, at 8 bits in a `ByteArray` or 16 in a `ShortArray`, and writes photometric 5 with InkSet 1.
+  Pass the press's ICC profile in the metadata, so that a reader can convert the ink.
+- The metadata's ICC profile goes into every page (tag 34675) and its XMP packet into the first
+  (tag 700). The EXIF block is not written.
+- The CCITT strips are `encodeCcitt`'s data, each strip coded alone: libtiff's `tiffcp -c g4` writes
+  the same strips. G4 is a third of the size of the same page as RGB with Deflate on the text pages
+  of the tests, and LZW comes out 4 to 19 percent larger than Deflate on the photo-like scenes and
+  two to six times faster; libtiff's own LZW files in the same strips are within 14 bytes of ours.
+- BMP `bitsPerPixel`: null keeps the 24-bit or 32-bit choice. 1, 4 and 8 write a palette of the
+  bitmap's colours, `rle` codes 4 and 8 bits with BI_RLE4 and BI_RLE8, every pixel written so no
+  reader leaves a hole. 16 writes 5-5-5 BI_RGB, each channel rounded to the nearest of 32 levels,
+  the only lossy depth. 24 and the palettes need an opaque bitmap, a palette at most as many colours
+  as its depth holds; anything else is refused with `IllegalArgumentException`.
+- libtiff (`tiffinfo`, `tiff2rgba`, `tiffcmp`) and ImageIO read every TIFF variant to the samples
+  ImageKodec's decoder gives, and ImageIO and ImageMagick read every BMP variant.
 
 ## Fax and JBIG2 data for PDF and TIFF
 
@@ -446,7 +497,11 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
 - The JBIG2 encoder writes generic regions only. Symbol dictionaries and text regions, which pay
   only on text and which encoders that merge look-alike glyphs make lossy, are not written, and
   neither are refinement, halftone or striped pages. The CCITT encoder writes no uncompressed mode.
-- `encodeTiff` does not write fax compression; a TIFF of a fax page is built around `encodeCcitt`.
+- The TIFF encoder writes chunky samples only (no separate planes), little endian, without
+  old-style JPEG (6), Group 3 two-dimensional coding, CCITT compression 2, floating-point or signed
+  samples, depths other than 1, 2, 4, 8 and 16 bits, YCbCr outside JPEG, or an EXIF directory. JPEG
+  takes no 16-bit pages and no alpha. The BMP encoder writes no 2-bit palette, no BITFIELDS layout
+  but the 32-bit one, no top-down rows, no V5 header with an ICC profile, and no embedded JPEG or PNG.
 - The PNG encoder does not quantize: a palette is written only for a picture of 256 colours or
   fewer, and `encodeGif` is the encoder that reduces colours. It writes no `sBIT`, `gAMA`, `cHRM`,
   `sRGB`, `cICP`, `pHYs` or text chunks other than XMP. APNG is written at 8 bits a sample at
