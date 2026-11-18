@@ -29,6 +29,9 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 - The PNG encoder writes a palette only for 256 colours or fewer, and APNG at 8 bits a sample at
   most. Its rows must fit one array: a file whose filtered rows pass 2 GB, such as a
   16-bit RGBA picture of more than 268 million pixels, throws `IllegalArgumentException`.
+- The JPEG encoder writes baseline, progressive, arithmetic, 12-bit and lossless files (2 to 16
+  bits), but no hierarchical, CMYK or alpha file. It keeps every coefficient of an image in memory,
+  two bytes each, so a 4:2:0 encode takes about three bytes a pixel besides the bitmap.
 
 ## Size ceilings
 

@@ -325,7 +325,11 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;Lio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
+	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JpegEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
+	public static synthetic fun encodeJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JpegEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeJpeg16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JpegEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJpeg16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JpegEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeJxl (Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public final fun encodeJxl (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
 	public final fun encodeJxl (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
@@ -448,12 +452,53 @@ public final class io/github/yuroyami/imagekodec/JpegComponents {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/yuroyami/imagekodec/JpegEncodeOptions {
+	public fun <init> ()V
+	public fun <init> (ILio/github/yuroyami/imagekodec/JpegSubsampling;ZZZIIILio/github/yuroyami/imagekodec/JpegGrayscale;ILio/github/yuroyami/imagekodec/JpegEncoderKind;IZII)V
+	public synthetic fun <init> (ILio/github/yuroyami/imagekodec/JpegSubsampling;ZZZIIILio/github/yuroyami/imagekodec/JpegGrayscale;ILio/github/yuroyami/imagekodec/JpegEncoderKind;IZIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getArithmetic ()Z
+	public final fun getArithmeticAcThreshold ()I
+	public final fun getArithmeticDcLower ()I
+	public final fun getArithmeticDcUpper ()I
+	public final fun getEncoder ()Lio/github/yuroyami/imagekodec/JpegEncoderKind;
+	public final fun getGrayscale ()Lio/github/yuroyami/imagekodec/JpegGrayscale;
+	public final fun getLossless ()Z
+	public final fun getOptimizeHuffman ()Z
+	public final fun getPointTransform ()I
+	public final fun getPrecision ()I
+	public final fun getPredictor ()I
+	public final fun getProgressive ()Z
+	public final fun getQuality ()I
+	public final fun getRestartInterval ()I
+	public final fun getSubsampling ()Lio/github/yuroyami/imagekodec/JpegSubsampling;
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/github/yuroyami/imagekodec/JpegEncoderKind : java/lang/Enum {
 	public static final field Fast Lio/github/yuroyami/imagekodec/JpegEncoderKind;
 	public static final field Jpegli Lio/github/yuroyami/imagekodec/JpegEncoderKind;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/JpegEncoderKind;
 	public static fun values ()[Lio/github/yuroyami/imagekodec/JpegEncoderKind;
+}
+
+public final class io/github/yuroyami/imagekodec/JpegGrayscale : java/lang/Enum {
+	public static final field Always Lio/github/yuroyami/imagekodec/JpegGrayscale;
+	public static final field Auto Lio/github/yuroyami/imagekodec/JpegGrayscale;
+	public static final field Never Lio/github/yuroyami/imagekodec/JpegGrayscale;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/JpegGrayscale;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/JpegGrayscale;
+}
+
+public final class io/github/yuroyami/imagekodec/JpegSubsampling : java/lang/Enum {
+	public static final field Auto Lio/github/yuroyami/imagekodec/JpegSubsampling;
+	public static final field S420 Lio/github/yuroyami/imagekodec/JpegSubsampling;
+	public static final field S422 Lio/github/yuroyami/imagekodec/JpegSubsampling;
+	public static final field S444 Lio/github/yuroyami/imagekodec/JpegSubsampling;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/JpegSubsampling;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/JpegSubsampling;
 }
 
 public final class io/github/yuroyami/imagekodec/JpxColorSpecification {

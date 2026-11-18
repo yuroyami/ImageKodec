@@ -12,6 +12,8 @@ ImageKodec.encodePng(bitmap, PngEncodeOptions()) // the smallest exact type: gra
 ImageKodec.encodePng16(bitmap16)                // up to 16 bits a sample, read back with decode16
 ImageKodec.encodeJpeg(bitmap, quality = 85)     // baseline; 4:2:0 at quality <= 90, 4:4:4 above
 ImageKodec.encodeJpeg(bitmap, 85, JpegEncoderKind.Jpegli) // smaller files at the same score, slower
+ImageKodec.encodeJpeg(bitmap, JpegEncodeOptions(quality = 85, progressive = true)) // see "JPEG options"
+ImageKodec.encodeJpeg16(bitmap16, JpegEncodeOptions(lossless = true, precision = 16)) // every bit back
 ImageKodec.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colors
 ImageKodec.encodeGif(anim)                      // animated, delays and loop count preserved
 ImageKodec.encodePng(anim)                      // APNG: lossless frames, alpha, delays and loop count
@@ -34,6 +36,33 @@ ImageKodec.encodeJbig2(bitmap)                  // a JBIG2 generic region, for a
 ```
 
 `encodeJpeg` uses a quality of 90 when you pass none.
+
+## JPEG options
+
+`JpegEncodeOptions` reaches every process of the JPEG standard (ITU-T T.81) but the hierarchical one (#183):
+
+```kotlin
+val options = JpegEncodeOptions(
+    quality = 80,
+    subsampling = JpegSubsampling.S422,   // Auto, S444, S422 or S420
+    progressive = true,                   // libjpeg's default scan script
+    grayscale = JpegGrayscale.Auto,       // one component when every pixel is gray
+    restartInterval = 0,                  // MCUs between restart markers
+)
+val jpeg = ImageKodec.encodeJpeg(bitmap, options, metadata, cancellationCheck = { ensureActive() })
+val twelve = ImageKodec.encodeJpeg16(bitmap16, JpegEncodeOptions(quality = 90, precision = 12))
+val lossless = ImageKodec.encodeJpeg16(bitmap16, JpegEncodeOptions(lossless = true, precision = 16, predictor = 7))
+```
+
+- The defaults write what `encodeJpeg(bitmap, 90)` writes, byte for byte, except that a gray bitmap becomes one component, which is smaller. `JpegGrayscale.Never` keeps three; `Always` writes the luma of a colour bitmap.
+- `progressive` writes the scan script libjpeg uses by default: the DC coefficients at half precision, the AC coefficients in bands and two steps of successive approximation, then the last bits. Its Huffman tables are built for the file, since the example tables have no end-of-band runs.
+- `optimizeHuffman` builds the Huffman tables of a sequential file from its own symbol counts in a second pass. A 12-bit or lossless Huffman file always gets them.
+- `arithmetic` codes the same coefficients with the QM coder of T.81 Annex D, about a tenth smaller than Huffman coding with built tables. `arithmeticDcLower`, `arithmeticDcUpper` and `arithmeticAcThreshold` set the conditioning of the DAC segment. Browsers do not read arithmetic-coded files; libjpeg-turbo does.
+- `precision = 12` with `encodeJpeg16` writes a 12-bit DCT file, extended sequential (SOF1) or progressive. It reads the top 12 bits of each 16-bit sample.
+- `lossless` writes T.81 Annex H at 2 to 16 bits, with the `predictor` (1 to 7) and `pointTransform` asked for: gray, or RGB with no colour transform, never subsampled. `decode16` returns the samples, and `decode` the pixels of an 8-bit bitmap given to `encodeJpeg`. A lossless restart interval must hold whole rows.
+- `encoder = JpegEncoderKind.Jpegli` makes Jpegli's coefficients and takes every option of an 8-bit DCT file: its progressive, arithmetic and optimized files hold the coefficients of its baseline file. It writes 4:2:0 only, and a gray file is the luma of its colour one.
+- Options that exclude each other, such as `lossless` with `progressive`, throw an `IllegalArgumentException` that names them.
+- Every coding of the same coefficients decodes to the same pixels in libjpeg-turbo and in ImageKodec, and in ffmpeg, which reads no arithmetic coding, for the Huffman ones. On the six photo-like scenes of the tests at quality 75, the progressive files are 0.9 percent smaller than `cjpeg -progressive -optimize`'s and the arithmetic ones 0.7 percent smaller than `cjpeg -arithmetic`'s, at SSIMULACRA 2 scores within 0.8 of theirs, and the arithmetic files 13 percent smaller than the progressive ones.
 
 ## Smaller JPEGs with Jpegli
 
@@ -422,5 +451,7 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   fewer, and `encodeGif` is the encoder that reduces colours. It writes no `sBIT`, `gAMA`, `cHRM`,
   `sRGB`, `cICP`, `pHYs` or text chunks other than XMP. APNG is written at 8 bits a sample at
   most, since a `KiteAnimation` holds 8-bit frames.
+- The JPEG encoder writes no hierarchical file, no CMYK or YCCK file and no alpha, and subsamples
+  only by 2 across or by 2 across and down. Jpegli's XYB colour space is not written.
 - The GIF writer accepts a play count in 0..65536 and refuses a larger one. See
   [Animation](animation.md#play-counts).

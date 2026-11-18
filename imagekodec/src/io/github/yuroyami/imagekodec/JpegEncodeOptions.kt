@@ -37,8 +37,8 @@ public enum class JpegGrayscale {
  * 8-bit baseline file with the example Huffman tables of T.81 Annex K. The one change is
  * [grayscale], which by default writes a gray picture as one component.
  *
- * The processes: a sequential DCT file (SOF0 at 8 bits, SOF1 at 12 or with optimized tables),
- * a [progressive] one (SOF2), the arithmetic-coded forms of both (SOF9, SOF10), and a [lossless]
+ * The processes: a sequential DCT file (baseline SOF0 at 8 bits, extended SOF1 at 12), a
+ * [progressive] one (SOF2), the arithmetic-coded forms of both (SOF9, SOF10), and a [lossless]
  * one (SOF3, or SOF11 with [arithmetic]). Hierarchical files are not written.
  *
  * @property quality 0 to 100, higher is better, as each [encoder] maps it to its tables. 0 writes
@@ -56,8 +56,8 @@ public enum class JpegGrayscale {
  *   slower. A 12-bit or lossless Huffman file always gets them, since the example tables do not
  *   hold its larger categories. Not with [arithmetic], which has no Huffman tables.
  * @property arithmetic arithmetic coding by T.81 Annex D's QM coder with the models of F.1.4,
- *   G.1.3 and H.1.2.3, in place of Huffman coding: about a tenth smaller, and read by fewer
- *   programs.
+ *   G.1.3 and H.1.2.3, in place of Huffman coding: commonly a tenth smaller than Huffman coding
+ *   with tables built for the file, and read by fewer programs (no browser reads it).
  * @property arithmeticDcLower the lower conditioning bound L of the DAC segment, 0 to 15, for the
  *   DC coefficients or the lossless differences (T.81 F.1.4.4.1.2). The default is T.81's.
  * @property arithmeticDcUpper the upper bound U, [arithmeticDcLower] to 15.

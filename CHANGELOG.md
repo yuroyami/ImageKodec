@@ -14,6 +14,15 @@ reviewable in the diff.
 
 ### Added
 
+- `encodeJpeg(bitmap, JpegEncodeOptions, metadata, cancellationCheck)` and
+  `encodeJpeg16(bitmap16, JpegEncodeOptions, ...)` write every process of ITU-T T.81 but the
+  hierarchical one: progressive files with libjpeg's default scan script, arithmetic coding with
+  the conditioning of a DAC segment, Huffman tables built for the file, restart markers, one gray
+  component, 4:4:4, 4:2:2 or 4:2:0, 12-bit DCT files, and lossless files at 2 to 16 bits with any
+  predictor and point transform, Huffman or arithmetic. Both encoders honour the options of an
+  8-bit DCT file. libjpeg-turbo 3.1 and ffmpeg read every file to the samples the coding promises.
+  The calls without options write the same bytes as before. See [Writing images](docs/encoding.md)
+  (#183).
 - PNG writes every colour type and bit depth, a palette, colour keys and Adam7 interlace (#182).
   `encodePng(bitmap, PngEncodeOptions(...), metadata, cancellationCheck)` takes `PngColorType.Auto`,
   the smallest type that holds the pixels exactly (gray at 1 to 16 bits, a palette of up to 256

@@ -125,6 +125,11 @@ being true.
 - ffmpeg 6 misreads the lossless difference -32768 (category 16, no extra bits) and
   reads a three-component 4:4:4 lossless file as RGB; its `ljpeg` encoder writes BGR
   through a private 9-bit transform no other decoder knows (#19).
+- ffmpeg 6 shifts a gray lossless JPEG's samples up to fill its 8- or 16-bit format but gives an
+  RGB one's unshifted, and reads every 9-bit RGB file through that private transform (#183).
+- libjpeg-turbo 3.1 reads lossless JPEG with Huffman coding only ("arithmetic coding is not
+  implemented" for SOF11), and ffmpeg reads no arithmetic coding at all, so an arithmetic lossless
+  file has no oracle here but the T.81 reference software (#183).
 - lcms2 interpolates every CLUT an ICC profile holds in 16-bit fixed point, even inside a
   floating-point transform (`EvaluateCLUTfloatIn16`), and its `LinearInterp` works in
   unsigned 32 bits, which a two-entry table overflows in signed arithmetic. A port in
