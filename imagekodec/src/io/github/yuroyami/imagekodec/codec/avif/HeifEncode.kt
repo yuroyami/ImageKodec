@@ -3,11 +3,13 @@ package io.github.yuroyami.imagekodec.codec.avif
 import io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi
 import io.github.yuroyami.imagekodec.HeifChroma
 import io.github.yuroyami.imagekodec.HeifCodedPicture
+import io.github.yuroyami.imagekodec.HeifCodedSample
 import io.github.yuroyami.imagekodec.HeifEncodeOptions
 import io.github.yuroyami.imagekodec.HeifEncodeParameters
 import io.github.yuroyami.imagekodec.HeifEncoder
 import io.github.yuroyami.imagekodec.HeifPlanes
 import io.github.yuroyami.imagekodec.ImageMetadata
+import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.Orientation
@@ -20,7 +22,8 @@ import io.github.yuroyami.imagekodec.scaled
 /**
  * A HEIF file of one still image (#174): RGB to planes ([HeifPlaneMaker]), the planes coded by the
  * registered [HeifEncoder] of the item type, one item or a `grid` of tiles, and the items written by
- * [HeifWriter] with an alpha auxiliary image, a thumbnail and the metadata the caller gives.
+ * [HeifWriter] with an alpha auxiliary image, a thumbnail and the metadata the caller gives. An
+ * animation is an image sequence track instead ([encodeSequence], #177).
  */
 @OptIn(ExperimentalHeifCodecApi::class)
 internal object HeifEncode {
@@ -65,11 +68,157 @@ internal object HeifEncode {
         return writer.build()
     }
 
+    const val NEEDS_HEIC_SEQUENCE = "HEIC image sequences need a sequence encoder for 'hvc1', which the imagekodec-heic module does not provide yet"
+
+    /** The timescale of a sequence's track: milliseconds, the unit of [KiteFrame.delayMillis]. */
+    private const val TIMESCALE = 1000L
+
+    /**
+     * [animation] as a HEIF image sequence (#177): one track of the pictures, coded by the sequence encoder of the
+     * registered [HeifEncoder] of [itemType] ([HeifEncoder.openSequence]), each frame lasting its delay in
+     * milliseconds (1 for a delay of 0), the play count in the edit list, an auxiliary alpha track when any frame
+     * has alpha, and the first picture also as the primary item, sharing the first sample's bytes, so a reader of
+     * still images shows it, as libavif writes a sequence. Throws IllegalArgumentException for an animation a
+     * reader cannot take, and UnsupportedImageException when no encoder of [itemType], or no sequence encoder, is
+     * registered.
+     */
+    fun encodeSequence(animation: KiteAnimation, options: HeifEncodeOptions, metadata: ImageMetadata, itemType: String, cancel: (() -> Unit)?): ByteArray {
+        val w = animation.width
+        val h = animation.height
+        require(w in 1..MAX_SIDE && h in 1..MAX_SIDE && w.toLong() * h <= Budget.MAX_PIXELS) { "HEIF: a sequence of $w by $h passes the size a reader accepts" }
+        for ((i, f) in animation.frames.withIndex()) {
+            require(f.bitmap.width == w && f.bitmap.height == h) { "HEIF: frame $i is ${f.bitmap.width} by ${f.bitmap.height} in an animation of $w by $h" }
+            require(f.delayMillis >= 0) { "HEIF: frame $i has a delay of ${f.delayMillis} ms" }
+        }
+        val encoder = HeifCodecs.encoder(itemType) ?: throw UnsupportedImageException(if (itemType == "hvc1") NEEDS_HEIC_MODULE else "HEIF encoding of '$itemType' needs its encoder registered")
+        val sources = animation.frames.map { HeifRgbSource(it.bitmap) }
+        val gray = sources.all { it.gray }
+        val alpha = sources.any { it.alpha }
+        val depth = options.bitDepth ?: 8
+        val lossless = options.lossless
+        val subX = if (gray || lossless || options.chroma == HeifChroma.Yuv444) 0 else 1
+        val subY = if (gray || lossless || options.chroma != HeifChroma.Yuv420) 0 else 1
+        // A subsampled picture of odd size codes one more column or row and crops it with 'clap', as a still does.
+        val cw = (w + subX) shr subX shl subX
+        val ch = (h + subY) shr subY shl subY
+        val icc = metadata.icc
+        val matrix = if (lossless && !gray) 0 else 6
+        val colour = HeifEncodeParameters(
+            options.quality, lossless, options.effort,
+            colorPrimaries = if (icc != null) 2 else 1, transferCharacteristics = if (icc != null) 2 else 13, matrixCoefficients = matrix,
+        )
+        val colourCoder = encoder.openSequence(colour, options.keyFrameInterval)
+            ?: throw UnsupportedImageException(if (itemType == "hvc1") NEEDS_HEIC_SEQUENCE else "HEIF image sequences of '$itemType' need a sequence encoder")
+        val alphaCoder = if (alpha) encoder.openSequence(HeifEncodeParameters(options.quality, lossless, options.effort), options.keyFrameInterval)!! else null
+        val colourSamples = ArrayList<HeifCodedSample>()
+        val alphaSamples = ArrayList<HeifCodedSample>()
+        for (source in sources) {
+            cancel?.invoke()
+            val maker = HeifPlaneMaker(source, depth, lossless, subX, subY, gray)
+            colourSamples += colourCoder.encode(maker.colour(0, 0, cw, ch), cancel)
+            if (alphaCoder != null) alphaSamples += alphaCoder.encode(maker.alpha(0, 0, cw, ch), cancel)
+        }
+        colourSamples += colourCoder.finish(cancel)
+        if (alphaCoder != null) alphaSamples += alphaCoder.finish(cancel)
+        val durations = LongArray(animation.frames.size) { maxOf(1, animation.frames[it].delayMillis).toLong() }
+        val heif = HeifWriter()
+        val nclx = colr(colour.colorPrimaries!!, colour.transferCharacteristics!!, matrix)
+        val prof = icc?.let { box("colr", "prof".encodeToByteArray() + it) }
+        val crop = if (cw != w || ch != h) clap(w, h, cw, ch) else null
+        val geometry = orientation(options.orientation)
+        val colourConfig = box(encoder.configurationType, colourCoder.configuration)
+        val colourEntry = sampleEntry(colourCoder.sampleEntryType, cw, ch, listOf(colourConfig, nclx) + listOfNotNull(prof, ccst(), crop) + geometry.map { it.first })
+        val colourTrack = heif.addTrack(track(colourSamples, durations, colourEntry, cw, ch, animation.loopCount, "pict", null))
+        val first = colourSamples.indexOfFirst { it.frameIndex == 0 }
+        val channels = if (gray) 1 else 3
+        val primary = heif.addItem(
+            encoder.itemType, colourSamples[first].data,
+            listOf(colourConfig to true, ispe(cw, ch) to false, pixi(channels, depth) to false, nclx to false) +
+                listOfNotNull(prof?.let { it to false }, crop?.let { it to true }) + geometry,
+            sharedSample = colourTrack to first,
+        )
+        heif.primary = primary
+        if (alphaCoder != null) {
+            val alphaConfig = box(encoder.configurationType, alphaCoder.configuration)
+            val auxi = fullBox("auxi", encoder.alphaUrn.encodeToByteArray() + byteArrayOf(0))
+            val alphaEntry = sampleEntry(alphaCoder.sampleEntryType, cw, ch, listOf(alphaConfig, auxi, ccst()) + listOfNotNull(crop))
+            val alphaTrack = heif.addTrack(track(alphaSamples, durations, alphaEntry, cw, ch, animation.loopCount, "auxv", intArrayOf(colourTrack)))
+            val firstAlpha = alphaSamples.indexOfFirst { it.frameIndex == 0 }
+            val alphaItem = heif.addItem(
+                encoder.itemType, alphaSamples[firstAlpha].data,
+                listOf(alphaConfig to true, ispe(cw, ch) to false, pixi(1, depth) to false, fullBox("auxC", encoder.alphaUrn.encodeToByteArray() + byteArrayOf(0)) to false) +
+                    listOfNotNull(crop?.let { it to true }),
+                hidden = true, sharedSample = alphaTrack to firstAlpha,
+            )
+            heif.reference("auxl", alphaItem, intArrayOf(primary))
+        }
+        Writing(encoder, options, metadata, cancel, heif).metadata(primary)
+        // AVIF 1.1 section 6 and ISO/IEC 23008-12 Annex B: the sequence brand first, the still image brand beside it.
+        return heif.build(colourCoder.brand, listOf(colourCoder.imageBrand, colourCoder.brand, "msf1", "iso8", "mif1", "miaf"))
+    }
+
+    /**
+     * A track of [samples], in decoding order, whose pictures last [durations] in display order: each sample's
+     * decoding time is the display time of the picture at its place, and its composition offset moves it to the
+     * display time of the picture it codes, so a sequence without reordering has none.
+     */
+    private fun track(
+        samples: List<HeifCodedSample>, durations: LongArray, entry: ByteArray, w: Int, h: Int, playCount: Long, handler: String, auxiliaryOf: IntArray?,
+    ): HeifWriter.Track {
+        val n = durations.size
+        check(samples.size == n && samples.map { it.frameIndex }.sorted() == (0 until n).toList()) {
+            "the sequence encoder coded ${samples.size} samples for $n pictures"
+        }
+        check(samples[0].sync) { "the first sample of a sequence is not a sync sample" }
+        val start = LongArray(n + 1)
+        for (j in 0 until n) start[j + 1] = start[j] + durations[j]
+        val offsets = LongArray(n) { i -> start[samples[i].frameIndex] - start[i] }
+        return HeifWriter.Track(
+            entry, samples.map { it.data }, durations.copyOf(), if (offsets.all { it == 0L }) null else offsets,
+            BooleanArray(n) { samples[it].sync }, w, h, TIMESCALE, playCount, handler, auxiliaryOf,
+        )
+    }
+
+    /**
+     * A VisualSampleEntry of [type] (ISO/IEC 14496-12 12.1.3) for pictures of [w] by [h], with [children]: six
+     * reserved bytes, data reference 1, the size, 72 dpi, one frame a sample, no compressor name, depth 24.
+     */
+    private fun sampleEntry(type: String, w: Int, h: Int, children: List<ByteArray>): ByteArray {
+        val s = HeifWriter.Sink()
+        for (i in 0 until 6) s.u8(0)
+        s.u16(1) // data_reference_index
+        s.u16(0)
+        s.u16(0)
+        for (i in 0 until 3) s.u32(0)
+        s.u16(w)
+        s.u16(h)
+        s.u32(0x00480000)
+        s.u32(0x00480000)
+        s.u32(0)
+        s.u16(1) // frame_count
+        for (i in 0 until 32) s.u8(0) // compressorname
+        s.u16(0x0018)
+        s.u16(0xFFFF) // pre_defined -1
+        for (c in children) s.bytes(c)
+        return s.box(type)
+    }
+
+    /**
+     * `ccst` (ISO/IEC 23008-12 7.2.3.4), which an image sequence's sample entry carries: pictures may predict from
+     * others (all_ref_pics_intra 0), intra prediction is used, and any number of references (15).
+     */
+    private fun ccst(): ByteArray = fullBox("ccst", be32((1 shl 30) or (15 shl 26)))
+
     /** The largest side of a grid a reader accepts, 16 bits of `ispe` and the grid's output size. */
     private const val MAX_SIDE = 65535
 
-    private class Writing(val encoder: HeifEncoder, val options: HeifEncodeOptions, val metadata: ImageMetadata, val cancel: (() -> Unit)?) {
-        val heif = HeifWriter()
+    private class Writing(
+        val encoder: HeifEncoder,
+        val options: HeifEncodeOptions,
+        val metadata: ImageMetadata,
+        val cancel: (() -> Unit)?,
+        val heif: HeifWriter = HeifWriter(),
+    ) {
 
         /**
          * Codes [source] as an image item, a grid of [tile] when not null, with its alpha as an auxiliary

@@ -1436,6 +1436,50 @@ public object ImageKodec {
     ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encode(bitmap, null, options, metadata, "av01", cancel) }
 
     /**
+     * Encode [animation] as an animated AVIF file (#177): an AV1 image sequence, a track of every frame with its delay,
+     * that [decodeAnimation] plays and libavif and ffmpeg read. The first frame is also the primary image item,
+     * sharing its bytes, as libavif writes a sequence, so a reader of still images shows it.
+     *
+     * The first frame is an AV1 key frame and the frames after it are inter frames, which predict each block from
+     * the frame before or the one before that, by a motion search, and from effort 2 from both averaged; set
+     * [HeifEncodeOptions.keyFrameInterval] for a key frame at least every that many frames. Each frame lasts its
+     * [KiteFrame.delayMillis] (1 ms for a delay of 0) on a track of timescale 1000, and [KiteAnimation.loopCount]
+     * goes in the edit list as libavif reads a play count, 0 playing for ever. A frame with alpha below 255 adds an
+     * alpha track of its own, auxiliary to the colour track. Quality, lossless, chroma, depth, effort, orientation
+     * and [metadata] act as [encodeAvif] says for a still, on every frame; a lossless file decodes to exactly the
+     * frames. [HeifEncodeOptions.tileSize] and [HeifEncodeOptions.thumbnailSize] apply to stills only: a sequence
+     * codes each frame as one AV1 frame. [cancellationCheck] runs at least once a frame and once a row of
+     * superblocks, and what it throws comes out of this call as it is.
+     *
+     * @throws IllegalArgumentException if a frame's bitmap is not the animation's size, a delay is negative, or the
+     *   picture is too large for a HEIF reader (65535 on a side)
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeAvif(
+        animation: KiteAnimation,
+        options: HeifEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encodeSequence(animation, options, metadata, "av01", cancel) }
+
+    /**
+     * Encode [animation] as an animated HEIC file (#177): an HEVC image sequence written as [encodeAvif] writes an
+     * AV1 one, its pictures coded by the sequence encoder of the `hvc1` encoder that a module registers with
+     * [registerHeifEncoder] ([HeifEncoder.openSequence]).
+     *
+     * @throws IllegalArgumentException as [encodeAvif] with an animation does
+     * @throws UnsupportedImageException if no `hvc1` encoder is installed (add the `imagekodec-heic` module and call
+     *   `ImageKodecHeic.install()`), or the one installed codes still pictures only
+     */
+    @Throws(IllegalArgumentException::class, UnsupportedImageException::class)
+    public fun encodeHeic(
+        animation: KiteAnimation,
+        options: HeifEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encodeSequence(animation, options, metadata, "hvc1", cancel) }
+
+    /**
      * Encode [bitmap] as an AVIF file of 10 or 12 bits a sample ([HeifEncodeOptions.bitDepth]; by default 10, or 12
      * when lossless), as [encodeAvif] writes an 8-bit bitmap. One or two channels code as gray, and so do three or
      * four whose colour channels are equal. AV1 holds 12 bits at most, so [decode16] gives each sample back rounded

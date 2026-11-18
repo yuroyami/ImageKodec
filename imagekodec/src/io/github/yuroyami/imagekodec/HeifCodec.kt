@@ -150,7 +150,68 @@ public interface HeifEncoder {
      * [IllegalArgumentException] for a picture the codec cannot hold.
      */
     public fun encode(planes: HeifPlanes, parameters: HeifEncodeParameters, cancellationCheck: (() -> Unit)?): HeifCodedPicture
+
+    /**
+     * Opens an encoder of one image sequence (#177), the pictures of one track of a HEIF file, coded as
+     * [parameters] ask, or returns null when this encoder codes still pictures only, as the default does. The
+     * core calls it for [ImageKodec.encodeAvif] and [ImageKodec.encodeHeic] with an animation, once for the
+     * colour track and once more for an alpha track. [keyFrameInterval] above 0 asks for a picture that needs no
+     * earlier one (a sync sample) at least every that many pictures; 0 asks for the first alone.
+     */
+    public fun openSequence(parameters: HeifEncodeParameters, keyFrameInterval: Int): HeifSequenceEncoder? = null
 }
+
+/**
+ * The encoder of one image sequence (#177), which a [HeifEncoder] opens. The core hands it the pictures of the
+ * track in display order and writes the samples it returns into the track in the order they come, which is
+ * decoding order: an encoder that reorders pictures, as HEVC does with B pictures, holds a picture back and
+ * returns it later, each sample naming the picture it codes by [HeifCodedSample.frameIndex]. The core then writes
+ * the composition offsets (`ctts`) that put each picture back at its display time.
+ *
+ * The contract of [HeifEncoder.encode] holds for each picture: every picture of the sequence has the first one's
+ * size, depth and chroma format, call `cancellationCheck` at a coarse step and let what it throws pass through.
+ */
+@ExperimentalHeifCodecApi
+public interface HeifSequenceEncoder {
+    /** The four-character sample entry type of the track, such as `av01` or `hvc1`. */
+    public val sampleEntryType: String
+
+    /**
+     * The brand of the image sequence for the `ftyp` box, such as `avis` for AV1 or `hevc` for HEVC, which the
+     * core lists beside the item brand of the first picture.
+     */
+    public val brand: String
+
+    /** The brand of the first picture as a still image item, such as `avif` or `heic`, for the `ftyp` box. */
+    public val imageBrand: String
+
+    /**
+     * Codes the next picture, [planes], and returns the samples that are ready, in decoding order: none while
+     * the encoder holds pictures back, one, or several.
+     */
+    public fun encode(planes: HeifPlanes, cancellationCheck: (() -> Unit)?): List<HeifCodedSample>
+
+    /** Ends the sequence: the samples the encoder still holds, in decoding order. */
+    public fun finish(cancellationCheck: (() -> Unit)?): List<HeifCodedSample>
+
+    /**
+     * The payload of the configuration property of the sample entry (`av1C`, `hvcC`), without its box header,
+     * once the first picture is coded. The core also gives it to the first picture, which it writes as the
+     * primary item too, so that a reader of still images shows that picture.
+     */
+    public val configuration: ByteArray
+}
+
+/**
+ * One coded sample of an image sequence: its [data], the index from 0 in display order of the picture it codes,
+ * and whether it is a sync sample, decodable without the samples before it. A sequence's first sample is one.
+ */
+@ExperimentalHeifCodecApi
+public class HeifCodedSample(
+    public val data: ByteArray,
+    public val frameIndex: Int,
+    public val sync: Boolean,
+)
 
 /**
  * What a [HeifEncoder] makes of one picture. [quality] runs from 0 to 100, higher better, and is

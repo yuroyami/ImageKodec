@@ -100,9 +100,10 @@ internal class HeifPlaneMaker(
     /** 0 or 1 each: the chroma subsampling of a colour picture. */
     val subX: Int,
     val subY: Int,
+    /** Whether to code luma alone: the source's own grayness, or a sequence's, which every frame shares (#177). */
+    private val gray: Boolean = source.gray,
 ) {
     private val max = (1 shl depth) - 1
-    private val gray = source.gray
     private val table: IntArray? = if (lossless && !source.narrow) nearestDecode16(depth) else null
 
     /** [v], a 16-bit sample, at [depth] bits. */

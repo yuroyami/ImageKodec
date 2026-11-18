@@ -54,6 +54,9 @@ public enum class HeifChroma {
  * @property orientation how to show the stored pixels, as `irot` and `imir` properties: a reader that
  *   applies them, as [ImageKodec.decode] with `applyOrientation` does, shows `bitmap.oriented(orientation)`.
  *   An EXIF block written with the image takes the same orientation, so the two never disagree.
+ * @property keyFrameInterval for an animation (#177): above 0, a picture coded on its own, which a player can
+ *   start from, at least every that many frames; 0, the default, codes the first frame alone that way and
+ *   every later one from those before it, which is smallest. Still pictures ignore it.
  * @throws IllegalArgumentException when a value is out of its range
  */
 public class HeifEncodeOptions @Throws(IllegalArgumentException::class) public constructor(
@@ -65,6 +68,7 @@ public class HeifEncodeOptions @Throws(IllegalArgumentException::class) public c
     public val tileSize: Int? = 512,
     public val thumbnailSize: Int? = null,
     public val orientation: Orientation = Orientation.Normal,
+    public val keyFrameInterval: Int = 0,
 ) {
     init {
         require(quality in 0..100) { "HEIF quality $quality is not in 0..100" }
@@ -72,9 +76,10 @@ public class HeifEncodeOptions @Throws(IllegalArgumentException::class) public c
         require(effort in 1..3) { "HEIF effort $effort is not in 1..3" }
         require(tileSize == null || (tileSize in 64..8192 && tileSize % 8 == 0)) { "HEIF tile size $tileSize is not a multiple of 8 from 64 to 8192" }
         require(thumbnailSize == null || thumbnailSize in 1..8192) { "HEIF thumbnail size $thumbnailSize is not in 1..8192" }
+        require(keyFrameInterval >= 0) { "HEIF key frame interval $keyFrameInterval is negative" }
     }
 
     override fun toString(): String =
         "HeifEncodeOptions(quality=$quality, lossless=$lossless, chroma=$chroma, bitDepth=$bitDepth, effort=$effort, " +
-            "tileSize=$tileSize, thumbnailSize=$thumbnailSize, orientation=$orientation)"
+            "tileSize=$tileSize, thumbnailSize=$thumbnailSize, orientation=$orientation, keyFrameInterval=$keyFrameInterval)"
 }
