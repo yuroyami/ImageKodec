@@ -1532,6 +1532,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             val ctx = if (paletteSizeY > 0) 1 else 0
             val hasPaletteUv = sym(cdf[C.PALETTE_UV_MODE], ctx * 3, 2) { if (choice.paletteSizeUV > 0) 1 else 0 }
             if (hasPaletteUv == 1) {
+                toolUse?.add("chroma palette")
                 paletteSizeUV = sym(cdf[C.PALETTE_UV_SIZE], bsizeCtx * 8, 7) { choice.paletteSizeUV - 2 } + 2
                 readPaletteColors(1, paletteSizeUV, paletteColorsU, deltaPlusOne = false)
                 if (sd.literal(1) == 1) {
@@ -2532,6 +2533,13 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             else -> sd.symbol(cdf[C.RESTORATION_TYPE], 0, 3)
         }
         lrType[plane]!![u] = type
+        toolUse?.add(
+            when (type) {
+                Av1FrameHeader.RESTORE_WIENER -> "wiener restoration unit"
+                Av1FrameHeader.RESTORE_SGRPROJ -> "self-guided restoration unit"
+                else -> "unrestored unit"
+            },
+        )
         if (type == Av1FrameHeader.RESTORE_WIENER) {
             for (pass in 0 until 2) {
                 val firstCoeff: Int

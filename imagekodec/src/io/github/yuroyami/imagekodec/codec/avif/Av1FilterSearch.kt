@@ -15,7 +15,20 @@ internal class Av1FilterSearch(
     private val src: Av1Source,
     private val record: Av1Record,
     private val effort: Int,
+    /** Whether the Wiener filter may be chosen; tests turn it off to measure what it brings. */
+    private val wiener: Boolean = true,
+    /** Whether the self-guided filter may be chosen; tests turn it off to make the Wiener filter the only one. */
+    private val selfGuided: Boolean = true,
+    /** Whether every restoration unit takes a filter whatever it costs, so tests see each filter in every unit. */
+    private val forceRestoration: Boolean = false,
 ) {
+    /** A restoration unit's choice: its type, and its self-guided set and weights, or for Wiener its unit's index. */
+    private class Unit(val type: Int, val set: Int, val w0: Int, val w1: Int)
+
+    /** Where entry (i, j) of the symmetric 3 by 3 matrix of the Wiener normal equations is kept. */
+    private val SYM = intArrayOf(0, 1, 2, 1, 3, 4, 2, 4, 5)
+    private val NONE_UNIT = Unit(Av1FrameHeader.RESTORE_NONE, 0, 0, 0)
+
     private val fh = d.fh
     private val lambda256: Long = run {
         val q = Av1Transform.acQ(d.bitDepth, fh.baseQIdx).toLong()
@@ -77,32 +90,50 @@ internal class Av1FilterSearch(
     // ---- loop restoration ----------------------------------------------------------------
 
     /** The self-guided sets tried: none at effort 1, a spread of four at 2, all sixteen at 3. */
-    private fun sgrSets(): IntArray = when (effort) {
+    private fun sgrSets(): IntArray = if (!selfGuided) IntArray(0) else when (effort) {
         1 -> IntArray(0)
         2 -> intArrayOf(0, 4, 10, 14)
         else -> IntArray(16) { it }
     }
 
-    private class Unit(val type: Int, val set: Int, val w0: Int, val w1: Int)
+    /** How many least-squares passes fit the Wiener taps, vertical and horizontal in turn from the identity. */
+    private fun wienerPasses(): Int = if (!wiener) 0 else when (effort) {
+        1 -> 0
+        2 -> 3
+        else -> 4
+    }
 
     /**
-     * The self-guided filter of each restoration unit, or none, chosen by the squared error the least-squares
-     * projection leaves, against the bits of its parameters; returns lr_type as coded for each plane: 3 for the
-     * self-guided filter where some unit uses it, 0 where none does.
+     * The restoration of each unit of each plane: none, the self-guided filter or the Wiener filter, and the frame's
+     * restoration type for the plane, chosen by rate and distortion. Returns lr_type as coded for each plane (0 none,
+     * 1 switchable, 2 Wiener, 3 self-guided).
+     *
+     * Each unit gets its best self-guided set and projection, fitted by least squares ([fit]) and measured by the
+     * error the projection leaves, and its Wiener taps, fitted by least squares one pass at a time with the other
+     * held ([fitWiener]) and measured by filtering the unit with the decoder's own filter. Then each frame type is
+     * priced in coding order, where each unit takes its cheapest choice and the taps or weights it codes become the
+     * reference the next one is coded against, as `decode_signed_subexp_with_ref_bool` reads them.
      */
     private fun restoration(saved: Array<HashMap<Int, ShortArray>>, unitSize: Int): IntArray {
         val coded = IntArray(3)
         val sets = sgrSets()
-        if (sets.isEmpty()) return coded
+        val passes = wienerPasses()
+        if (sets.isEmpty() && passes == 0) return coded
         val units = arrayOfNulls<Array<Unit>>(3)
+        val cdf = d.cdf
+        val useWiener = IntArray(2) { symbolCost(it, cdf[Av1Cdfs.USE_WIENER]) }
+        val useSgr = IntArray(2) { symbolCost(it, cdf[Av1Cdfs.USE_SGRPROJ]) }
+        val switchable = IntArray(3) { symbolCost(it, cdf[Av1Cdfs.RESTORATION_TYPE]) }
         for (p in 0 until d.numPlanes) {
             val sx = if (p > 0) d.subX else 0
             val sy = if (p > 0) d.subY else 0
             val rows = maxOf((Av1.round2(fh.frameHeight, sy) + (unitSize shr 1)) / unitSize, 1)
             val cols = maxOf((Av1.round2(fh.upscaledWidth, sx) + (unitSize shr 1)) / unitSize, 1)
             val n = rows * cols
-            val best = Array(n) { Unit(Av1FrameHeader.RESTORE_NONE, 0, 0, 0) }
-            val bestJ = LongArray(n) { Long.MAX_VALUE }
+            val none = LongArray(n)
+            // The self-guided filter: each unit's best set and weights, and the error they leave.
+            val sgr = Array(n) { NONE_UNIT }
+            val sgrErr = LongArray(n) { Long.MAX_VALUE }
             val stats = LongArray(n * 7)
             for (set in sets) {
                 stats.fill(0)
@@ -111,9 +142,9 @@ internal class Av1FilterSearch(
                 val r1 = Av1Tables.sgrParams[set * 4 + 2]
                 for (u in 0 until n) {
                     val at = u * 7
-                    if (set == sets[0]) bestJ[u] = (stats[at + 6] shl 8) + (lambda256 * 256 shr 8)
+                    none[u] = stats[at + 6]
                     val (w0, w1) = fit(stats, at, r0, r1)
-                    // The squared error the projection leaves: sum of (e - w0 a - w1 b)^2 over 2^14.
+                    // The squared error the projection leaves: sum of (e - w0 a - w1 b)^2, scaled to samples.
                     val aa = stats[at]
                     val ab = stats[at + 1]
                     val bb = stats[at + 2]
@@ -121,32 +152,285 @@ internal class Av1FilterSearch(
                     val be = stats[at + 4]
                     val ee = stats[at + 5]
                     val err = ee - 2 * w0 * ae - 2 * w1 * be + w0.toLong() * w0 * aa + 2L * w0 * w1 * ab + w1.toLong() * w1 * bb
-                    val dist = maxOf(0L, err shr 14)
-                    // use_sgrproj, the set's four bits and two subexponential codes of about seven bits.
-                    val j = (dist shl 8) + (lambda256 * (19 * 256) shr 8)
-                    if (j < bestJ[u]) {
-                        bestJ[u] = j
-                        best[u] = Unit(Av1FrameHeader.RESTORE_SGRPROJ, set, w0, w1)
+                    val dist = maxOf(0L, err shr (22 - 2 * (d.bitDepth - 8)))
+                    if (dist < sgrErr[u]) {
+                        sgrErr[u] = dist
+                        sgr[u] = Unit(Av1FrameHeader.RESTORE_SGRPROJ, set, w0, w1)
                     }
                 }
             }
-            units[p] = best
-            if (best.any { it.type != Av1FrameHeader.RESTORE_NONE }) coded[p] = 3
+            // The projection's error leaves out the filter's rounding and clipping, so each unit's best set is
+            // measured again through the decoder's own filter.
+            if (sets.isNotEmpty()) {
+                val chosenSets = IntArray(n) { sgr[it].set.takeIf { _ -> sgr[it].type == Av1FrameHeader.RESTORE_SGRPROJ } ?: -1 }
+                val weights = IntArray(n * 2) { if (it % 2 == 0) sgr[it / 2].w0 else sgr[it / 2].w1 }
+                val exact = LongArray(n)
+                Av1LoopRestoration.sgrErrors(d, p, unitSize, rows, cols, d.frame[p], d.planeWidth[p], saved[p], src.planes[p], chosenSets, weights, exact)
+                for (u in 0 until n) {
+                    if (chosenSets[u] >= 0) sgrErr[u] = exact[u]
+                }
+            }
+            // The Wiener filter: taps by least squares, then each unit filtered with them.
+            val taps = IntArray(n * 6)
+            val wienerErr = LongArray(n) { Long.MAX_VALUE }
+            if (passes > 0) {
+                val equations = LongArray(n * 9)
+                for (pass in 0 until passes) {
+                    val vertical = pass % 2 == 0
+                    equations.fill(0)
+                    Av1LoopRestoration.wienerStatistics(
+                        d, p, vertical, unitSize, rows, cols, d.frame[p], d.planeWidth[p], saved[p], src.planes[p], taps, equations,
+                    )
+                    for (u in 0 until n) fitWiener(equations, u * 9, p > 0, taps, u * 6 + (if (vertical) 0 else 3))
+                }
+                val errors = LongArray(n * 2)
+                Av1LoopRestoration.wienerErrors(d, p, unitSize, rows, cols, d.frame[p], d.planeWidth[p], saved[p], src.planes[p], taps, errors)
+                for (u in 0 until n) {
+                    wienerErr[u] = errors[u * 2]
+                    none[u] = errors[u * 2 + 1]
+                }
+            }
+            // Each frame type priced in coding order; the cheapest is kept with its units.
+            var bestJ = if (forceRestoration) Long.MAX_VALUE else 0L
+            var bestType = Av1FrameHeader.RESTORE_NONE
+            var bestUnits = Array(n) { NONE_UNIT }
+            if (!forceRestoration) for (u in 0 until n) bestJ += none[u] shl 8
+            val candidates = ArrayList<Int>()
+            if (sets.isNotEmpty()) candidates += Av1FrameHeader.RESTORE_SGRPROJ
+            if (passes > 0) candidates += Av1FrameHeader.RESTORE_WIENER
+            if (sets.isNotEmpty() && passes > 0) {
+                // Forced with both filters, only the switchable type, which the tests need to see.
+                if (forceRestoration) candidates.clear()
+                candidates += Av1FrameHeader.RESTORE_SWITCHABLE
+            }
+            for (type in candidates) {
+                val refW = Array(2) { Av1Tables.wienerTapsMid.copyOf() }
+                val refX = Av1Tables.sgrprojXqdMid.copyOf()
+                val chosen = Array(n) { NONE_UNIT }
+                var total = 0L
+                for (u in 0 until n) {
+                    val noneBits = when (type) {
+                        Av1FrameHeader.RESTORE_WIENER -> useWiener[0]
+                        Av1FrameHeader.RESTORE_SGRPROJ -> useSgr[0]
+                        else -> switchable[Av1FrameHeader.RESTORE_NONE]
+                    }
+                    var best = if (forceRestoration) Long.MAX_VALUE else cost(none[u], noneBits)
+                    var pick = NONE_UNIT
+                    if (type != Av1FrameHeader.RESTORE_SGRPROJ && wienerErr[u] != Long.MAX_VALUE) {
+                        val flag = if (type == Av1FrameHeader.RESTORE_WIENER) useWiener[1] else switchable[Av1FrameHeader.RESTORE_WIENER]
+                        val jw = cost(wienerErr[u], flag + wienerBits(taps, u * 6, refW, p > 0))
+                        if (jw < best) {
+                            best = jw
+                            pick = Unit(Av1FrameHeader.RESTORE_WIENER, u, 0, 0)
+                        }
+                    }
+                    if (type != Av1FrameHeader.RESTORE_WIENER && sgr[u].type == Av1FrameHeader.RESTORE_SGRPROJ) {
+                        val flag = if (type == Av1FrameHeader.RESTORE_SGRPROJ) useSgr[1] else switchable[Av1FrameHeader.RESTORE_SGRPROJ]
+                        val js = cost(sgrErr[u], flag + sgrBits(sgr[u], refX))
+                        if (js < best) {
+                            best = js
+                            pick = sgr[u]
+                        }
+                    }
+                    when (pick.type) {
+                        Av1FrameHeader.RESTORE_WIENER -> for (pass in 0 until 2) for (k in 0 until 3) refW[pass][k] = taps[u * 6 + pass * 3 + k]
+                        Av1FrameHeader.RESTORE_SGRPROJ -> {
+                            refX[0] = pick.w0
+                            refX[1] = pick.w1
+                        }
+                    }
+                    chosen[u] = pick
+                    total = if (best == Long.MAX_VALUE) Long.MAX_VALUE - 1 else minOf(Long.MAX_VALUE - 1, total + best)
+                }
+                if (total < bestJ) {
+                    bestJ = total
+                    bestType = type
+                    bestUnits = chosen
+                }
+            }
+            if (bestType != Av1FrameHeader.RESTORE_NONE) {
+                units[p] = bestUnits
+                planeTaps[p] = taps
+                coded[p] = when (bestType) {
+                    Av1FrameHeader.RESTORE_SWITCHABLE -> 1
+                    Av1FrameHeader.RESTORE_WIENER -> 2
+                    else -> 3
+                }
+            }
         }
         lr = object : Av1LrChoice {
             override fun unit(coding: Av1Coding, plane: Int, unitRow: Int, unitCol: Int, wiener: IntArray, wienerAt: Int, xqd: IntArray, xqdAt: Int): Int {
                 val all = units[plane] ?: return Av1FrameHeader.RESTORE_NONE
                 val cols = maxOf((Av1.round2(fh.upscaledWidth, if (plane > 0) d.subX else 0) + (unitSize shr 1)) / unitSize, 1)
                 val u = all[unitRow * cols + unitCol]
-                if (u.type == Av1FrameHeader.RESTORE_SGRPROJ) {
-                    coding.lrSgrSet = u.set
-                    xqd[xqdAt] = u.w0
-                    xqd[xqdAt + 1] = u.w1
+                when (u.type) {
+                    Av1FrameHeader.RESTORE_SGRPROJ -> {
+                        coding.lrSgrSet = u.set
+                        xqd[xqdAt] = u.w0
+                        xqd[xqdAt + 1] = u.w1
+                    }
+                    // A Wiener unit keeps its index in set; its taps are the plane's.
+                    Av1FrameHeader.RESTORE_WIENER -> planeTaps[plane]!!.copyInto(wiener, wienerAt, u.set * 6, u.set * 6 + 6)
                 }
                 return u.type
             }
         }
+        unitTypes = Array(3) { p -> units[p]?.let { a -> IntArray(a.size) { a[it].type } } }
         return coded
+    }
+
+    private fun cost(dist: Long, bits256: Int): Long = (dist shl 8) + (lambda256 * bits256 shr 8)
+
+    private fun symbolCost(v: Int, c: IntArray): Int = Av1SymbolCounter.COST[maxOf(1, c[v] - (if (v > 0) c[v - 1] else 0))]
+
+    private val planeTaps = arrayOfNulls<IntArray>(3)
+
+    /** The restoration type of each unit of each plane that [search] chose, null for a plane with none: for tests. */
+    var unitTypes: Array<IntArray?> = arrayOfNulls(3)
+        private set
+
+    /** The bits, in 1/256, of the Wiener taps at [at] of [taps] coded against [ref], as `read_lr_unit` codes them. */
+    private fun wienerBits(taps: IntArray, at: Int, ref: Array<IntArray>, chroma: Boolean): Int {
+        var bits = 0
+        for (pass in 0 until 2) for (k in (if (chroma) 1 else 0) until 3) {
+            bits += subexpBits(Av1Tables.wienerTapsMin[k], Av1Tables.wienerTapsMax[k] + 1, Av1Tables.wienerTapsK[k], ref[pass][k], taps[at + pass * 3 + k])
+        }
+        return bits shl 8
+    }
+
+    /** The bits, in 1/256, of the self-guided set and weights of [u] coded against [ref]. */
+    private fun sgrBits(u: Unit, ref: IntArray): Int {
+        var bits = 4
+        for (i in 0 until 2) {
+            if (Av1Tables.sgrParams[u.set * 4 + i * 2] == 0) continue
+            bits += subexpBits(Av1Tables.sgrprojXqdMin[i], Av1Tables.sgrprojXqdMax[i] + 1, 4, ref[i], if (i == 0) u.w0 else u.w1)
+        }
+        return bits shl 8
+    }
+
+    /**
+     * The bits of [v] in [low] until [high] coded about the reference [r] as `decode_signed_subexp_with_ref_bool`
+     * reads it: the recentred value's subexponential code, its flag bits and literals, and its last `NS` in full.
+     */
+    private fun subexpBits(low: Int, high: Int, k: Int, r: Int, v: Int): Int {
+        val mx = high - low
+        val x = v - low
+        val rr = r - low
+        val s = if ((rr shl 1) <= mx) recenter(rr, x) else recenter(mx - 1 - rr, mx - 1 - x)
+        var i = 0
+        var mk = 0
+        var bits = 0
+        while (true) {
+            val b2 = if (i != 0) k + i - 1 else k
+            val a = 1 shl b2
+            if (mx <= mk + 3 * a) {
+                val n = mx - mk
+                val w = 32 - n.countLeadingZeroBits()
+                return bits + (if (s - mk < (1 shl w) - n) w - 1 else w)
+            }
+            bits++
+            if (s >= mk + a) {
+                i++
+                mk += a
+            } else {
+                return bits + b2
+            }
+        }
+    }
+
+    private fun recenter(r: Int, v: Int): Int = when {
+        v > 2 * r -> v
+        v >= r -> (v - r) shl 1
+        else -> ((r - v) shl 1) - 1
+    }
+
+    /**
+     * The Wiener taps of one pass that fit the normal equations at [at] of [eq] best, into [taps] at [out]: three
+     * taps, or for chroma, whose outer tap is 0, two, by least squares held to the ranges the syntax codes. A tap the
+     * unconstrained solution puts out of its range is fixed at the end it passed, and the others solved again
+     * with it fixed, which is the constrained optimum when one bound is active and close to it otherwise. A
+     * singular system leaves the taps as they were.
+     */
+    private fun fitWiener(eq: LongArray, at: Int, chroma: Boolean, taps: IntArray, out: Int) {
+        val m = Array(3) { i -> LongArray(3) { j -> eq[at + SYM[i * 3 + j]] } }
+        // A ridge on the diagonal: the three second differences are close to one another on smooth content, so
+        // the system is near singular there, and the plain solution swings between the ends of the taps' ranges.
+        val ridge = (m[0][0] + m[1][1] + m[2][2]) shr 8
+        for (k in 0 until 3) m[k][k] += ridge
+        val b = LongArray(3) { eq[at + 6 + it] }
+        val a = IntArray(3)
+        val free = BooleanArray(3) { !(chroma && it == 0) }
+        for (round in 0 until 3) {
+            val idx = (0 until 3).filter { free[it] }
+            if (idx.isEmpty()) break
+            // The right side less what the fixed taps contribute.
+            val rhs = LongArray(idx.size) { r ->
+                var v = b[idx[r]]
+                for (k in 0 until 3) if (!free[k]) v -= m[idx[r]][k] * a[k]
+                v
+            }
+            val sol = solve(Array(idx.size) { r -> LongArray(idx.size) { c -> m[idx[r]][idx[c]] } }, rhs) ?: return
+            var clamped = false
+            for (r in idx.indices) {
+                val k = idx[r]
+                val lo = Av1Tables.wienerTapsMin[k]
+                val hi = Av1Tables.wienerTapsMax[k]
+                a[k] = sol[r].coerceIn(lo, hi)
+                if (sol[r] != a[k]) {
+                    free[k] = false
+                    clamped = true
+                }
+            }
+            if (!clamped) break
+        }
+        for (k in 0 until 3) taps[out + k] = a[k]
+    }
+
+    /**
+     * The solution of the symmetric system [m] x = [rhs] of one to three unknowns, rounded, by Cramer's rule, or null
+     * when it is singular. The matrix and the right side are scaled to 19 bits each, apart so that neither loses the
+     * other's precision, so the products of three entries stay in a Long.
+     */
+    private fun solve(m: Array<LongArray>, rhs: LongArray): IntArray? {
+        val n = rhs.size
+        var top = 0L
+        for (row in m) for (v in row) top = maxOf(top, kotlin.math.abs(v))
+        var topB = 0L
+        for (v in rhs) topB = maxOf(topB, kotlin.math.abs(v))
+        val sa = shiftTo(top, 19)
+        val sb = shiftTo(topB, 19)
+        val a = Array(n) { r -> LongArray(n) { c -> m[r][c] shr sa } }
+        val y = LongArray(n) { rhs[it] shr sb }
+        fun det(x: Array<LongArray>): Long = when (n) {
+            1 -> x[0][0]
+            2 -> x[0][0] * x[1][1] - x[0][1] * x[1][0]
+            else -> x[0][0] * (x[1][1] * x[2][2] - x[1][2] * x[2][1]) - x[0][1] * (x[1][0] * x[2][2] - x[1][2] * x[2][0]) +
+                x[0][2] * (x[1][0] * x[2][1] - x[1][1] * x[2][0])
+        }
+        val d = det(a)
+        if (d <= 0L) return null
+        // Each unknown is det_k / det times 2^(sb - sa), where det_k has column k replaced by the right side.
+        val e = sb - sa
+        return IntArray(n) { k ->
+            val num = det(Array(n) { r -> LongArray(n) { c -> if (c == k) y[r] else a[r][c] } })
+            if (e >= 0) {
+                val dd = d shr e
+                if (dd == 0L) 0 else divRound(num, dd).coerceIn(-1000L, 1000L).toInt()
+            } else {
+                divRound(num shr -e, d).coerceIn(-1000L, 1000L).toInt()
+            }
+        }
+    }
+
+    /** The shift that brings [top] below 2^[bits]. */
+    private fun shiftTo(top: Long, bits: Int): Int {
+        var t = top
+        var s = 0
+        while (t >= (1L shl bits)) {
+            t = t shr 1
+            s++
+        }
+        return s
     }
 
     /**

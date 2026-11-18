@@ -33,6 +33,11 @@ internal object Av1HeifEncoder : HeifEncoder {
             intArrayOf(parameters.colorPrimaries, parameters.transferCharacteristics, parameters.matrixCoefficients)
         } else null
         val settings = Av1EncodeSettings(if (parameters.lossless) 0 else qIndex(parameters.quality), parameters.effort, colour)
+        return encode(planes, settings, cancellationCheck)
+    }
+
+    /** [planes] coded with [settings] as an `av01` item: for tests that turn a tool off to measure what it brings. */
+    fun encode(planes: HeifPlanes, settings: Av1EncodeSettings, cancellationCheck: (() -> Unit)?): HeifCodedPicture {
         val coded = Av1Encoder(planes, settings, cancellationCheck).encode()
         return HeifCodedPicture(coded.params.configuration(coded.sequenceHeaderObu), coded.data, planes.width, planes.height, "avif")
     }

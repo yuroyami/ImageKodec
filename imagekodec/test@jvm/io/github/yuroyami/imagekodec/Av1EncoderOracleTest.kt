@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec
 import io.github.yuroyami.imagekodec.codec.avif.Av1Decoder
 import io.github.yuroyami.imagekodec.codec.avif.Av1EncodeSettings
 import io.github.yuroyami.imagekodec.codec.avif.Av1Encoder
+import io.github.yuroyami.imagekodec.codec.avif.Av1ToolUse
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -206,6 +207,64 @@ class Av1EncoderOracleTest {
             "directional with angle delta", "smooth", "paeth", "dc", "chroma from luma", "filter intra", "palette", "skip",
             "transform type 1", "transform type 2", "transform type 3", "transform type 9", "partition 1", "partition 2", "partition 3",
         )) assertTrue((use[tool] ?: 0) > 0, "no block used $tool: $use")
+    }
+
+    /**
+     * Encodes [input] with [settings], checks that dav1d and ImageKodec's decoder both decode the stream to the
+     * encoder's reconstruction, and returns the tools ImageKodec's decoder read in the stream, header and blocks.
+     */
+    private fun agree(input: HeifPlanes, settings: Av1EncodeSettings, label: String): Pair<Av1Encoder, Av1ToolUse> {
+        val encoder = Av1Encoder(input, settings, null)
+        val coded = encoder.encode()
+        val expected = encoder.decodedPlanes()
+        val use = Av1ToolUse()
+        val ours = Av1Decoder().also { it.toolUse = use }.decode(coded.data)
+        val mono = input.planes.size == 1
+        val raw = reference(coded.data, pixFmt(input.bitDepthLuma, input.subX, input.subY, mono))
+        val bytes = if (input.bitDepthLuma > 8) 2 else 1
+        var at = 0
+        for (p in expected.indices) {
+            val pw = if (p == 0) input.width else (input.width + input.subX) shr input.subX
+            for (i in expected[p].indices) {
+                val v = if (bytes == 1) raw[at].toInt() and 0xFF else (raw[at].toInt() and 0xFF) or ((raw[at + 1].toInt() and 0xFF) shl 8)
+                if (v != expected[p][i].toInt()) error("$label: dav1d differs in plane $p at sample $i: ${expected[p][i]} expected, $v read")
+                if (ours.planes[p][(i / pw) * ours.strides[p] + i % pw] != expected[p][i]) error("$label: ImageKodec differs in plane $p at sample $i")
+                at += bytes
+            }
+        }
+        assertEquals(raw.size, at, "$label: dav1d's output size")
+        println("$label: ${coded.data.size} bytes, dav1d and ImageKodec agree; ${use.counts.toSortedMap()}")
+        return encoder to use
+    }
+
+    /**
+     * The Wiener filter (#176). Forced into every restoration unit, with the self-guided filter off, in every format,
+     * depth and two quantizers: every plane's frame header signals Wiener restoration, every unit codes taps, and
+     * dav1d decodes the stream to the encoder's reconstruction. Forced with both filters on, the header signals the
+     * switchable type and the units take both. Chosen by rate and distortion alone, it wins some units of a photo-like
+     * picture at a fine quantizer, beside self-guided ones.
+     */
+    @Test
+    fun wienerRestoration() {
+        assumeTrue("ffmpeg with libdav1d is needed", dav1d())
+        val formats = listOf(Triple(1, 1, false), Triple(1, 0, false), Triple(0, 0, false), Triple(1, 1, true))
+        val switchableUnits = Av1ToolUse()
+        for ((sx, sy, mono) in formats) for (depth in listOf(8, 10, 12)) for ((w, h) in listOf(200 to 120, 300 to 260)) for (q in listOf(60, 200)) {
+            val input = picture(w, h, depth, sx, sy, mono)
+            val label = "wiener ${w}x$h ${if (mono) "gray" else "4:${if (sx == 0) 4 else 2}:${if (sy == 0 && sx == 1) 2 else if (sy == 0) 4 else 0}"} $depth-bit q$q"
+            val (_, use) = agree(input, Av1EncodeSettings(q, 2, null, selfGuided = false, forceRestoration = true), label)
+            assertEquals(input.planes.size, use["wiener restoration frame"], "$label: planes whose frame header signals Wiener restoration")
+            assertTrue(use["wiener restoration unit"] > 0, "$label: no unit uses the Wiener filter")
+            assertEquals(0, use["unrestored unit"], "$label: units left unfiltered")
+            if (w == 300) {
+                val (_, both) = agree(input, Av1EncodeSettings(q, 3, null, forceRestoration = true), "$label, both filters")
+                assertEquals(input.planes.size, both["switchable restoration frame"], "$label: planes whose header signals switchable restoration")
+                for ((k, n) in both.counts) repeat(n) { switchableUnits.add(k) }
+            }
+        }
+        assertTrue(switchableUnits["wiener restoration unit"] > 0 && switchableUnits["self-guided restoration unit"] > 0, "switchable units: ${switchableUnits.counts}")
+        val (_, chosen) = agree(picture(512, 384, 8, 1, 1, false), Av1EncodeSettings(30, 2, null), "restoration chosen by cost")
+        assertTrue(chosen["wiener restoration unit"] > 0, "no unit chose the Wiener filter by cost: ${chosen.counts}")
     }
 
     private val sizes = listOf(1 to 1, 7 to 5, 64 to 64, 65 to 33, 200 to 120, 513 to 257)

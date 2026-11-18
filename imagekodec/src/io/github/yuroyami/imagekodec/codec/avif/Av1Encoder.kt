@@ -13,6 +13,12 @@ internal class Av1EncodeSettings(
     val colour: IntArray?,
     /** Whether loop restoration may be chosen; tests turn it off to measure what it brings. */
     val restoration: Boolean = true,
+    /** Whether the Wiener filter may be chosen beside the self-guided one; tests turn it off to measure it. */
+    val wiener: Boolean = true,
+    /** Whether the self-guided filter may be chosen; tests turn it off to make the Wiener filter the only one. */
+    val selfGuided: Boolean = true,
+    /** Whether every restoration unit takes a filter whatever it costs, so tests see each filter in every unit. */
+    val forceRestoration: Boolean = false,
 )
 
 /** A coded AV1 still picture: the sequence header OBU, and the item's data (the sequence header and the frame OBU). */
@@ -63,7 +69,8 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         val block = Av1BlockSearch(d, source, record, settings.qIndex, effort)
         for (tile in 0 until fh1.tileCols * fh1.tileRows) block.tile(tile)
         // The filters on the reconstruction, then the final header.
-        val filterSearch = Av1FilterSearch(d, source, record, effort)
+        val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration)
+        lastFilterSearch = filterSearch
         val filters = filterSearch.search(search, stream)
         chosenFilters = filters
         val fh = parseFrameHeader(seq, filters)
@@ -123,6 +130,10 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         private set
 
     private var lastRecord: Av1Record? = null
+    private var lastFilterSearch: Av1FilterSearch? = null
+
+    /** The restoration type of each unit of each plane in the last [encode], null for a plane with none: for tests. */
+    fun restorationUnits(): Array<IntArray?> = lastFilterSearch?.unitTypes ?: arrayOfNulls(3)
 
     /**
      * How many blocks or transform blocks of the last [encode] used each coding tool, by name: for tests that check a
