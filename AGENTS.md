@@ -231,6 +231,6 @@ being true.
   gamma of 2.4, and HLG's ICtCp takes BT.2100's HLG matrix and the OOTF on L, M and S one at a time (#189).
 - CI's `ubuntu-latest` became Ubuntu 26.04 in November 2026: ImageMagick 7.1.2 and libjxl 0.11.1 where a
   24.04 machine has 6.9 and 0.7, so an oracle test can pass locally and fail in CI. ImageMagick 7 does not
-  move signed 16-bit gray by half its range as 6 does (#189).
+  move signed 16-bit gray by half its range as 6 does, so the test moves its samples itself (#189).
 - Ubuntu 24.04's djxl 0.7 has no colour engine: it writes a lossy file with only an ICC profile as linear sRGB, and
   converts to another space with `--color_space` only into an 8-bit PNG (#189).
