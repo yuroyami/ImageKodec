@@ -271,11 +271,14 @@ class Av1EncoderOracleTest {
      * Screen content in colour: text and boxes in a few colours, each with its own chroma, so that both planes'
      * palettes pay. [subX] and [subY] set the chroma format.
      */
-    private fun colourScreen(w: Int, h: Int, depth: Int, subX: Int, subY: Int, close: Boolean = false): HeifPlanes {
+    private fun colourScreen(w: Int, h: Int, depth: Int, subX: Int, subY: Int, close: Boolean = false, wrap: Boolean = false): HeifPlanes {
         val max = (1 shl depth) - 1
         // Luma, U and V of each colour, in 8 bits; with [close], chroma a few levels apart, as shades of one hue are,
-        // which the palette codes as steps.
-        val colours = if (close) {
+        // which the palette codes as steps. With [wrap], U close and V at either end of its range in turn, so that
+        // in U's order each V step is shorter the other way round, past the end of the range.
+        val colours = if (wrap) {
+            arrayOf(intArrayOf(235, 128, 252), intArrayOf(30, 131, 6), intArrayOf(80, 134, 249), intArrayOf(150, 137, 1), intArrayOf(110, 125, 3))
+        } else if (close) {
             arrayOf(intArrayOf(235, 128, 128), intArrayOf(30, 131, 125), intArrayOf(80, 134, 122), intArrayOf(150, 137, 131), intArrayOf(110, 125, 127))
         } else {
             arrayOf(intArrayOf(235, 128, 128), intArrayOf(30, 140, 110), intArrayOf(80, 90, 200), intArrayOf(150, 200, 60), intArrayOf(110, 60, 170))
@@ -296,17 +299,17 @@ class Av1EncoderOracleTest {
     }
 
     /**
-     * The chroma palette (#176): on colour screen content, with chroma far apart (V coded in full) and close (V coded
-     * as steps), in 4:2:0, 4:2:2 and 4:4:4 at 8, 10 and 12 bits and at two efforts, some blocks code a palette of U and V pairs, which ImageKodec's decoder reads in the stream, and dav1d
+     * The chroma palette (#176): on colour screen content, with chroma far apart (V coded in full), close (V coded
+     * as steps) and V at both ends of its range (steps that wrap), in 4:2:0, 4:2:2 and 4:4:4 at 8, 10 and 12 bits and at two efforts, some blocks code a palette of U and V pairs, which ImageKodec's decoder reads in the stream, and dav1d
      * decodes each stream to the encoder's reconstruction.
      */
     @Test
     fun chromaPalette() {
         assumeTrue("ffmpeg with libdav1d is needed", dav1d())
-        for ((sx, sy) in listOf(1 to 1, 1 to 0, 0 to 0)) for (depth in listOf(8, 10, 12)) for (effort in listOf(2, 3)) for (close in listOf(false, true)) {
-            val label = "chroma palette 4:${if (sx == 0) 4 else 2}:${if (sy == 0 && sx == 1) 2 else if (sy == 0) 4 else 0} $depth-bit effort $effort" +
-                if (close) ", close colours" else ""
-            val (encoder, use) = agree(colourScreen(160, 96, depth, sx, sy, close), Av1EncodeSettings(80, effort, null), label)
+        for ((sx, sy) in listOf(1 to 1, 1 to 0, 0 to 0)) for (depth in listOf(8, 10, 12)) for (effort in listOf(2, 3)) for (kind in listOf("", ", close colours", ", steps that wrap")) {
+            val label = "chroma palette 4:${if (sx == 0) 4 else 2}:${if (sy == 0 && sx == 1) 2 else if (sy == 0) 4 else 0} $depth-bit effort $effort$kind"
+            val input = colourScreen(160, 96, depth, sx, sy, close = kind == ", close colours", wrap = kind == ", steps that wrap")
+            val (encoder, use) = agree(input, Av1EncodeSettings(80, effort, null), label)
             assertTrue(use["chroma palette"] > 0, "$label: no block codes a chroma palette: ${use.counts}")
             assertEquals(use["chroma palette"], encoder.toolUse()["chroma palette"], "$label: the decoder read another count of chroma palettes")
         }
