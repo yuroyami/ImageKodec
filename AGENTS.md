@@ -217,3 +217,17 @@ being true.
   `opj_decompress` alone, and neither MIXED nor placeholder passes are decoded (#187).
 - OpenJPEG 2.5.0's `opj_decompress` converts a CIELab JP2 to colours far from any L*a*b* reading of its
   samples, so CIELab is checked against lcms2 through `tools/icc_lcms.c convert-lab` (#187).
+- ImageMagick 6 moves a signed TIFF sample up by half its range only in 16-bit gray, and reads signed RGB and
+  8-bit or 32-bit signed gray as unsigned, so only signed 16-bit gray is held to it (#189).
+- ImageIO reads a JPEG YCbCr TIFF in separate planes without converting it, and puts each subsampled chroma
+  strip in the corner of a full-size band, so it checks one strip of such a page alone (#189).
+- cjpeg writes the Huffman tables of a later non-interleaved scan just before that scan, so an old-style JPEG
+  TIFF built from a `-scans` stream needs them moved to JPEGInterchangeFormat (#189).
+- jbig2dec 0.20 draws the same symbol whatever the refinement data of a Huffman symbol dictionary holds, and
+  stops at its aggregates with a broken symbol ID table; it reads arithmetic ones right (#189).
+- jxrlib's JxrEncApp stops with exit code 150 (WMP_errUnsupportedFormat) on every CMYK TIFF, and JxrDecApp's
+  24bppRGB of an RGBE file does not follow from its own RGBE samples (#189).
+- zimg converts constant luminance to light through the curve's OETF and gives the light back through BT.1886's
+  gamma of 2.4, and HLG's ICtCp takes BT.2100's HLG matrix and the OOTF on L, M and S one at a time (#189).
+- Ubuntu's djxl 0.7 has no colour engine: it writes a lossy file with only an ICC profile as linear sRGB, and
+  converts to another space with `--color_space` only into an 8-bit PNG (#189).
