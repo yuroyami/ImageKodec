@@ -61,27 +61,31 @@ for i in range(im.n_frames):
         }
     })
 
-    private fun check(name: String, animation: KiteAnimation) {
+    private fun check(name: String, animation: KiteAnimation, options: PngEncodeOptions? = null) {
         val file = File.createTempFile("kite-apng", ".png").apply { deleteOnExit() }
-        file.writeBytes(ImageKodec.encodePng(animation))
+        file.writeBytes(if (options == null) ImageKodec.encodePng(animation) else ImageKodec.encodePng(animation, options))
         val w = animation.width
         val h = animation.height
 
-        val (code, pil) = run(Tools.require("python3").path, "-c", pillowScript, file.path)
-        assertEquals(0, code, "$name: Pillow could not read the APNG")
-        fun i32(at: Int) = (pil[at].toInt() and 255) or ((pil[at + 1].toInt() and 255) shl 8) or
-            ((pil[at + 2].toInt() and 255) shl 16) or (pil[at + 3].toInt() shl 24)
-        assertEquals(animation.frames.size, i32(0), "$name: Pillow's frame count")
-        assertEquals(animation.loopCount, i32(4).toLong(), "$name: Pillow's loop count")
-        var at = 8
-        for ((n, frame) in animation.frames.withIndex()) {
-            assertEquals(frame.delayMillis, i32(at), "$name: Pillow's duration of frame $n")
-            at += 4
-            for (p in 0 until w * h) {
-                val px = argb(pil[at + 3].toInt() and 255, pil[at].toInt() and 255, pil[at + 1].toInt() and 255, pil[at + 2].toInt() and 255)
+        // Pillow 12 fails on the second frame of an interlaced APNG, a TypeError as it sets up its
+        // decoder, so only ffmpeg reads those.
+        if (options?.interlace != true) {
+            val (code, pil) = run(Tools.require("python3").path, "-c", pillowScript, file.path)
+            assertEquals(0, code, "$name: Pillow could not read the APNG")
+            fun i32(at: Int) = (pil[at].toInt() and 255) or ((pil[at + 1].toInt() and 255) shl 8) or
+                ((pil[at + 2].toInt() and 255) shl 16) or (pil[at + 3].toInt() shl 24)
+            assertEquals(animation.frames.size, i32(0), "$name: Pillow's frame count")
+            assertEquals(animation.loopCount, i32(4).toLong(), "$name: Pillow's loop count")
+            var at = 8
+            for ((n, frame) in animation.frames.withIndex()) {
+                assertEquals(frame.delayMillis, i32(at), "$name: Pillow's duration of frame $n")
                 at += 4
-                if (px != frame.bitmap.argb[p]) {
-                    throw AssertionError("$name: Pillow reads frame $n pixel (${p % w}, ${p / w}) as ${px.toUInt().toString(16)}, written ${frame.bitmap.argb[p].toUInt().toString(16)}")
+                for (p in 0 until w * h) {
+                    val px = argb(pil[at + 3].toInt() and 255, pil[at].toInt() and 255, pil[at + 1].toInt() and 255, pil[at + 2].toInt() and 255)
+                    at += 4
+                    if (px != frame.bitmap.argb[p]) {
+                        throw AssertionError("$name: Pillow reads frame $n pixel (${p % w}, ${p / w}) as ${px.toUInt().toString(16)}, written ${frame.bitmap.argb[p].toUInt().toString(16)}")
+                    }
                 }
             }
         }
@@ -138,6 +142,35 @@ for i in range(im.n_frames):
         assumeTrue("python3 with Pillow or ffmpeg not installed", tools())
         val frames = List(4) { t -> KiteBitmap(48, 32, scene(48, 32, t % 2, translucent = false).argb.map { it or (0xFF shl 24) }.toIntArray()) }
         check("opaque repeats", animation(frames + frames[3], listOf(100, 100, 120, 140, 160), 1))
+    }
+
+    /** Frames of few colours, written with options (#182): a palette, interlaced or not, and a gray colour key. */
+    @Test
+    fun framesWithOptions() {
+        assumeTrue("python3 with Pillow or ffmpeg not installed", tools())
+        val palette = List(5) { t -> KiteBitmap(48, 32, IntArray(48 * 32) { i ->
+            val x = i % 48
+            val y = i / 48
+            when {
+                x - 4 * t in 3..14 && y in 8..20 -> argb(0xFF, 240, 40 * t, 30)
+                (x + y) % 9 == 0 -> 0
+                else -> argb(0xFF, (x / 8) * 40, (y / 8) * 50, 100)
+            }
+        }) }
+        for (interlace in listOf(false, true)) for (effort in 1..3) {
+            check("palette interlace $interlace effort $effort", animation(palette, List(5) { 70 }, 0), PngEncodeOptions(interlace = interlace, effort = effort))
+        }
+        val gray = List(4) { t -> KiteBitmap(40, 24, IntArray(40 * 24) { i ->
+            val x = i % 40
+            val y = i / 40
+            when {
+                x - 5 * t in 2..9 && y in 4..15 -> gray(255)
+                (x * 3 + y) % 11 == 0 -> 0
+                else -> gray(85 * (1 + x / 20))
+            }
+        }) }
+        check("gray keyed", animation(gray, List(4) { 90 }, 1), PngEncodeOptions(interlace = true))
+        check("translucent with options", animation(List(4) { scene(48, 32, it, translucent = true) }, List(4) { 50 }, 0), PngEncodeOptions(effort = 3))
     }
 
     @Test

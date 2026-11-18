@@ -22,6 +22,7 @@ import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.codec.MetadataIo
 import io.github.yuroyami.imagekodec.codec.PngDecoder
 import io.github.yuroyami.imagekodec.codec.PngEncoder
+import io.github.yuroyami.imagekodec.codec.PngWriter
 import io.github.yuroyami.imagekodec.codec.TiffDecoder
 import io.github.yuroyami.imagekodec.codec.TiffEncoder
 import io.github.yuroyami.imagekodec.codec.WebpDecoder
@@ -893,6 +894,78 @@ public object ImageKodec {
      */
     @Throws(IllegalArgumentException::class)
     public fun encodePng(animation: KiteAnimation): ByteArray = PngEncoder.encode(animation)
+
+    /**
+     * Encode [bitmap] as a PNG in the colour type, bit depth and interlace [options] asks for,
+     * with [metadata] written as the overload without options writes it (#182). Lossless:
+     * [decode] returns the exact same pixels.
+     *
+     * With [PngColorType.Auto], the default, the file takes the smallest type that holds the
+     * pixels exactly: gray at 1, 2, 4 or 8 bits, a palette of up to 256 colours with their alpha
+     * in `tRNS`, RGB, or gray or RGB with an alpha channel. Gray and RGB carry a `tRNS` colour
+     * key in place of alpha when every transparent pixel is one colour that no opaque pixel has.
+     * An ICC profile in [metadata] keeps the type gray or colour as its colour space is. The
+     * overload without options keeps writing 8-bit RGB or RGBA, byte for byte as before.
+     *
+     * [cancellationCheck] runs between rows and through the compression, and may throw to stop
+     * the encode; what it throws comes out of this call.
+     *
+     * @throws IllegalArgumentException if the fixed [PngEncodeOptions.colorType] or
+     *   [PngEncodeOptions.bitDepth] cannot hold the pixels exactly, if it disagrees with the ICC
+     *   profile's colour space, or if the rows need more than 2 GB
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodePng(
+        bitmap: KiteBitmap,
+        options: PngEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { PngWriter.encode(bitmap, options, metadata, it) }
+
+    /**
+     * Encode [bitmap] as a PNG of up to 16 bits a sample, keeping every bit [decode16] gives, as
+     * [encodePng] with options writes an 8-bit bitmap (#182). Its channels are gray, gray and
+     * alpha, RGB or RGBA, as [KiteBitmap16] holds them.
+     *
+     * With [PngColorType.Auto], the file takes the smallest type that [decode16] reads back to
+     * the same channels and samples: 8 bits where every sample is a multiple of 257 (an 8-bit
+     * `v` widened as `v * 257`), gray at 1, 2 or 4 bits where every sample is such a widened
+     * value, a palette where a picture of 8-bit samples has 256 colours or fewer, and a `tRNS`
+     * colour key in place of an alpha channel where the alpha allows it. A fixed type is written
+     * as asked, and [decode16] then gives the channels that type has: a gray type gives one
+     * channel, or two with a colour key, and a palette three, or four with `tRNS`.
+     *
+     * @throws IllegalArgumentException as [encodePng] with options does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodePng16(
+        bitmap: KiteBitmap16,
+        options: PngEncodeOptions = PngEncodeOptions(),
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { PngWriter.encode16(bitmap, options, metadata, it) }
+
+    /**
+     * Encode [animation] as an APNG, as the overload without options does, in the colour type,
+     * bit depth and interlace [options] asks for, chosen once for every frame, since a PNG has
+     * one colour type (#182). [PngColorType.Auto] picks it by its bits a pixel at every effort;
+     * the effort sets the filters and compression of each frame. Gray and palette frames take
+     * 8 bits unless [PngEncodeOptions.bitDepth] asks for fewer, as ffmpeg 6 reads the frames
+     * after the first wrong at fewer. A frame is drawn over the
+     * canvas only where the type has a transparent pixel, which it has when any frame is
+     * transparent. [metadata] goes before the image data, as in a still. A single frame is
+     * written as [encodePng] with options writes a bitmap.
+     *
+     * @throws IllegalArgumentException as the overload without options does, or as [encodePng]
+     *   with options does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodePng(
+        animation: KiteAnimation,
+        options: PngEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { PngWriter.encode(animation, options, metadata, it) }
 
     /**
      * Encode [bitmap] as a TIFF: 8-bit gray when every pixel is gray, RGB otherwise, with

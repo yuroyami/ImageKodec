@@ -16,13 +16,19 @@ package io.github.yuroyami.imagekodec.internal.flate
 internal object Zlib {
 
     /** Compress [data] into a zlib stream. */
-    fun compress(data: ByteArray): ByteArray {
-        val out = ByteArrayBuilder(data.size / 2 + 16)
+    fun compress(data: ByteArray): ByteArray = wrap(data, Deflate.encode(data))
+
+    /** [compress] with the match search of [Deflate.encode] set by [maxChain], [lazy] and [minMatch]. */
+    fun compress(data: ByteArray, maxChain: Int, lazy: Boolean, minMatch: Int = 3, cancel: (() -> Unit)? = null): ByteArray =
+        wrap(data, Deflate.encode(data, maxChain, lazy, minMatch, cancel))
+
+    private fun wrap(data: ByteArray, deflated: ByteArray): ByteArray {
+        val out = ByteArrayBuilder(deflated.size + 6)
         // CMF = 0x78 (CM=8, CINFO=7 → 32 KiB window), FLG = 0x9C so that
         // (CMF*256 + FLG) % 31 == 0 with FLEVEL=2, FDICT=0.
         out.append(0x78.toByte())
         out.append(0x9C.toByte())
-        out.append(Deflate.encode(data))
+        out.append(deflated)
         val adler = Adler32.of(data)
         out.append(((adler ushr 24) and 0xFF).toByte())   // big-endian
         out.append(((adler ushr 16) and 0xFF).toByte())
