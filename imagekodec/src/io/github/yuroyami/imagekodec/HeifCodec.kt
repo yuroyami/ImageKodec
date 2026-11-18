@@ -119,3 +119,66 @@ public class HeifPlanes(
     public val strides: IntArray,
     public val fullRange: Boolean,
 )
+
+/**
+ * The encoder of one coded item type of HEIF, such as `hvc1` for HEVC (#174). The core writes the
+ * container: it converts RGB to planes, cuts a large picture into the tiles of a grid, and writes the
+ * items, their properties and their references. An encoder only turns the planes of one picture into
+ * the payload of its configuration property and the coded data of its item.
+ *
+ * Register an encoder with [ImageKodec.registerHeifEncoder].
+ */
+@ExperimentalHeifCodecApi
+public interface HeifEncoder {
+    /** The four-character item type this encoder writes, such as `hvc1`. */
+    public val itemType: String
+
+    /** The four-character type of the item property that configures the codec, such as `hvcC`. */
+    public val configurationType: String
+
+    /**
+     * The URN of the `auxC` property of an alpha plane coded by this encoder, as the readers of the
+     * codec expect it: `urn:mpeg:hevc:2015:auxid:1` for HEVC, `urn:mpeg:mpegB:cicp:systems:auxiliary:alpha`
+     * for AV1.
+     */
+    public val alphaUrn: String
+
+    /**
+     * Codes [planes], one picture, as [parameters] ask. Luma has 1 sample or more on each side, and in
+     * subsampled chroma an even number, so the picture needs no rounding up. Call [cancellationCheck]
+     * at a coarse step, such as once a row of coding blocks, and let what it throws pass through. Throw
+     * [IllegalArgumentException] for a picture the codec cannot hold.
+     */
+    public fun encode(planes: HeifPlanes, parameters: HeifEncodeParameters, cancellationCheck: (() -> Unit)?): HeifCodedPicture
+}
+
+/**
+ * What a [HeifEncoder] makes of one picture. [quality] runs from 0 to 100, higher better, and is
+ * ignored when [lossless] asks for the planes to decode exactly as given. [effort] runs from 1 (fast)
+ * to 3 (thorough). The colour fields are the code points of ITU-T H.273 for the codec to signal in its
+ * own headers, or null to signal none, as for an alpha plane; [HeifPlanes.fullRange] gives the range.
+ */
+@ExperimentalHeifCodecApi
+public class HeifEncodeParameters(
+    public val quality: Int,
+    public val lossless: Boolean,
+    public val effort: Int,
+    public val colorPrimaries: Int? = null,
+    public val transferCharacteristics: Int? = null,
+    public val matrixCoefficients: Int? = null,
+)
+
+/**
+ * One coded picture: [configuration] is the payload of the encoder's configuration property, without its
+ * box header, and [data] the coded data of the item. The picture decodes to [width] by [height], the size
+ * of the planes. [brand] is the brand of ISO/IEC 23008-12 Annex B, or of the codec's own HEIF
+ * specification, that the coded picture conforms to, such as `heic`, `heix` or `avif`, for the `ftyp` box.
+ */
+@ExperimentalHeifCodecApi
+public class HeifCodedPicture(
+    public val configuration: ByteArray,
+    public val data: ByteArray,
+    public val width: Int,
+    public val height: Int,
+    public val brand: String,
+)

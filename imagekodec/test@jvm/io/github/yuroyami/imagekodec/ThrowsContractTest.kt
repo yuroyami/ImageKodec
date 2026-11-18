@@ -70,6 +70,16 @@ class ThrowsContractTest {
             declares(scaling, "downscaledTo", ex, receiver, int, int)
             declares(transforms, "cropped", ex, receiver, int, int, int, int)
         }
+        // encodeHeic refuses an argument and throws UnsupportedImageException without the HEVC module (#174).
+        val options = HeifEncodeOptions::class.java
+        val metadata = ImageMetadata::class.java
+        for (unsupported in listOf(ex, UnsupportedImageException::class.java)) {
+            declares(ImageKodec::class.java, "encodeHeic", unsupported, KiteBitmap::class.java, int)
+            declares(ImageKodec::class.java, "encodeHeic", unsupported, KiteBitmap::class.java, options, metadata, check)
+            declares(ImageKodec::class.java, "encodeHeic16", unsupported, KiteBitmap16::class.java, options, metadata, check)
+        }
+        val optionsConstructor = options.constructors.maxBy { it.parameterCount }
+        assertTrue(ex in optionsConstructor.exceptionTypes, "HeifEncodeOptions constructor should declare IllegalArgumentException")
         val wideConstructor = KiteBitmap16::class.java.getConstructor(int, int, int, ShortArray::class.java)
         assertTrue(ex in wideConstructor.exceptionTypes, "KiteBitmap16 constructor should declare IllegalArgumentException")
         val bitmapConstructor = KiteBitmap::class.java.getConstructor(int, int, IntArray::class.java)

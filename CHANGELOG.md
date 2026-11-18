@@ -14,6 +14,22 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.encodeHeic(bitmap, quality)`, `encodeHeic(bitmap, options, metadata, cancellationCheck)` and
+  `encodeHeic16` write HEIC files: a HEIF writer in the core (`ftyp`, `meta` with `hdlr`, `pitm`, `iloc`,
+  `iinf`, `iref`, `iprp` and `idat`, then `mdat`) around the intra HEVC encoder of `imagekodec-heic`, which
+  `ImageKodecHeic.install()` now registers beside the decoder. `HeifEncodeOptions` sets quality, lossless,
+  chroma subsampling (`HeifChroma`), bit depth (8, 10 or 12), effort, tile size, thumbnail size and
+  orientation. RGB converts with BT.601's matrix in full range, signalled as sRGB; lossless uses the
+  identity matrix in 4:4:4 and returns the bitmap exactly. Gray codes as 4:0:0, alpha as an auxiliary
+  image, a picture larger than the tile size (512 by default) as a `grid` whose tiles the tile runner of
+  `setTileRunner` encodes, and a subsampled picture of odd size with a `clap` crop. The ICC profile, EXIF
+  and XMP of an `ImageMetadata` go in as `colr` `prof`, `Exif` and `mime` items, a thumbnail as a `thmb`
+  item, and the orientation as `irot` and `imir`. Without the module, `encodeHeic` throws
+  `UnsupportedImageException` that names it. libheif, libde265, ffmpeg and exiftool read the files in
+  `HeicEncodeOracleTest` (#174).
+- `HeifEncoder`, `HeifEncodeParameters`, `HeifCodedPicture` and `ImageKodec.registerHeifEncoder`, under
+  `ExperimentalHeifCodecApi`: the encode side of the HEIF codec interface, through which a module adds the
+  encoder of an item type (#174).
 - `ImageKodec.setTileRunner` sets one `TileRunner` that every decode hands the tiles of a HEIC or
   AVIF grid to, as `TileJob`s, so a caller can decode them on its own threads. Each job decodes one
   tile with its own codec session and copies it into the picture at once, so a decode holds the

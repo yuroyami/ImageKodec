@@ -21,6 +21,7 @@ import io.github.yuroyami.imagekodec.codec.WebpDecoder
 import io.github.yuroyami.imagekodec.codec.WebpEncoder
 import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
 import io.github.yuroyami.imagekodec.codec.avif.HeifCodecs
+import io.github.yuroyami.imagekodec.codec.avif.HeifEncode
 import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
 import io.github.yuroyami.imagekodec.codec.jxr.JxrDecoder
 import io.github.yuroyami.imagekodec.internal.color.ColorManagement
@@ -52,9 +53,20 @@ public object ImageKodec {
     public fun registerHeifCodec(codec: HeifCodec): Unit = HeifCodecs.register(codec)
 
     /**
+     * Adds [encoder] as the encoder of its HEIF item type, so that [encodeHeic] can write HEIF files
+     * whose items have that type (#174). An encoder for a type that already has one replaces it. Safe
+     * from several threads.
+     *
+     * @throws IllegalArgumentException if its item or configuration type is not four characters
+     */
+    @ExperimentalHeifCodecApi
+    @Throws(IllegalArgumentException::class)
+    public fun registerHeifEncoder(encoder: HeifEncoder): Unit = HeifCodecs.registerEncoder(encoder)
+
+    /**
      * Sets the [TileRunner] that every decode from now on hands its independent jobs to: the tiles
      * of a HEIC or AVIF grid, in [decode], [decode16], [decodeScaled] and the other decodes of a grid
-     * image (#152). The default, [TileRunner.Serial], runs them in order on the calling thread,
+     * image (#152), and the tiles that [encodeHeic] and [encodeHeic16] code (#174). The default, [TileRunner.Serial], runs them in order on the calling thread,
      * which is all JS and Wasm can do. Set it once, at startup, before any decode: a decode reads the
      * runner each time it hands out a set of jobs, so a change while it runs can apply to its later
      * rows of tiles.
@@ -1023,6 +1035,67 @@ public object ImageKodec {
      */
     @Throws(IllegalArgumentException::class)
     public fun encodeWebp(bitmap: KiteBitmap, metadata: ImageMetadata): ByteArray = WebpEncoder.encode(bitmap, metadata)
+
+    /**
+     * Encode [bitmap] as a HEIC file at [quality], 0 to 100 (default 50), with the other settings of
+     * [HeifEncodeOptions]: 8-bit 4:2:0, tiles of 512 for a larger picture. See the overload with options.
+     *
+     * @throws IllegalArgumentException if [quality] is outside 0..100, or the picture is too large for a
+     *   HEIF reader
+     * @throws UnsupportedImageException if the HEVC encoder of the `imagekodec-heic` module is not
+     *   installed: add the module and call `ImageKodecHeic.install()`
+     */
+    @Throws(IllegalArgumentException::class, UnsupportedImageException::class)
+    public fun encodeHeic(bitmap: KiteBitmap, quality: Int = 50): ByteArray = encodeHeic(bitmap, HeifEncodeOptions(quality = quality))
+
+    /**
+     * Encode [bitmap] as a HEIC file (#174): HEIF (ISO/IEC 23008-12) with HEVC pictures, coded by the
+     * intra encoder of the `imagekodec-heic` module, which `ImageKodecHeic.install()` registers.
+     *
+     * Colour converts to Y, Cb and Cr with BT.601's matrix in full range and is signalled as sRGB
+     * (`colr` `nclx` 1, 13, 6, full range), as libheif and libavif write it; a lossless file uses the
+     * identity matrix in 4:4:4 and decodes to exactly [bitmap]. A gray bitmap codes luma alone, and a
+     * bitmap with any alpha below 255 adds an alpha auxiliary image, straight (not premultiplied). A
+     * picture wider or taller than [HeifEncodeOptions.tileSize] is a `grid` of tiles, which the runner of
+     * [setTileRunner] encodes. [HeifEncodeOptions.thumbnailSize] adds a thumbnail item, and
+     * [HeifEncodeOptions.orientation] writes `irot` and `imir`.
+     *
+     * [metadata] adds its ICC profile as a `colr` `prof` property, its EXIF block as an `Exif` item and
+     * its XMP packet as a `mime` item, which [readMetadata] reads back; a gain map is not written.
+     * [cancellationCheck] runs at least once a tile and once a row of coding blocks, and what it throws
+     * comes out of this call as it is.
+     *
+     * @throws IllegalArgumentException if the picture is too large for a HEIF reader (65535 on a side, or
+     *   more than 256 tiles on a side of a grid), or for one coded picture when [HeifEncodeOptions.tileSize]
+     *   is null
+     * @throws UnsupportedImageException if the HEVC encoder of the `imagekodec-heic` module is not
+     *   installed: add the module and call `ImageKodecHeic.install()`
+     */
+    @Throws(IllegalArgumentException::class, UnsupportedImageException::class)
+    public fun encodeHeic(
+        bitmap: KiteBitmap,
+        options: HeifEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encode(bitmap, null, options, metadata, "hvc1", cancel) }
+
+    /**
+     * Encode [bitmap] as a HEIC file of 10 or 12 bits a sample ([HeifEncodeOptions.bitDepth]; by default
+     * 10, or 12 when lossless), as [encodeHeic] writes an 8-bit bitmap. One or two channels code as gray,
+     * and so do three or four whose colour channels are equal. HEVC holds 12 bits at most, so
+     * [decode16] gives each sample back rounded to the coded depth; a lossless file gives back exactly
+     * every sample that a file of its depth can give, such as the samples [decode16] read from one.
+     *
+     * @throws IllegalArgumentException as [encodeHeic] does
+     * @throws UnsupportedImageException as [encodeHeic] does
+     */
+    @Throws(IllegalArgumentException::class, UnsupportedImageException::class)
+    public fun encodeHeic16(
+        bitmap: KiteBitmap16,
+        options: HeifEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encode(null, bitmap, options, metadata, "hvc1", cancel) }
 
     /**
      * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, AVIF or HEIC file. The

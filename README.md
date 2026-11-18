@@ -2,7 +2,7 @@
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
 BMP, TIFF, JPEG 2000, WebP, AVIF, JPEG XL and JPEG XR from a `ByteArray`, with the same code
-on every target. HEIC decodes with the separate `imagekodec-heic` module.
+on every target. HEIC decodes and encodes with the separate `imagekodec-heic` module.
 
 <sub>AI tools wrote much of the code, tests and documentation in this project, under the
 direction and review of its author.</sub>
@@ -132,7 +132,7 @@ val jpeg: ByteArray = ImageKodec.encodeJpeg(bitmap, quality = 85)
 ```
 
 There are encoders for PNG and APNG, JPEG (stb_image_write's, or a port of Jpegli for smaller
-files), GIF, BMP, TIFF and lossless WebP. See
+files), GIF, BMP, TIFF, lossless WebP and, with the `imagekodec-heic` module, HEIC. See
 [Writing images](docs/encoding.md).
 
 ### Show an image in Compose
@@ -163,11 +163,11 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | AVIF | stills and image sequences, 8 to 12 bits | no |
 | JPEG XL | both coding modes, layers and animation | no |
 | JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | no |
-| HEIC | stills, grids, alpha, depth and gain maps, and image sequences, 8 to 16 bits, with the `imagekodec-heic` module | no |
+| HEIC | stills, grids, alpha, depth and gain maps, and image sequences, 8 to 16 bits, with the `imagekodec-heic` module | intra stills and grids, 8 to 12 bits, alpha, lossless, with the `imagekodec-heic` module |
 
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
-carries a header of its own, so both take their parameters explicitly. HEIC decodes only with the
-separate `imagekodec-heic` module, which is not published yet. [HEIC](docs/heic.md) explains why and
+carries a header of its own, so both take their parameters explicitly. HEIC decodes and encodes only
+with the separate `imagekodec-heic` module, which is not published yet. [HEIC](docs/heic.md) explains why and
 how to install it. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
 format.
 
@@ -190,7 +190,7 @@ in a browser on the web, so those two modules are for browser apps.
 
 - Every entry point takes the complete file as a `ByteArray`. There is no streaming decode.
 - `decode` returns 8 bits a channel. Use `decode16` for deeper samples.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL, JPEG XR or HEIC.
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR.
 - A decode refuses an image of more than 2^28 pixels (about 1 GiB of ARGB).
 
 [Limits](docs/limits.md) has the full list, format by format.

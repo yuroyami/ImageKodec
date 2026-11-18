@@ -20,7 +20,7 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
   `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
   can move by up to 255 sixteen-bit units to stay in that level.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL, JPEG XR or HEIC. See
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR. See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
 ## Size ceilings
@@ -114,6 +114,32 @@ The tests fail past 30 seconds or 1,500 MB on the JVM and linuxX64, and past 120
 wasmJs: an order of magnitude, which catches a regression and not a loaded machine. On JS, wasmJs
 and linuxX64 the benchmark skips, printing so, where ffmpeg has no libx265, as on CI's runners for
 those targets.
+
+### Encoding
+
+`encodeHeic` writes intra HEVC still images only (#174): no image sequence, depth map, gain map,
+premultiplied alpha, limited range, HDR transfer or matrix other than BT.601 (identity when lossless).
+HEVC holds 12 bits at most, so `encodeHeic16` rounds to 8, 10 or 12 bits. A side may be 65535 at most
+and a grid 256 by 256 tiles; a single picture (`tileSize = null`) is held to HEVC's levels.
+
+`HeicEncodeBenchmarkTest` (run with `IMAGEKODEC_HEIC_ENCODE_BENCHMARK=1`) encodes the 4000 by 3000
+landscape of the photo-like test scenes at quality 50 and 80, effort 2, 8-bit 4:2:0 in tiles of 512,
+on one thread and with a tile runner on a pool of four, which writes the same bytes. libheif's
+`heif-enc` (x265, its own default threads and its own quality scale) is beside it for scale. The score
+is SSIMULACRA 2 of the decoded file against the scene. The machine: a 4-core Intel Xeon at 2.30 GHz.
+
+| Encoder | Quality | Threads | Size | Bits a pixel | Time | SSIMULACRA 2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ImageKodec | 50 | 1 | 140,868 B | 0.094 | 15.9 s | 71.00 |
+| ImageKodec | 50 | 4 | 140,868 B | 0.094 | 4.1 s | 71.00 |
+| ImageKodec | 80 | 1 | 3,327,078 B | 2.218 | 77.4 s | 82.74 |
+| ImageKodec | 80 | 4 | 3,327,078 B | 2.218 | 20.1 s | 82.74 |
+| heif-enc 1.17.6 (x265) | 50 | its own | 664,519 B | 0.443 | 3.0 s | 77.01 |
+| heif-enc 1.17.6 (x265) | 80 | its own | 5,383,163 B | 3.589 | 5.8 s | 83.44 |
+
+The two quality scales differ, so the rows do not compare at equal quality; `HevcEncoderBenchmarkTest`
+compares the HEVC encoder with x265 at equal score. On one thread, ImageKodec takes 5 and 13 times as
+long as heif-enc with its own threads; with four threads, 1.4 and 3.5 times as long.
 
 ## JPEG XL
 

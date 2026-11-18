@@ -2,7 +2,7 @@ package io.github.yuroyami.imagekodec
 
 /**
  * Runs the independent jobs of a decode, the tiles of a HEIC or AVIF grid, on the threads it
- * chooses (#152). [ImageKodec.setTileRunner] sets the one runner that every decode uses; the
+ * chooses (#152), and the tiles of a grid that `encodeHeic` codes (#174). [ImageKodec.setTileRunner] sets the one runner that every decode uses; the
  * default, [Serial], runs the jobs in order on the calling thread.
  *
  * Each job decodes one tile with a codec session of its own and copies it into the canvas at

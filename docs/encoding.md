@@ -1,6 +1,7 @@
 # Writing images
 
-ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF and lossless WebP. Every encoder takes a
+ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, lossless WebP and, with the `imagekodec-heic`
+module, HEIC. Every encoder takes a
 `KiteBitmap` (or a `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows
 it) and returns the file as a `ByteArray`.
 
@@ -16,6 +17,7 @@ ImageKodec.encodeTiff(bitmap)                   // gray or RGB, alpha when prese
 ImageKodec.encodeTiff(pages)                    // one page a bitmap, read back with decodePage
 ImageKodec.encodeTiff16(bitmap16)               // the same at 16 bits, read back with decode16
 ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than the PNG
+ImageKodec.encodeHeic(bitmap, quality = 50)     // HEVC in HEIF, needs ImageKodecHeic.install()
 ```
 
 `encodeJpeg` uses a quality of 90 when you pass none.
@@ -53,6 +55,9 @@ val webp = ImageKodec.encodeWebp(upright, metadata.upright())
 - JPEG writes the EXIF block as an APP1 `Exif` segment, the XMP packet as an APP1 Adobe XMP segment and the ICC profile as APP2 `ICC_PROFILE` chunks. An EXIF block or an XMP packet longer than one segment, about 64 KB, is left out. A profile of any size up to 255 segments goes in.
 - PNG writes `iCCP`, `eXIf` and an `iTXt` chunk with the keyword `XML:com.adobe.xmp`.
 - WebP writes the extended format: `VP8X`, `ICCP`, the image, `EXIF` and `XMP `.
+- HEIC (`encodeHeic` with `ImageMetadata`) writes the ICC profile as a `colr` `prof` property, the
+  EXIF block as an `Exif` item and the XMP packet as a `mime` item, each tied to the image by `cdsc`.
+  The EXIF orientation is set to the orientation the options write as `irot` and `imir`.
 - `upright()` sets the EXIF orientation to 1. Keep the original orientation only when you write the pixels as they were stored.
 
 ### Ultra HDR gain maps
@@ -90,9 +95,28 @@ val progressive = ImageKodec.repackJpeg(photo, progressive = true) // often smal
 - Arithmetic-coded, lossless and hierarchical files come back unchanged.
 - `ImageKodec.repackJpeg(ImageKodec.encodeJpeg(bitmap))` gives the encoder's output with optimal tables.
 
+## HEIC
+
+`encodeHeic` writes a HEIF file of HEVC pictures (#174). The core writes the container and converts
+RGB to Y, Cb and Cr; the intra HEVC encoder of the `imagekodec-heic` module codes the pictures, so
+call `ImageKodecHeic.install()` first. Without it, `encodeHeic` throws `UnsupportedImageException`
+that names the module.
+
+```kotlin
+ImageKodecHeic.install()
+val heic = ImageKodec.encodeHeic(bitmap, quality = 60)
+val exact = ImageKodec.encodeHeic(bitmap, HeifEncodeOptions(lossless = true))
+val deep = ImageKodec.encodeHeic16(bitmap16, HeifEncodeOptions(quality = 70, chroma = HeifChroma.Yuv444))
+val kept = ImageKodec.encodeHeic(upright, HeifEncodeOptions(thumbnailSize = 320), metadata.upright())
+```
+
+[Writing HEIC](heic.md#writing-heic) describes the file, the options and what is not written.
+
 ## What the encoders do not write
 
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL, JPEG XR or HEIC.
+- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR.
+- The HEIC encoder writes still images only, with no image sequence, depth map, gain map or
+  premultiplied alpha. See [Writing HEIC](heic.md#writing-heic).
 - The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit
   output. It picks a filter for each row, which is a compression choice and not a format
   capability. Use `encodeTiff16` for 16-bit output.

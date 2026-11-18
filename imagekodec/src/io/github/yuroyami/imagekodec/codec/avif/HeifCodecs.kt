@@ -4,6 +4,7 @@ import io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi
 import io.github.yuroyami.imagekodec.HeifCodec
 import io.github.yuroyami.imagekodec.HeifCodecInfo
 import io.github.yuroyami.imagekodec.HeifCodecSession
+import io.github.yuroyami.imagekodec.HeifEncoder
 import io.github.yuroyami.imagekodec.HeifPlanes
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import kotlin.concurrent.atomics.AtomicReference
@@ -39,8 +40,26 @@ internal object HeifCodecs {
         }
     }
 
-    /** Back to the built-in codecs alone, for tests. */
-    fun reset() = current.store(table(builtIn))
+    /** Back to the built-in codecs alone, and no encoder, for tests. */
+    fun reset() {
+        current.store(table(builtIn))
+        encoders.store(emptyMap())
+    }
+
+    /** The encoders by item type (#174). None is built in until the AV1 encoder (#176). */
+    private val encoders = AtomicReference<Map<String, HeifEncoder>>(emptyMap())
+
+    fun registerEncoder(encoder: HeifEncoder) {
+        for (t in listOf(encoder.itemType, encoder.configurationType)) {
+            require(t.length == 4 && t.all { it.code in 0x20..0x7E }) { "'$t' is not a four-character code" }
+        }
+        while (true) {
+            val old = encoders.load()
+            if (encoders.compareAndSet(old, old + (encoder.itemType to encoder))) return
+        }
+    }
+
+    fun encoder(itemType: String): HeifEncoder? = encoders.load()[itemType]
 
     fun forItem(type: Int): HeifCodec? = current.load().byItem[type]
 

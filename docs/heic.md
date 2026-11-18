@@ -21,8 +21,9 @@ ImageKodecHeic.install()
 val bitmap = ImageKodec.decode(heicBytes)
 ```
 
-`install()` registers the HEVC codec with the core. A second call changes nothing. After it, every
-entry point of `ImageKodec` reads HEIC like any other format.
+`install()` registers the HEVC codec with the core, and the HEVC encoder that `encodeHeic` uses. A
+second call changes nothing. After it, every entry point of `ImageKodec` reads HEIC like any other
+format.
 
 The module is not published yet. Its publishing waits on the owner's decision about the patents
 on HEVC, so the coordinates above do not resolve until a release names them.
@@ -31,8 +32,8 @@ on HEVC, so the coordinates above do not resolve until a release names them.
 
 The core still recognises a HEIC file. `ImageKodec.detect` returns `ImageFormat.HEIC`, and `probe`
 reports its size, bit depth, alpha, orientation, thumbnails and pages from the container. Its
-`isDecodable` is false, and `unsupportedReason` names `imagekodec-heic`. `decode` throws
-`UnsupportedImageException`. `readMetadata` returns the EXIF, XMP and ICC profile, and `motionPhoto`
+`isDecodable` is false, and `unsupportedReason` names `imagekodec-heic`. `decode` and `encodeHeic`
+throw `UnsupportedImageException`. `readMetadata` returns the EXIF, XMP and ICC profile, and `motionPhoto`
 finds the video of a Motion Photo, with or without the module.
 
 ## What decodes
@@ -125,6 +126,71 @@ runner decodes AVIF grids, and a reduced decode (`decodeScaled`, `decodeDownscal
 row of tiles at a time, which keeps its memory bound. On four threads the 48-tile grid of the
 benchmark decodes in 584 ms where one thread takes 1,469 ms. JS and Wasm have no threads, so the
 default runner, `TileRunner.Serial`, is the one to keep there.
+
+## Writing HEIC
+
+`ImageKodec.encodeHeic` writes a HEIC file (#174). The core writes the HEIF container and converts
+RGB to planes; the module's intra HEVC encoder, which `install()` registers beside the decoder, codes
+each picture. The encoder is written from ITU-T H.265: one IDR picture of one I slice, with the
+decoder's own reconstruction, deblocking and SAO.
+
+```kotlin
+ImageKodecHeic.install()
+val heic = ImageKodec.encodeHeic(bitmap, quality = 60)
+val options = HeifEncodeOptions(quality = 80, chroma = HeifChroma.Yuv444, thumbnailSize = 320, orientation = Orientation.Rotate90)
+val withMetadata = ImageKodec.encodeHeic(bitmap, options, ImageKodec.readMetadata(original))
+val tenBits = ImageKodec.encodeHeic16(bitmap16, HeifEncodeOptions(quality = 70))
+```
+
+`HeifEncodeOptions` holds every setting, each with a default:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `quality` | 50 | 0 to 100. The QP is 51 at 0, 26 at 50 and 1 at 100, straight between. |
+| `lossless` | false | Codes RGB with the identity matrix in 4:4:4, or gray in 4:0:0, so `decode` returns the bitmap exactly. |
+| `chroma` | `Yuv420` | The chroma subsampling of a lossy colour picture: `Yuv420`, `Yuv422` or `Yuv444`. |
+| `bitDepth` | 8, or 10 from `encodeHeic16` (12 lossless) | 8, 10 or 12 bits a sample. |
+| `effort` | 2 | 1 (fast) to 3 (thorough): how many intra modes and transform splits the encoder tries. |
+| `tileSize` | 512 | A picture wider or taller than this is a `grid` of tiles of this size. Null writes one picture. |
+| `thumbnailSize` | null | The longest side of a thumbnail item, scaled down from the picture. |
+| `orientation` | `Normal` | Written as `irot` and `imir`, so a reader shows `bitmap.oriented(orientation)`. |
+
+What the file holds:
+
+- `ftyp` names the brand of the primary picture's profile (ISO/IEC 23008-12 Annex B: `heic` for
+  8-bit 4:2:0, `heix` for the others), then `mif1`, the brands of the other pictures, and `miaf`.
+- Colour converts with BT.601's matrix in full range and is signalled as sRGB (`colr` `nclx` 1, 13,
+  6, full range), as libheif and libavif write it, in the `nclx` box and in the HEVC VUI. With an ICC
+  profile in the metadata, the profile goes in a `colr` `prof` box, and the `nclx` box leaves the
+  primaries and transfer unspecified. A gray bitmap codes luma alone (4:0:0).
+- 4:2:0 chroma is the mean of each 2 by 2 block, centred between its luma samples, where the
+  decoder's bilinear upsampling expects it. A subsampled picture of odd size codes one more column
+  or row, repeating the last, and a `clap` box crops it.
+- A bitmap with any alpha below 255 gets an alpha auxiliary image: a 4:0:0 picture in full range,
+  straight, with `auxC` `urn:mpeg:hevc:2015:auxid:1` and an `auxl` reference, coded at the same
+  quality. A grid's alpha is a grid of the same layout.
+- A picture wider or taller than `tileSize` is a `grid` item whose tiles are hidden `hvc1` items of
+  `tileSize` by `tileSize`, the edge tiles padded by repeating the last row and column. The tiles
+  share one `hvcC`, `ispe`, `pixi` and `colr` in `ipco`. They go through the tile runner of
+  `setTileRunner`, so a pool of threads encodes them in parallel, and the bytes do not depend on
+  the runner.
+- Every image item has `ispe` and `pixi`; `irot` and `imir` follow, marked essential, in MIAF's
+  order. A thumbnail item is tied to the image by `thmb`, the EXIF and XMP items by `cdsc`.
+
+`encodeHeic16` keeps up to 12 bits, the most the encoder codes. A lossless file gives back through
+`decode16` exactly every value that a file of its depth can give, such as what `decode16` read from
+one. Other 16-bit values move to the nearest of those: `decode16` widens a coded sample into the
+8-bit level that `decode` rounds it to, so a 12-bit file gives 3,366 distinct values, not 4,096.
+
+The output is the same on every platform. `HeicEncodeOracleTest` checks it against libheif 1.17.6
+(`heif-info` lists the structure; `heif-convert` gives the same RGB within one level on 4:4:4 and
+4:0:0), libde265 and ffmpeg (each coded item decodes to the same samples) and `exiftool` (EXIF,
+XMP and ICC). On 4:2:0 and 4:2:2, heif-convert repeats each chroma sample where ImageKodec
+interpolates, so the two differ by up to 17 levels at colour edges and by 0.3 to 1.5 on average.
+
+Not written: image sequences, depth maps, gain maps, premultiplied alpha, limited range, other
+matrices or primaries than sRGB's, HDR transfer functions, and HEVC inter pictures. A grid holds at
+most 256 by 256 tiles, and a side of 65535 is the most a reader accepts.
 
 ## Platforms
 
