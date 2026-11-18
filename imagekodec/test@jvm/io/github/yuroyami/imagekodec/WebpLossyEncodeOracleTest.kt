@@ -93,6 +93,71 @@ class WebpLossyEncodeOracleTest {
         }
     }
 
+    /** A ball that moves over a photo, with a clear border that fills in, and a repeated frame. */
+    private fun animation(): KiteAnimation {
+        val base = PhotoScenes.landscape(96, 72).bitmap
+        fun frame(t: Int): KiteBitmap = KiteBitmap(96, 72, IntArray(96 * 72) { i ->
+            val x = i % 96
+            val y = i / 96
+            val dx = x - (20 + t * 15)
+            val dy = y - (30 + t * 5)
+            when {
+                y < 6 && x > 90 - t * 20 -> 0
+                y < 6 -> argb(0x60 + t * 30, 200, 200, 40)
+                dx * dx + dy * dy < 120 -> argb(255, 250, 40, 40)
+                else -> base.argb[i]
+            }
+        })
+        val frames = listOf(frame(0), frame(1), frame(1), frame(2), frame(3))
+        return KiteAnimation(96, 72, frames.mapIndexed { i, b -> KiteFrame(b, 40 + 70 * i, (40 + 70 * i) / 10) }, loopCount = 7)
+    }
+
+    private fun readPam(file: File): KiteBitmap {
+        val bytes = file.readBytes()
+        val header = bytes.decodeToString(0, minOf(bytes.size, 200))
+        val w = Regex("WIDTH (\\d+)").find(header)!!.groupValues[1].toInt()
+        val h = Regex("HEIGHT (\\d+)").find(header)!!.groupValues[1].toInt()
+        val start = header.indexOf("ENDHDR\n") + 7
+        return KiteBitmap(w, h, IntArray(w * h) { i ->
+            val o = start + i * 4
+            argb(bytes[o + 3].toInt() and 255, bytes[o].toInt() and 255, bytes[o + 1].toInt() and 255, bytes[o + 2].toInt() and 255)
+        })
+    }
+
+    @Test
+    fun animDumpAndWebpmuxReadEveryAnimation() {
+        assumeTrue("anim_dump or webpmux is not installed", Tools.hasAll("anim_dump", "webpmux"))
+        val anim = animation()
+        val settings = listOf(WebpEncodeOptions(lossless = true), WebpEncodeOptions(quality = 70), WebpEncodeOptions(quality = 95, effort = 3, background = 0xFF336699.toInt()))
+        for (options in settings) {
+            val webp = File(dir, "anim.webp").apply { writeBytes(ImageKodec.encodeWebp(anim, options)) }
+            val out = File(dir, "dump").apply { deleteRecursively(); mkdirs() }
+            val (code, text) = run(Tools.require("anim_dump").path, "-folder", out.path, "-prefix", "f", "-pam", webp.path)
+            assertEquals(0, code, "anim_dump failed: $text")
+            val ours = ImageKodec.decodeAnimation(webp.readBytes())
+            val dumped = out.listFiles()!!.filter { it.name.endsWith(".pam") }.sortedBy { it.name }
+            assertEquals(anim.frames.size, dumped.size, "$options: frames anim_dump writes")
+            assertEquals(anim.frames.size, ours.frames.size, "$options: frames ImageKodec reads")
+            for ((i, file) in dumped.withIndex()) {
+                // anim_dump sets every fully transparent pixel to 0 before it writes a frame
+                // (CleanupTransparentPixels in libwebp's examples/anim_util.c), so ours are cleaned alike.
+                val mine = ours.frames[i].bitmap.argb.map { if (it ushr 24 == 0) 0 else it }
+                val theirs = readPam(file).argb.toList()
+                val differing = mine.indices.count { mine[it] != theirs[it] }
+                assertEquals(0, differing, "$options, frame $i: $differing pixels differ from anim_dump's")
+                if (options.lossless) {
+                    val source = anim.frames[i].bitmap.argb.map { if (it ushr 24 == 0) 0 else it }
+                    assertEquals(source, mine, "frame $i is not the source")
+                }
+            }
+            val (infoCode, info) = run(Tools.require("webpmux").path, "-info", webp.path)
+            assertEquals(0, infoCode, info)
+            println(info)
+            assertTrue(info.contains("Number of frames: ${anim.frames.size}"), info)
+            assertTrue(info.contains("Loop Count : 7"), info)
+        }
+    }
+
     private class Point(val quality: Int, val size: Int, val score: Double)
 
     private fun cwebpCurve(scene: PhotoScenes.Scene): List<Point> {

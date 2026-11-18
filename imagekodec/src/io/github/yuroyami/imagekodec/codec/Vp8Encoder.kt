@@ -18,11 +18,15 @@ internal class Vp8Planes(val width: Int, val height: Int) {
  * A lossy VP8 key frame encoder, written from RFC 6386 (#178). Every macroblock is predicted from
  * its reconstructed neighbours as the decoder will predict it, and each choice of prediction mode
  * (16x16 or sixteen 4x4 modes for luma, one of four for chroma) is the one that costs least in
- * distortion plus [Params.lambda] times the bits it takes, the bits counted from the token
- * probabilities the frame will carry. The macroblocks fall into up to four segments by how busy
- * their luma is, and a busy segment takes a coarser quantizer, where the eye sees the loss less.
- * The token probabilities are then fitted to the counted tokens, and an update is sent for every
- * probability whose saving pays for its own cost.
+ * distortion plus a lambda times the bits it takes, the bits counted from the token
+ * probabilities the frame will carry. At effort 3 a trellis also picks each coefficient's level
+ * that way. The macroblocks fall into up to four segments by how busy their luma is, and a busy
+ * segment takes a coarser quantizer, where the eye sees the loss less. The token probabilities are
+ * then fitted to the counted tokens, and an update is sent for every probability whose saving pays
+ * for its own cost. The loop filter level follows each segment's quantizer.
+ *
+ * Nothing here comes from libwebp's encoder: the tuning constants were set by measuring the size
+ * at an equal SSIMULACRA 2 score against `cwebp -m 4`, which is only run as a tool.
  */
 internal class Vp8Encoder private constructor(
     private val planes: Vp8Planes,
@@ -136,6 +140,8 @@ internal class Vp8Encoder private constructor(
     private val d4 = IntArray(16)
     private val best4Rec = IntArray(16)
     private val best4Lev = IntArray(16)
+    private val candidates = IntArray(10)
+    private val preScore = LongArray(10)
 
     // Chroma candidates: levels of 4 U then 4 V blocks, reconstruction of U then V.
     private val uvRec = IntArray(128)
@@ -439,8 +445,12 @@ internal class Vp8Encoder private constructor(
         for (b in 0 until 16) {
             val bx = b and 3
             val by = b shr 2
-            quantize(coeffs, b * 16, seg.y1Dc, seg.y1Ac, 1, tryLev, b * 16, Y1_ROUND)
             val ctx = ((tnz shr bx) and 1) + ((lnz shr by) and 1)
+            if (effort >= 3) {
+                trellis(coeffs, b * 16, seg.y1Dc, seg.y1Ac, 1, TYPE_Y_AFTER_Y2, ctx, seg.lambda16 * TRELLIS shr 4, tryLev, b * 16)
+            } else {
+                quantize(coeffs, b * 16, seg.y1Dc, seg.y1Ac, 1, tryLev, b * 16, Y1_ROUND)
+            }
             rate += blockCost(tryLev, b * 16, 1, TYPE_Y_AFTER_Y2, ctx)
             val nz = if (lastNonZero(tryLev, b * 16, 1) >= 0) 1 else 0
             tnz = (tnz and (1 shl bx).inv()) or (nz shl bx)
@@ -484,7 +494,6 @@ internal class Vp8Encoder private constructor(
         var tnz = 0
         var lnz = 0
         for (i in 0 until 4) { tnz = tnz or (nzTopY[mbX * 4 + i] shl i); lnz = lnz or (nzLeftY[i] shl i) }
-        val candidates = IntArray(10)
         for (b in 0 until 16) {
             val bx = b and 3
             val by = b shr 2
@@ -494,18 +503,20 @@ internal class Vp8Encoder private constructor(
             val leftMode = if (bx == 0) modeLeft[by] else i4Modes[b - 1]
             val probs = (topMode * 10 + leftMode) * 9
             val ctx = ((tnz shr bx) and 1) + ((lnz shr by) and 1)
-            // Effort 1 codes only the three modes whose prediction alone scores best.
             val tried = if (effort == 1) {
-                val pre = LongArray(10)
+                // Effort 1 codes only the three modes whose prediction alone scores best.
                 for (m in 0 until 10) {
                     predict4(m, edge, p4)
                     var e = 0
                     for (k in 0 until 16) { val d = l4[k] - p4[k]; e += d * d }
-                    pre[m] = e.toLong() * 4096 + seg.lambda4 * bmodeCost(probs, m)
+                    preScore[m] = e.toLong() * 4096 + seg.lambda4 * bmodeCost(probs, m)
+                    candidates[m] = m
                 }
-                for (m in 0 until 10) candidates[m] = m
-                val order = candidates.sortedBy { pre[it] }
-                for (m in 0 until 3) candidates[m] = order[m]
+                for (i in 0 until 3) {
+                    var min = i
+                    for (j in i + 1 until 10) if (preScore[candidates[j]] < preScore[candidates[min]]) min = j
+                    val t = candidates[i]; candidates[i] = candidates[min]; candidates[min] = t
+                }
                 3
             } else {
                 for (m in 0 until 10) candidates[m] = m
@@ -518,7 +529,11 @@ internal class Vp8Encoder private constructor(
                 predict4(m, edge, p4)
                 for (k in 0 until 16) r4[k] = l4[k] - p4[k]
                 fdct(r4, d4, 0, scratch)
-                quantize(d4, 0, seg.y1Dc, seg.y1Ac, 0, r4, 0, Y1_ROUND)
+                if (effort >= 3) {
+                    trellis(d4, 0, seg.y1Dc, seg.y1Ac, 0, TYPE_I4, ctx, seg.lambda4 * TRELLIS shr 4, r4, 0)
+                } else {
+                    quantize(d4, 0, seg.y1Dc, seg.y1Ac, 0, r4, 0, Y1_ROUND)
+                }
                 val rate = bmodeCost(probs, m) + blockCost(r4, 0, 0, TYPE_I4, ctx)
                 dequantize(r4, 0, seg.y1Dc, seg.y1Ac, tmp)
                 val sse = reconstruct4(tmp, p4, 0, 4, d4, l4)
@@ -594,8 +609,12 @@ internal class Vp8Encoder private constructor(
                 }
                 fdct(tmp, d4, 0, scratch)
                 val at = (plane * 4 + b) * 16
-                quantize(d4, 0, seg.uvDc, seg.uvAc, 0, tryUvLev, at, UV_ROUND)
                 val ctx = ((tnz shr bx) and 1) + ((lnz shr by) and 1)
+                if (effort >= 3) {
+                    trellis(d4, 0, seg.uvDc, seg.uvAc, 0, TYPE_UV, ctx, seg.lambdaUv * TRELLIS shr 4, tryUvLev, at)
+                } else {
+                    quantize(d4, 0, seg.uvDc, seg.uvAc, 0, tryUvLev, at, UV_ROUND)
+                }
                 rate += blockCost(tryUvLev, at, 0, TYPE_UV, ctx)
                 val nz = if (lastNonZero(tryUvLev, at, 0) >= 0) 1 else 0
                 tnz = (tnz and (1 shl bx).inv()) or (nz shl bx)
@@ -667,6 +686,95 @@ internal class Vp8Encoder private constructor(
             val max = if (q * MAX_LEVEL > 32767) 32767 / q else MAX_LEVEL
             if (level > max) level = max
             out[at + n] = if (v < 0) -level else level
+        }
+    }
+
+    // Trellis state: 0 the block's start, 1 after a zero (no end of block may follow), 2 after a
+    // one, 3 after a larger level. The context of the next token is 0, 0, 1 and 2.
+    private val trellisCost = LongArray(4)
+    private val trellisNext = LongArray(4)
+    private val trellisBack = IntArray(16 * 4) // level shl 2 or previous state
+    private val trellisDist = LongArray(17 * 3)
+    private val trellisLevel = IntArray(16 * 3)
+    private val zeroTail = LongArray(17)
+
+    /**
+     * The levels of the block at [from] of [c] that cost least in distortion plus [lambda] times
+     * rate, each position choosing among the nearest level, the one below it and zero, with the
+     * token context each choice leaves for the next position. Writes them in zigzag order to [out].
+     */
+    private fun trellis(c: IntArray, from: Int, qDc: Int, qAc: Int, first: Int, type: Int, ctx0: Int, lambda: Long, out: IntArray, at: Int) {
+        for (n in 0 until 16) out[at + n] = 0
+        // Candidates and their distortion: twice the orthonormal transform, so a pixel's squared
+        // error is a quarter of the coefficient's, times the score's 4096.
+        zeroTail[16] = 0
+        for (n in 15 downTo first) {
+            val v = c[from + ZIGZAG[n]]
+            val a = if (v < 0) -v else v
+            val q = if (n == 0) qDc else qAc
+            val max = if (q * MAX_LEVEL > 32767) 32767 / q else MAX_LEVEL
+            val near = minOf((a + (q shr 1)) / q, max)
+            for (k in 0 until 3) {
+                val l = when (k) {
+                    0 -> near
+                    1 -> if (near >= 2) near - 1 else -1
+                    else -> if (near >= 1) 0 else -1
+                }
+                trellisLevel[n * 3 + k] = l
+                if (l >= 0) {
+                    val d = (a - l * q).toLong()
+                    trellisDist[n * 3 + k] = d * d * 1024
+                }
+            }
+            val d0 = a.toLong()
+            zeroTail[n] = zeroTail[n + 1] + d0 * d0 * 1024
+        }
+        val inf = Long.MAX_VALUE / 4
+        trellisCost.fill(inf)
+        trellisCost[if (ctx0 == 0) 0 else ctx0 + 1] = 0
+        var bestEnd = inf
+        var endN = first
+        var endState = if (ctx0 == 0) 0 else ctx0 + 1
+        for (n in first until 16) {
+            val band = BANDS[n]
+            for (s in 0 until 4) {
+                val cost = trellisCost[s]
+                if (cost >= inf || s == 1) continue
+                val ctx = if (s <= 1) 0 else s - 1
+                val eob = cost + lambda * bitCost(proba[((type * 8 + band) * 3 + ctx) * 11], 0) + zeroTail[n]
+                if (eob < bestEnd) { bestEnd = eob; endN = n; endState = s }
+            }
+            trellisNext.fill(inf)
+            for (s in 0 until 4) {
+                val cost = trellisCost[s]
+                if (cost >= inf) continue
+                val ctx = if (s <= 1) 0 else s - 1
+                val ci = (type * 8 + band) * 3 + ctx
+                val more = if (s == 1) 0 else bitCost(proba[ci * 11], 1)
+                for (k in 0 until 3) {
+                    val l = trellisLevel[n * 3 + k]
+                    if (l < 0) continue
+                    val bits = more + tokenCost[ci * 11 + TOKEN_OF[l]] + EXTRA_COST[l]
+                    val total = cost + lambda * bits + trellisDist[n * 3 + k]
+                    val ns = if (l == 0) 1 else if (l == 1) 2 else 3
+                    if (total < trellisNext[ns]) {
+                        trellisNext[ns] = total
+                        trellisBack[n * 4 + ns] = (l shl 2) or s
+                    }
+                }
+            }
+            trellisNext.copyInto(trellisCost)
+        }
+        for (s in 0 until 4) {
+            if (trellisCost[s] < bestEnd) { bestEnd = trellisCost[s]; endN = 16; endState = s }
+        }
+        var s = endState
+        for (n in endN - 1 downTo first) {
+            val back = trellisBack[n * 4 + s]
+            val l = back shr 2
+            val v = c[from + ZIGZAG[n]]
+            out[at + n] = if (v < 0) -l else l
+            s = back and 3
         }
     }
 
@@ -1050,16 +1158,26 @@ internal class Vp8Encoder private constructor(
         const val NUM_CTX = 4 * 8 * 3
         const val MAX_LEVEL = 2047
 
-        // Tuning: rounding of quantization in 1/256 of a step, and lambda per squared AC step / 16.
-        const val Y1_ROUND = 100
-        const val Y2_ROUND = 100
-        const val UV_ROUND = 100
-        const val LAMBDA_I16 = 8
-        const val LAMBDA_I4 = 8
-        const val LAMBDA_UV = 8
-        const val SNS_STRENGTH = 4 * 256 / 256
+        // Tuning, set by measuring the size at equal SSIMULACRA 2 against cwebp -m 4 on PhotoScenes.
+        /** Rounding of quantization, in 1/256 of a step: below 128 widens the band that goes to zero. */
+        const val Y1_ROUND = 80
+        const val Y2_ROUND = 128
+        const val UV_ROUND = 115
+
+        /** Lambda of each decision, in 1/16 of the squared AC step. */
+        const val LAMBDA_I16 = 4
+        const val LAMBDA_I4 = 4
+        const val LAMBDA_UV = 4
+
+        /** Quantizer steps a segment moves for each doubling of its luma energy over the mean. */
+        const val SNS_STRENGTH = 2
+
+        /** Loop filter level: FILTER_BASE plus FILTER_SLOPE / 64 of the AC step. */
         const val FILTER_BASE = 0
-        const val FILTER_SLOPE = 20
+        const val FILTER_SLOPE = 14
+
+        /** The trellis lambda, in 1/16 of the decision's. */
+        const val TRELLIS = 16
 
         /** Coefficient order of RFC 6386 section 13: zigzag position to raster index. */
         val ZIGZAG = intArrayOf(0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15)

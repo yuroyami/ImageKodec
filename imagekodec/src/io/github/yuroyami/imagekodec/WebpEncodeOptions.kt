@@ -10,11 +10,12 @@ package io.github.yuroyami.imagekodec
  * @property lossless write the lossless format instead of the lossy one.
  * @property quality 0 to 100, higher is better and larger, with the meaning of `cwebp -q`: the same
  *   number gives about the same quantizer as libwebp chooses.
- * @property effort 1 (fast) to 3 (thorough). 1 decides the modes of a macroblock by its distortion
- *   and a cost estimate in one pass, about as `cwebp -m 2` does. 2 adds a first pass that measures
- *   the token statistics, so the rate and distortion decisions of the second pass weigh real costs,
- *   as `cwebp -m 4` does. 3 also searches each coefficient's level for the best rate and
- *   distortion, and tries several loop filter strengths, as `cwebp -m 6` does.
+ * @property effort 1 (fast) to 3 (thorough), in the place of `cwebp -m 2`, `-m 4` and `-m 6`. Every
+ *   effort chooses each macroblock's modes by distortion plus the bits they cost. 1 codes in full
+ *   only the three 4x4 modes whose prediction alone looks best, in one pass. 2 codes every mode, and
+ *   adds a first pass that measures the token statistics, so the decisions of the second pass
+ *   weigh the costs the frame will have. 3 also chooses each coefficient's level, among the
+ *   nearest, the one below and zero, by distortion plus bits, about three times as slow as 2.
  * @property sharpYuv convert to YUV 4:2:0 by an iterative search that keeps colour edges sharper
  *   after the decoder's upsampling, as `cwebp -sharp_yuv` does. Slower to encode.
  * @property alphaQuality 0 to 100: 100 keeps the alpha exact, and a lower value reduces the alpha to
