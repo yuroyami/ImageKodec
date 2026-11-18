@@ -611,7 +611,7 @@ internal object AvifDecoder {
         if (reason == null && alpha != null) reason = unsupported(c, alpha, 0)
         val size = itemSize(c, item, 0)
         val cicp = itemCicp(c, item, 0)
-        if (reason == null) reason = cicp?.let { AvifColor.unsupported(it.matrix) }
+        if (reason == null) reason = cicp?.let { AvifColor.unsupported(it.matrix, it.transfer) }
         if (reason == null) reason = frames(c, item, 0)
         if (reason == null && alpha != null) reason = frames(c, alpha, 0)
         val premultiplied = alpha != null && alpha.id in c.referencesFrom(item.id, PREM)
@@ -638,7 +638,7 @@ internal object AvifDecoder {
         val nclx = track.properties.firstOrNull { it is AvifProperty.Nclx } as AvifProperty.Nclx?
         val cicp = nclx?.let { AvifCicp(it.primaries, it.transfer, it.matrix, it.fullRange) } ?: headers?.cicp()
         // A sequence's first frame is a key frame: what follows it is what decodeAnimation reads.
-        val reason = headers?.unsupportedReason ?: cicp?.let { AvifColor.unsupported(it.matrix) }
+        val reason = headers?.unsupportedReason ?: cicp?.let { AvifColor.unsupported(it.matrix, it.transfer) }
         val premultiplied = alpha != null &&
             (track.references.any { it.type == PREM && alpha.id in it.to } || alpha.references.any { it.type == PREM && track.id in it.to })
         val width = headers?.width?.takeIf { it > 0 } ?: track.width

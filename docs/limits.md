@@ -159,15 +159,24 @@ and fail during the decode.
 
 ## AVIF
 
-- AV1 matrices that are not linear (BT.2020 and chromaticity-derived constant luminance, SMPTE ST
-  2085 and ICtCp) throw `UnsupportedImageException`, as libavif refuses them.
+- The matrices that are not linear convert as zimg converts them (#189): BT.2020 and chromaticity-derived
+  constant luminance through the BT.709 curve (transfer characteristics 1, 6, 14 and 15) or linear light (8),
+  and ICtCp through PQ (16) or HLG (18). Like zimg, the light comes out through BT.1886's gamma of 2.4 for the
+  SDR curves, and HLG's ICtCp goes through its OOTF one channel at a time. Other curves throw
+  `UnsupportedImageException`, as zimg refuses them, and so does SMPTE ST 2085 (11), which neither libavif nor
+  zimg converts, so no reading could be checked; matrix coefficients from 15 up are reserved.
+- Item data built from other items (`iloc` construction method 2) throws `UnsupportedImageException`: libavif
+  refuses it as unsupported, and no tool here writes it, so no file could be checked.
+- A sample transform token outside the set the AVIF specification defines (0 to 32, 64 to 67 and 128 to 137)
+  throws `UnsupportedImageException`: the others are reserved.
 - An ICC profile or a transfer function is reported, and applied only with a `colorTarget`.
 - An image sequence without an edit list loops forever, as browsers play it.
 - A file with both a track and a primary item shows the primary item when its major brand is `avif`
   and the track otherwise, as libavif chooses.
 - AV1 allows a frame coded at another size than the first. Such a frame is scaled to the size of
   the first frame.
-- Large scale tile lists, which no image uses, are refused.
+- Tile list OBUs are refused. They belong to AV1's large scale tile decoding, whose tiles an
+  application picks from outside the stream; no image uses them, and neither dav1d nor libavif decodes them.
 - The encoder (`encodeAvif`) writes one intra key frame a picture, 8, 10 or 12 bits, at most 65535 on
   a side. It writes no image sequence, film grain, 128 by 128 superblock, intra block copy, delta
   quantizer, Wiener restoration, chroma palette, or 4:1 and three-way partition.

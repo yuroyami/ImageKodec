@@ -182,6 +182,9 @@ class FuzzTest {
         ),
         // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
         *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
+        // Constant luminance and ICtCp, which convert through light (#189).
+        "avif-constant-luminance" to AvifMatrixFixtures.m10t14,
+        "avif-ictcp-hlg" to AvifMatrixFixtures.m14t18,
         // An AVIF the core's own encoder writes: 4:4:4 with alpha, palette blocks among intra ones, CDEF and restoration (#176).
         "avif-encoded" to ImageKodec.encodeAvif(
             KiteBitmap(24, 16, IntArray(24 * 16) { i -> (((i % 24) * 9 + (i / 24) * 40) shl 24) or (if ((i % 24) / 6 % 2 == 0) 0x1080E0 else 0xF0F020) or ((i % 7) * 3) }),
