@@ -998,8 +998,8 @@ public object JpxDecoder {
 
     // ---- tier-1 EBCOT ---------------------------------------------------------
 
-    private const val CTX_UNI = 18
-    private const val CTX_RLC = 17
+    internal const val CTX_UNI = 18
+    internal const val CTX_RLC = 17
 
     /**
      * ZC context lookup, indexed [orientGroup][h*12 + v*4 + min(d,3)]: h and v
@@ -1009,6 +1009,29 @@ public object JpxDecoder {
     private val ZC_LL = buildZcTable(0)
     private val ZC_HL = buildZcTable(1)
     private val ZC_HH = buildZcTable(2)
+
+    /** The zero-coding table of a band of orientation [orient] (0 LL, 1 HL, 2 LH, 3 HH), which the encoder shares. */
+    internal fun zeroCodingTable(orient: Int): IntArray = when (orient) {
+        1 -> ZC_HL
+        3 -> ZC_HH
+        else -> ZC_LL
+    }
+
+    /**
+     * The sign coding context (T.800 Table D.3) shifted left once, or'd with its XOR bit, from the
+     * horizontal and vertical contributions [hc] and [vc], each already clamped to -1, 0 or 1.
+     */
+    internal fun signContextOf(hc: Int, vc: Int): Int = when {
+        hc == 1 && vc == 1 -> 13 shl 1
+        hc == 1 && vc == 0 -> 12 shl 1
+        hc == 1 && vc == -1 -> 11 shl 1
+        hc == 0 && vc == 1 -> 10 shl 1
+        hc == 0 && vc == 0 -> 9 shl 1
+        hc == 0 && vc == -1 -> (10 shl 1) or 1
+        hc == -1 && vc == 1 -> (11 shl 1) or 1
+        hc == -1 && vc == 0 -> (12 shl 1) or 1
+        else -> (13 shl 1) or 1
+    }
 
     private fun buildZcTable(group: Int): IntArray {
         val t = IntArray(36)
@@ -1094,7 +1117,8 @@ public object JpxDecoder {
         }
     }
 
-    private fun resetContexts(cx: IntArray) {
+    /** The initial states of T.800 Table D.7: UNIFORM at 46, run-length at 3, the all-zero context at 4. */
+    internal fun resetContexts(cx: IntArray) {
         cx.fill(0)
         cx[0] = 4 shl 1
         cx[CTX_RLC] = 3 shl 1
@@ -1200,17 +1224,7 @@ public object JpxDecoder {
         }
         val hc = (c(x - 1, y) + c(x + 1, y)).coerceIn(-1, 1)
         val vc = (c(x, y - 1) + (if (seesBelow(y)) c(x, y + 1) else 0)).coerceIn(-1, 1)
-        return when {
-            hc == 1 && vc == 1 -> 13 shl 1
-            hc == 1 && vc == 0 -> 12 shl 1
-            hc == 1 && vc == -1 -> 11 shl 1
-            hc == 0 && vc == 1 -> 10 shl 1
-            hc == 0 && vc == 0 -> 9 shl 1
-            hc == 0 && vc == -1 -> (10 shl 1) or 1
-            hc == -1 && vc == 1 -> (11 shl 1) or 1
-            hc == -1 && vc == 0 -> (12 shl 1) or 1
-            else -> (13 shl 1) or 1
-        }
+        return signContextOf(hc, vc)
     }
 
     /** The significance propagation pass, MQ coded, or raw when [raw] is given: its bits then carry no context and the sign no XOR. */
@@ -1429,7 +1443,7 @@ public object JpxDecoder {
         }
     }
 
-    private const val FRACT = 13
+    internal const val FRACT = 13
 
     /**
      * The largest 9/7 value kept between synthesis levels, in fixed point. One level grows a value
@@ -1552,7 +1566,7 @@ public object JpxDecoder {
      * X[k] holds global index i0+k. Interleaved layout: even global indices
      * are low-pass, odd are high-pass.
      */
-    private fun lift1d(x: IntArray, i0: Int, i1: Int) {
+    internal fun lift1d(x: IntArray, i0: Int, i1: Int) {
         val n = i1 - i0
         if (n <= 0) return
         if (n == 1) {
@@ -1586,7 +1600,7 @@ public object JpxDecoder {
     }
 
     /** [lift1d] for the 9/7 filter, on fixed-point values (T.800 F.3.8.2.2). */
-    private fun liftFixed(x: LongArray, i0: Int, i1: Int) {
+    internal fun liftFixed(x: LongArray, i0: Int, i1: Int) {
         val n = i1 - i0
         if (n <= 0) return
         if (n == 1) {
@@ -1627,13 +1641,20 @@ public object JpxDecoder {
         stepLift(1, NEG_ALPHA_FIX)
     }
 
+    // The lifting parameters of the 9/7 filter (T.800 Table F.4), which the forward transform of the encoder shares.
+    internal const val ALPHA_97 = -1.586134342059924
+    internal const val BETA_97 = -0.052980118572961
+    internal const val GAMMA_97 = 0.882911075530934
+    internal const val DELTA_97 = 0.443506852043971
+    internal const val K_97 = 1.230174104914001
+
     private const val FIX_SHIFT = 16
-    private val K_FIX = (1.230174104914001 * (1 shl FIX_SHIFT)).toLong()
-    private val INV_K_FIX = ((1.0 / 1.230174104914001) * (1 shl FIX_SHIFT)).toLong()
-    private val NEG_ALPHA_FIX = (1.586134342059924 * (1 shl FIX_SHIFT)).toLong()
-    private val NEG_BETA_FIX = (0.052980118572961 * (1 shl FIX_SHIFT)).toLong()
-    private val NEG_GAMMA_FIX = (-0.882911075530934 * (1 shl FIX_SHIFT)).toLong()
-    private val NEG_DELTA_FIX = (-0.443506852043971 * (1 shl FIX_SHIFT)).toLong()
+    private val K_FIX = (K_97 * (1 shl FIX_SHIFT)).toLong()
+    private val INV_K_FIX = ((1.0 / K_97) * (1 shl FIX_SHIFT)).toLong()
+    private val NEG_ALPHA_FIX = (-ALPHA_97 * (1 shl FIX_SHIFT)).toLong()
+    private val NEG_BETA_FIX = (-BETA_97 * (1 shl FIX_SHIFT)).toLong()
+    private val NEG_GAMMA_FIX = (-GAMMA_97 * (1 shl FIX_SHIFT)).toLong()
+    private val NEG_DELTA_FIX = (-DELTA_97 * (1 shl FIX_SHIFT)).toLong()
 
     // ---- inverse MCT + assembly ---------------------------------------------------
 

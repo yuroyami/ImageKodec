@@ -11,6 +11,7 @@ import io.github.yuroyami.imagekodec.codec.JpegDecoder
 import io.github.yuroyami.imagekodec.codec.JpegEncoder
 import io.github.yuroyami.imagekodec.codec.JpegRepack
 import io.github.yuroyami.imagekodec.internal.metric.Ssimulacra2
+import io.github.yuroyami.imagekodec.codec.Jp2Encoder
 import io.github.yuroyami.imagekodec.codec.JpxDecoder
 import io.github.yuroyami.imagekodec.codec.MetadataIo
 import io.github.yuroyami.imagekodec.codec.PngDecoder
@@ -1332,6 +1333,62 @@ public object ImageKodec {
     @Throws(IllegalArgumentException::class)
     public fun encodeGif(animation: KiteAnimation, dither: Boolean = true): ByteArray =
         GifEncoder.encode(animation, dither)
+
+    /**
+     * Encode [bitmap] as a lossy JPEG 2000 file (JP2) at [quality] 0..100 (default 75), as
+     * [Jp2EncodeOptions] describes with its defaults: the 9/7 wavelet over five resolution levels,
+     * code-blocks truncated until the error meets a peak signal-to-noise ratio of
+     * `20 + 0.28 * quality` dB. Gray when every pixel is gray, RGB otherwise, with an opacity
+     * channel when any pixel carries alpha. [decode] reads it back, and so does OpenJPEG.
+     *
+     * @throws IllegalArgumentException if [quality] is outside 0..100
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJp2(bitmap: KiteBitmap, quality: Int = 75): ByteArray =
+        encodeJp2(bitmap, Jp2EncodeOptions(quality = quality))
+
+    /**
+     * Encode [bitmap] as JPEG 2000 with every choice of [options] (#180): lossy at a quality or at
+     * a compression ratio a layer, or lossless with the reversible 5/3 wavelet and colour transform,
+     * in a JP2 file or as a bare codestream, in tiles, resolution levels, code-blocks, precincts and
+     * quality layers of the sizes asked for, in any progression order. Gray when every pixel is
+     * gray, RGB otherwise, with an opacity channel, which a channel definition box (`cdef`)
+     * describes, when any pixel carries alpha. A lossless file decodes to [bitmap] exactly.
+     *
+     * A JP2 file carries [metadata]: the ICC profile as its colour specification when the profile
+     * is gray or RGB as the image is, else the enumerated sRGB or greyscale space; the XMP packet in
+     * the UUID box XMP assigns to JPEG 2000; and the EXIF block in the UUID box exiftool reads. A
+     * bare codestream carries none of it. [cancellationCheck] runs before each tile and each
+     * code-block, and what it throws comes out of this call as it is.
+     *
+     * @throws IllegalArgumentException if [options] asks more than 8 bits a sample of a [KiteBitmap],
+     *   or tiles so small that the image needs more than 65535 of them
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJp2(
+        bitmap: KiteBitmap,
+        options: Jp2EncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> Jp2Encoder.encode(bitmap, options, metadata, cancel) }
+
+    /**
+     * [encodeJp2] for a [KiteBitmap16]: its channels as components, 1 gray, 2 gray and alpha, 3 RGB,
+     * 4 RGBA, at 16 bits a sample or at [Jp2EncodeOptions.bitsPerSample], each sample scaled to that
+     * depth and rounded. Lossless, [decode16] returns the samples of a 16-bit file exactly, and those
+     * of a shallower one as it widens them, so a bitmap [decode16] read from a 12-bit file comes back
+     * the same at 12 bits.
+     *
+     * @throws IllegalArgumentException if [options] asks tiles so small that the image needs more than
+     *   65535 of them
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJp2Wide(
+        bitmap: KiteBitmap16,
+        options: Jp2EncodeOptions = Jp2EncodeOptions(),
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> Jp2Encoder.encode16(bitmap, options, metadata, cancel) }
 
     /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored), each side divided by [reduction]. */
     private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1, cancel: (() -> Unit)? = null): KiteBitmap {

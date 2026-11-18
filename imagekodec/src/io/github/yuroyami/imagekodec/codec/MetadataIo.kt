@@ -26,6 +26,7 @@ internal object MetadataIo {
         data.size >= 8 && (data[0].toInt() and 0xFF) == 0x89 && data[1].toInt() == 0x50 && data[2].toInt() == 0x4E && data[3].toInt() == 0x47 -> readPng(data)
         data.size >= 12 && ascii(data, 0, 4) == "RIFF" && ascii(data, 8, 4) == "WEBP" -> readWebp(data)
         AvifContainer.heifFormat(data) != null -> readHeif(data)
+        data.size >= 12 && be32(data, 0) == 12 && ascii(data, 4, 4) == "jP  " -> Jp2Boxes.read(data)
         else -> ImageMetadata()
     }
 
