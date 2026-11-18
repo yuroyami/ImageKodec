@@ -1,8 +1,8 @@
 # Writing images
 
 ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, WebP (lossless and lossy, still and
-animated), JPEG 2000, JPEG XL, AVIF, JPEG XR, HEIC with the `imagekodec-heic` module, and the CCITT
-fax and JBIG2 data that PDF and TIFF embed. Every encoder takes a `KiteBitmap` (or a
+animated), JPEG 2000, JPEG XL, AVIF (still and animated), JPEG XR, HEIC with the `imagekodec-heic`
+module, and the CCITT fax and JBIG2 data that PDF and TIFF embed. Every encoder takes a `KiteBitmap` (or a
 `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows it) and returns the
 file as a `ByteArray`.
 
@@ -28,6 +28,7 @@ ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than t
 ImageKodec.encodeWebp(bitmap, 75)               // lossy VP8 at cwebp's quality 75, alpha kept exact
 ImageKodec.encodeWebp(anim, WebpEncodeOptions(lossless = true)) // animated, lossless or lossy frames
 ImageKodec.encodeAvif(bitmap, quality = 50)     // AV1 in HEIF, built in
+ImageKodec.encodeAvif(anim, HeifEncodeOptions()) // an AV1 image sequence of inter frames
 ImageKodec.encodeHeic(bitmap, quality = 50)     // HEVC in HEIF, needs ImageKodecHeic.install()
 ImageKodec.encodeJxr(bitmap, quality = 80)      // lossy JPEG XR, as JxrEncApp -q 0.8
 ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(lossless = true)) // lossless JPEG XR
@@ -442,6 +443,49 @@ and reconstructs, and the encoder supplies each decision. So the encoder's recon
 decoder rebuilds: `Av1EncoderOracleTest` holds dav1d and ImageKodec's decoder to it, sample for sample.
 The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed inputs.
 
+### Animated AVIF
+
+`encodeAvif(animation, options)` writes an AV1 image sequence (#177): a track of every frame with its
+delay, which `decodeAnimation` plays and libavif and ffmpeg read. `encodeHeic(animation, options)` writes
+the same track around HEVC pictures once the `imagekodec-heic` module has a sequence encoder; until then
+it throws `UnsupportedImageException` that says so.
+
+```kotlin
+val animated = ImageKodec.encodeAvif(animation, HeifEncodeOptions(quality = 60))
+val seekable = ImageKodec.encodeAvif(animation, HeifEncodeOptions(quality = 60, keyFrameInterval = 30))
+val exact = ImageKodec.encodeAvif(animation, HeifEncodeOptions(lossless = true))
+```
+
+What the file holds:
+
+- `moov` with `mvhd` and a `trak` of the colour: `tkhd`, an edit list (`edts`, `elst`) and `mdia` with
+  `mdhd`, `hdlr` `pict`, `vmhd`, `dinf` and the sample table: an `av01` sample entry with `av1C`, `colr`,
+  `ccst` and, for a subsampled picture of odd size, `clap`; `stts`, `stsc`, `stsz`, `stco` and, when some
+  frames are not key frames, `stss`. Each frame lasts its `delayMillis` on a timescale of 1000 (1 ms for
+  a delay of 0). The edit list repeats the track, as libavif writes a play count: the track lasts the
+  loop count times the edit, or for ever (a duration of all ones) for a loop count of 0.
+- A frame with alpha below 255 adds a second track of alpha (`hdlr` `auxv`, `auxi` in its sample entry
+  and a `tref` `auxl` to the colour track).
+- The first frame is also the primary item, and its alpha an auxiliary item, each sharing the bytes of
+  the first sample, as libavif writes a sequence, so a reader of still images shows it. `ftyp` names
+  `avis`, `avif`, `msf1`, `iso8`, `mif1` and `miaf`. Metadata and orientation go on the item and the
+  sample entry; `tileSize` and `thumbnailSize` apply to stills only.
+- The first frame is a key frame and every later one an inter frame, unless `keyFrameInterval` asks
+  for a key frame at least every that many frames. An inter frame predicts from the frame before it
+  (LAST) and, from effort 2, the one before that (LAST2); each block chooses, by coding it through the
+  decoder's syntax, between NEARESTMV, NEARMV, GLOBALMV, NEWMV with a vector from a motion search (whole
+  samples by the sum of absolute differences, then half and quarter samples through the decoder's own
+  prediction filters), the two averaged (compound, from effort 2) and the intra modes of a still. Its
+  CDFs start from the previous frame's, and the loop filter, CDEF and restoration are chosen per frame.
+- `effort` 1 searches LAST alone in square steps of 4, 2 and 1 samples, codes the two best candidates
+  with their residual, and skips the intra modes of a block that inter prediction codes with no
+  residual; 2 adds LAST2, compound prediction, steps from 16, more NEARMV indices, a third candidate and
+  a transform split; 3 adds steps from 32, a near pair and five candidates.
+
+dav1d decodes every frame to the encoder's own reconstruction (`AvifSequenceOracleTest`), and
+`AvifSequenceEncodeTest` keeps hashes of fixed animations. Sizes against libaom are in
+[Limits](limits.md#encoding-animated-avif).
+
 ## JPEG 2000
 
 `encodeJp2` writes JPEG 2000 Part 1 (ITU-T T.800), in a JP2 file or as a bare codestream, the form a
@@ -519,10 +563,13 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   splines or noise, no LZ77 and no prefix codes, no Gaborish, no adaptive quantization, no
   squeeze and no float samples. Its lossy files are 8 or 16 bits in sRGB; an ICC profile in the
   metadata is written as the profile of the samples without converting them.
-- The AV1 encoder writes still intra pictures only: no image sequence, no inter frames, no film
-  grain, no 128 by 128 superblocks, no superres, no delta quantizer, no quantizer matrices, no
-  segmentation and no 4:1 or three-way partitions. Intra block copy copies only places whose source
-  matches the block exactly, and not at effort 1.
+- The AV1 encoder writes no film grain, no 128 by 128 superblocks, no superres, no delta quantizer, no
+  quantizer matrices, no segmentation and no 4:1 or three-way partitions. Intra block copy copies only
+  places whose source matches the block exactly, and not at effort 1. Its sequences hold shown key and
+  inter frames in display order: no hidden or alternate reference frames, no backward references, no
+  skip mode, no global or warped motion, no OBMC, no inter-intra or masked compound, no distance
+  weights, no switchable or dual interpolation filters, no eighth-sample vectors and no motion field
+  projection.
 - The HEIC encoder writes still images only, with no image sequence, depth map, gain map or
   premultiplied alpha. See [Writing HEIC](heic.md#writing-heic).
 - The JPEG XR encoder writes neither hard tiles (the decoder reads them), 4:2:2 chroma, CMYK,

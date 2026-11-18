@@ -317,6 +317,13 @@ about a tenth less size, and effort 1 a quarter of it for about two thirds more.
 x265's target, but `-tune ssim`, which turns its psycho-visual tuning off, moves the ratios by less
 than 0.04. The scenes are synthetic and short; no camera footage was measured.
 
+`encodeHeic(animation, options)` is in place for image sequences (#177): the core writes the track as it
+does for an animated AVIF, and asks the `hvc1` encoder for a sequence encoder through
+`HeifEncoder.openSequence`. The module's encoder has none yet, so the call throws
+`UnsupportedImageException` that says so; without the module it names the module, as `encodeHeic` of a
+bitmap does. A sequence encoder hands its samples back in decoding order, each naming the picture it
+codes, and the core writes the composition offsets (`ctts`) that reordered pictures need.
+
 ## Platforms
 
 The module builds for the same 22 targets as the core. CI runs its tests on the JVM, linuxX64, the

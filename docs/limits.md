@@ -178,8 +178,15 @@ and fail during the decode.
 - Tile list OBUs are refused. They belong to AV1's large scale tile decoding, whose tiles an
   application picks from outside the stream; no image uses them, and neither dav1d nor libavif decodes them.
 - The encoder (`encodeAvif`) writes one intra key frame a picture, 8, 10 or 12 bits, at most 65535 on
-  a side. It writes no image sequence, film grain, 128 by 128 superblock, superres, delta quantizer,
-  segmentation, or 4:1 and three-way partition. Intra block copy, from effort 2 on screen content,
+  a side. It writes no film grain, 128 by 128 superblock, superres, delta quantizer, segmentation, or
+  4:1 and three-way partition.
+- An animation (`encodeAvif(animation)`, #177) is one image sequence track of shown frames in display
+  order: a key frame, then inter frames that predict from the one or two frames before, single or
+  averaged. It codes no hidden or alternate reference frame, backward reference, skip mode, global or
+  warped motion, OBMC, inter-intra or masked compound, distance weights, switchable or dual filter,
+  eighth-sample vector or motion field projection, and no grid: each frame is one AV1 frame. Every frame
+  has the first one's size. The track's timescale is 1000, so a delay is kept to the millisecond, and a
+  delay of 0 is written as 1 ms. Intra block copy, from effort 2 on screen content,
   copies only places whose source matches the block exactly, from a hash of the source luma kept for
   pictures of at most 4 Mi samples (a grid tile always is).
 - The encoder is slower than libaom; see [Encoding AVIF](#encoding-avif) below.
@@ -218,6 +225,32 @@ On JS (Node, `AvifEncodeTimingTest`, the faster of two runs), a 256 by 256 scene
 13,277 ms at efforts 1, 2 and 3, where the first committed encoder took 853, 1,905 and 12,773 ms in the same
 session. Effort 3 got slower there: the Wiener filter's least squares and the exact error of each restoration
 filter run in Long arithmetic, which JS does in software.
+
+### Encoding animated AVIF
+
+`AvifSequenceBenchmarkTest` (run with `IMAGEKODEC_AVIS_BENCHMARK=1`) pans a 256 by 192 window three pixels
+across and one down a frame over two photo-like scenes (landscape and city), with a disc crossing it, 24
+frames of 40 ms each, and compares `encodeAvif(animation)` with ffmpeg 6.1's libaom 3.8.2
+(`-c:v libaom-av1 -cpu-used 6 -crf N -b:v 0 -threads 1 -f avif`, which looks 19 frames ahead and codes hidden
+alternate reference frames): for each libaom file, the size ImageKodec needs for the same SSIMULACRA 2 score,
+the mean over the frames, read between its sizes at qualities 10 apart. Both write 8-bit 4:2:0. The table
+gives the mean ratio of the two scenes; below 1, ImageKodec's file is smaller.
+
+| ImageKodec | Against CRF 30 | CRF 40 | CRF 50 | Time of both scenes at quality 50 |
+| --- | ---: | ---: | ---: | ---: |
+| effort 1 | 1.77 | 1.58 | 1.35 | 1.9 s |
+| effort 2 | 1.05 | 1.03 | 0.99 | 7.1 s |
+| effort 2 without compound prediction | 1.10 | 1.04 | 1.00 | 7.2 s |
+| effort 2 with every frame a key frame | 6.43 | 6.26 | 5.98 | 6.2 s |
+| effort 3 | 0.90 | 0.98 | 0.94 | 87.8 s |
+
+libaom took 0.69 s for both scenes at CRF 40, one process each, start included; ImageKodec's times are the CPU
+time of its thread on the JVM after a warm-up, on a 4-core Intel Xeon at 2.10 GHz shared with other builds. So
+effort 2 writes files within 5 percent of libaom's at equal score, in 10 times its time, and inter frames make
+them a sixth of what every frame as a key frame takes. Averaging the two references saves up to 4 percent where
+the quality is high and nothing where it is low. Effort 1 is three and a half times faster than effort 2 for
+files 35 to 77 percent larger than libaom's, most on the finely textured city scene. The test fails when effort
+2's ratio at CRF 40 passes 1.3.
 
 ## HEIC
 

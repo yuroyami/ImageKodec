@@ -179,6 +179,25 @@ reviewable in the diff.
   the files in `AvifEncodeOracleTest`. A picture wider than 4096 with no tile size codes as AV1 tiles.
   The AV1 decoder's inverse transform skips the rows that hold only zeros and CDEF works out its damping
   once a block, which leaves its output unchanged.
+- `ImageKodec.encodeAvif(animation, options, metadata, cancellationCheck)` writes an animated AVIF: an AV1
+  image sequence track of every frame with its delay (timescale 1000), the loop count in an edit list as
+  libavif reads it, an alpha track auxiliary to it when a frame has alpha, and the first frame also as the
+  primary item, sharing the first sample's bytes, under the `avis` and `msf1` brands. The first frame is a
+  key frame, and the frames after it inter frames, which the frame decoder's coding mode codes as it codes
+  stills: each block chooses by rate and distortion among NEARESTMV, NEARMV, GLOBALMV, NEWMV from a motion
+  search (whole samples, then half and quarter samples through the decoder's own filters), and from effort 2
+  the frame before last and both averaged (compound), beside the intra modes. `HeifEncodeOptions` gains
+  `keyFrameInterval` for a key frame every so many frames. dav1d decodes every frame of
+  `AvifSequenceOracleTest` to the encoder's reconstruction, libavif and ffmpeg read the files, and at equal
+  mean SSIMULACRA 2 score effort 2 writes files within 5 percent of those of ffmpeg's libaom at
+  `-cpu-used 6` on two panning scenes, in 10 times its time. The AV1 decoder's motion vector stack reads its top right point only where the
+  superblock's decoded flags say it was decoded, as the specification asks, which changes no decode (#177).
+- The HEIF writer writes image sequence tracks (`moov`, `trak`, `tkhd`, `tref`, `edts`, `mdia` and the sample
+  table with `stts`, `ctts` when pictures are reordered, `stsc`, `stsz`, `stco` or `co64`, and `stss`).
+  `HeifEncoder.openSequence`, `HeifSequenceEncoder` and `HeifCodedSample`, under `ExperimentalHeifCodecApi`,
+  let a module code the pictures of a track; `encodeHeic(animation, options, metadata, cancellationCheck)`
+  goes through them and, until the `imagekodec-heic` module has an HEVC sequence encoder, throws
+  `UnsupportedImageException` that says so (#177).
 - `ImageKodec.encodeHeic(bitmap, quality)`, `encodeHeic(bitmap, options, metadata, cancellationCheck)` and
   `encodeHeic16` write HEIC files: a HEIF writer in the core (`ftyp`, `meta` with `hdlr`, `pitm`, `iloc`,
   `iinf`, `iref`, `iprp` and `idat`, then `mdat`) around the intra HEVC encoder of `imagekodec-heic`, which
