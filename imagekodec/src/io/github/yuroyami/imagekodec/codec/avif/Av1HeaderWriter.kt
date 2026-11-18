@@ -62,8 +62,9 @@ internal class Av1BitWriter {
 }
 
 /**
- * What the AV1 encoder writes in its sequence and frame headers (#176): a still picture of one key frame with
- * `reduced_still_picture_header`, as libavif writes a still image.
+ * What the AV1 encoder writes in its sequence and frame headers: a still picture of one key frame with
+ * `reduced_still_picture_header`, as libavif writes a still image (#176), or with [sequence] a sequence of key and
+ * inter frames (#177), with order hints and the tools the inter coder uses and no others.
  */
 internal class Av1StreamParams(
     val width: Int,
@@ -78,7 +79,12 @@ internal class Av1StreamParams(
     val enableFilterIntra: Boolean,
     val enableCdef: Boolean,
     val enableRestoration: Boolean,
+    /** A sequence of frames rather than one still picture (#177). */
+    val sequence: Boolean = false,
 ) {
+    /** OrderHintBits of a sequence: 7, so the frames a frame refers to, at most a few back, are never ambiguous. */
+    val orderHintBits: Int get() = if (sequence) 7 else 0
+
     /** seq_profile: 0 for 4:2:0 and gray up to 10 bits, 1 for 4:4:4 up to 10 bits, 2 for 12 bits and 4:2:2. */
     val profile: Int = when {
         bitDepth == 12 -> 2
@@ -105,9 +111,18 @@ internal class Av1StreamParams(
     fun sequenceHeader(): ByteArray {
         val w = Av1BitWriter()
         w.f(3, profile)
-        w.flag(true) // still_picture
-        w.flag(true) // reduced_still_picture_header
-        w.f(5, level)
+        w.flag(!sequence) // still_picture
+        w.flag(!sequence) // reduced_still_picture_header
+        if (sequence) {
+            w.flag(false) // timing_info_present_flag
+            w.flag(false) // initial_display_delay_present_flag
+            w.f(5, 0) // operating_points_cnt_minus_1
+            w.f(12, 0) // operating_point_idc[ 0 ]
+            w.f(5, level)
+            if (level > 7) w.flag(false) // seq_tier
+        } else {
+            w.f(5, level)
+        }
         val widthBits = 32 - (width - 1).countLeadingZeroBits()
         val heightBits = 32 - (height - 1).countLeadingZeroBits()
         val wb = maxOf(1, widthBits)
@@ -116,9 +131,23 @@ internal class Av1StreamParams(
         w.f(4, hb - 1)
         w.f(wb, width - 1)
         w.f(hb, height - 1)
+        if (sequence) w.flag(false) // frame_id_numbers_present_flag
         w.flag(false) // use_128x128_superblock
         w.flag(enableFilterIntra)
         w.flag(true) // enable_intra_edge_filter
+        if (sequence) {
+            w.flag(false) // enable_interintra_compound
+            w.flag(false) // enable_masked_compound
+            w.flag(false) // enable_warped_motion
+            w.flag(false) // enable_dual_filter
+            w.flag(true) // enable_order_hint
+            w.flag(false) // enable_jnt_comp
+            w.flag(false) // enable_ref_frame_mvs
+            w.flag(true) // seq_choose_screen_content_tools: each frame says
+            w.flag(false) // seq_choose_integer_mv
+            w.f(1, 0) // seq_force_integer_mv: inter frames may code fractions
+            w.f(3, orderHintBits - 1)
+        }
         w.flag(false) // enable_superres
         w.flag(enableCdef)
         w.flag(enableRestoration)
@@ -182,24 +211,58 @@ internal class Av1FrameParams(
     val reducedTxSet: Boolean = false,
     /** allow_intrabc: blocks may copy earlier parts of the frame, and the frame then has no loop filters. */
     val allowIntrabc: Boolean = false,
+    /** The frame's place in a sequence (#177): required for a [Av1StreamParams.sequence], null for a still picture. */
+    val inter: Av1InterParams? = null,
 ) {
     init {
         require(!allowIntrabc || allowScreenContentTools) { "intra block copy needs the screen content tools" }
     }
 
     /**
-     * The OBU_FRAME payload's frame header, `uncompressed_header` of a shown key frame under a reduced still picture
-     * header (section 5.9), then its byte alignment, for the sequence [stream] describes.
+     * The OBU_FRAME payload's frame header, `uncompressed_header` (section 5.9), then its byte alignment, for the
+     * sequence [stream] describes: a shown key frame under a reduced still picture header, or a shown key or inter
+     * frame of a sequence, with what [inter] gives.
      */
     fun frameHeader(stream: Av1StreamParams): ByteArray {
         val w = Av1BitWriter()
         val numPlanes = if (stream.monochrome) 1 else 3
+        val seq = inter
+        require(stream.sequence == (seq != null)) { "a frame of a sequence needs its place in it, and a still picture has none" }
+        val key = seq == null || seq.frameType == Av1FrameHeader.KEY_FRAME
+        if (seq != null) {
+            w.flag(false) // show_existing_frame
+            w.f(2, seq.frameType)
+            w.flag(true) // show_frame
+            if (!key) w.flag(false) // error_resilient_mode, implied for a shown key frame
+        }
         w.flag(false) // disable_cdf_update
-        w.flag(allowScreenContentTools)
-        if (allowScreenContentTools) w.flag(false) // force_integer_mv: SELECT under a reduced header, read and then forced to 1
-        // frame_size( ): no override, so the sequence's maximum; no superres. render_size( ): the same.
-        w.flag(false) // render_and_frame_size_different
-        if (allowScreenContentTools) w.flag(allowIntrabc)
+        w.flag(allowScreenContentTools) // allow_screen_content_tools: SELECT in both headers
+        if (seq == null) {
+            if (allowScreenContentTools) w.flag(false) // force_integer_mv: SELECT under a reduced header, read and then forced to 1
+        } else {
+            // force_integer_mv follows seq_force_integer_mv, 0, and a key frame forces it to 1.
+            w.flag(false) // frame_size_override_flag
+            w.f(stream.orderHintBits, seq.orderHint)
+            if (!key) {
+                w.f(3, seq.primaryRefFrame)
+                w.f(8, seq.refreshFrameFlags)
+            }
+        }
+        if (key) {
+            // frame_size( ): no override, so the sequence's maximum; no superres. render_size( ): the same.
+            w.flag(false) // render_and_frame_size_different
+            if (allowScreenContentTools) w.flag(allowIntrabc)
+        } else {
+            seq!!
+            w.flag(false) // frame_refs_short_signaling
+            for (i in 0 until 7) w.f(3, seq.refFrameIdx[i])
+            w.flag(false) // render_and_frame_size_different, after frame_size( ) of no override
+            w.flag(seq.allowHighPrecisionMv)
+            w.flag(false) // is_filter_switchable
+            w.f(2, Av1.EIGHTTAP) // interpolation_filter
+            w.flag(false) // is_motion_mode_switchable
+        }
+        if (seq != null) w.flag(false) // disable_frame_end_update_cdf: the frame's CDFs are kept for the next
         // tile_info( ): uniform spacing, the columns' and rows' log2 as increments over their minimum.
         val sbCols = (stream.width + 63) shr 6
         val sbRows = (stream.height + 63) shr 6
@@ -284,7 +347,68 @@ internal class Av1FrameParams(
             }
         }
         if (!codedLossless) w.flag(true) // tx_mode_select
+        if (!key) {
+            w.flag(inter!!.referenceSelect)
+            if (inter.skipModeAllowed(stream)) w.flag(false) // skip_mode_present
+        }
         w.flag(reducedTxSet)
+        // global_motion_params( ): no reference moves globally.
+        if (!key) for (i in 0 until 7) w.flag(false)
         return w.toByteArray().also { check(it.isNotEmpty()) }
+    }
+}
+
+/**
+ * A frame's place in a sequence (#177): its type and order hint, and for an inter frame the slots its seven references
+ * name, the one it refreshes, and where its CDFs start.
+ */
+internal class Av1InterParams(
+    val frameType: Int,
+    val orderHint: Int,
+    /** primary_ref_frame, 0 to 6, or PRIMARY_REF_NONE. */
+    val primaryRefFrame: Int = Av1FrameHeader.PRIMARY_REF_NONE,
+    val refreshFrameFlags: Int = 0xFF,
+    /** ref_frame_idx of LAST_FRAME to ALTREF_FRAME. */
+    val refFrameIdx: IntArray = IntArray(7),
+    /** The order hint each reference's slot holds, as the decoder's reference state gives it. */
+    val refOrderHints: IntArray = IntArray(7),
+    /** reference_select: blocks may predict from two references. */
+    val referenceSelect: Boolean = false,
+    val allowHighPrecisionMv: Boolean = false,
+) {
+    /** get_relative_dist( ) for [bits]-bit order hints. */
+    private fun relativeDist(a: Int, b: Int, bits: Int): Int {
+        val diff = a - b
+        val m = 1 shl (bits - 1)
+        return (diff and (m - 1)) - (diff and m)
+    }
+
+    /**
+     * skipModeAllowed of `skip_mode_params( )` (section 5.9.22), which decides whether skip_mode_present is coded: a
+     * frame that may predict from two references, with a forward reference and either a backward one or a second
+     * forward one.
+     */
+    fun skipModeAllowed(stream: Av1StreamParams): Boolean {
+        if (frameType == Av1FrameHeader.KEY_FRAME || !referenceSelect) return false
+        val bits = stream.orderHintBits
+        var forward = -1
+        var forwardHint = 0
+        var backward = false
+        for (i in 0 until 7) {
+            val hint = refOrderHints[i]
+            val d = relativeDist(hint, orderHint, bits)
+            if (d < 0) {
+                if (forward < 0 || relativeDist(hint, forwardHint, bits) > 0) {
+                    forward = i
+                    forwardHint = hint
+                }
+            } else if (d > 0) {
+                backward = true
+            }
+        }
+        if (forward < 0) return false
+        if (backward) return true
+        for (i in 0 until 7) if (relativeDist(refOrderHints[i], forwardHint, bits) < 0) return true
+        return false
     }
 }

@@ -71,6 +71,7 @@ internal class Av1FilterSearch(
             cdefY = cdef?.y ?: IntArray(8), cdefUv = cdef?.uv ?: IntArray(8),
             lrType = lrType, lrUnitShift = unitShift,
             reducedTxSet = base.reducedTxSet,
+            inter = base.inter,
         )
     }
 

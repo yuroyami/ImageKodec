@@ -42,7 +42,10 @@ internal abstract class Av1Coding {
     var lrSgrSet: Int = 0
 }
 
-/** The intra mode info of one block that the encoder chose (#176), as the block's syntax codes it. */
+/**
+ * The mode info of one block that the encoder chose, as the block's syntax codes it: intra (#176), or inter with
+ * its references, mode and vectors (#177).
+ */
 internal class Av1BlockChoice {
     var skip = 0
     var yMode = Av1.DC_PRED
@@ -67,6 +70,18 @@ internal class Av1BlockChoice {
     var useIntrabc = false
     var mvRow = 0
     var mvCol = 0
+    /** Whether the block predicts from other frames (#177); [yMode] is then its inter mode, NEARESTMV to NEW_NEWMV. */
+    var isInter = false
+    /** RefFrame[ 0 ] and RefFrame[ 1 ] of an inter block: LAST_FRAME to ALTREF_FRAME, and NONE when it has one reference. */
+    var refFrame0 = Av1.INTRA_FRAME
+    var refFrame1 = Av1.NONE
+    /** The index into the reference vector stack that NEWMV or NEARMV codes. */
+    var refMvIdx = 0
+    /** The vector of the second reference of a compound block, in eighths; the first is [mvRow] and [mvCol]. */
+    var mv1Row = 0
+    var mv1Col = 0
+    /** The interpolation filter, when the frame lets each block choose. */
+    var interpFilter = Av1.EIGHTTAP
 
     fun copyFrom(o: Av1BlockChoice): Av1BlockChoice {
         skip = o.skip
@@ -89,6 +104,13 @@ internal class Av1BlockChoice {
         useIntrabc = o.useIntrabc
         mvRow = o.mvRow
         mvCol = o.mvCol
+        isInter = o.isInter
+        refFrame0 = o.refFrame0
+        refFrame1 = o.refFrame1
+        refMvIdx = o.refMvIdx
+        mv1Row = o.mv1Row
+        mv1Col = o.mv1Col
+        interpFilter = o.interpFilter
         return this
     }
 

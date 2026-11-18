@@ -23,6 +23,8 @@ internal class Av1EncodeSettings(
     val intrabc: Boolean? = null,
     /** Whether blocks may code a chroma palette where the frame allows screen content tools; tests turn it off. */
     val chromaPalette: Boolean = true,
+    /** Whether blocks of inter frames may average two references: null for from effort 2 (#177); tests turn it off. */
+    val compound: Boolean? = null,
 )
 
 /** A coded AV1 still picture: the sequence header OBU, and the item's data (the sequence header and the frame OBU). */
@@ -43,7 +45,7 @@ internal class Av1Coded(val params: Av1StreamParams, val sequenceHeaderObu: Byte
  * 3. The recorded decisions are coded again into the arithmetic coder under the final frame header.
  */
 @OptIn(ExperimentalHeifCodecApi::class)
-internal class Av1Encoder(private val planes: HeifPlanes, private val settings: Av1EncodeSettings, private val cancel: (() -> Unit)?) {
+internal class Av1Encoder(private val planes: HeifPlanes, private val settings: Av1EncodeSettings, var cancel: (() -> Unit)?, sequence: Boolean = false) {
 
     private val width = planes.width
     private val height = planes.height
@@ -57,35 +59,53 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
     val stream = Av1StreamParams(
         width, height, bitDepth, mono, subX, subY, settings.colour, planes.fullRange,
         enableFilterIntra = !lossless, enableCdef = !lossless, enableRestoration = !lossless && effort >= 2 && settings.restoration,
+        sequence = sequence,
     )
 
     fun encode(): Av1Coded {
         val seqPayload = stream.sequenceHeader()
         val seq = Av1SequenceHeader.parse(Av1BitReader(seqPayload, 0, seqPayload.size))
+        val frame = codeFrame(planes, seq, null, Av1RefSlots())
+        reconstruction = frame.writer
+        val seqObu = Av1BitWriter.obu(Av1Decoder.OBU_SEQUENCE_HEADER, seqPayload)
+        return Av1Coded(stream, seqObu, seqObu + Av1BitWriter.obu(Av1Decoder.OBU_FRAME, frame.payload))
+    }
+
+    /** A coded frame: the OBU_FRAME payload, its parsed header, and the frame decoder that wrote it, holding its picture. */
+    class Frame(val payload: ByteArray, val header: Av1FrameHeader, val writer: Av1FrameDecoder)
+
+    /**
+     * Codes [frame] as one frame of [seq]: a key frame of a still picture when [inter] is null, or the frame of a
+     * sequence that [inter] places (#177), predicting from the pictures [refs] holds, as a decoder of the stream holds
+     * them. The caller ends the frame ([Av1Decoder.endCodedFrame]) to update [refs].
+     */
+    fun codeFrame(frame: HeifPlanes, seq: Av1SequenceHeader, inter: Av1InterParams?, refs: Av1RefSlots): Frame {
+        val key = inter == null || inter.frameType == Av1FrameHeader.KEY_FRAME
         val (colsLog2, rowsLog2) = tiles()
-        val screen = screenContent()
-        val hash = if (screen && settings.intrabc != false && width.toLong() * height <= Av1BlockHash.MAX_SAMPLES && (effort >= 2 || settings.intrabc == true)) {
-            Av1BlockHash(planes.planes[0], planes.strides[0], width, height)
+        val screen = screenContent(frame)
+        val hash = if (key && screen && settings.intrabc != false && width.toLong() * height <= Av1BlockHash.MAX_SAMPLES && (effort >= 2 || settings.intrabc == true)) {
+            Av1BlockHash(frame.planes[0], frame.strides[0], width, height)
         } else null
         // Intra block copy turns the loop filters off, so it is allowed only where enough of the picture repeats:
         // an eighth of its blocks that are not flat.
         val intrabc = hash != null && (settings.intrabc == true || hash.repeatedShare() >= 32)
-        val search = Av1FrameParams(settings.qIndex, screen, colsLog2, rowsLog2, cdefBits = if (lossless) 0 else 3, allowIntrabc = intrabc)
-        val fh1 = parseFrameHeader(seq, search)
-        val d = Av1FrameDecoder(seq, fh1, Av1Cdfs.initial(fh1.baseQIdx), Av1RefSlots())
+        val search = Av1FrameParams(settings.qIndex, screen, colsLog2, rowsLog2, cdefBits = if (lossless) 0 else 3, allowIntrabc = intrabc, inter = inter)
+        val fh1 = parseFrameHeader(seq, search, refs)
+        val d = Av1FrameDecoder(seq, fh1, startCdfs(fh1, refs), refs)
         d.cancel = cancel
-        val source = Av1Source(planes, d)
+        val source = Av1Source(frame, d)
         val record = Av1Record()
         lastRecord = record
-        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort, if (intrabc) hash else null, settings.chromaPalette)
+        val compound = settings.compound ?: (effort >= 2)
+        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort, if (intrabc) hash else null, settings.chromaPalette, compound)
         for (tile in 0 until fh1.tileCols * fh1.tileRows) block.tile(tile)
         // The filters on the reconstruction, then the final header.
         val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration)
         lastFilterSearch = filterSearch
         val filters = filterSearch.search(search, stream)
         chosenFilters = filters
-        val fh = parseFrameHeader(seq, filters)
-        val w = Av1FrameDecoder(seq, fh, Av1Cdfs.initial(fh.baseQIdx), Av1RefSlots())
+        val fh = parseFrameHeader(seq, filters, refs)
+        val w = Av1FrameDecoder(seq, fh, startCdfs(fh, refs), refs)
         val writer = Av1Replay(record, filters)
         writer.lrUnits = filterSearch.lr
         w.enc = writer
@@ -105,9 +125,10 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
                 }
                 r += 16
             }
+            w.endTile(tile)
             tiles += sink.finish()
         }
-        reconstruction = w
+        w.enc = null
         val header = filters.frameHeader(stream)
         val tg = Av1BitWriter()
         if (tiles.size > 1) {
@@ -132,9 +153,13 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
             tiles[i].copyInto(payload, at)
             at += tiles[i].size
         }
-        val seqObu = Av1BitWriter.obu(Av1Decoder.OBU_SEQUENCE_HEADER, seqPayload)
-        return Av1Coded(stream, seqObu, seqObu + Av1BitWriter.obu(Av1Decoder.OBU_FRAME, payload))
+        return Frame(payload, fh, w)
     }
+
+    /** The CDFs a frame starts from: the defaults for its quantizer, or those its primary reference frame kept. */
+    private fun startCdfs(fh: Av1FrameHeader, refs: Av1RefSlots): Av1Cdfs =
+        if (fh.primaryRefFrame == Av1FrameHeader.PRIMARY_REF_NONE) Av1Cdfs.initial(fh.baseQIdx)
+        else refs.cdfs[fh.refFrameIdx[fh.primaryRefFrame]]!!.copy().also { it.clearCounters() }
 
     /** The frame header's filter choices of the last [encode], for tests that check a tool was used. */
     var chosenFilters: Av1FrameParams? = null
@@ -157,6 +182,19 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
             out[name] = (out[name] ?: 0) + 1
         }
         for (b in rec.blocks) {
+            if (b.isInter) {
+                add(if (b.refFrame1 > Av1.INTRA_FRAME) "compound" else "single")
+                add(
+                    when (b.yMode) {
+                        Av1.NEWMV, Av1.NEW_NEWMV -> "new vector"
+                        Av1.NEARESTMV, Av1.NEAREST_NEARESTMV -> "nearest vector"
+                        Av1.GLOBALMV, Av1.GLOBAL_GLOBALMV -> "global vector"
+                        else -> "near vector"
+                    },
+                )
+                if (b.skip == 1) add("skip")
+                continue
+            }
             when {
                 b.useIntrabc -> add("intra block copy")
                 b.paletteSizeY > 0 -> add("palette")
@@ -205,7 +243,7 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
      * Whether to allow the screen content tools (the palette): from effort 2, when at least a tenth of the 16 by 16
      * luma blocks hold 2 to 8 values spread over at least 3/16 of the range, as text and drawings do and photos do not.
      */
-    private fun screenContent(): Boolean {
+    private fun screenContent(planes: HeifPlanes): Boolean {
         if (effort < 2) return false
         val luma = planes.planes[0]
         val stride = planes.strides[0]
@@ -252,9 +290,9 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         return minCols to maxOf(minTiles - minCols, 0)
     }
 
-    private fun parseFrameHeader(seq: Av1SequenceHeader, p: Av1FrameParams): Av1FrameHeader {
+    private fun parseFrameHeader(seq: Av1SequenceHeader, p: Av1FrameParams, refs: Av1RefSlots): Av1FrameHeader {
         val bytes = p.frameHeader(stream)
-        return Av1FrameHeader.parse(Av1BitReader(bytes, 0, bytes.size), seq, Av1RefSlots(), 0, 0)
+        return Av1FrameHeader.parse(Av1BitReader(bytes, 0, bytes.size), seq, refs, 0, 0)
     }
 }
 

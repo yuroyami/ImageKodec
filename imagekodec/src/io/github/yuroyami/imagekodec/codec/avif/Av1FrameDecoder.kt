@@ -786,7 +786,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
                 } else if (availU || availL) {
                     2 * (if (if (availU) aboveIntra else leftIntra) 1 else 0)
                 } else 0
-                sd.symbol(cdf[C.IS_INTER], ctx * 3, 2) == 1
+                sym(cdf[C.IS_INTER], ctx * 3, 2) { if (choice.isInter) 1 else 0 } == 1
             }
         }
     }
@@ -794,7 +794,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     private fun intraBlockModeInfo() {
         refFrame[0] = Av1.INTRA_FRAME
         refFrame[1] = Av1.NONE
-        yMode = sd.symbol(cdf[C.Y_MODE], Av1Tables.sizeGroup[miSize] * 14, 13)
+        yMode = sym(cdf[C.Y_MODE], Av1Tables.sizeGroup[miSize] * 14, 13) { choice.yMode }
         intraAngleInfoY()
         if (hasChroma) {
             readUvMode()
@@ -828,12 +828,12 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             Av1.GLOBALMV
         } else if (isCompound) {
             val ctx = Av1Tables.compoundModeCtxMap[(stack.refMvContext shr 1) * COMP_NEWMV_CTXS + minOf(stack.newMvContext, COMP_NEWMV_CTXS - 1)]
-            Av1.NEAREST_NEARESTMV + sd.symbol(cdf[C.COMPOUND_MODE], ctx * 9, 8)
-        } else if (sd.symbol(cdf[C.NEW_MV], stack.newMvContext * 3, 2) == 0) {
+            Av1.NEAREST_NEARESTMV + sym(cdf[C.COMPOUND_MODE], ctx * 9, 8) { choice.yMode - Av1.NEAREST_NEARESTMV }
+        } else if (sym(cdf[C.NEW_MV], stack.newMvContext * 3, 2) { if (choice.yMode == Av1.NEWMV) 0 else 1 } == 0) {
             Av1.NEWMV
-        } else if (sd.symbol(cdf[C.ZERO_MV], stack.zeroMvContext * 3, 2) == 0) {
+        } else if (sym(cdf[C.ZERO_MV], stack.zeroMvContext * 3, 2) { if (choice.yMode == Av1.GLOBALMV) 0 else 1 } == 0) {
             Av1.GLOBALMV
-        } else if (sd.symbol(cdf[C.REF_MV], stack.refMvContext * 3, 2) == 0) {
+        } else if (sym(cdf[C.REF_MV], stack.refMvContext * 3, 2) { if (choice.yMode == Av1.NEARESTMV) 0 else 1 } == 0) {
             Av1.NEARESTMV
         } else {
             Av1.NEARMV
@@ -842,7 +842,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         if (yMode == Av1.NEWMV || yMode == Av1.NEW_NEWMV) {
             for (idx in 0 until 2) {
                 if (stack.numMvFound > idx + 1) {
-                    val drlMode = sd.symbol(cdf[C.DRL_MODE], stack.drlCtxStack[idx] * 3, 2)
+                    val drlMode = sym(cdf[C.DRL_MODE], stack.drlCtxStack[idx] * 3, 2) { if (choice.refMvIdx > idx) 1 else 0 }
                     if (drlMode == 0) {
                         refMvIdx = idx
                         break
@@ -854,7 +854,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             refMvIdx = 1
             for (idx in 1 until 3) {
                 if (stack.numMvFound > idx + 1) {
-                    val drlMode = sd.symbol(cdf[C.DRL_MODE], stack.drlCtxStack[idx] * 3, 2)
+                    val drlMode = sym(cdf[C.DRL_MODE], stack.drlCtxStack[idx] * 3, 2) { if (choice.refMvIdx > idx) 1 else 0 }
                     if (drlMode == 0) {
                         refMvIdx = idx
                         break
@@ -863,13 +863,14 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
                 }
             }
         }
+        if (enc != null) check(refMvIdx == choice.refMvIdx) { "reference vector index ${choice.refMvIdx} cannot be coded here: $refMvIdx" }
         assignMv(isCompound)
         readInterIntraMode(isCompound)
         readMotionMode(isCompound)
         readCompoundType(isCompound)
         if (fh.interpolationFilter == Av1FrameHeader.SWITCHABLE) {
             for (dir in 0 until (if (seq.enableDualFilter) 2 else 1)) {
-                interpFilter[dir] = if (needsInterpFilter()) sd.symbol(cdf[C.INTERP_FILTER], interpFilterCtx(dir) * 4, 3) else Av1.EIGHTTAP
+                interpFilter[dir] = if (needsInterpFilter()) sym(cdf[C.INTERP_FILTER], interpFilterCtx(dir) * 4, 3) { choice.interpFilter } else Av1.EIGHTTAP
             }
             if (!seq.enableDualFilter) interpFilter[1] = interpFilter[0]
         } else {
@@ -955,53 +956,59 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         }
         val bw4 = Av1.num4x4Wide[miSize]
         val bh4 = Av1.num4x4High[miSize]
-        val compMode = if (fh.referenceSelect && minOf(bw4, bh4) >= 2) sd.symbol(cdf[C.COMP_MODE], compModeCtx() * 3, 2) else 0
+        // In coding, each bit follows from the block's chosen pair (or single reference), as the tree reads it.
+        val c0 = if (enc != null) choice.refFrame0 else 0
+        val c1 = if (enc != null) choice.refFrame1 else 0
+        val compMode = if (fh.referenceSelect && minOf(bw4, bh4) >= 2) sym(cdf[C.COMP_MODE], compModeCtx() * 3, 2) { bit(c1 > Av1.INTRA_FRAME) } else 0
         if (compMode == 1) {
-            val compRefType = sd.symbol(cdf[C.COMP_REF_TYPE], compRefTypeCtx() * 3, 2)
+            val compRefType = sym(cdf[C.COMP_REF_TYPE], compRefTypeCtx() * 3, 2) { bit(!isSamedirRefPair(c0, c1)) }
             if (compRefType == 0) {
                 // UNIDIR_COMP_REFERENCE
-                if (sd.symbol(cdf[C.UNI_COMP_REF], (singleRefP1Ctx() * 3 + 0) * 3, 2) == 1) {
+                if (sym(cdf[C.UNI_COMP_REF], (singleRefP1Ctx() * 3 + 0) * 3, 2) { bit(c0 == Av1.BWDREF_FRAME) } == 1) {
                     refFrame[0] = Av1.BWDREF_FRAME
                     refFrame[1] = Av1.ALTREF_FRAME
                 } else {
                     val p1Ctx = refCountCtx(countRefs(Av1.LAST2_FRAME), countRefs(Av1.LAST3_FRAME) + countRefs(Av1.GOLDEN_FRAME))
-                    if (sd.symbol(cdf[C.UNI_COMP_REF], (p1Ctx * 3 + 1) * 3, 2) == 1) {
+                    if (sym(cdf[C.UNI_COMP_REF], (p1Ctx * 3 + 1) * 3, 2) { bit(c1 != Av1.LAST2_FRAME) } == 1) {
                         refFrame[0] = Av1.LAST_FRAME
-                        refFrame[1] = if (sd.symbol(cdf[C.UNI_COMP_REF], (compRefP2Ctx() * 3 + 2) * 3, 2) == 1) Av1.GOLDEN_FRAME else Av1.LAST3_FRAME
+                        refFrame[1] = if (sym(cdf[C.UNI_COMP_REF], (compRefP2Ctx() * 3 + 2) * 3, 2) { bit(c1 == Av1.GOLDEN_FRAME) } == 1) Av1.GOLDEN_FRAME else Av1.LAST3_FRAME
                     } else {
                         refFrame[0] = Av1.LAST_FRAME
                         refFrame[1] = Av1.LAST2_FRAME
                     }
                 }
             } else {
-                refFrame[0] = if (sd.symbol(cdf[C.COMP_REF], (compRefCtx() * 3 + 0) * 3, 2) == 0) {
-                    if (sd.symbol(cdf[C.COMP_REF], (compRefP1Ctx() * 3 + 1) * 3, 2) == 1) Av1.LAST2_FRAME else Av1.LAST_FRAME
+                refFrame[0] = if (sym(cdf[C.COMP_REF], (compRefCtx() * 3 + 0) * 3, 2) { bit(c0 == Av1.LAST3_FRAME || c0 == Av1.GOLDEN_FRAME) } == 0) {
+                    if (sym(cdf[C.COMP_REF], (compRefP1Ctx() * 3 + 1) * 3, 2) { bit(c0 == Av1.LAST2_FRAME) } == 1) Av1.LAST2_FRAME else Av1.LAST_FRAME
                 } else {
-                    if (sd.symbol(cdf[C.COMP_REF], (compRefP2Ctx() * 3 + 2) * 3, 2) == 1) Av1.GOLDEN_FRAME else Av1.LAST3_FRAME
+                    if (sym(cdf[C.COMP_REF], (compRefP2Ctx() * 3 + 2) * 3, 2) { bit(c0 == Av1.GOLDEN_FRAME) } == 1) Av1.GOLDEN_FRAME else Av1.LAST3_FRAME
                 }
-                refFrame[1] = if (sd.symbol(cdf[C.COMP_BWD_REF], (compBwdrefCtx() * 2 + 0) * 3, 2) == 0) {
-                    if (sd.symbol(cdf[C.COMP_BWD_REF], (compBwdrefP1Ctx() * 2 + 1) * 3, 2) == 1) Av1.ALTREF2_FRAME else Av1.BWDREF_FRAME
+                refFrame[1] = if (sym(cdf[C.COMP_BWD_REF], (compBwdrefCtx() * 2 + 0) * 3, 2) { bit(c1 == Av1.ALTREF_FRAME) } == 0) {
+                    if (sym(cdf[C.COMP_BWD_REF], (compBwdrefP1Ctx() * 2 + 1) * 3, 2) { bit(c1 == Av1.ALTREF2_FRAME) } == 1) Av1.ALTREF2_FRAME else Av1.BWDREF_FRAME
                 } else {
                     Av1.ALTREF_FRAME
                 }
             }
         } else {
-            refFrame[0] = if (sd.symbol(cdf[C.SINGLE_REF], (singleRefP1Ctx() * 6 + 0) * 3, 2) == 1) {
-                if (sd.symbol(cdf[C.SINGLE_REF], (compBwdrefCtx() * 6 + 1) * 3, 2) == 0) {
-                    if (sd.symbol(cdf[C.SINGLE_REF], (compBwdrefP1Ctx() * 6 + 5) * 3, 2) == 1) Av1.ALTREF2_FRAME else Av1.BWDREF_FRAME
+            refFrame[0] = if (sym(cdf[C.SINGLE_REF], (singleRefP1Ctx() * 6 + 0) * 3, 2) { bit(c0 >= Av1.BWDREF_FRAME) } == 1) {
+                if (sym(cdf[C.SINGLE_REF], (compBwdrefCtx() * 6 + 1) * 3, 2) { bit(c0 == Av1.ALTREF_FRAME) } == 0) {
+                    if (sym(cdf[C.SINGLE_REF], (compBwdrefP1Ctx() * 6 + 5) * 3, 2) { bit(c0 == Av1.ALTREF2_FRAME) } == 1) Av1.ALTREF2_FRAME else Av1.BWDREF_FRAME
                 } else {
                     Av1.ALTREF_FRAME
                 }
             } else {
-                if (sd.symbol(cdf[C.SINGLE_REF], (compRefCtx() * 6 + 2) * 3, 2) == 1) {
-                    if (sd.symbol(cdf[C.SINGLE_REF], (compRefP2Ctx() * 6 + 4) * 3, 2) == 1) Av1.GOLDEN_FRAME else Av1.LAST3_FRAME
+                if (sym(cdf[C.SINGLE_REF], (compRefCtx() * 6 + 2) * 3, 2) { bit(c0 == Av1.LAST3_FRAME || c0 == Av1.GOLDEN_FRAME) } == 1) {
+                    if (sym(cdf[C.SINGLE_REF], (compRefP2Ctx() * 6 + 4) * 3, 2) { bit(c0 == Av1.GOLDEN_FRAME) } == 1) Av1.GOLDEN_FRAME else Av1.LAST3_FRAME
                 } else {
-                    if (sd.symbol(cdf[C.SINGLE_REF], (compRefP1Ctx() * 6 + 3) * 3, 2) == 1) Av1.LAST2_FRAME else Av1.LAST_FRAME
+                    if (sym(cdf[C.SINGLE_REF], (compRefP1Ctx() * 6 + 3) * 3, 2) { bit(c0 == Av1.LAST2_FRAME) } == 1) Av1.LAST2_FRAME else Av1.LAST_FRAME
                 }
             }
             refFrame[1] = Av1.NONE
         }
+        if (enc != null) check(refFrame[0] == c0 && refFrame[1] == (if (c1 > Av1.INTRA_FRAME) c1 else Av1.NONE)) { "references $c0 and $c1 cannot be coded here" }
     }
+
+    private fun bit(v: Boolean): Int = if (v) 1 else 0
 
     private fun countRefs(frameType: Int): Int {
         var c = 0
@@ -1177,8 +1184,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
      */
     private fun writeMv(sink: Av1SymbolSink, ref: Int) {
         val mvCtx = if (useIntrabc) MV_INTRABC_CONTEXT else 0
-        mv[ref * 2] = choice.mvRow
-        mv[ref * 2 + 1] = choice.mvCol
+        mv[ref * 2] = if (ref == 0) choice.mvRow else choice.mv1Row
+        mv[ref * 2 + 1] = if (ref == 0) choice.mvCol else choice.mv1Col
         val diffRow = mv[ref * 2] - predMv[ref * 2]
         val diffCol = mv[ref * 2 + 1] - predMv[ref * 2 + 1]
         val joint = (if (diffRow != 0) 2 else 0) + (if (diffCol != 0) 1 else 0)
@@ -1941,8 +1948,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             val maxTxSz = Av1.findTxSize(size, size)
             val txSzSqrUp = Av1Tables.txSizeSqrUp[txSz]
             val ctx = (if (txSzSqrUp != maxTxSz) 1 else 0) * 3 + (Av1.TX_SIZES - 1 - maxTxSz) * 6 + above + left
-            // The encoder codes no inter block but an intra block copy, at its largest transform.
-            sym(cdf[C.TXFM_SPLIT], ctx * 3, 2) { 0 } == 1
+            // In coding, split until the block's chosen size: the encoder chooses one size for the whole block.
+            sym(cdf[C.TXFM_SPLIT], ctx * 3, 2) { if (txSz != choice.txSize) 1 else 0 } == 1
         }
         val w4 = Av1.txWidth[txSz] / Av1.MI_SIZE
         val h4 = Av1.txHeight[txSz] / Av1.MI_SIZE
@@ -1989,6 +1996,37 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
 
     private fun computePrediction() {
         if (isInter) inter.computePrediction()
+    }
+
+    /**
+     * For the encoder's motion search (#177): the luma prediction of the block [positionBlock] last placed, from
+     * [ref0] with the vector ([mvRow0], [mvCol0]) and, when [ref1] is a reference, from it with ([mvRow1], [mvCol1])
+     * averaged in, through the decoder's own filters, into the frame. It writes the block's references and vectors
+     * into the mode information grid, which coding the block later writes over.
+     */
+    fun predictInterLuma(ref0: Int, mvRow0: Int, mvCol0: Int, ref1: Int, mvRow1: Int, mvCol1: Int, filter: Int) {
+        isInter = true
+        useIntrabc = false
+        yMode = Av1.NEWMV
+        refFrame[0] = ref0
+        refFrame[1] = ref1
+        motionMode = Av1.SIMPLE
+        interintra = false
+        compoundType = Av1.COMPOUND_AVERAGE
+        val bw4 = Av1.num4x4Wide[miSize]
+        val bh4 = Av1.num4x4High[miSize]
+        for (y in 0 until bh4) for (x in 0 until bw4) {
+            val m = mi(miRow + y, miCol + x)
+            refFrames0[m] = ref0
+            refFrames1[m] = ref1
+            interpFilters[m * 2] = filter
+            interpFilters[m * 2 + 1] = filter
+            mvs[m * 4] = mvRow0
+            mvs[m * 4 + 1] = mvCol0
+            mvs[m * 4 + 2] = mvRow1
+            mvs[m * 4 + 3] = mvCol1
+        }
+        inter.computePrediction(lumaOnly = true)
     }
 
     private fun residual() {

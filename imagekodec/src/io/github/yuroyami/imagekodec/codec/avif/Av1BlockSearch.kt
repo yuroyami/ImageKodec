@@ -40,6 +40,8 @@ internal class Av1BlockSearch(
     private val hash: Av1BlockHash? = null,
     /** Whether a block may code a chroma palette. */
     private val chromaPalettes: Boolean = true,
+    /** Whether a block of an inter frame that allows it may average two references (#177). */
+    private val compound: Boolean = true,
 ) : Av1Coding() {
 
     private val bitDepth = d.bitDepth
@@ -243,6 +245,18 @@ internal class Av1BlockSearch(
         val maxDepth = if (lossless) 0 else minOf(Av1Tables.maxTxDepth[bSize], if (Av1Tables.maxTxDepth[bSize] > 1) 2 else 1)
         val txDepths = minOf(maxDepth, effort - 1)
 
+        // In an inter frame, the inter candidates first; intra modes then compete with the best of them, except at
+        // effort 1 when it codes no residual.
+        if (interFrame) {
+            bestJ = interSearch(r, c, bSize, saved, ch, best)
+            if (effort <= 1 && best.skip == 1) {
+                trial(r, c, bSize, best, saved)
+                chosen[record.key(r, c, bSize)] = best
+                return bestJ
+            }
+            ch.copyFrom(blank)
+        }
+
         // Luma: rank the modes by SATD, then code the best few with DC chroma.
         saved.restore()
         d.positionBlock(r, c, bSize)
@@ -310,7 +324,7 @@ internal class Av1BlockSearch(
             }
         }
         // Chroma, on the chosen luma.
-        if (hasChroma) {
+        if (hasChroma && !best.isInter) {
             if (!lastWasBest) {
                 trial(r, c, bSize, best, saved)
                 lastWasBest = true
@@ -350,7 +364,7 @@ internal class Av1BlockSearch(
         }
         // A chroma palette on the chosen luma, where the frame allows screen content tools and the block's chroma
         // has few colours.
-        if (chromaPalettes && hasChroma && d.fh.allowScreenContentTools != 0 && bSize >= Av1.BLOCK_8X8 && Av1.blockWidth[bSize] <= 64 && Av1.blockHeight[bSize] <= 64) {
+        if (chromaPalettes && hasChroma && !best.isInter && d.fh.allowScreenContentTools != 0 && bSize >= Av1.BLOCK_8X8 && Av1.blockWidth[bSize] <= 64 && Av1.blockHeight[bSize] <= 64) {
             if (!lastWasBest) {
                 trial(r, c, bSize, best, saved)
                 lastWasBest = true
@@ -552,6 +566,311 @@ internal class Av1BlockSearch(
         return sum
     }
 
+    // ---- inter blocks (#177) ---------------------------------------------------------------
+
+    private val interFrame = !d.fh.frameIsIntra
+
+    /** The references searched: LAST, and from effort 2 LAST2 where its slot holds another frame. */
+    private val searchRefs: IntArray = when {
+        !interFrame -> IntArray(0)
+        effort >= 2 && d.fh.refFrameIdx[1] != d.fh.refFrameIdx[0] -> intArrayOf(Av1.LAST_FRAME, Av1.LAST2_FRAME)
+        else -> intArrayOf(Av1.LAST_FRAME)
+    }
+
+    /** Whether blocks try LAST and LAST2 averaged: the frame allows it and both are searched. */
+    private val tryCompound = interFrame && compound && d.fh.referenceSelect && searchRefs.size == 2
+
+    /** The vector each 4x4 position's last search found, by reference searched, as row << 16 | column & 0xFFFF. */
+    private val lastMv = Array(searchRefs.size) { IntArray(d.miStride * d.miRowsAligned) }
+    private val lastMvSet = Array(searchRefs.size) { BooleanArray(d.miStride * d.miRowsAligned) }
+
+    /** The vector found for each reference searched in the block being decided, packed as [lastMv] packs them. */
+    private val newMv = IntArray(2)
+
+    /** One inter candidate: its mode, references, stack index and vectors, packed in that order. */
+    private val candidates = IntArray(16 * 8)
+    private var candidateCount = 0
+    private val candidateRank = LongArray(16)
+    private val candidateOrder = IntArray(16)
+
+    private fun addCandidate(mode: Int, ref0: Int, ref1: Int, refMvIdx: Int, mvRow0: Int, mvCol0: Int, mvRow1: Int, mvCol1: Int) {
+        val at = candidateCount * 8
+        candidates[at] = mode
+        candidates[at + 1] = ref0
+        candidates[at + 2] = ref1
+        candidates[at + 3] = refMvIdx
+        candidates[at + 4] = mvRow0
+        candidates[at + 5] = mvCol0
+        candidates[at + 6] = mvRow1
+        candidates[at + 7] = mvCol1
+        candidateCount++
+    }
+
+    private fun loadCandidate(k: Int, ch: Av1BlockChoice, bSize: Int) {
+        val at = k * 8
+        ch.copyFrom(blank)
+        ch.isInter = true
+        ch.yMode = candidates[at]
+        ch.refFrame0 = candidates[at + 1]
+        ch.refFrame1 = candidates[at + 2]
+        ch.refMvIdx = candidates[at + 3]
+        ch.mvRow = candidates[at + 4]
+        ch.mvCol = candidates[at + 5]
+        ch.mv1Row = candidates[at + 6]
+        ch.mv1Col = candidates[at + 7]
+        ch.txSize = if (lossless) Av1.TX_4X4 else Av1Tables.maxTxSizeRect[bSize]
+    }
+
+    private val blank = Av1BlockChoice()
+
+    /**
+     * The best inter coding of the block of [bSize] at ([r], [c]) into [best], and its cost. Each reference searched
+     * gets a motion search ([motionSearch]); then NEARESTMV, NEARMV, GLOBALMV and NEWMV with the vector found, and
+     * where the frame allows two references, their nearest, near and new pairs averaged, are each coded with no
+     * residual (skip) through the frame decoder, which prices them exactly. The best few by that cost are coded again
+     * with their residual, at the largest transform and, from effort 2, the best of them at one split.
+     */
+    private fun interSearch(r: Int, c: Int, bSize: Int, saved: Saved, ch: Av1BlockChoice, best: Av1BlockChoice): Long {
+        candidateCount = 0
+        for (i in searchRefs.indices) {
+            val ref = searchRefs[i]
+            newMv[i] = motionSearch(r, c, bSize, ref, i)
+            // motionSearch left the stack of this reference alone.
+            val stack = d.mvStack
+            val n = stack.numMvFound
+            addCandidate(Av1.NEARESTMV, ref, Av1.NONE, 0, 0, 0, 0, 0)
+            addCandidate(Av1.GLOBALMV, ref, Av1.NONE, 0, 0, 0, 0, 0)
+            // NEARMV codes index 1, and 2 and 3 where the stack holds them.
+            val nearMax = if (effort >= 2) maxOf(1, minOf(3, n - 1)) else 1
+            for (k in 1..nearMax) addCandidate(Av1.NEARMV, ref, Av1.NONE, k, 0, 0, 0, 0)
+            val mvRow = newMv[i] shr 16
+            val mvCol = (newMv[i] shl 16) shr 16
+            // The stack entry the new vector is coded against, the nearest of those NEWMV can name.
+            var idx = 0
+            var bits = Int.MAX_VALUE
+            for (k in 0 until minOf(3, maxOf(1, n))) {
+                val b = mvBits(mvRow - stack.stack[k * 4], mvCol - stack.stack[k * 4 + 1]) + k * 256
+                if (b < bits) {
+                    bits = b
+                    idx = k
+                }
+            }
+            val same = (0 until minOf(2, maxOf(1, n))).any { k -> stack.stack[k * 4] == mvRow && stack.stack[k * 4 + 1] == mvCol }
+            if (!same) addCandidate(Av1.NEWMV, ref, Av1.NONE, idx, mvRow, mvCol, 0, 0)
+        }
+        if (tryCompound && minOf(Av1.num4x4Wide[bSize], Av1.num4x4High[bSize]) >= 2) {
+            d.positionBlock(r, c, bSize)
+            d.refFrame[0] = Av1.LAST_FRAME
+            d.refFrame[1] = Av1.LAST2_FRAME
+            d.mvStack.find(true)
+            addCandidate(Av1.NEAREST_NEARESTMV, Av1.LAST_FRAME, Av1.LAST2_FRAME, 0, 0, 0, 0, 0)
+            if (effort >= 3) addCandidate(Av1.NEAR_NEARMV, Av1.LAST_FRAME, Av1.LAST2_FRAME, 1, 0, 0, 0, 0)
+            addCandidate(Av1.NEW_NEWMV, Av1.LAST_FRAME, Av1.LAST2_FRAME, 0, newMv[0] shr 16, (newMv[0] shl 16) shr 16, newMv[1] shr 16, (newMv[1] shl 16) shr 16)
+        }
+        // Each candidate with no residual: its exact price, and the order to code the best with their residual in.
+        var bestJ = Long.MAX_VALUE
+        for (k in 0 until candidateCount) {
+            loadCandidate(k, ch, bSize)
+            ch.skip = 1
+            val j = trial(r, c, bSize, ch, saved)
+            candidateRank[k] = j
+            candidateOrder[k] = k
+            if (j < bestJ) {
+                bestJ = j
+                best.copyFrom(ch)
+            }
+        }
+        for (i in 1 until candidateCount) {
+            val k = candidateOrder[i]
+            var j = i - 1
+            while (j >= 0 && candidateRank[candidateOrder[j]] > candidateRank[k]) {
+                candidateOrder[j + 1] = candidateOrder[j]
+                j--
+            }
+            candidateOrder[j + 1] = k
+        }
+        val full = minOf(candidateCount, if (effort <= 1) 2 else if (effort == 2) 3 else 5)
+        var bestCoded = -1
+        var bestCodedJ = Long.MAX_VALUE
+        for (i in 0 until full) {
+            loadCandidate(candidateOrder[i], ch, bSize)
+            ch.skip = 0
+            val j = trial(r, c, bSize, ch, saved)
+            if (j < bestCodedJ) {
+                bestCodedJ = j
+                bestCoded = candidateOrder[i]
+            }
+            if (j < bestJ) {
+                bestJ = j
+                best.copyFrom(ch)
+            }
+        }
+        // One transform split for the best candidate coded with its residual.
+        if (effort >= 2 && !lossless && bestCoded >= 0) {
+            loadCandidate(bestCoded, ch, bSize)
+            val split = Av1Tables.splitTxSize[ch.txSize]
+            if (split != ch.txSize) {
+                ch.skip = 0
+                ch.txSize = split
+                val j = trial(r, c, bSize, ch, saved)
+                if (j < bestJ) {
+                    bestJ = j
+                    best.copyFrom(ch)
+                }
+            }
+        }
+        return bestJ
+    }
+
+    /** About what a vector difference of ([dr], [dc]) eighths costs to code, in 1/256 bits. */
+    private fun mvBits(dr: Int, dc: Int): Int {
+        fun component(v: Int): Int {
+            if (v == 0) return 0
+            val a = (if (v < 0) -v else v) shr 1
+            return (3 + 2 * (31 - (a or 1).countLeadingZeroBits())) * 256
+        }
+        return 256 + component(dr) + component(dc)
+    }
+
+    /**
+     * The vector, in eighths, that predicts the block of [bSize] at ([r], [c]) from [ref] best by its cost: the error
+     * plus lambda times what the vector costs against the stack's nearest. Whole samples first, by the sum of absolute
+     * differences against the reference frame, from the stack's vectors, zero and the vector found here at the last
+     * size, then a square search at falling steps; then half and quarter samples around the best, by the Hadamard
+     * error of the decoder's own prediction. Packed as row << 16 | column & 0xFFFF. Leaves [ref]'s stack in the
+     * frame decoder.
+     */
+    private fun motionSearch(r: Int, c: Int, bSize: Int, ref: Int, refList: Int): Int {
+        d.positionBlock(r, c, bSize)
+        d.refFrame[0] = ref
+        d.refFrame[1] = Av1.NONE
+        val stack = d.mvStack
+        stack.find(false)
+        val predRow = stack.stack[0]
+        val predCol = stack.stack[1]
+        val slot = d.fh.refFrameIdx[ref - Av1.LAST_FRAME]
+        val pic = d.refs.pictures[slot]!!
+        val refPlane = pic.planes[0]
+        val refStride = pic.strides[0]
+        val lastX = d.refs.upscaledWidth[slot] - 1
+        val lastY = d.refs.frameHeight[slot] - 1
+        val bx = c * 4
+        val by = r * 4
+        val w = minOf(Av1.blockWidth[bSize], src.width - bx)
+        val h = minOf(Av1.blockHeight[bSize], src.height - by)
+        val m0 = d.mi(r, c)
+        if (w <= 0 || h <= 0) return pack(predRow, predCol)
+        var bestRow = 0
+        var bestCol = 0
+        var bestJ = Long.MAX_VALUE
+        fun tryWhole(ir: Int, ic: Int) {
+            if (ir < -MAX_WHOLE || ir > MAX_WHOLE || ic < -MAX_WHOLE || ic > MAX_WHOLE) return
+            if (bestJ != Long.MAX_VALUE && ir == bestRow && ic == bestCol) return
+            val rate = sqrtLambda256 * mvBits(ir * 8 - predRow, ic * 8 - predCol) shr 8
+            if (bestJ != Long.MAX_VALUE && rate >= bestJ) return
+            val limit = if (bestJ == Long.MAX_VALUE) Long.MAX_VALUE else (bestJ - rate + 255) shr 8
+            val sad = sad(refPlane, refStride, lastX, lastY, bx, by, w, h, ic, ir, limit)
+            val j = (sad shl 8) + rate
+            if (j < bestJ) {
+                bestJ = j
+                bestRow = ir
+                bestCol = ic
+            }
+        }
+        tryWhole(0, 0)
+        for (k in 0 until minOf(stack.numMvFound, 4)) tryWhole(roundEighths(stack.stack[k * 4]), roundEighths(stack.stack[k * 4 + 1]))
+        if (lastMvSet[refList][m0]) {
+            val v = lastMv[refList][m0]
+            tryWhole(roundEighths(v shr 16), roundEighths((v shl 16) shr 16))
+        }
+        val steps = when (effort) {
+            1 -> STEPS_1
+            2 -> STEPS_2
+            else -> STEPS_3
+        }
+        for (s in steps) {
+            var rounds = 0
+            while (rounds < 8) {
+                val r0 = bestRow
+                val c0 = bestCol
+                for (k in 0 until 8) tryWhole(r0 + SQUARE[k * 2] * s, c0 + SQUARE[k * 2 + 1] * s)
+                if (bestRow == r0 && bestCol == c0) break
+                rounds++
+            }
+        }
+        // Half and quarter samples, through the decoder's prediction.
+        var mvRow = bestRow * 8
+        var mvCol = bestCol * 8
+        fun subJ(mr: Int, mc: Int): Long {
+            d.predictInterLuma(ref, mr, mc, Av1.NONE, 0, 0, Av1.EIGHTTAP)
+            val satd = satd(0, bx, by, Av1.blockWidth[bSize], Av1.blockHeight[bSize])
+            return (satd shl 8) + (sqrtLambda256 * mvBits(mr - predRow, mc - predCol) shr 8)
+        }
+        var subBest = subJ(mvRow, mvCol)
+        for (s in intArrayOf(4, 2)) {
+            val r0 = mvRow
+            val c0 = mvCol
+            val n = if (effort >= 2) 8 else 4
+            for (k in 0 until n) {
+                val mr = r0 + SQUARE[k * 2] * s
+                val mc = c0 + SQUARE[k * 2 + 1] * s
+                val j = subJ(mr, mc)
+                if (j < subBest) {
+                    subBest = j
+                    mvRow = mr
+                    mvCol = mc
+                }
+            }
+        }
+        val packed = pack(mvRow, mvCol)
+        val bw4 = Av1.num4x4Wide[bSize]
+        val bh4 = Av1.num4x4High[bSize]
+        for (y in 0 until bh4) for (x in 0 until bw4) {
+            val m = d.mi(r + y, c + x)
+            lastMv[refList][m] = packed
+            lastMvSet[refList][m] = true
+        }
+        // The stack of [ref] again, which the predictions above leave as it was but the caller reads.
+        return packed
+    }
+
+    private fun pack(row: Int, col: Int): Int = (row shl 16) or (col and 0xFFFF)
+
+    /** A vector in eighths to the nearest whole sample. */
+    private fun roundEighths(v: Int): Int = if (v >= 0) (v + 4) shr 3 else -((-v + 4) shr 3)
+
+    /**
+     * The sum of absolute differences of the source luma of [w] by [h] at ([bx], [by]) against the reference [ref]
+     * moved by ([dx], [dy]) whole samples, its reads held inside the reference as prediction holds them; it stops
+     * once past [limit].
+     */
+    private fun sad(ref: ShortArray, refStride: Int, lastX: Int, lastY: Int, bx: Int, by: Int, w: Int, h: Int, dx: Int, dy: Int, limit: Long): Long {
+        val s = src.planes[0]
+        val stride = d.planeWidth[0]
+        val inside = bx + dx >= 0 && by + dy >= 0 && bx + dx + w - 1 <= lastX && by + dy + h - 1 <= lastY
+        var sum = 0L
+        for (y in 0 until h) {
+            val sAt = (by + y) * stride + bx
+            var row = 0
+            if (inside) {
+                val rAt = (by + y + dy) * refStride + bx + dx
+                for (x in 0 until w) {
+                    val e = s[sAt + x] - ref[rAt + x]
+                    row += if (e < 0) -e else e
+                }
+            } else {
+                val ry = (by + y + dy).coerceIn(0, lastY) * refStride
+                for (x in 0 until w) {
+                    val e = s[sAt + x] - ref[ry + (bx + x + dx).coerceIn(0, lastX)]
+                    row += if (e < 0) -e else e
+                }
+            }
+            sum += row
+            if (sum >= limit) return sum
+        }
+        return sum
+    }
+
     // ---- palette -------------------------------------------------------------------------
 
     private val counts = HashMap<Int, Int>()
@@ -674,9 +993,13 @@ internal class Av1BlockSearch(
         val satd = satd(0, x, y, bw4 * 4, bh4 * 4)
         costSink.cost = 0
         val cdf = d.cdf
-        val above = Av1Tables.intraModeContext[if (d.availU) d.yModes[d.mi(r - 1, c)] else Av1.DC_PRED]
-        val left = Av1Tables.intraModeContext[if (d.availL) d.yModes[d.mi(r, c - 1)] else Av1.DC_PRED]
-        costSink.symbol(probe.yMode, cdf[C.INTRA_FRAME_Y_MODE], (above * 5 + left) * 14, 13)
+        if (interFrame) {
+            costSink.symbol(probe.yMode, cdf[C.Y_MODE], Av1Tables.sizeGroup[bSize] * 14, 13)
+        } else {
+            val above = Av1Tables.intraModeContext[if (d.availU) d.yModes[d.mi(r - 1, c)] else Av1.DC_PRED]
+            val left = Av1Tables.intraModeContext[if (d.availL) d.yModes[d.mi(r, c - 1)] else Av1.DC_PRED]
+            costSink.symbol(probe.yMode, cdf[C.INTRA_FRAME_Y_MODE], (above * 5 + left) * 14, 13)
+        }
         if (bSize >= Av1.BLOCK_8X8 && Av1.isDirectionalMode(probe.yMode)) {
             costSink.symbol(probe.angleDeltaY + 3, cdf[C.ANGLE_DELTA], (probe.yMode - Av1.V_PRED) * 8, 7)
         }
@@ -1221,6 +1544,14 @@ internal class Av1BlockSearch(
     }
 
     companion object {
+        /** The furthest whole-sample vector component searched, well inside what a vector may hold (2^14 eighths). */
+        private const val MAX_WHOLE = 512
+        /** The steps of the square search at each effort. */
+        private val STEPS_1 = intArrayOf(4, 2, 1)
+        private val STEPS_2 = intArrayOf(16, 8, 4, 2, 1)
+        private val STEPS_3 = intArrayOf(32, 16, 8, 4, 2, 1)
+        /** The eight neighbours of a point, the four nearest first: row and column steps. */
+        private val SQUARE = intArrayOf(-1, 0, 0, -1, 0, 1, 1, 0, -1, -1, -1, 1, 1, -1, 1, 1)
         val PRUNE = LongArray(4)
         /** The floor of the square root of [x], by Newton's method in integers. */
         fun isqrt(x: Long): Long {
