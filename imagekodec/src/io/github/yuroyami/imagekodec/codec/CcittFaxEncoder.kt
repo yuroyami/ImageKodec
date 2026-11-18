@@ -7,7 +7,7 @@ package io.github.yuroyami.imagekodec.codec
  * framing follows the decoder's reading of the PDF parameters, which `CcittFax.decode` documents.
  */
 
-/** The widest row the encoder writes: a run of it takes 26 makeup codes, well within any reader's limit. */
+/** The widest row the encoder writes. A run that long takes 27 codes, and the decoder reads up to 100 for one run. */
 internal const val CCITT_MAX_ENCODE_COLUMNS = 1 shl 16
 
 /** An MSB-first bit sink, as T.4 packs its codes. */
