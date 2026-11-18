@@ -153,8 +153,12 @@ reviewable in the diff.
   picture is one key frame with a reduced still picture header: 8, 10 or 12 bits, 4:2:0, 4:2:2, 4:4:4 and
   gray, alpha as an auxiliary image, lossless at base_q_idx 0 with the identity matrix in 4:4:4. The encoder
   chooses partitions, intra modes (directional with angle deltas, smooth, Paeth, chroma from luma, filter
-  intra, and a luma palette for screen content), transform sizes and types and levels by rate and
-  distortion, and the loop filter levels, CDEF strengths and self-guided restoration units. It runs the
+  intra, and for screen content palettes of luma and of chroma and intra block copy), transform sizes and
+  types and levels by rate and distortion, and the loop filter levels, CDEF strengths and restoration
+  units, self-guided or Wiener. Intra block copy, on a picture an eighth of whose blocks repeat, makes
+  screen content 26 percent smaller at equal SSIMULACRA 2 score, and turns the loop filters off as AV1
+  requires. Effort 2 makes files 14 percent smaller than it did when first written, in a fifth less time;
+  CDEF filters a block whose taps are all inside the frame without checking each, in the decoder too. It runs the
   core's AV1 decoder in a coding mode, so its reconstruction is the decoder's; dav1d and ImageKodec decode
   every stream of `Av1EncoderOracleTest` to it sample for sample, and libavif, libheif and exiftool read
   the files in `AvifEncodeOracleTest`. A picture wider than 4096 with no tile size codes as AV1 tiles.
@@ -328,6 +332,12 @@ reviewable in the diff.
   share one reconstruction and one colour stage (#121).
 
 ### Changed
+
+- `encodeHeic`'s `quality` now means what it means to libheif's `heif-enc -q` (x265): equal quality gives
+  about equal SSIMULACRA 2 scores, as `encodeAvif`'s follows `avifenc -q`. The QP is 46 less half the quality,
+  rounded up, and at least 1, where it was 51 less half the quality, so every lossy file is larger and better
+  at the same quality: at quality 50, 0.646 bits a pixel at a mean score of 80.5 on the photo scenes, where
+  it was 0.270 at 71.6 and heif-enc gives 0.687 at 80.6 (#176).
 
 - A HEIF file with both an image sequence and a primary item shows what libavif shows: the primary
   item when the major brand is `avif`, the track when it is `avis`, and for any other brand the track.

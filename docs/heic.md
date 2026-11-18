@@ -155,7 +155,7 @@ val tenBits = ImageKodec.encodeHeic16(bitmap16, HeifEncodeOptions(quality = 70))
 
 | Option | Default | What it does |
 | --- | --- | --- |
-| `quality` | 50 | 0 to 100. The QP is 51 at 0, 26 at 50 and 1 at 100, straight between. |
+| `quality` | 50 | 0 to 100. The QP is 46 less half the quality, rounded up, and at least 1: 46 at 0, 21 at 50, 6 at 80, 1 from 90 on. Equal quality gives about the SSIMULACRA 2 score of libheif's `heif-enc -q` (x265), as `encodeAvif`'s follows `avifenc -q`; see below. |
 | `lossless` | false | Codes RGB with the identity matrix in 4:4:4, or gray in 4:0:0, so `decode` returns the bitmap exactly. |
 | `chroma` | `Yuv420` | The chroma subsampling of a lossy colour picture: `Yuv420`, `Yuv422` or `Yuv444`. |
 | `bitDepth` | 8, or 10 from `encodeHeic16` (12 lossless) | 8, 10 or 12 bits a sample. |
@@ -190,6 +190,23 @@ What the file holds:
 `decode16` exactly every value that a file of its depth can give, such as what `decode16` read from
 one. Other 16-bit values move to the nearest of those: `decode16` widens a coded sample into the
 8-bit level that `decode` rounds it to, so a 12-bit file gives 3,366 distinct values, not 4,096.
+
+`quality` means what it means to `heif-enc -q` of libheif 1.17.6 with x265 (#176). `HeicQualityTest` (run with
+`IMAGEKODEC_HEIC_ENCODE_BENCHMARK=1`) codes the six photo-like test scenes in 8-bit 4:2:0 with both and
+compares the mean SSIMULACRA 2 score at each tenth quality. The QP that matched heif-enc's score at qualities
+0 to 80 was 46.4, 41.2, 36.4, 31.6, 26.2, 20.9, 16.2, 11.7 and 7.1, which the mapping above follows to within
+1.1; above 80 both scores level off near 91. With it:
+
+| Quality | `encodeHeic` bits a pixel | Its mean score | `heif-enc` bits a pixel | Its mean score |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 0.073 | 18.26 | 0.063 | 16.91 |
+| 30 | 0.153 | 60.39 | 0.143 | 58.56 |
+| 50 | 0.646 | 80.47 | 0.687 | 80.58 |
+| 70 | 2.610 | 89.79 | 2.640 | 89.50 |
+| 90 | 4.678 | 91.65 | 4.893 | 91.48 |
+
+From 20 to 90 the two mean scores stay within 1.9 of each other. Before #176 the QP was 51 less half the quality,
+and quality 50 gave 0.270 bits a pixel at a score of 71.6, where heif-enc gives 80.6.
 
 The output is the same on every platform. `HeicEncodeOracleTest` checks it against libheif 1.17.6
 (`heif-info` lists the structure; `heif-convert` gives the same RGB within one level on 4:4:4 and

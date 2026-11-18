@@ -13,11 +13,14 @@ internal object HevcHeifEncoder : HeifEncoder {
     // The alpha URN of ISO/IEC 23008-12 for HEVC auxiliary pictures, which libheif and Apple write and read.
     override val alphaUrn: String = "urn:mpeg:hevc:2015:auxid:1"
 
-    override fun encode(planes: HeifPlanes, parameters: HeifEncodeParameters, cancellationCheck: (() -> Unit)?): HeifCodedPicture {
+    override fun encode(planes: HeifPlanes, parameters: HeifEncodeParameters, cancellationCheck: (() -> Unit)?): HeifCodedPicture =
+        encode(planes, parameters, HevcEncoderSettings(quality = parameters.quality, lossless = parameters.lossless, effort = parameters.effort), cancellationCheck)
+
+    /** [planes] coded with [settings] in place of the ones [parameters] give: for tests that fix the QP. */
+    fun encode(planes: HeifPlanes, parameters: HeifEncodeParameters, settings: HevcEncoderSettings, cancellationCheck: (() -> Unit)?): HeifCodedPicture {
         val colour = parameters.colorPrimaries?.let { p ->
             intArrayOf(p, parameters.transferCharacteristics ?: 2, parameters.matrixCoefficients ?: 2)
         }
-        val settings = HevcEncoderSettings(quality = parameters.quality, lossless = parameters.lossless, effort = parameters.effort)
         val coded = HevcEncoder.encode(planes, planes.fullRange, colour, settings, cancellationCheck)
         // ISO/IEC 23008-12 B.4.1: 'heic' for the Main and Main Still Picture profiles, 'heix' for Main 10 and
         // the format range extensions profiles.

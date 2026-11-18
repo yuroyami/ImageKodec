@@ -43,11 +43,15 @@ internal class HevcEncoderSettings(
 
     companion object {
         /**
-         * The QP of a [quality]: 51 at 0, 26 at 50 and 1 at 100, straight between. x265 3.5 at its default constant
-         * rate factor of 28 codes an intra picture (keyint=1) at a slice QP of 25 with adaptive deltas around it, so
-         * the default sits next to x265's default visual quality.
+         * The QP of a [quality]: 46 less half the quality, rounded up, and at least 1, so 46 at 0, 21 at 50, 6 at 80
+         * and 1 from 90 on (#176). It gives about the SSIMULACRA 2 score of libheif's `heif-enc -q` (x265) at the same
+         * number, as `encodeAvif`'s quality follows `avifenc -q`: `HeicQualityTest` measured, over the photo scenes,
+         * the QP whose mean score equals heif-enc's at each tenth quality from 0 to 80 (46.4, 41.2, 36.4, 31.6, 26.2,
+         * 20.9, 16.2, 11.7 and 7.1), and this line fits them to within 1.1. Above 80 both encoders' scores level off
+         * near 91, where QP 1 matches. The mapping before #176, 51 less half the quality, gave a mean score 9 below
+         * heif-enc's at quality 50.
          */
-        fun qpOf(quality: Int): Int = 51 - (quality * 50 + 50) / 100
+        fun qpOf(quality: Int): Int = maxOf(1, 46 - (quality + 1) / 2)
     }
 }
 

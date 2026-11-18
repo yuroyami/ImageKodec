@@ -228,6 +228,6 @@ class HevcEncoderTest {
 
     private companion object {
         const val MD5_T_CRC = 0x5FDBF382L
-        val EXPECTED = intArrayOf(0x471d0509, 0x9e61daba.toInt(), 0xb02651e6.toInt(), 0x13fba213)
+        val EXPECTED = intArrayOf(0x601ff898, 0x5589cb05, 0x656afa33, 0x13fba213)
     }
 }

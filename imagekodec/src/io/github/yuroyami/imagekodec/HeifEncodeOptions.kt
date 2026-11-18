@@ -25,10 +25,11 @@ public enum class HeifChroma {
  * val heic = ImageKodec.encodeHeic(bitmap, HeifEncodeOptions(quality = 80, chroma = HeifChroma.Yuv444))
  * ```
  *
- * @property quality 0 to 100, higher is better and larger. The HEVC encoder codes at a QP of 51 at 0,
- *   26 at 50 and 1 at 100, straight between; 50 sits next to x265's default visual quality. The AV1 encoder
- *   codes at a base_q_idx of 240 at 0, 117 at 50, 43 at 80 and 1 from 97 on, straight between, so that 50 and
- *   80 give about the SSIMULACRA 2 score of libavif's `avifenc -q 50` and `-q 80`.
+ * @property quality 0 to 100, higher is better and larger. The HEVC encoder codes at a QP of 46 less half
+ *   the quality, rounded up, and at least 1 (46 at 0, 21 at 50, 6 at 80, 1 from 90 on), so that a quality
+ *   gives about the SSIMULACRA 2 score of libheif's `heif-enc -q` at the same number. The AV1 encoder codes at
+ *   a base_q_idx of 240 at 0, 117 at 50, 43 at 80 and 1 from 97 on, straight between, so that 50 and 80 give
+ *   about the SSIMULACRA 2 score of libavif's `avifenc -q 50` and `-q 80`.
  * @property lossless codes the picture so that it decodes to exactly the input: RGB through the identity
  *   matrix of ITU-T H.273 in 4:4:4, or gray in 4:0:0, with [quality] and [chroma] ignored. A 16-bit
  *   input keeps exactly the samples a picture of [bitDepth] bits can give back through
@@ -41,8 +42,9 @@ public enum class HeifChroma {
  *   64 coding units, one level of transform split and rate-distortion optimised quantization, and 3 tests
  *   every mode and two levels of transform split with no early stops.
  *   In AV1, 1 tries one mode a block, square partitions down to 8 by 8 and two transform types; 2 adds
- *   angle deltas, filter intra, a transform split, more transform types, a level search and loop
- *   restoration; 3 adds 4 by 4 blocks, rectangular partitions, a second split and every transform type.
+ *   filter intra, a transform split, 4 by 4 blocks, more transform types, a level search, loop
+ *   restoration and, on screen content, intra block copy; 3 adds a second mode, angle deltas,
+ *   rectangular partitions, a second split and every transform type throughout.
  * @property tileSize the side of the square tiles of a grid, a multiple of 8 from 64 to 8192: a picture
  *   wider or taller than this is written as a `grid` of tiles of this size, which the tile runner of
  *   [ImageKodec.setTileRunner] encodes, and the edge tiles are padded by repeating the last row and

@@ -186,6 +186,6 @@ class HeicEncodeTest {
     }
 
     private companion object {
-        val EXPECTED = listOf("8c39a2a9525c12a555decc60110597b4", "a3b34841936ac21dc96407e180c4d63e", "69eeb1e9f861f0ca844bc7d24bac8a53")
+        val EXPECTED = listOf("4bb74ab8a655058cef0b53304cc96c54", "491e00d7f3d1ec9c5f172ae047d0ab46", "69eeb1e9f861f0ca844bc7d24bac8a53")
     }
 }
