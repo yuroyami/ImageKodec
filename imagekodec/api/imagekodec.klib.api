@@ -161,6 +161,36 @@ final enum class io.github.yuroyami.imagekodec/RenderingIntent : kotlin/Enum<io.
     final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/RenderingIntent> // io.github.yuroyami.imagekodec/RenderingIntent.values|values#static(){}[0]
 }
 
+final enum class io.github.yuroyami.imagekodec/TiffCompression : kotlin/Enum<io.github.yuroyami.imagekodec/TiffCompression> { // io.github.yuroyami.imagekodec/TiffCompression|null[0]
+    enum entry CcittG3 // io.github.yuroyami.imagekodec/TiffCompression.CcittG3|null[0]
+    enum entry CcittG4 // io.github.yuroyami.imagekodec/TiffCompression.CcittG4|null[0]
+    enum entry Deflate // io.github.yuroyami.imagekodec/TiffCompression.Deflate|null[0]
+    enum entry Jpeg // io.github.yuroyami.imagekodec/TiffCompression.Jpeg|null[0]
+    enum entry Lzw // io.github.yuroyami.imagekodec/TiffCompression.Lzw|null[0]
+    enum entry None // io.github.yuroyami.imagekodec/TiffCompression.None|null[0]
+    enum entry PackBits // io.github.yuroyami.imagekodec/TiffCompression.PackBits|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/TiffCompression.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/TiffCompression> // io.github.yuroyami.imagekodec/TiffCompression.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/TiffCompression // io.github.yuroyami.imagekodec/TiffCompression.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/TiffCompression> // io.github.yuroyami.imagekodec/TiffCompression.values|values#static(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/TiffPhotometric : kotlin/Enum<io.github.yuroyami.imagekodec/TiffPhotometric> { // io.github.yuroyami.imagekodec/TiffPhotometric|null[0]
+    enum entry Auto // io.github.yuroyami.imagekodec/TiffPhotometric.Auto|null[0]
+    enum entry BiLevel // io.github.yuroyami.imagekodec/TiffPhotometric.BiLevel|null[0]
+    enum entry Gray // io.github.yuroyami.imagekodec/TiffPhotometric.Gray|null[0]
+    enum entry Palette // io.github.yuroyami.imagekodec/TiffPhotometric.Palette|null[0]
+    enum entry Rgb // io.github.yuroyami.imagekodec/TiffPhotometric.Rgb|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/TiffPhotometric.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/TiffPhotometric> // io.github.yuroyami.imagekodec/TiffPhotometric.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/TiffPhotometric // io.github.yuroyami.imagekodec/TiffPhotometric.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/TiffPhotometric> // io.github.yuroyami.imagekodec/TiffPhotometric.values|values#static(){}[0]
+}
+
 final enum class io.github.yuroyami.imagekodec/WebpAlphaFilter : kotlin/Enum<io.github.yuroyami.imagekodec/WebpAlphaFilter> { // io.github.yuroyami.imagekodec/WebpAlphaFilter|null[0]
     enum entry Best // io.github.yuroyami.imagekodec/WebpAlphaFilter.Best|null[0]
     enum entry Fast // io.github.yuroyami.imagekodec/WebpAlphaFilter.Fast|null[0]
@@ -256,6 +286,17 @@ final class io.github.yuroyami.imagekodec/AuxiliaryImage { // io.github.yuroyami
         final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/AuxiliaryImage.width.<get-width>|<get-width>(){}[0]
 
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/AuxiliaryImage.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/BmpEncodeOptions { // io.github.yuroyami.imagekodec/BmpEncodeOptions|null[0]
+    constructor <init>(kotlin/Int? = ..., kotlin/Boolean = ...) // io.github.yuroyami.imagekodec/BmpEncodeOptions.<init>|<init>(kotlin.Int?;kotlin.Boolean){}[0]
+
+    final val bitsPerPixel // io.github.yuroyami.imagekodec/BmpEncodeOptions.bitsPerPixel|{}bitsPerPixel[0]
+        final fun <get-bitsPerPixel>(): kotlin/Int? // io.github.yuroyami.imagekodec/BmpEncodeOptions.bitsPerPixel.<get-bitsPerPixel>|<get-bitsPerPixel>(){}[0]
+    final val rle // io.github.yuroyami.imagekodec/BmpEncodeOptions.rle|{}rle[0]
+        final fun <get-rle>(): kotlin/Boolean // io.github.yuroyami.imagekodec/BmpEncodeOptions.rle.<get-rle>|<get-rle>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/BmpEncodeOptions.toString|toString(){}[0]
 }
 
 final class io.github.yuroyami.imagekodec/CcittEncodeOptions { // io.github.yuroyami.imagekodec/CcittEncodeOptions|null[0]
@@ -846,6 +887,29 @@ final class io.github.yuroyami.imagekodec/PngEncodeOptions { // io.github.yuroya
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/PngEncodeOptions.toString|toString(){}[0]
 }
 
+final class io.github.yuroyami.imagekodec/TiffEncodeOptions { // io.github.yuroyami.imagekodec/TiffEncodeOptions|null[0]
+    constructor <init>(io.github.yuroyami.imagekodec/TiffCompression = ..., io.github.yuroyami.imagekodec/TiffPhotometric = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/TiffEncodeOptions.<init>|<init>(io.github.yuroyami.imagekodec.TiffCompression;io.github.yuroyami.imagekodec.TiffPhotometric;kotlin.Boolean;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+
+    final val compression // io.github.yuroyami.imagekodec/TiffEncodeOptions.compression|{}compression[0]
+        final fun <get-compression>(): io.github.yuroyami.imagekodec/TiffCompression // io.github.yuroyami.imagekodec/TiffEncodeOptions.compression.<get-compression>|<get-compression>(){}[0]
+    final val photometric // io.github.yuroyami.imagekodec/TiffEncodeOptions.photometric|{}photometric[0]
+        final fun <get-photometric>(): io.github.yuroyami.imagekodec/TiffPhotometric // io.github.yuroyami.imagekodec/TiffEncodeOptions.photometric.<get-photometric>|<get-photometric>(){}[0]
+    final val predictor // io.github.yuroyami.imagekodec/TiffEncodeOptions.predictor|{}predictor[0]
+        final fun <get-predictor>(): kotlin/Boolean // io.github.yuroyami.imagekodec/TiffEncodeOptions.predictor.<get-predictor>|<get-predictor>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/TiffEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val rowsPerStrip // io.github.yuroyami.imagekodec/TiffEncodeOptions.rowsPerStrip|{}rowsPerStrip[0]
+        final fun <get-rowsPerStrip>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.rowsPerStrip.<get-rowsPerStrip>|<get-rowsPerStrip>(){}[0]
+    final val tileLength // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileLength|{}tileLength[0]
+        final fun <get-tileLength>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileLength.<get-tileLength>|<get-tileLength>(){}[0]
+    final val tileWidth // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileWidth|{}tileWidth[0]
+        final fun <get-tileWidth>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileWidth.<get-tileWidth>|<get-tileWidth>(){}[0]
+    final val tiled // io.github.yuroyami.imagekodec/TiffEncodeOptions.tiled|{}tiled[0]
+        final fun <get-tiled>(): kotlin/Boolean // io.github.yuroyami.imagekodec/TiffEncodeOptions.tiled.<get-tiled>|<get-tiled>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/TiffEncodeOptions.toString|toString(){}[0]
+}
+
 final class io.github.yuroyami.imagekodec/UnsupportedImageException : io.github.yuroyami.imagekodec/ImageDecodeException { // io.github.yuroyami.imagekodec/UnsupportedImageException|null[0]
     constructor <init>(kotlin/String, kotlin/Throwable? = ...) // io.github.yuroyami.imagekodec/UnsupportedImageException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
 }
@@ -947,6 +1011,7 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun encodeAvif(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeAvif|encodeAvif(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
     final fun encodeAvif16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/HeifEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeAvif16|encodeAvif16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.HeifEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeBmp(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeBmp|encodeBmp(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
+    final fun encodeBmp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/BmpEncodeOptions): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeBmp|encodeBmp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.BmpEncodeOptions){}[0]
     final fun encodeCcitt(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeCcitt|encodeCcitt(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun encodeCcitt(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/CcittEncodeOptions, kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeCcitt|encodeCcitt(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.CcittEncodeOptions;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeGif(io.github.yuroyami.imagekodec/KiteAnimation, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteAnimation;kotlin.Boolean){}[0]
@@ -979,9 +1044,15 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/PngEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.PngEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodePng16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/PngEncodeOptions = ..., io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng16|encodePng16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.PngEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
+    final fun encodeTiff(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap>){}[0]
+    final fun encodeTiff(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap>, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap>;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff16(io.github.yuroyami.imagekodec/KiteBitmap16): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(io.github.yuroyami.imagekodec.KiteBitmap16){}[0]
+    final fun encodeTiff16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff16(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap16>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap16>){}[0]
+    final fun encodeTiff16(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap16>, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap16>;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeTiffCmyk(kotlin/Int, kotlin/Int, kotlin/ByteArray, io.github.yuroyami.imagekodec/TiffEncodeOptions = ..., io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiffCmyk|encodeTiffCmyk(kotlin.Int;kotlin.Int;kotlin.ByteArray;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeTiffCmyk(kotlin/Int, kotlin/Int, kotlin/ShortArray, io.github.yuroyami.imagekodec/TiffEncodeOptions = ..., io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiffCmyk|encodeTiffCmyk(kotlin.Int;kotlin.Int;kotlin.ShortArray;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeWebp(io.github.yuroyami.imagekodec/KiteAnimation, io.github.yuroyami.imagekodec/WebpEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteAnimation;io.github.yuroyami.imagekodec.WebpEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.ImageMetadata){}[0]
