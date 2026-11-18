@@ -429,17 +429,20 @@ What the encoder writes:
   specification requires. On screen content in 4:4:4 at effort 2, intra block copy makes the files 26
   percent smaller at equal SSIMULACRA 2 score, and the chroma palette 3 percent (`Av1ToolGainTest`).
 - After the blocks, the loop filter levels, the CDEF strengths of each 64 by 64 block, and, from effort
-  2, the loop restoration of each unit are chosen on the reconstruction: none, the self-guided filter
-  or the Wiener filter, whose taps are fitted by least squares, each measured through the decoder's own
-  filter and priced by the bits its parameters take, and each plane takes whichever of the four frame
-  types costs least. The Wiener filter wins few units of the photo scenes (0.1 percent smaller files).
-- `effort` 1 tries one luma and one chroma mode at their own transform size, square partitions down to
-  8 by 8, and the DCT or the mode's own transform type; 2 adds filter intra up to 16 by 16, one
-  transform split, 4 by 4 blocks, the identity type while searching and every type of the set at the
-  end, the level search, loop restoration and intra block copy; 3 adds a second luma and chroma mode,
-  angle deltas, rectangular partitions, two transform splits, every transform type throughout and more
-  filter strengths. Effort 2 was set by measuring what each step of effort 3 brings against its time;
-  see [Limits](limits.md#encoding-avif).
+  2, the loop restoration of each unit are chosen on the reconstruction: none or the Wiener filter, whose
+  taps are fitted by least squares, and at effort 3 also the self-guided filter, each measured through the
+  decoder's own filter and priced by the bits its parameters take, and each plane takes whichever frame
+  type costs least. The Wiener filter makes the files of the photo scenes, and of the same scenes blurred, 0.5
+  percent smaller at equal SSIMULACRA 2 score at effort 2 (`Av1ToolGainTest`).
+- `effort` 1 tries one luma and one chroma mode at their own transform size, ranking only the three
+  directional modes whose lines the block's source follows most, square partitions down to 8 by 8
+  but no split of a block that varies little and keeps its largest transform, and of the DCT and the
+  mode's own transform type the one whose coefficients have the least magnitude; 2 adds one transform
+  split, 4 by 4 blocks, the identity type to choose from, the level search, Wiener restoration and intra
+  block copy; 3 adds a second luma and chroma mode, every direction with its angle deltas, filter intra,
+  rectangular partitions, two transform splits, every transform type of the set priced in full, the
+  self-guided filter and more filter strengths. Effort 2 was set by measuring what each step of effort 3
+  brings against its time; see [Limits](limits.md#encoding-avif).
 - With `tileSize = null`, a picture wider than 4096 codes as one frame of uniform AV1 tiles, the fewest
   the specification allows. Grid items, the default, are what both libavif and libheif read best, and
   the tile runner encodes them in parallel.

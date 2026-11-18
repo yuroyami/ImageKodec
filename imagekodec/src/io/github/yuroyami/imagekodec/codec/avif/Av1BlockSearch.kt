@@ -27,9 +27,9 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * only the transform type whose coefficients have the least sum of magnitudes, the one that gathers the residual
  * into fewest; and effort 2 does not split a block of a still picture that its whole codes at the largest transform
  * when its source varies by less than lambda a sample. Measured on the photo scenes as the size at equal SSIMULACRA 2
- * score over qualities 30 to 90, each cost under a percent; together they took a fifth of effort 1's time and a
- * third of effort 2's. The split pruning cost a percent at effort 1, and in a sequence it made the inter frames that
- * predict from the key frame larger and slower, so it stays out of both.
+ * score over qualities 30 to 90, each cost under a percent, and each took 5 to 15 percent off the time of the efforts
+ * it runs at. The split pruning cost 0.7 percent at effort 1, and in a sequence it made the inter frames that predict
+ * from the key frame larger and slower, so it stays out of both.
  *
  * Effort 2 was set by measuring, on the photo scenes of the tests, what each step of effort 3 brought against its
  * time, as the size at equal SSIMULACRA 2 score (#176). Kept: 4 by 4 blocks (4.6 percent smaller for 9 percent more

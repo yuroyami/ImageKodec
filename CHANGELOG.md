@@ -186,9 +186,10 @@ reviewable in the diff.
   types and levels by rate and distortion, and the loop filter levels, CDEF strengths and restoration
   units, self-guided or Wiener. Intra block copy, on a picture an eighth of whose blocks repeat, makes
   screen content 26 percent smaller at equal SSIMULACRA 2 score, and turns the loop filters off as AV1
-  requires. Effort 2 takes a quarter less time than it did when first written, for files of about the same
-  size at equal score; CDEF filters a block whose taps are all inside the frame without checking each, in
-  the decoder too. It runs the
+  requires. Effort 2 takes a third of the time it did when first written, for files no larger at equal score:
+  it ranks only the intra directions the block's source follows, prices one transform type, keeps the levels
+  it chose for a repeat, prunes splits of smooth blocks in stills, and restores with the Wiener filter alone;
+  CDEF filters a block whose taps are all inside the frame without checking each, in the decoder too. It runs the
   core's AV1 decoder in a coding mode, so its reconstruction is the decoder's; dav1d and ImageKodec decode
   every stream of `Av1EncoderOracleTest` to it sample for sample, and libavif, libheif and exiftool read
   the files in `AvifEncodeOracleTest`. A picture wider than 4096 with no tile size codes as AV1 tiles.
