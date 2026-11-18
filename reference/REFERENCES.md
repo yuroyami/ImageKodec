@@ -157,3 +157,5 @@ Run `git pull --depth 1` inside `stb`, `lodepng` and `commons-imaging` to refres
 `libjxl` stays at the tag v0.11.1, the version the JPEG XL decoder follows. Its
 conformance files (`jxl-conformance`, BSD-3-Clause) and test files (`jxl-testdata`,
 CC BY 4.0) were read while the decoder was written. None of them is committed.
+
+Brotli, for the `brob` boxes of JPEG XL metadata (#186), follows RFC 7932 alone: the decoder in `internal/brotli` was written from the RFC, and no Brotli source was read. Its static dictionary (Appendix A) and word transforms (Appendix B) are tables the RFC defines. `tools/brotli_dictionary.py` takes the dictionary from the installed libbrotlicommon (MIT), checks its size and CRC-32, and writes it compressed; the transforms and the literal context tables of section 7.1 were checked against the copies libbrotlicommon 1.1 exports. libbrotlienc wrote the test streams of `BrotliTest`, and ExifTool (`-api Compress=1`) the compressed boxes of `MetadataExifToolOracleTest`; both run as tools only.

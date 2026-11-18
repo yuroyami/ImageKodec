@@ -38,6 +38,24 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   A palette holds 256 colours at most and no alpha, in TIFF and BMP alike; a BMP of 1, 4, 8, 16 or 24
   bits holds no alpha. Each is refused with `IllegalArgumentException` that names it (#184).
 
+## Metadata
+
+- `readMetadata` reads the EXIF block, XMP packet and ICC profile of JPEG, PNG, WebP, HEIC, AVIF,
+  JPEG 2000, TIFF, JPEG XL, JPEG XR, GIF and BMP files (#186). It never throws: a damaged segment,
+  chunk, box or directory is left out. It reads IPTC and Photoshop resources of no format, and the
+  metadata of a TIFF's first page only. A BigTIFF gives none.
+- A TIFF or JPEG XR file holds EXIF as directories of its own, so the block `readMetadata` gives is
+  rebuilt from them, little endian, without the thumbnail directory (IFD1), and only when the file
+  points to an EXIF or GPS directory. Writing one into those formats takes the same directories
+  apart. Values are copied as their types say, so a maker note with offsets of its own points to the
+  wrong place once moved. A hostile directory whose values overlap stops being copied at twice the
+  file's size.
+- A JPEG XL `brob` box is decompressed up to 16 MB, as an XMP packet in a PNG is. The Brotli decoder
+  refuses the large-window extension, which RFC 7932 does not define.
+- GIF keeps no EXIF and BMP neither EXIF nor XMP, so their encoders leave those blocks out. A JPEG
+  segment holds at most about 64 KB, so a longer EXIF block or XMP packet is left out of a JPEG; the
+  extended XMP of XMP Part 3 is not written or read.
+
 ## Size ceilings
 
 - All image decoders cap their output at 2^28 pixels (about 1 GiB of ARGB).

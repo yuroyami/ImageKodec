@@ -14,6 +14,18 @@ reviewable in the diff.
 
 ### Added
 
+- `readMetadata` reads EXIF, XMP and ICC from TIFF (the first page's EXIF and GPS directories
+  rebuilt as a block, tag 700, tag 34675), JPEG XL (`Exif` and `xml ` boxes, also inside Brotli
+  `brob` boxes, and the codestream's profile), JPEG XR (its EXIF, GPS, XMP and ICC tags), GIF (the
+  `XMP DataXMP` and `ICCRGBG1` `012` application extensions) and BMP (the profile a BITMAPV5HEADER
+  embeds), and the UUID boxes ExifTool writes after a JP2 codestream. `encodeTiff` with options now
+  writes the EXIF block of its metadata as directories of the first page, where it left it out
+  before. `encodeGif(bitmap, metadata, dither)` and `encodeGif(animation, metadata, dither)` write
+  the XMP and ICC extensions, and `encodeBmp(bitmap, options, metadata)` embeds the ICC profile under
+  a BITMAPV5HEADER. Every call without metadata writes the bytes it wrote before. ExifTool reads every
+  block every encoder writes, and `readMetadata` every block ExifTool writes. See
+  [Keeping a photo's metadata](docs/encoding.md#keeping-a-photos-metadata) (#186).
+
 - `imagekodec-heic` decodes the tools of the HEVC screen content coding extensions: palette mode
   with its predictor palette and initializers, escape samples and transposition, current picture
   referencing (intra block copy) with `use_integer_mv_flag`, the adaptive colour transform with its

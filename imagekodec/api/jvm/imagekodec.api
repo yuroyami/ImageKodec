@@ -309,12 +309,17 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun encodeAvif16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/BmpEncodeOptions;)[B
+	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/BmpEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;)[B
 	public final fun encodeCcitt (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeCcitt (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/CcittEncodeOptions;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeCcitt$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/CcittEncodeOptions;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/ImageMetadata;Z)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteAnimation;Z)[B
+	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ImageMetadata;Z)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteBitmap;Z)[B
+	public static synthetic fun encodeGif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/ImageMetadata;ZILjava/lang/Object;)[B
 	public static synthetic fun encodeGif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteAnimation;ZILjava/lang/Object;)[B
+	public static synthetic fun encodeGif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ImageMetadata;ZILjava/lang/Object;)[B
 	public static synthetic fun encodeGif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;ZILjava/lang/Object;)[B
 	public final fun encodeHeic (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
 	public final fun encodeHeic (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B

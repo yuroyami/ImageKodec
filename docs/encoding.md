@@ -188,7 +188,8 @@ val bmp4 = ImageKodec.encodeBmp(icon, BmpEncodeOptions(bitsPerPixel = 4, rle = t
   full, at 8 bits in a `ByteArray` or 16 in a `ShortArray`, and writes photometric 5 with InkSet 1.
   Pass the press's ICC profile in the metadata, so that a reader can convert the ink.
 - The metadata's ICC profile goes into every page (tag 34675) and its XMP packet into the first
-  (tag 700). The EXIF block is not written.
+  (tag 700). The EXIF block goes into the first page as a TIFF holds one (#186): see
+  [Keeping a photo's metadata](#keeping-a-photos-metadata).
 - The CCITT strips are `encodeCcitt`'s data, each strip coded alone: libtiff's `tiffcp -c g4` writes
   the same strips. G4 is a third of the size of the same page as RGB with Deflate on the text pages
   of the tests, and LZW comes out 4 to 19 percent larger than Deflate on the photo-like scenes and
@@ -292,25 +293,44 @@ At effort 2 the six photographs come out byte for byte as today, since RGB with 
 
 ## Keeping a photo's metadata
 
-A decode returns pixels only, so a plain re-encode drops the capture date, the place, the camera and the colour profile. `readMetadata` reads the EXIF block, the XMP packet and the ICC profile of a JPEG, PNG or WebP file, and the JPEG, PNG and WebP encoders take them back:
+A decode returns pixels only, so a plain re-encode drops the capture date, the place, the camera and the colour profile. `readMetadata` reads the EXIF block, the XMP packet and the ICC profile of every format that carries them, and every encoder with a place for them takes them back (#129, #186):
 
 ```kotlin
 val metadata = ImageKodec.readMetadata(photo)
 val upright = ImageKodec.decode(photo, applyOrientation = true)
 // The pixels are upright now, so the copied orientation must say so.
-val jpeg = ImageKodec.encodeJpeg(upright, 85, metadata.upright())
-val png = ImageKodec.encodePng(upright, metadata.upright())
-val webp = ImageKodec.encodeWebp(upright, metadata.upright())
-val lossy = ImageKodec.encodeWebp(upright, WebpEncodeOptions(quality = 80), metadata.upright())
+val kept = metadata.upright()
+val jpeg = ImageKodec.encodeJpeg(upright, 85, kept)
+val png = ImageKodec.encodePng(upright, kept)
+val webp = ImageKodec.encodeWebp(upright, WebpEncodeOptions(quality = 80), kept)
+val tiff = ImageKodec.encodeTiff(upright, TiffEncodeOptions(), kept)
+val jxl = ImageKodec.encodeJxl(upright, JxlEncodeOptions(), kept)
+val gif = ImageKodec.encodeGif(upright, kept)                        // XMP and ICC only
+val bmp = ImageKodec.encodeBmp(upright, BmpEncodeOptions(), kept)    // ICC only
 ```
 
-- JPEG writes the EXIF block as an APP1 `Exif` segment, the XMP packet as an APP1 Adobe XMP segment and the ICC profile as APP2 `ICC_PROFILE` chunks. An EXIF block or an XMP packet longer than one segment, about 64 KB, is left out. A profile of any size up to 255 segments goes in.
-- PNG writes `iCCP`, `eXIf` and an `iTXt` chunk with the keyword `XML:com.adobe.xmp`.
-- WebP writes the extended format: `VP8X`, `ICCP`, the image, `EXIF` and `XMP `.
-- HEIC (`encodeHeic` with `ImageMetadata`) writes the ICC profile as a `colr` `prof` property, the
-  EXIF block as an `Exif` item and the XMP packet as a `mime` item, each tied to the image by `cdsc`.
-  The EXIF orientation is set to the orientation the options write as `irot` and `imir`.
+| Format | EXIF | XMP | ICC |
+|---|---|---|---|
+| JPEG | APP1 `Exif` segment | APP1 Adobe XMP segment | APP2 `ICC_PROFILE` chunks |
+| PNG | `eXIf` | `iTXt` `XML:com.adobe.xmp` | `iCCP` |
+| WebP | `EXIF` | `XMP ` | `ICCP` |
+| HEIC, AVIF | `Exif` item | `mime` item | `colr` `prof` |
+| JPEG 2000 (JP2) | UUID box `JpgTiffExif->JP2` | XMP UUID box | colour specification, when gray or RGB as the image |
+| JPEG XL | `Exif` box | `xml ` box | the codestream |
+| TIFF | directories of the first page, rebuilt | tag 700 | tag 34675, every page |
+| JPEG XR | directories of the file, rebuilt | tag 0x02BC | tag 0x8773 |
+| GIF | none | `XMP DataXMP` extension | `ICCRGBG1` `012` extension |
+| BMP | none | none | BITMAPV5HEADER, `PROFILE_EMBEDDED` |
+
+- Every format but TIFF and JPEG XR stores the blocks whole, and `readMetadata` gives back each byte for byte.
+- A TIFF or JPEG XR file has no place for an EXIF block as such. Its descriptive tags (make, model, dates, orientation, and in a TIFF the resolution) join the file's directory, and its EXIF, GPS and Interoperability directories are copied after it, little endian, at new offsets. `readMetadata` builds a block again from the same directories, so a block read back from such a file returns byte for byte the next time through. The thumbnail directory (IFD1) is left out, and a maker note that holds offsets of its own points to the wrong place once moved, as after any editor that moves it.
+- `readMetadata` gives a TIFF or JPEG XR file an EXIF block only when the file points to an EXIF or GPS directory; the tags of a plain scan are not EXIF.
+- JPEG writes an EXIF block or an XMP packet only when it fits one segment, about 64 KB. A profile of any size up to 255 segments goes in.
+- JPEG XL reads `Exif` and `xml ` boxes also when a `brob` box holds them compressed with Brotli, as `exiftool -api Compress=1` and libjxl write them; the Brotli decoder carries the 122 KB dictionary of RFC 7932, compressed to 58 KB.
+- GIF and BMP have no place for EXIF, and BMP none for XMP: those blocks are left out. A GIF's pixels and a BMP's pixels are those the calls without metadata write, and with empty metadata the bytes are the same.
+- HEIC and AVIF set the EXIF orientation to the orientation the options write as `irot` and `imir`, and JPEG XR writes it as its Transformation tag.
 - `upright()` sets the EXIF orientation to 1. Keep the original orientation only when you write the pixels as they were stored.
+- ExifTool reads every block every encoder writes, and `readMetadata` reads every block ExifTool writes into a file of each format, ImageMagick's BMP and libjxl's codestream profile (`MetadataExifToolOracleTest`).
 
 ### Ultra HDR gain maps
 
@@ -499,14 +519,16 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   neither are refinement, halftone or striped pages. The CCITT encoder writes no uncompressed mode.
 - The TIFF encoder writes chunky samples only (no separate planes), little endian, without
   old-style JPEG (6), Group 3 two-dimensional coding, CCITT compression 2, floating-point or signed
-  samples, depths other than 1, 2, 4, 8 and 16 bits, YCbCr outside JPEG, or an EXIF directory. JPEG
-  takes no 16-bit pages and no alpha. The BMP encoder writes no 2-bit palette, no BITFIELDS layout
-  but the 32-bit one, no top-down rows, no V5 header with an ICC profile, and no embedded JPEG or PNG.
+  samples, depths other than 1, 2, 4, 8 and 16 bits, YCbCr outside JPEG, or an EXIF thumbnail
+  directory. JPEG takes no 16-bit pages and no alpha. The BMP encoder writes no 2-bit palette, no
+  BITFIELDS layout but the 32-bit one, no top-down rows, no linked profile, and no embedded JPEG or
+  PNG; a V5 header only to embed an ICC profile.
 - The PNG encoder does not quantize: a palette is written only for a picture of 256 colours or
   fewer, and `encodeGif` is the encoder that reduces colours. It writes no `sBIT`, `gAMA`, `cHRM`,
   `sRGB`, `cICP`, `pHYs` or text chunks other than XMP. APNG is written at 8 bits a sample at
   most, since a `KiteAnimation` holds 8-bit frames.
 - The JPEG encoder writes no hierarchical file, no CMYK or YCCK file and no alpha, and subsamples
   only by 2 across or by 2 across and down. Jpegli's XYB colour space is not written.
-- The GIF writer accepts a play count in 0..65536 and refuses a larger one. See
+- The GIF writer writes no EXIF, which a GIF has no place for, and no comment extension. It accepts
+  a play count in 0..65536 and refuses a larger one. See
   [Animation](animation.md#play-counts).

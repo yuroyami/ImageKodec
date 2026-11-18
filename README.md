@@ -166,6 +166,10 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | lossy and lossless, 8 and 16 bits, alpha, tiles |
 | HEIC | stills, grids, alpha, depth and gain maps, and image sequences, 8 to 16 bits, with the `imagekodec-heic` module | intra stills and grids, 8 to 12 bits, alpha, lossless, with the `imagekodec-heic` module |
 
+`readMetadata` reads the EXIF block, XMP packet and ICC profile of every format above that carries
+them, and each encoder writes those its format has a place for: GIF keeps XMP and ICC, BMP only ICC.
+See [Keeping a photo's metadata](docs/encoding.md#keeping-a-photos-metadata).
+
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it, and `encodeJbig2`
 (generic regions) and `encodeCcitt` (Group 3 and Group 4) write it. Neither format carries a header
 of its own, so both take their parameters explicitly. HEIC decodes and encodes only
