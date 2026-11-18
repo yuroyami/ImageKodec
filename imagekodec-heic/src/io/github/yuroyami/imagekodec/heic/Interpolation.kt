@@ -38,6 +38,14 @@ internal class InterPredictor(private val d: PictureDecoder) {
     }
 
     /**
+     * predSamplesLX of the luma block at ([x], [y]) of [w] by [h] from [ref] displaced by [mv], at the 14-bit
+     * precision of 8.5.3.3.3.1 before any weighting, into [out]: what an encoder's motion search compares.
+     */
+    fun lumaSamples(ref: DecodedPicture, x: Int, y: Int, w: Int, h: Int, mv: Int, out: IntArray) {
+        sample(ref, 0, x, y, w, h, mv, 0, 0, sps.bitDepthY, out)
+    }
+
+    /**
      * predSamplesLX of component [c] for the block at ([x], [y]) of [bw] by [bh] in that component's
      * samples, from [ref] displaced by the luma vector [mv] (8.5.3.3.3.1). A chroma vector is in units of
      * 1/8 of a chroma sample, mvCLX of 8.5.3.2.10: twice the luma vector, then divided by SubWidthC and

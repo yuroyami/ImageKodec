@@ -4,6 +4,8 @@ import io.github.yuroyami.imagekodec.ImageDecodeException
 
 /** The NAL unit types of ITU-T H.265 Table 7-1 that the decoder acts on. */
 internal object NalType {
+    /** TRAIL_R: a trailing picture that later pictures may refer to. */
+    const val TRAIL_R = 1
     const val RASL_N = 8
     const val RASL_R = 9
     const val BLA_W_LP = 16

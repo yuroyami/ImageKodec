@@ -183,6 +183,33 @@ internal class MotionPredictor(private val d: PictureDecoder) {
         }
     }
 
+    /**
+     * The whole merging candidate list of the prediction block that [merge] takes, for an encoder: the last
+     * candidate's derivation builds every one before it. Each candidate goes through the same last steps as
+     * [merge]'s (8-124 to 8-127) into [ref] and [mv] at 2 * i + X. Returns MaxNumMergeCand.
+     */
+    fun mergeCandidates(xCb: Int, yCb: Int, nCbS: Int, xPb: Int, yPb: Int, nPbW: Int, nPbH: Int, partIdx: Int, partMode: Int, ref: IntArray, mv: IntArray): Int {
+        val max = slice.maxNumMergeCand
+        merge(xCb, yCb, nCbS, xPb, yPb, nPbW, nPbH, partIdx, partMode, max - 1)
+        for (i in 0 until max) {
+            var r0 = candRef[2 * i]
+            var r1 = candRef[2 * i + 1]
+            var m0 = candMv[2 * i]
+            var m1 = candMv[2 * i + 1]
+            if (slice.useIntegerMv || (r0 >= 0 && refs.isCurrent[0][r0])) m0 = MotionField.pack((MotionField.x(m0) shr 2) shl 2, (MotionField.y(m0) shr 2) shl 2)
+            if (slice.useIntegerMv || (r1 >= 0 && refs.isCurrent[1][r1])) m1 = MotionField.pack((MotionField.x(m1) shr 2) shl 2, (MotionField.y(m1) shr 2) shl 2)
+            if (r0 >= 0 && r1 >= 0 && nPbW + nPbH == 12) {
+                r1 = -1
+                m1 = 0
+            }
+            ref[2 * i] = r0
+            ref[2 * i + 1] = r1
+            mv[2 * i] = if (r0 >= 0) m0 else 0
+            mv[2 * i + 1] = if (r1 >= 0) m1 else 0
+        }
+        return max
+    }
+
     /** 8.5.3.2.4, with l0CandIdx and l1CandIdx of Table 8-7. */
     private fun combined(max: Int) {
         val orig = count

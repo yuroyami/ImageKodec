@@ -27,4 +27,27 @@ internal object HevcHeifEncoder : HeifEncoder {
         val brand = if (coded.profile == "Main Still Picture") "heic" else "heix"
         return HeifCodedPicture(coded.hvcC, coded.sample, coded.width, coded.height, brand)
     }
+
+    /**
+     * [frames], each shown for its entry of [durations], as one HEVC sequence for an image sequence track of HEIF
+     * (#177), coded with the quality, lossless coding, effort and colour of [parameters] and the order of
+     * [sequence]. The sequence's samples, `hvcC`, timing and sync samples are what a `trak` needs; its brand is
+     * [sequenceBrand]. The frames are planes as [encode] takes them, all of one size and format.
+     */
+    fun encodeSequence(
+        frames: List<HeifPlanes>, durations: LongArray, parameters: HeifEncodeParameters,
+        sequence: HevcSequenceSettings = HevcSequenceSettings(), cancellationCheck: (() -> Unit)?,
+    ): HevcSequence {
+        val colour = parameters.colorPrimaries?.let { p ->
+            intArrayOf(p, parameters.transferCharacteristics ?: 2, parameters.matrixCoefficients ?: 2)
+        }
+        val settings = HevcEncoderSettings(quality = parameters.quality, lossless = parameters.lossless, effort = parameters.effort)
+        return HevcEncoder.encodeSequence(frames, durations, frames.firstOrNull()?.fullRange ?: false, colour, settings, sequence, cancellationCheck)
+    }
+
+    /**
+     * The brand of ISO/IEC 23008-12 B.4.2 for an image sequence of [sequence]: `hevc` for the Main profile, `hevx`
+     * for Main 10 and the format range extensions profiles.
+     */
+    fun sequenceBrand(sequence: HevcSequence): String = if (sequence.profile == "Main") "hevc" else "hevx"
 }

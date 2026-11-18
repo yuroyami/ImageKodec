@@ -68,7 +68,7 @@ internal class DecodedPicture(val sps: Sps, val planes: Array<ShortArray>, val s
  * comes wants. With [keepOutput], [takeOutput] and [flush] give them in output order, as the "bumping"
  * process of C.5.2.4 outputs them.
  */
-internal class HevcDecoder(keepOutput: Boolean = false) {
+internal class HevcDecoder(keepOutput: Boolean = false, private val stats: IntArray? = null) {
     private val store = ParameterSetStore()
     private val buffer = PictureBuffer(keepOutput)
     /** The picture being decoded: one decoder, or one for each colour plane under separate_colour_plane_flag. */
@@ -98,7 +98,7 @@ internal class HevcDecoder(keepOutput: Boolean = false) {
                     if (pictureOrder == null) return
                     poc = pictureOrder
                     // 8.1.3: three separate colour planes are three monochrome pictures, each decoded alone.
-                    val decoders = Array(if (h.sps.separateColourPlane) 3 else 1) { k -> PictureDecoder(h.sps, h.pps, k) }
+                    val decoders = Array(if (h.sps.separateColourPlane) 3 else 1) { k -> PictureDecoder(h.sps, h.pps, k).also { it.stats = stats } }
                     picture = decoders
                     val planes = if (decoders.size == 1) decoders[0].planes else Array(3) { k -> decoders[k].planes[0] }
                     val strides = if (decoders.size == 1) decoders[0].strides else IntArray(3) { k -> decoders[k].strides[0] }
@@ -117,6 +117,7 @@ internal class HevcDecoder(keepOutput: Boolean = false) {
                 if (h.pps !== p.pps || h.sps !== p.sps) hevcError("the slice segments of a picture name different PPSs")
                 HevcSupport.sliceReason(h)?.let { throw UnsupportedImageException(it) }
                 if (h.sliceType != SliceType.I) h.refs = if (h.dependentSliceSegment) h.refs else buffer.refLists(h, poc, current!!)
+                stats?.let { it[HevcStats.I_SLICES + h.sliceType.let { t -> if (t == SliceType.I) 0 else if (t == SliceType.P) 1 else 2 }]++ }
                 p.decodeSliceSegment(h, rbsp, emulationPreventionBytes(bytes, from, to), cancel)
             }
             nal.type == NalType.SUFFIX_SEI -> current?.let { readSei(r, it) }
@@ -192,4 +193,23 @@ internal class HevcDecoder(keepOutput: Boolean = false) {
             r.skip(start + size * 8 - r.pos, "sei_payload")
         }
     }
+}
+
+/**
+ * The indices of the counts a [HevcDecoder] keeps when a test hands it an array of [COUNT]: coding units of P and B
+ * slices skipped, inter and intra; prediction units merged, coded with AMVP and bi-predicted; slices of each type;
+ * and inter units of each PartMode from PART_2Nx2N on.
+ */
+internal object HevcStats {
+    const val SKIP = 0
+    const val INTER = 1
+    const val INTRA_IN_INTER = 2
+    const val MERGE = 3
+    const val AMVP = 4
+    const val BI = 5
+    const val I_SLICES = 6
+    const val P_SLICES = 7
+    const val B_SLICES = 8
+    const val PART_2Nx2N = 9
+    const val COUNT = 17
 }

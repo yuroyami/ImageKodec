@@ -192,6 +192,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps, val colourPlane: Int =
     var decodedCtbs: Int = 0
         private set
 
+    /** Counts of the inter coding tools the picture uses, at the indices of [HevcStats], for tests; null to count nothing. */
+    var stats: IntArray? = null
+
     /**
      * Decodes the slice segment [h], whose RBSP is [rbsp] with the emulation prevention bytes removed
      * from the escaped positions [escapes], in tile scan (7.3.8.1). [cancel] runs once per CTB row of a tile.
@@ -392,6 +395,90 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps, val colourPlane: Int =
         sliceQpY = h.sliceQpY
     }
 
+    /**
+     * Starts the reconstruction of the P or B slice [h], whose reference picture lists are built: the picture's
+     * motion field, merging and AMVP ([encoderMotion]) and inter prediction ([predictEncoded]), as
+     * [decodeSliceSegment] makes them.
+     */
+    internal fun beginInterEncoding(h: SliceHeader) {
+        beginEncoding(h)
+        val refs = h.refs ?: error("a P or B slice has no reference picture lists")
+        val m = motion ?: MotionField(width, height).also { motion = it }
+        val mp = motionPredictor ?: MotionPredictor(this).also { motionPredictor = it }
+        if (interPredictor == null) interPredictor = InterPredictor(this)
+        mp.startSlice(h, refs, m)
+    }
+
+    /** The merging candidates and motion vector predictors of the slice being encoded. */
+    internal val encoderMotion: MotionPredictor get() = motionPredictor ?: error("the slice is not a P or B slice")
+
+    /** The inter prediction of the slice being encoded, whose interpolation the motion search runs. */
+    internal val encoderInter: InterPredictor get() = interPredictor ?: error("the slice is not a P or B slice")
+
+    /** Predicts the block at ([xPb], [yPb]) of [w] by [h] into the picture, as [predictionUnit] does (8.5.3.3). */
+    internal fun predictEncoded(xPb: Int, yPb: Int, w: Int, h: Int, r0: Int, m0: Int, r1: Int, m1: Int) {
+        interPredictor!!.predict(slice, slice.refs!!, xPb, yPb, w, h, r0, m0, r1, m1)
+    }
+
+    /**
+     * Marks the coding unit of [size] at ([x0], [y0]) as intra or inter, with cu_skip_flag [skip], while the
+     * encoder weighs it: merging and AMVP read the kind of a neighbour (6.4.2), and cu_skip_flag's context the
+     * neighbour's flag. An intra unit leaves no motion for later pictures, as a decoder keeps none of it.
+     */
+    internal fun markEncodedKind(x0: Int, y0: Int, size: Int, intra: Boolean, skip: Boolean) {
+        val m = motion ?: return
+        for (y in (y0 shr 2) until ((y0 + size) shr 2)) {
+            val row = y * w4
+            for (x in (x0 shr 2) until ((x0 + size) shr 2)) {
+                val f = flags[row + x].toInt() and 0xFF
+                flags[row + x] = (if (intra) f or FLAG_INTRA else f and FLAG_INTRA.inv()).toByte()
+            }
+        }
+        fillUnits(m.skip, x0, y0, size, size, if (skip) 1 else 0)
+        if (intra) {
+            val c = m.collocated
+            var y = (y0 + 15) and 15.inv()
+            while (y < y0 + size) {
+                var x = (x0 + 15) and 15.inv()
+                while (x < x0 + size) {
+                    c.flags[(y shr 4) * c.width16 + (x shr 4)] = 0
+                    x += 16
+                }
+                y += 16
+            }
+        }
+    }
+
+    /**
+     * Records the inter coding unit of 1 shl [log2] samples at ([x0], [y0]) as the decoder records one it parses:
+     * its depth, bypass flag, QpY [qp], its edges and the edge between its prediction blocks of [partMode], and
+     * cu_skip_flag [skip]. Its motion is stored through [encoderMotion].
+     */
+    internal fun markEncodedInterUnit(x0: Int, y0: Int, log2: Int, depth: Int, bypass: Boolean, qp: Int, partMode: Int, skip: Boolean) {
+        val size = 1 shl log2
+        val unitFlags = if (bypass) FLAG_BYPASS else 0
+        for (y in (y0 shr 2) until ((y0 + size) shr 2)) {
+            val row = y * w4
+            for (x in (x0 shr 2) until ((x0 + size) shr 2)) {
+                ctDepth[row + x] = depth.toByte()
+                flags[row + x] = unitFlags.toByte()
+            }
+        }
+        fillUnits(motion!!.skip, x0, y0, size, size, if (skip) 1 else 0)
+        val half = size shr 1
+        val quarter = size shr 2
+        when (partMode) {
+            PartMode.PART_2NxN -> markPredictionEdge(x0, y0 + half, size, false)
+            PartMode.PART_Nx2N -> markPredictionEdge(x0 + half, y0, size, true)
+            PartMode.PART_2NxnU -> markPredictionEdge(x0, y0 + quarter, size, false)
+            PartMode.PART_2NxnD -> markPredictionEdge(x0, y0 + size - quarter, size, false)
+            PartMode.PART_nLx2N -> markPredictionEdge(x0 + quarter, y0, size, true)
+            PartMode.PART_nRx2N -> markPredictionEdge(x0 + size - quarter, y0, size, true)
+        }
+        markEdges(x0, y0, size)
+        fillUnits(qpY, x0, y0, size, size, qp)
+    }
+
     /** Marks the CTB [rs] as being coded in the slice, as the decoder does before it parses the CTB. */
     internal fun beginEncodedCtb(rs: Int) {
         ctbAddr = rs
@@ -414,6 +501,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps, val colourPlane: Int =
                 flags[row + x] = unitFlags.toByte()
             }
         }
+        // In a P or B slice, cu_skip_flag 0, and no motion for later pictures.
+        if (motion != null) markEncodedKind(x0, y0, size, intra = true, skip = false)
         markEdges(x0, y0, size)
         fillUnits(qpY, x0, y0, size, size, qp)
     }
@@ -568,6 +657,9 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps, val colourPlane: Int =
         }
         // pred_mode_flag 1 is MODE_INTRA; an I slice codes every unit in intra mode.
         val isIntra = !skip && (slice.sliceType == SliceType.I || cabac.decode(Ctx.PRED_MODE) == 1)
+        stats?.let { s ->
+            if (slice.sliceType != SliceType.I) s[if (skip) HevcStats.SKIP else if (isIntra) HevcStats.INTRA_IN_INTER else HevcStats.INTER]++
+        }
         cuInter = !isIntra
         intraSplit = false
         partMode = PartMode.PART_2Nx2N
@@ -581,6 +673,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps, val colourPlane: Int =
             if (intraSplit) partMode = PartMode.PART_NxN
         } else if (!skip) {
             partMode = interPartMode(log2)
+            stats?.let { it[HevcStats.PART_2Nx2N + partMode]++ }
         }
         cuQpY = currentQpY()
         val pcm = isIntra && !intraSplit && sps.pcmEnabled && log2 >= sps.log2MinPcmCb && log2 <= sps.log2MaxPcmCb && cabac.terminate() == 1
@@ -748,6 +841,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps, val colourPlane: Int =
             }
             if (r0 >= 0) m0 = addMvd(mp.predictor(0, r0, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag0), mvd0, refs.isCurrent[0][r0])
             if (r1 >= 0) m1 = addMvd(mp.predictor(1, r1, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag1), mvd1, refs.isCurrent[1][r1])
+        }
+        stats?.let { s ->
+            s[if (merge) HevcStats.MERGE else HevcStats.AMVP]++
+            if (r0 >= 0 && r1 >= 0) s[HevcStats.BI]++
         }
         // 8.5.3.2.1: under TwoVersionsOfCurrDecPicFlag, a bi-predicted block of 8x8 whose two vectors are both
         // fractional (8-102) and not the same motion (8-103) predicts from list 0 alone. The size is the

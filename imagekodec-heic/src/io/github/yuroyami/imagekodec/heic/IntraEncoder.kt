@@ -16,9 +16,39 @@ internal class EncTu(val x: Int, val y: Int, val log2: Int, val depth: Int, val 
     val levels: Array<IntArray?> = arrayOfNulls(5)
 }
 
+/** A prediction unit of an inter coding unit as the encoder decided it (7.3.8.6). */
+internal class EncPu {
+    /** merge_flag, with merge_idx. */
+    var merge = false
+    var mergeIdx = 0
+    /** inter_pred_idc of an AMVP unit: 0 PRED_L0, 1 PRED_L1, 2 PRED_BI. */
+    var dir = 0
+    /** RefIdxL0 and RefIdxL1, -1 for a list the unit does not use, and MvL0 and MvL1, packed. */
+    val ref = intArrayOf(-1, -1)
+    val mv = IntArray(2)
+    /** MvdLX and mvp_lX_flag of an AMVP unit. */
+    val mvd = IntArray(2)
+    val mvpFlag = IntArray(2)
+
+    fun copyFrom(o: EncPu) {
+        merge = o.merge
+        mergeIdx = o.mergeIdx
+        dir = o.dir
+        o.ref.copyInto(ref)
+        o.mv.copyInto(mv)
+        o.mvd.copyInto(mvd)
+        o.mvpFlag.copyInto(mvpFlag)
+    }
+}
+
 /** A coding unit as the encoder decided it. */
 internal class EncCu(val x: Int, val y: Int, val log2: Int, val depth: Int) {
     var bypass = false
+    /** CuPredMode is MODE_INTER, with cu_skip_flag [skip], PartMode [partMode] and its prediction units [pus]. */
+    var inter = false
+    var skip = false
+    var partMode = PartMode.PART_2Nx2N
+    val pus = arrayOf(EncPu(), EncPu())
     /** PartMode is PART_NxN: four luma prediction blocks. */
     var nxn = false
     /** IntraPredModeY of each prediction block. */
@@ -62,6 +92,24 @@ internal class EffortPlan(effort: Int, lossless: Boolean) {
     val rdoq = effort >= 2
     /** A split is not tried below a coding unit whose residual codes nothing, a uniform area. */
     val earlySkip = effort <= 2
+
+    // Inter coding (#177).
+
+    /** Merging candidates ranked by luma SATD that go on to a full rate-distortion test. */
+    val mergeRd = when (effort) { 1 -> 1; 2 -> 2; else -> 3 }
+    /** The AMVP 2Nx2N search runs even where a skipped unit won the merging test. */
+    val amvpAfterSkip = effort >= 2
+    /** The partitions of an inter unit besides 2Nx2N: 2NxN and Nx2N from effort 2, the asymmetric ones at 3. */
+    val rectParts = effort >= 2
+    val ampParts = effort >= 3
+    /** The first step of the whole-sample pattern search, in samples: the search reaches about twice it. */
+    val searchStep = when (effort) { 1 -> 8; 2 -> 16; else -> 32 }
+    /** Intra coding is weighed in a P or B picture where inter prediction leaves a residual, or always from effort 2. */
+    val intraAlways = effort >= 2
+    /** A bi-predicted unit refines each list's vector against the other's prediction. */
+    val biRefine = effort >= 3
+    /** The reference pictures in each list of a P or B picture. */
+    val refsPerList = if (effort >= 3) 2 else 1
 }
 
 /** A rectangle of the reconstruction kept to put back after a trial: any of the three planes. */
@@ -94,6 +142,8 @@ internal class IntraEncoder(
     private val aqOffsets: IntArray? = null,
     /** Log2MinCuQpDeltaSize, the size of a quantization group. */
     private val qgLog2: Int = 6,
+    /** The slice header of a P or B slice, whose reference lists the inter decisions use, or null for an I slice. */
+    private val interSlice: SliceHeader? = null,
 ) {
     private val sps = rec.sps
     private val pps = rec.pps
@@ -170,8 +220,13 @@ internal class IntraEncoder(
     /** qPY_PREV of 8.6.1: QpY of the last coding unit in decoding order, SliceQpY at the start of the slice. */
     private var lastQpY = qp
 
+    /** The slice codes P or B units: cu_skip_flag and pred_mode_flag come first in every unit. */
+    private val inter = interSlice != null
+    /** initType of 9.3.2.2 for the slice: 0 for I, 1 for P and 2 for B, with cabac_init_flag 0. */
+    val initType: Int = when (interSlice?.sliceType) { null, SliceType.I -> 0; SliceType.P -> 1; else -> 2 }
+
     /** The rate estimate, whose states follow the coding units as they are decided. */
-    private val est = CabacEncoder(true).also { Ctx.init(it.states, 0, qp) }
+    private val est = CabacEncoder(true).also { Ctx.init(it.states, initType, qp) }
     private val quant = Quantizer(est)
     private val forward = ForwardTransform()
     private val inverse = InverseTransform()
@@ -251,7 +306,14 @@ internal class IntraEncoder(
             cu.qpY = qp
         }
         lastQpY = cu.qpY
-        rec.markEncodedUnit(cu.x, cu.y, cu.log2, cu.depth, cu.bypass, cu.qpY)
+        if (cu.inter) {
+            rec.markEncodedInterUnit(cu.x, cu.y, cu.log2, cu.depth, cu.bypass, cu.qpY, cu.partMode, cu.skip)
+            storeMotion(cu)
+            // An inter unit without a residual has no transform tree (rqt_root_cbf 0), so no edges inside it.
+            if (!hasResidual(cu.tu)) return
+        } else {
+            rec.markEncodedUnit(cu.x, cu.y, cu.log2, cu.depth, cu.bypass, cu.qpY)
+        }
         fun walk(t: EncTu) {
             val ch = t.children
             if (ch != null) ch.forEach { walk(it) } else rec.markEncodedTransform(t.x, t.y, t.log2, t.cbfY != 0)
@@ -271,7 +333,8 @@ internal class IntraEncoder(
         if (!inside) return evalSplit(x, y, log2, depth, coded = false)
         val canSplit = log2 > minCbLog2
         est.states.copyInto(nodeStart[depth])
-        if (log2 == 6) {
+        // In a P or B picture a unit of 64 is weighed first as an inter unit, which is often skipped whole.
+        if (log2 == 6 && !inter) {
             // A 64 coding unit predicts four 32 transform blocks in turn, which no single SATD can rank, so its
             // children decide first and offer their modes.
             val split = evalSplit(x, y, log2, depth, coded = true)
@@ -365,6 +428,14 @@ internal class IntraEncoder(
     private fun stampCu(cu: EncCu) {
         val size = 1 shl cu.log2
         fill(depthMap, cu.x, cu.y, size, cu.depth)
+        if (cu.inter) {
+            // 8.4.2 takes the luma mode of an inter neighbour as INTRA_DC.
+            fill(modeMap, cu.x, cu.y, size, IntraPredictor.INTRA_DC)
+            rec.markEncodedKind(cu.x, cu.y, size, intra = false, skip = cu.skip)
+            storeMotion(cu)
+            return
+        }
+        if (inter) rec.markEncodedKind(cu.x, cu.y, size, intra = true, skip = false)
         if (cu.nxn) {
             val half = size shr 1
             for (k in 0 until 4) fill(modeMap, cu.x + (k and 1) * half, cu.y + (k shr 1) * half, half, cu.lumaModes[k])
@@ -388,27 +459,415 @@ internal class IntraEncoder(
         setQp(target)
         var flagCost = 0
         if (flagCoded) flagCost = est.costOf(splitContext(x, y, depth), 0)
-        var best = eval2Nx2N(x, y, log2, depth, hints)
-        var bestCost = cuCost(best, start)
-        // NxN is not tried where 2Nx2N predicts the luma so well that it codes no residual.
-        if (log2 == minCbLog2 && log2 == 3 && !(plan.earlySkip && !lumaResidual(best.tu))) {
-            save(partSave, x, y, log2, 7)
-            val nxn = evalNxN(x, y, depth)
-            val nxnCost = cuCost(nxn, start)
-            if (nxnCost < bestCost) {
-                best = nxn
-                bestCost = nxnCost
+        var best: EncCu? = null
+        var bestCost = Long.MAX_VALUE
+        if (inter) {
+            best = evalInter(x, y, log2, depth, start)
+            bestCost = interCost
+        }
+        // In a P or B picture intra coding is weighed where inter prediction leaves a residual, or from effort 2
+        // wherever the unit is not skipped; never for a unit of 64, whose four transform blocks no single SATD ranks.
+        val tryIntra = best == null || (log2 <= 5 && (hasResidual(best.tu) || (plan.intraAlways && !(plan.earlySkip && best.skip))))
+        if (tryIntra) {
+            if (best != null) save(leafSave, x, y, log2, 7)
+            var intra = eval2Nx2N(x, y, log2, depth, hints)
+            var intraCost = cuCost(intra, start)
+            // NxN is not tried where 2Nx2N predicts the luma so well that it codes no residual.
+            if (log2 == minCbLog2 && log2 == 3 && !(plan.earlySkip && !lumaResidual(intra.tu))) {
+                save(partSave, x, y, log2, 7)
+                val nxn = evalNxN(x, y, depth)
+                val nxnCost = cuCost(nxn, start)
+                if (nxnCost < intraCost) {
+                    intra = nxn
+                    intraCost = nxnCost
+                } else {
+                    restore(partSave)
+                    stampCu(intra)
+                }
+            }
+            if (intraCost < bestCost) {
+                best = intra
+                bestCost = intraCost
             } else {
-                restore(partSave)
-                stampCu(best)
+                restore(leafSave)
+                stampCu(best!!)
             }
         }
+        val chosen = best!!
         // Commit: the estimate's states move past the split flag and the unit.
         start.copyInto(est.states)
         if (flagCoded) est.encode(splitContext(x, y, depth), 0)
-        writeCodingUnit(est, best)
+        writeCodingUnit(est, chosen)
         nodeCost = bestCost + lambda * flagCost
-        return listOf(best)
+        return listOf(chosen)
+    }
+
+    // ---------------------------------------------------------------- inter decisions (#177)
+
+    private val numRef = intArrayOf((interSlice?.numRefIdxL0ActiveMinus1 ?: 0) + 1, (interSlice?.numRefIdxL1ActiveMinus1 ?: 0) + 1)
+    private val sliceB = interSlice?.sliceType == SliceType.B
+    private val maxMerge = interSlice?.maxNumMergeCand ?: 5
+    private val search: MotionSearch? = if (inter) MotionSearch(rec, orig) else null
+    private val leafSave = RegionStore(ctbSize * ctbSize)
+    private val interSave = RegionStore(ctbSize * ctbSize)
+
+    /** The prediction of the inter unit being weighed, per component at its own size, which each transform block starts from. */
+    private val predStore = Array(comps) { ShortArray(ctbSize * ctbSize) }
+    private var predX = 0
+    private var predY = 0
+    private var predSize = 0
+
+    /** The merging candidates of the prediction block being weighed: RefIdxLX and MvLX at 2 * i + X. */
+    private val mergeRef = IntArray(10)
+    private val mergeMv = IntArray(10)
+    /** The distinct merging candidates in order of cost, and their costs. */
+    private val mergeOrder = IntArray(5)
+    private val mergeCost = LongArray(5)
+    private val satdDiff = IntArray(64 * 64)
+    private val amvpPu = EncPu()
+    private val rect = IntArray(4)
+    private var interCost = 0L
+
+    /**
+     * Decides the inter coding unit at ([x], [y]) of 1 shl [log2]: the merging candidates of 2Nx2N of least SATD,
+     * each skipped and with its residual, the AMVP 2Nx2N unit of the motion search, and the partitions the effort
+     * allows. Leaves the best reconstructed and stamped, with its cost from the states [start] in [interCost].
+     */
+    private fun evalInter(x: Int, y: Int, log2: Int, depth: Int, start: ByteArray): EncCu {
+        val size = 1 shl log2
+        fill(depthMap, x, y, size, depth)
+        fill(modeMap, x, y, size, IntraPredictor.INTRA_DC)
+        rec.markEncodedKind(x, y, size, intra = false, skip = false)
+        var best: EncCu? = null
+        var bestCost = Long.MAX_VALUE
+        fun consider(cu: EncCu) {
+            val c = cuCost(cu, start)
+            if (c < bestCost) {
+                bestCost = c
+                best = cu
+                save(interSave, x, y, log2, 7)
+            }
+        }
+        val mp = rec.encoderMotion
+        val n = mp.mergeCandidates(x, y, size, x, y, size, size, 0, PartMode.PART_2Nx2N, mergeRef, mergeMv)
+        val ranked = rankMerge(x, y, size, size, n)
+        val chosen = IntArray(minOf(ranked, plan.mergeRd)) { mergeOrder[it] }
+        for (i in chosen) {
+            val skip = interCu(x, y, log2, depth, PartMode.PART_2Nx2N)
+            setMerge(skip.pus[0], i)
+            predict(skip, 0, x, y, size, size)
+            capturePrediction(x, y, size)
+            skip.skip = true
+            skip.tu = EncTu(x, y, log2, 0, 0)
+            // A lossless unit is skipped only where its prediction is exact.
+            if (!lossless || predictionError(x, y, size) == 0L) consider(skip)
+            val merged = interCu(x, y, log2, depth, PartMode.PART_2Nx2N)
+            merged.pus[0].copyFrom(skip.pus[0])
+            interResidual(merged)
+            // A merged 2Nx2N unit infers rqt_root_cbf 1 (7.4.9.5), so one without a residual is the skipped one.
+            if (hasResidual(merged.tu)) consider(merged)
+        }
+        if (best?.skip != true || plan.amvpAfterSkip) {
+            val cu = interCu(x, y, log2, depth, PartMode.PART_2Nx2N)
+            searchPu(cu, 0, x, y, size, size)
+            predict(cu, 0, x, y, size, size)
+            capturePrediction(x, y, size)
+            interResidual(cu)
+            consider(cu)
+        }
+        if (plan.rectParts && !(plan.earlySkip && best?.skip == true)) {
+            for (pm in RECT_PARTS) {
+                val cu = interCu(x, y, log2, depth, pm)
+                decidePu(cu, 0)
+                decidePu(cu, 1)
+                capturePrediction(x, y, size)
+                interResidual(cu)
+                consider(cu)
+            }
+            // The asymmetric partitions of a direction are weighed only where its symmetric split won.
+            val won = best!!.partMode
+            if (plan.ampParts && log2 > minCbLog2 && (won == PartMode.PART_2NxN || won == PartMode.PART_Nx2N)) {
+                val parts = if (won == PartMode.PART_2NxN) HORIZONTAL_AMP else VERTICAL_AMP
+                for (pm in parts) {
+                    val cu = interCu(x, y, log2, depth, pm)
+                    decidePu(cu, 0)
+                    decidePu(cu, 1)
+                    capturePrediction(x, y, size)
+                    interResidual(cu)
+                    consider(cu)
+                }
+            }
+        }
+        restore(interSave)
+        val out = best!!
+        stampCu(out)
+        interCost = bestCost
+        return out
+    }
+
+    /** A new inter unit of [partMode], at the current QP. */
+    private fun interCu(x: Int, y: Int, log2: Int, depth: Int, partMode: Int): EncCu {
+        val cu = EncCu(x, y, log2, depth)
+        cu.inter = true
+        cu.bypass = lossless
+        cu.partMode = partMode
+        markQp(cu)
+        return cu
+    }
+
+    /** Prediction unit [k] of [partMode] in a unit of [size]: its offset and size, into [rect]. Returns the unit count. */
+    private fun partRect(partMode: Int, size: Int, k: Int): Int {
+        val h2 = size shr 1
+        val q = size shr 2
+        val r = rect
+        r[0] = 0; r[1] = 0; r[2] = size; r[3] = size
+        when (partMode) {
+            PartMode.PART_2Nx2N -> return 1
+            PartMode.PART_2NxN -> { r[1] = k * h2; r[3] = h2 }
+            PartMode.PART_Nx2N -> { r[0] = k * h2; r[2] = h2 }
+            PartMode.PART_2NxnU -> { r[1] = if (k == 0) 0 else q; r[3] = if (k == 0) q else size - q }
+            PartMode.PART_2NxnD -> { r[1] = if (k == 0) 0 else size - q; r[3] = if (k == 0) size - q else q }
+            PartMode.PART_nLx2N -> { r[0] = if (k == 0) 0 else q; r[2] = if (k == 0) q else size - q }
+            PartMode.PART_nRx2N -> { r[0] = if (k == 0) 0 else size - q; r[2] = if (k == 0) size - q else q }
+        }
+        return 2
+    }
+
+    /** Stores the motion of each prediction unit of [cu] in the picture's field, as the decoder does after parsing it. */
+    private fun storeMotion(cu: EncCu) {
+        val size = 1 shl cu.log2
+        val mp = rec.encoderMotion
+        val parts = partRect(cu.partMode, size, 0)
+        for (k in 0 until parts) {
+            partRect(cu.partMode, size, k)
+            val pu = cu.pus[k]
+            mp.store(cu.x + rect[0], cu.y + rect[1], rect[2], rect[3], pu.ref[0], pu.mv[0], pu.ref[1], pu.mv[1])
+        }
+    }
+
+    private fun predict(cu: EncCu, k: Int, x: Int, y: Int, w: Int, h: Int) {
+        val pu = cu.pus[k]
+        rec.predictEncoded(x, y, w, h, pu.ref[0], pu.mv[0], pu.ref[1], pu.mv[1])
+    }
+
+    private fun setMerge(pu: EncPu, i: Int) {
+        pu.merge = true
+        pu.mergeIdx = i
+        pu.ref[0] = mergeRef[2 * i]
+        pu.ref[1] = mergeRef[2 * i + 1]
+        pu.mv[0] = mergeMv[2 * i]
+        pu.mv[1] = mergeMv[2 * i + 1]
+    }
+
+    /** The squared error of the unit of [size] at ([x], [y]) as the reconstruction holds it, every component. */
+    private fun predictionError(x: Int, y: Int, size: Int): Long {
+        var d = sse(0, x, y, size, size)
+        if (cat != 0) for (c in 1..2) d += sse(c, x shr subW, y shr subH, size shr subW, size shr subH)
+        return d
+    }
+
+    /** Copies the prediction the reconstruction holds for the unit of [size] at ([x], [y]) into [predStore]. */
+    private fun capturePrediction(x: Int, y: Int, size: Int) {
+        predX = x
+        predY = y
+        predSize = size
+        for (c in 0 until comps) {
+            val w = if (c == 0) size else size shr subW
+            val h = if (c == 0) size else size shr subH
+            copyOut(predStore[c], c, if (c == 0) x else x shr subW, if (c == 0) y else y shr subH, w, h)
+        }
+    }
+
+    /** Puts the captured prediction of the n by n block of [cIdx] at ([x], [y]), in its own samples, back in the reconstruction. */
+    private fun loadPrediction(cIdx: Int, x: Int, y: Int, n: Int) {
+        val sw = if (cIdx == 0) 0 else subW
+        val sh = if (cIdx == 0) 0 else subH
+        val w = predSize shr sw
+        val ox = x - (predX shr sw)
+        val oy = y - (predY shr sh)
+        val p = rec.planes[cIdx]
+        val stride = strides[cIdx]
+        val src = predStore[cIdx]
+        for (j in 0 until n) src.copyInto(p, (y + j) * stride + x, (oy + j) * w + ox, (oy + j) * w + ox + n)
+    }
+
+    /** The residual of the inter unit [cu], whose prediction is captured: its luma transform tree by rate and distortion, then its chroma. */
+    private fun interResidual(cu: EncCu) {
+        val tu = EncTu(cu.x, cu.y, cu.log2, 0, 0)
+        lumaTree(cu, tu, -1, sps.maxTransformHierarchyDepthInter)
+        cu.tu = tu
+        if (cat != 0) chromaTree(cu, tu, 0)
+    }
+
+    /** The luma SATD of the block at ([x], [y]) of [w] by [h] as the reconstruction holds it against the source. */
+    private fun predictionSatd(x: Int, y: Int, w: Int, h: Int): Int {
+        val plane = rec.planes[0]
+        val src = orig[0]
+        val stride = strides[0]
+        for (j in 0 until h) {
+            val row = (y + j) * stride + x
+            for (i in 0 until w) satdDiff[j * w + i] = (src[row + i].toInt() and 0xFFFF) - (plane[row + i].toInt() and 0xFFFF)
+        }
+        return satdCalc.rect(satdDiff, w, h)
+    }
+
+    /** The bins of merge_idx [i] in 1/256 bits, its first in a context taken as one bit. */
+    private fun mergeIdxBits(i: Int): Int = (i + (if (i < maxMerge - 1) 1 else 0)) * 256
+
+    /**
+     * Ranks the [n] merging candidates of the block at ([x], [y]) of [w] by [h] by the luma SATD of their prediction
+     * and the bits of merge_idx, a candidate with the motion of an earlier one left out. Returns how many are in
+     * [mergeOrder] and [mergeCost], the cheapest first.
+     */
+    private fun rankMerge(x: Int, y: Int, w: Int, h: Int, n: Int): Int {
+        var m = 0
+        for (i in 0 until n) {
+            var duplicate = false
+            for (j in 0 until i) {
+                if (mergeRef[2 * j] == mergeRef[2 * i] && mergeRef[2 * j + 1] == mergeRef[2 * i + 1] &&
+                    mergeMv[2 * j] == mergeMv[2 * i] && mergeMv[2 * j + 1] == mergeMv[2 * i + 1]
+                ) duplicate = true
+            }
+            if (duplicate) continue
+            rec.predictEncoded(x, y, w, h, mergeRef[2 * i], mergeMv[2 * i], mergeRef[2 * i + 1], mergeMv[2 * i + 1])
+            val cost = (predictionSatd(x, y, w, h).toLong() shl 8) + ((sqrtLambda.toLong() * mergeIdxBits(i)) shr 8)
+            var at = m
+            while (at > 0 && mergeCost[at - 1] > cost) {
+                mergeCost[at] = mergeCost[at - 1]
+                mergeOrder[at] = mergeOrder[at - 1]
+                at--
+            }
+            mergeCost[at] = cost
+            mergeOrder[at] = i
+            m++
+        }
+        return m
+    }
+
+    /** sqrt( lambda ) times [bits] (1/256 bits), in the units of a SATD cost. */
+    private fun rateCost(bits: Int): Long = (sqrtLambda.toLong() * bits) shr 8
+
+    /** The bits of ref_idx_lX [r] of list [x]: TR of cMax num_ref_idx_active_minus1. */
+    private fun refBits(x: Int, r: Int): Int = if (numRef[x] <= 1) 0 else minOf(r + 1, numRef[x] - 1) * 256
+
+    /** The bins of inter_pred_idc [dir] for a block of [w] + [h] in a unit of depth [depth] (9.3.4.2.2). */
+    private fun dirBits(dir: Int, w: Int, h: Int, depth: Int): Int {
+        if (!sliceB) return 0
+        var bits = 0
+        if (w + h != 12) bits += est.costOf(Ctx.INTER_PRED_IDC + depth, if (dir == 2) 1 else 0)
+        if (dir != 2) bits += est.costOf(Ctx.INTER_PRED_IDC + 4, dir)
+        return bits
+    }
+
+    /**
+     * The AMVP motion of prediction unit [k] of [cu], at ([px], [py]) of [pw] by [ph]: the motion search in each
+     * reference picture of each list, then one list or, in a B slice, both, whichever costs least. Fills the unit's
+     * syntax and returns its cost in SATD units.
+     */
+    private fun searchPu(cu: EncCu, k: Int, px: Int, py: Int, pw: Int, ph: Int): Long {
+        val s = search!!
+        s.sqrtLambda = sqrtLambda
+        val mp = rec.encoderMotion
+        val refs = interSlice!!.refs!!
+        val size = 1 shl cu.log2
+        val lists = if (sliceB) 2 else 1
+        val bestMv = IntArray(2)
+        val bestRef = intArrayOf(-1, -1)
+        val bestCost = longArrayOf(Long.MAX_VALUE, Long.MAX_VALUE)
+        val predA = IntArray(2)
+        val predB = IntArray(2)
+        for (x in 0 until lists) for (r in 0 until numRef[x]) {
+            val a = mp.predictor(x, r, cu.x, cu.y, size, px, py, pw, ph, k, 0)
+            val b = mp.predictor(x, r, cu.x, cu.y, size, px, py, pw, ph, k, 1)
+            val mv = s.search(refs.pictures[x][r], px, py, pw, ph, a, b, plan.searchStep)
+            val c = s.cost + rateCost(refBits(x, r))
+            if (c < bestCost[x]) {
+                bestCost[x] = c
+                bestMv[x] = mv
+                bestRef[x] = r
+                predA[x] = a
+                predB[x] = b
+            }
+        }
+        var dir = 0
+        var cost = bestCost[0] + rateCost(dirBits(0, pw, ph, cu.depth))
+        if (sliceB) {
+            val c1 = bestCost[1] + rateCost(dirBits(1, pw, ph, cu.depth))
+            if (c1 < cost) {
+                dir = 1
+                cost = c1
+            }
+            // 8x4 and 4x8 blocks predict from one list (inter_pred_idc has no PRED_BI for them).
+            if (pw + ph != 12) {
+                val p0 = refs.pictures[0][bestRef[0]]
+                val p1 = refs.pictures[1][bestRef[1]]
+                var m0 = bestMv[0]
+                var m1 = bestMv[1]
+                var bi: Long
+                if (plan.biRefine) {
+                    m1 = s.refineBi(p1, p0, m0, 1, px, py, pw, ph, m1, predA[1], predB[1])
+                    m0 = s.refineBi(p0, p1, m1, 0, px, py, pw, ph, m0, predA[0], predB[0])
+                    s.predictors(predA[1], predB[1])
+                    bi = s.cost + rateCost(s.mvBits(m1))
+                } else {
+                    bi = s.biSatd(p0, m0, p1, m1, px, py, pw, ph).toLong() shl 8
+                    s.predictors(predA[0], predB[0])
+                    bi += rateCost(s.mvBits(m0))
+                    s.predictors(predA[1], predB[1])
+                    bi += rateCost(s.mvBits(m1))
+                }
+                bi += rateCost(refBits(0, bestRef[0]) + refBits(1, bestRef[1]) + dirBits(2, pw, ph, cu.depth))
+                if (bi < cost) {
+                    dir = 2
+                    cost = bi
+                    bestMv[0] = m0
+                    bestMv[1] = m1
+                }
+            }
+        }
+        val pu = cu.pus[k]
+        pu.merge = false
+        pu.dir = dir
+        for (x in 0..1) {
+            if (dir == 2 || dir == x) {
+                val mv = bestMv[x]
+                pu.ref[x] = bestRef[x]
+                pu.mv[x] = mv
+                val bitsA = s.componentBits(MotionField.x(mv) - MotionField.x(predA[x])) + s.componentBits(MotionField.y(mv) - MotionField.y(predA[x]))
+                val bitsB = s.componentBits(MotionField.x(mv) - MotionField.x(predB[x])) + s.componentBits(MotionField.y(mv) - MotionField.y(predB[x]))
+                val flag = if (bitsB < bitsA) 1 else 0
+                val mvp = if (flag == 1) predB[x] else predA[x]
+                pu.mvpFlag[x] = flag
+                pu.mvd[x] = MotionField.pack(MotionField.x(mv) - MotionField.x(mvp), MotionField.y(mv) - MotionField.y(mvp))
+            } else {
+                pu.ref[x] = -1
+                pu.mv[x] = 0
+                pu.mvd[x] = 0
+                pu.mvpFlag[x] = 0
+            }
+        }
+        return cost
+    }
+
+    /**
+     * Decides prediction unit [k] of the unit [cu] of two units: its best merging candidate by SATD against its AMVP
+     * motion, then stores its motion, which the second unit's candidates read, and predicts it.
+     */
+    private fun decidePu(cu: EncCu, k: Int) {
+        val size = 1 shl cu.log2
+        partRect(cu.partMode, size, k)
+        val px = cu.x + rect[0]
+        val py = cu.y + rect[1]
+        val pw = rect[2]
+        val ph = rect[3]
+        val amvp = searchPu(cu, k, px, py, pw, ph) + rateCost(est.costOf(Ctx.MERGE_FLAG, 0))
+        amvpPu.copyFrom(cu.pus[k])
+        val n = rec.encoderMotion.mergeCandidates(cu.x, cu.y, size, px, py, pw, ph, k, cu.partMode, mergeRef, mergeMv)
+        val m = rankMerge(px, py, pw, ph, n)
+        val pu = cu.pus[k]
+        if (m > 0 && mergeCost[0] + rateCost(est.costOf(Ctx.MERGE_FLAG, 1)) < amvp) setMerge(pu, mergeOrder[0]) else pu.copyFrom(amvpPu)
+        rec.encoderMotion.store(px, py, pw, ph, pu.ref[0], pu.mv[0], pu.ref[1], pu.mv[1])
+        predict(cu, k, px, py, pw, ph)
     }
 
     /** The cost of the decided unit [cu]: its squared error and the bins of its syntax from the states [start]. */
@@ -544,7 +1003,8 @@ internal class IntraEncoder(
     private fun codeBlock(cu: EncCu, tu: EncTu, cIdx: Int, slot: Int, x: Int, y: Int, log2: Int, mode: Int, cbfCtx: Int): Long {
         val n = 1 shl log2
         val bit = 1 shl (if (slot == 0) 0 else (slot - 1) and 1)
-        rec.intra.predict(cIdx, x, y, log2, mode, false)
+        // An inter block starts from the unit's captured prediction, which a trial before it may have overwritten.
+        if (cu.inter) loadPrediction(cIdx, x, y, n) else rec.intra.predict(cIdx, x, y, log2, mode, false)
         val plane = rec.planes[cIdx]
         val src = orig[cIdx]
         val stride = strides[cIdx]
@@ -566,7 +1026,7 @@ internal class IntraEncoder(
         }
         val tryTs = plan.transformSkip && log2 == 2 && pps.transformSkipEnabled
         if (tryTs) save(blockSave, x, y, log2, 0, cIdx)
-        val costA = transformBlock(cIdx, x, y, log2, scanIdx, bitDepth, cbfCtx, levelsA, false)
+        val costA = transformBlock(cIdx, x, y, log2, scanIdx, bitDepth, cbfCtx, levelsA, false, cu.inter)
         if (!tryTs) {
             setBlock(tu, slot, bit, if (lastNonZero > 0) levelsA.copyOf(n * n) else null, false)
             return costA
@@ -576,7 +1036,7 @@ internal class IntraEncoder(
         val savedA = ShortArray(n * n)
         for (j in 0 until n) plane.copyInto(savedA, j * n, (y + j) * stride + x, (y + j) * stride + x + n)
         restore(blockSave)
-        val costB = transformBlock(cIdx, x, y, log2, scanIdx, bitDepth, cbfCtx, levelsB, true)
+        val costB = transformBlock(cIdx, x, y, log2, scanIdx, bitDepth, cbfCtx, levelsB, true, cu.inter)
         if (costB < costA && lastNonZero > 0) {
             setBlock(tu, slot, bit, levelsB.copyOf(n * n), true)
             return costB
@@ -588,11 +1048,14 @@ internal class IntraEncoder(
 
     private var lastNonZero = 0
 
-    /** The transform (or with [skip], none), quantization and reconstruction of the residual in [resid]. */
-    private fun transformBlock(cIdx: Int, x: Int, y: Int, log2: Int, scanIdx: Int, bitDepth: Int, cbfCtx: Int, levels: IntArray, skip: Boolean): Long {
+    /**
+     * The transform (or with [skip], none), quantization and reconstruction of the residual in [resid], of an
+     * [inter] block or an intra one, whose 4x4 luma blocks take the DST (8.6.4.2).
+     */
+    private fun transformBlock(cIdx: Int, x: Int, y: Int, log2: Int, scanIdx: Int, bitDepth: Int, cbfCtx: Int, levels: IntArray, skip: Boolean, inter: Boolean): Long {
         val n = 1 shl log2
         val total = n * n
-        val dst = cIdx == 0 && log2 == 2
+        val dst = cIdx == 0 && log2 == 2 && !inter
         if (skip) {
             // 8.6.4.2 scales a skipped residual by 2^tsShift and 8-299 by 2^-bdShift: the inverse is the
             // transform's own coefficient scale, 2^( 15 - BitDepth - Log2( nTbS ) ).
@@ -603,7 +1066,7 @@ internal class IntraEncoder(
         }
         val qpc = qpPrime[cIdx]
         val hide = pps.signDataHiding
-        val nz = quant.quantize(coef, levels, log2, cIdx, scanIdx, qpc, bitDepth, lambda, plan.rdoq, hide, cbfCtx)
+        val nz = quant.quantize(coef, levels, log2, cIdx, scanIdx, qpc, bitDepth, lambda, plan.rdoq, hide, cbfCtx, inter)
         lastNonZero = nz
         if (nz > 0) {
             val ls = PictureDecoder.LEVEL_SCALE[qpc % 6]
@@ -855,8 +1318,9 @@ internal class IntraEncoder(
         return (order.take(count - 1) + 4).toIntArray()
     }
 
-    /** The prediction mode of chroma block [k] of [cu] (8.4.3), for 4:2:2 through Table 8-3. */
+    /** The prediction mode of chroma block [k] of [cu] (8.4.3), for 4:2:2 through Table 8-3; -1 for an inter unit. */
     private fun chromaMode(cu: EncCu, k: Int): Int {
+        if (cu.inter) return -1
         val luma = cu.lumaModes[k]
         val s = cu.chromaSyntax[k]
         val idx = if (s == 4) luma else PictureDecoder.CHROMA_CANDIDATES[s].let { if (it == luma) 34 else it }
@@ -1000,10 +1464,23 @@ internal class IntraEncoder(
     /** cu_qp_delta_abs and cu_qp_delta_sign_flag waiting for the first transform unit with a coded block. */
     private var pendingDelta = false
 
-    /** coding_unit( ), 7.3.8.5, of an intra unit in an I slice. */
+    /** coding_unit( ), 7.3.8.5, of an intra unit, or in a P or B slice of an inter one. */
     fun writeCodingUnit(c: CabacEncoder, cu: EncCu) {
         pendingDelta = cu.deltaHere
         if (pps.transquantBypassEnabled) c.encode(Ctx.TRANSQUANT_BYPASS, if (cu.bypass) 1 else 0)
+        if (inter) {
+            c.encode(Ctx.CU_SKIP + skipContext(cu.x, cu.y), if (cu.skip) 1 else 0)
+            if (cu.skip) {
+                writeMergeIdx(c, cu.pus[0].mergeIdx)
+                return
+            }
+            // pred_mode_flag: 0 is MODE_INTER.
+            c.encode(Ctx.PRED_MODE, if (cu.inter) 0 else 1)
+        }
+        if (cu.inter) {
+            writeInterUnit(c, cu)
+            return
+        }
         if (cu.log2 == minCbLog2) c.encode(Ctx.PART_MODE, if (cu.nxn) 0 else 1)
         val parts = if (cu.nxn) 4 else 1
         val half = (1 shl cu.log2) shr 1
@@ -1048,6 +1525,104 @@ internal class IntraEncoder(
         writeTransformTree(c, cu, cu.tu, maxTrafoDepth, 0, 0)
     }
 
+    /** ctxInc of cu_skip_flag (9.3.4.2.2): the left and upper neighbours that are available and skipped. */
+    private fun skipContext(x: Int, y: Int): Int {
+        val skip = rec.motion!!.skip
+        var inc = 0
+        if (rec.available(x, y, x - 1, y) && skip[(y shr 2) * w4 + ((x - 1) shr 2)].toInt() != 0) inc++
+        if (rec.available(x, y, x, y - 1) && skip[((y - 1) shr 2) * w4 + (x shr 2)].toInt() != 0) inc++
+        return inc
+    }
+
+    /** merge_idx: TR of cMax MaxNumMergeCand - 1, its first bin in a context and the rest bypass. */
+    private fun writeMergeIdx(c: CabacEncoder, idx: Int) {
+        val max = maxMerge - 1
+        for (i in 0 until idx) if (i == 0) c.encode(Ctx.MERGE_IDX, 1) else c.bypass(1)
+        if (idx < max) if (idx == 0) c.encode(Ctx.MERGE_IDX, 0) else c.bypass(0)
+    }
+
+    /** ref_idx_lX [r]: TR of cMax [max], its first two bins in contexts and the rest bypass. */
+    private fun writeRefIdx(c: CabacEncoder, r: Int, max: Int) {
+        for (i in 0 until r) if (i < 2) c.encode(Ctx.REF_IDX + i, 1) else c.bypass(1)
+        if (r < max) if (r < 2) c.encode(Ctx.REF_IDX + r, 0) else c.bypass(0)
+    }
+
+    /** mvd_coding( ), 7.3.8.9: the flags of both components, then each one's abs_mvd_minus2 as EG1 and its sign. */
+    private fun writeMvd(c: CabacEncoder, mvd: Int) {
+        val x = MotionField.x(mvd)
+        val y = MotionField.y(mvd)
+        val ax = if (x < 0) -x else x
+        val ay = if (y < 0) -y else y
+        c.encode(Ctx.ABS_MVD_GREATER0, if (ax > 0) 1 else 0)
+        c.encode(Ctx.ABS_MVD_GREATER0, if (ay > 0) 1 else 0)
+        if (ax > 0) c.encode(Ctx.ABS_MVD_GREATER1, if (ax > 1) 1 else 0)
+        if (ay > 0) c.encode(Ctx.ABS_MVD_GREATER1, if (ay > 1) 1 else 0)
+        for ((a, v) in listOf(ax to x, ay to y)) {
+            if (a == 0) continue
+            if (a > 1) {
+                var r = a - 2
+                var k = 1
+                while (r >= (1 shl k)) {
+                    c.bypass(1)
+                    r -= 1 shl k
+                    k++
+                }
+                c.bypass(0)
+                c.bypassBits(r, k)
+            }
+            c.bypass(if (v < 0) 1 else 0)
+        }
+    }
+
+    /** part_mode of an inter unit (Table 9-43), the inverse of the decoder's reading. */
+    private fun writePartMode(c: CabacEncoder, cu: EncCu) {
+        val pm = cu.partMode
+        if (pm == PartMode.PART_2Nx2N) {
+            c.encode(Ctx.PART_MODE, 1)
+            return
+        }
+        c.encode(Ctx.PART_MODE, 0)
+        val horizontal = pm == PartMode.PART_2NxN || pm == PartMode.PART_2NxnU || pm == PartMode.PART_2NxnD
+        c.encode(Ctx.PART_MODE + 1, if (horizontal) 1 else 0)
+        // At the smallest size of 8, the second bin is the last; elsewhere amp_enabled_flag adds the third and fourth.
+        if (cu.log2 == minCbLog2 || !sps.ampEnabled) return
+        val symmetric = pm == PartMode.PART_2NxN || pm == PartMode.PART_Nx2N
+        c.encode(Ctx.PART_MODE + 3, if (symmetric) 1 else 0)
+        if (!symmetric) c.bypass(if (pm == PartMode.PART_2NxnD || pm == PartMode.PART_nRx2N) 1 else 0)
+    }
+
+    /** The rest of coding_unit( ) of an inter unit that is not skipped: part_mode, its prediction units, rqt_root_cbf and the transform tree. */
+    private fun writeInterUnit(c: CabacEncoder, cu: EncCu) {
+        writePartMode(c, cu)
+        val size = 1 shl cu.log2
+        val parts = partRect(cu.partMode, size, 0)
+        for (k in 0 until parts) {
+            partRect(cu.partMode, size, k)
+            val pu = cu.pus[k]
+            // prediction_unit( ), 7.3.8.6.
+            c.encode(Ctx.MERGE_FLAG, if (pu.merge) 1 else 0)
+            if (pu.merge) {
+                writeMergeIdx(c, pu.mergeIdx)
+                continue
+            }
+            if (sliceB) {
+                if (rect[2] + rect[3] != 12) c.encode(Ctx.INTER_PRED_IDC + cu.depth, if (pu.dir == 2) 1 else 0)
+                if (pu.dir != 2) c.encode(Ctx.INTER_PRED_IDC + 4, pu.dir)
+            }
+            for (x in 0..1) {
+                if (pu.dir != 2 && pu.dir != x) continue
+                writeRefIdx(c, pu.ref[x], numRef[x] - 1)
+                writeMvd(c, pu.mvd[x])
+                c.encode(Ctx.MVP_FLAG, pu.mvpFlag[x])
+            }
+        }
+        val root = hasResidual(cu.tu)
+        // rqt_root_cbf, inferred 1 for a merged 2Nx2N unit.
+        if (cu.partMode == PartMode.PART_2Nx2N && cu.pus[0].merge) check(root) { "a merged 2Nx2N unit without a residual is not skipped" }
+        else c.encode(Ctx.RQT_ROOT_CBF, if (root) 1 else 0)
+        if (root) writeTransformTree(c, cu, cu.tu, sps.maxTransformHierarchyDepthInter, 0, 0)
+    }
+
     /** The chroma coded block flags of [t] for component [comp] (1 Cb, 2 Cr), as transform_tree( ) codes them at its node. */
     private fun chromaCbf(t: EncTu, comp: Int): Int {
         val ch = t.children ?: return if (comp == 1) t.cbfCb else t.cbfCr
@@ -1087,14 +1662,16 @@ internal class IntraEncoder(
             for (k in ch) writeTransformTree(c, cu, k, maxTrafoDepth, cb, cr)
             return
         }
-        c.encode(Ctx.CBF_LUMA + (if (t.depth == 0) 1 else 0), t.cbfY)
+        // cbf_luma is inferred 1 for an inter unit's undivided tree with no chroma residual (7.4.9.8).
+        if (!cu.inter || t.depth != 0 || cb != 0 || cr != 0) c.encode(Ctx.CBF_LUMA + (if (t.depth == 0) 1 else 0), t.cbfY)
+        else check(t.cbfY != 0) { "an inter unit's undivided tree codes no residual" }
         // transform_unit( ), 7.3.8.10: delta_qp( ) in the first one with a coded block; no chroma QP offsets.
         if (pendingDelta && (t.cbfY != 0 || cb != 0 || cr != 0)) {
             pendingDelta = false
             writeDeltaQp(c, cu.qpDelta)
         }
         val half = (1 shl cu.log2) shr 1
-        val lumaMode = cu.lumaModes[if (cu.nxn) ((if (t.y - cu.y >= half) 2 else 0) + (if (t.x - cu.x >= half) 1 else 0)) else 0]
+        val lumaMode = if (cu.inter) -1 else cu.lumaModes[if (cu.nxn) ((if (t.y - cu.y >= half) 2 else 0) + (if (t.x - cu.x >= half) 1 else 0)) else 0]
         if (t.cbfY != 0) writeResidual(c, 0, log2, t.levels[0]!!, scanIndex(log2, 0, lumaMode), t.skip and 1 != 0, cu.bypass)
         if (cat == 0) return
         val log2C = if (log2 > 2 || cat == 3) (if (cat == 3) log2 else log2 - 1) else if (t.blkIdx == 3) 2 else return
@@ -1339,11 +1916,48 @@ internal class IntraEncoder(
         for (i in 0 until comps * 6) if (p[a + i] != p[b + i]) return false
         return true
     }
+
+    private companion object {
+        /** The partitions of two prediction units weighed beside 2Nx2N: the symmetric ones, then the asymmetric ones of each direction. */
+        val RECT_PARTS = intArrayOf(PartMode.PART_2NxN, PartMode.PART_Nx2N)
+        val HORIZONTAL_AMP = intArrayOf(PartMode.PART_2NxnU, PartMode.PART_2NxnD)
+        val VERTICAL_AMP = intArrayOf(PartMode.PART_nLx2N, PartMode.PART_nRx2N)
+    }
 }
 
 /** The sum of absolute Hadamard transformed differences, in 8x8 tiles, or 4x4 for a 4x4 block. */
 internal class Satd {
     private val m = IntArray(64)
+    private val tile = IntArray(16)
+
+    /** The SATD of a [w] by [h] block of differences [d]: 8x8 tiles where both sides are multiples of 8, else 4x4 tiles. */
+    fun rect(d: IntArray, w: Int, h: Int): Int {
+        if (w == h) return of(d, w)
+        var sum = 0
+        if (w and 7 == 0 && h and 7 == 0) {
+            var y = 0
+            while (y < h) {
+                var x = 0
+                while (x < w) {
+                    sum += (hadamard8(d, y * w + x, w) + 2) shr 2
+                    x += 8
+                }
+                y += 8
+            }
+            return sum
+        }
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                for (j in 0 until 4) for (i in 0 until 4) tile[j * 4 + i] = d[(y + j) * w + x + i]
+                sum += (hadamard4(tile) + 1) shr 1
+                x += 4
+            }
+            y += 4
+        }
+        return sum
+    }
 
     fun of(d: IntArray, n: Int): Int {
         if (n == 4) return (hadamard4(d) + 1) shr 1

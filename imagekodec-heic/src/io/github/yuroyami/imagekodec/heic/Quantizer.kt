@@ -32,11 +32,12 @@ internal class Quantizer(private val est: CabacEncoder) {
      * levels [levels] (raster order), at qP [qp] (with QpBdOffset) for a block of [bitDepth] bits. [lambda] is
      * the Lagrange multiplier of the picture in 1/256 for squared sample errors; [rdoq] chooses RDOQ over plain
      * rounding, [hide] sign data hiding. [cbfCtx] is the context of the block's coded block flag, or -1 when the
-     * flag is not coded. Returns the number of levels other than 0.
+     * flag is not coded. [inter] marks the residual of an inter prediction, which rounds with a smaller offset
+     * without RDOQ. Returns the number of levels other than 0.
      */
     fun quantize(
         c: IntArray, levels: IntArray, log2: Int, cIdx: Int, scanIdx: Int, qp: Int, bitDepth: Int,
-        lambda: Long, rdoq: Boolean, hide: Boolean, cbfCtx: Int,
+        lambda: Long, rdoq: Boolean, hide: Boolean, cbfCtx: Int, inter: Boolean = false,
     ): Int {
         val n = 1 shl log2
         val total = n * n
@@ -49,8 +50,9 @@ internal class Quantizer(private val est: CabacEncoder) {
             v[i] = (if (abs > 65535) 65535 else abs) * q
         }
         var count = if (rdoq) rdoq(c, levels, log2, cIdx, scanIdx, qp, qBits, lambda, cbfCtx) else {
-            // A dead zone of two thirds below the rounding point, as intra residuals favour small levels.
-            val offset = 171 shl (qBits - 9)
+            // A rounding offset of a third, as intra residuals favour small levels, and of a sixth for the
+            // flatter residuals of inter prediction.
+            val offset = (if (inter) 85 else 171) shl (qBits - 9)
             var nz = 0
             for (i in 0 until total) {
                 var l = (v[i] + offset) shr qBits

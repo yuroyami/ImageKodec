@@ -35,13 +35,24 @@ internal class HevcProfile(
          * The lowest level of Table A.8 for a coded picture of [width] by [height] luma samples: A.4.1 a) bounds
          * the area by MaxLumaPs, and b) and c) each side by Sqrt( MaxLumaPs * 8 ). Null when no level holds it.
          */
-        fun level(width: Int, height: Int): Int? {
+        fun level(width: Int, height: Int, dpbSize: Int = 1): Int? {
             val area = width.toLong() * height
             for ((idc, maxLumaPs) in LEVELS) {
                 val side = maxLumaPs * 8
-                if (area <= maxLumaPs && width.toLong() * width <= side && height.toLong() * height <= side) return idc
+                if (area <= maxLumaPs && width.toLong() * width <= side && height.toLong() * height <= side && dpbSize <= maxDpbSize(area, maxLumaPs)) return idc
             }
             return null
+        }
+
+        /**
+         * MaxDpbSize of A-2 for a picture of [area] luma samples at a level of [maxLumaPs]: maxDpbPicBuf, 6, grows
+         * to 8, 12 and 16 as the picture takes three quarters, half or a quarter of the level's largest.
+         */
+        private fun maxDpbSize(area: Long, maxLumaPs: Long): Int = when {
+            area <= maxLumaPs shr 2 -> 16
+            area <= maxLumaPs shr 1 -> 12
+            area <= (3 * maxLumaPs) shr 2 -> 8
+            else -> 6
         }
 
         /**
@@ -52,9 +63,12 @@ internal class HevcProfile(
          * with the tightest flags: Monochrome, Monochrome 10 or 12, Main 12, Main 4:2:2 10 or 12, or Main
          * 4:4:4, 4:4:4 10 or 4:4:4 12, each with general_lower_bit_rate_constraint_flag 1.
          */
-        fun choose(chromaFormat: Int, bitDepthY: Int, bitDepthC: Int, levelIdc: Int): HevcProfile {
+        fun choose(chromaFormat: Int, bitDepthY: Int, bitDepthC: Int, levelIdc: Int, sequence: Boolean = false): HevcProfile {
             val depth = maxOf(bitDepthY, bitDepthC)
             fun compat(vararg j: Int): Int = j.fold(0) { a, k -> a or (1 shl (31 - k)) }
+            // A sequence of several pictures takes Main (A.3.2), marked compatible with Main 10, or Main 10 (A.3.3).
+            if (sequence && chromaFormat == 1 && depth == 8) return HevcProfile(1, compat(1, 2), null, false, levelIdc, "Main")
+            if (sequence && chromaFormat == 1 && depth <= 10) return HevcProfile(2, compat(2), null, false, levelIdc, "Main 10")
             if (chromaFormat == 1 && depth == 8) return HevcProfile(3, compat(1, 2, 3), null, true, levelIdc, "Main Still Picture")
             if (chromaFormat == 1 && depth <= 10) return HevcProfile(2, compat(2), null, true, levelIdc, "Main 10 Still Picture")
             val max12 = 1
@@ -98,6 +112,18 @@ internal class HevcStreamConfig(
     val fullRange: Boolean,
     /** colour_primaries, transfer_characteristics and matrix_coeffs, or null for none. */
     val colour: IntArray?,
+    /** sps_max_dec_pic_buffering_minus1 and sps_max_num_reorder_pics, the same in the VPS (7.4.3.1). */
+    val maxDecPicBufferingMinus1: Int = 0,
+    val maxNumReorder: Int = 0,
+    /** log2_max_pic_order_cnt_lsb_minus4 + 4. */
+    val log2MaxPocLsb: Int = 4,
+    /** The short-term reference picture sets of the SPS, each coded on its own (no inter RPS prediction). */
+    val shortTermRps: List<ShortTermRps> = emptyList(),
+    /** sps_temporal_mvp_enabled_flag. */
+    val temporalMvp: Boolean = false,
+    /** amp_enabled_flag: the asymmetric partitions of inter coding units. */
+    val amp: Boolean = false,
+    val maxTransformHierarchyDepthInter: Int = 0,
 )
 
 /** Writes the NAL units of an encoded picture: VPS, SPS, PPS, the slice segment header and the picture hash SEI. */
@@ -156,9 +182,10 @@ internal object HevcHeaderWriter {
         w.u(16, 0xFFFF)
         profileTierLevel(w, c.profile)
         w.u(1, 1)
-        // One picture held, none reordered: sps_max_dec_pic_buffering_minus1 0 as the still profiles ask.
-        w.ue(0)
-        w.ue(0)
+        // vps_max_dec_pic_buffering_minus1, vps_max_num_reorder_pics and vps_max_latency_increase_plus1 as the SPS
+        // has them: a still picture holds one picture and reorders none, as the still profiles ask.
+        w.ue(c.maxDecPicBufferingMinus1)
+        w.ue(c.maxNumReorder)
         w.ue(0)
         w.u(6, 0)
         w.ue(0)
@@ -189,27 +216,30 @@ internal object HevcHeaderWriter {
         w.ue(c.bitDepthY - 8)
         w.ue(c.bitDepthC - 8)
         // log2_max_pic_order_cnt_lsb_minus4: an IDR picture codes no picture order count.
-        w.ue(0)
+        w.ue(c.log2MaxPocLsb - 4)
         w.u(1, 1)
-        w.ue(0)
-        w.ue(0)
+        w.ue(c.maxDecPicBufferingMinus1)
+        w.ue(c.maxNumReorder)
+        // sps_max_latency_increase_plus1 0: no bound on the latency besides the reorder count.
         w.ue(0)
         w.ue(c.minCbLog2 - 3)
         w.ue(c.ctbLog2 - c.minCbLog2)
         w.ue(0)
         w.ue(c.maxTbLog2 - 2)
         // max_transform_hierarchy_depth_inter and _intra.
-        w.ue(0)
+        w.ue(c.maxTransformHierarchyDepthInter)
         w.ue(c.maxTransformHierarchyDepthIntra)
         // scaling_list_enabled_flag, amp_enabled_flag.
         w.u(1, 0)
-        w.u(1, 0)
+        w.flag(c.amp)
         w.flag(c.sao)
-        // pcm_enabled_flag, num_short_term_ref_pic_sets, long_term_ref_pics_present_flag, sps_temporal_mvp_enabled_flag.
+        // pcm_enabled_flag, num_short_term_ref_pic_sets and the sets, long_term_ref_pics_present_flag,
+        // sps_temporal_mvp_enabled_flag.
         w.u(1, 0)
-        w.ue(0)
+        w.ue(c.shortTermRps.size)
+        for ((i, rps) in c.shortTermRps.withIndex()) shortTermRefPicSet(w, i, rps)
         w.u(1, 0)
-        w.u(1, 0)
+        w.flag(c.temporalMvp)
         // strong_intra_smoothing_enabled_flag.
         w.u(1, 1)
         val vui = c.fullRange || c.colour != null
@@ -286,6 +316,81 @@ internal object HevcHeaderWriter {
         w.u(1, 0)
         w.u(1, 0)
         w.trailingBits()
+    }
+
+    /**
+     * st_ref_pic_set( [idx] ), 7.3.7, of [rps], never predicted from another set: inter_ref_pic_set_prediction_flag
+     * 0 where it is coded, then each entry as its distance from the one before (7-61, 7-62).
+     */
+    fun shortTermRefPicSet(w: BitWriter, idx: Int, rps: ShortTermRps) {
+        if (idx != 0) w.u(1, 0)
+        w.ue(rps.numNegative)
+        w.ue(rps.numPositive)
+        var prev = 0
+        for (i in 0 until rps.numNegative) {
+            w.ue(prev - rps.deltaPocS0[i] - 1)
+            w.flag(rps.usedS0[i])
+            prev = rps.deltaPocS0[i]
+        }
+        prev = 0
+        for (i in 0 until rps.numPositive) {
+            w.ue(rps.deltaPocS1[i] - prev - 1)
+            w.flag(rps.usedS1[i])
+            prev = rps.deltaPocS1[i]
+        }
+    }
+
+    /**
+     * The NAL unit header and slice_segment_header( ) (7.3.6.1) of the one slice of a picture of a sequence, up to
+     * and with byte_alignment( ): the I slice of an IDR picture ([idr]), or a slice of a TRAIL_R picture of picture
+     * order count [poc] with the reference picture set [rps], the SPS's set [rpsIdx] or coded in the header when
+     * [rpsIdx] is -1. A P or B slice has [numRefL0] and [numRefL1] active references, its temporal predictor from
+     * the first picture of list 1 in a B slice and of list 0 in a P slice, and five merging candidates.
+     */
+    fun sequenceSliceHeader(
+        c: HevcStreamConfig, sliceType: Int, idr: Boolean, poc: Int, rps: ShortTermRps?, rpsIdx: Int,
+        numRefL0: Int, numRefL1: Int, saoLuma: Boolean, saoChroma: Boolean, qp: Int,
+    ): ByteArray = nal(if (idr) NalType.IDR_N_LP else NalType.TRAIL_R) { w ->
+        w.u(1, 1)
+        // no_output_of_prior_pics_flag of an IRAP picture.
+        if (idr) w.u(1, 0)
+        w.ue(0)
+        w.ue(sliceType)
+        if (!idr) {
+            w.u(c.log2MaxPocLsb, poc and ((1 shl c.log2MaxPocLsb) - 1))
+            val count = c.shortTermRps.size
+            // short_term_ref_pic_set_sps_flag, then the set or short_term_ref_pic_set_idx.
+            w.flag(rpsIdx >= 0)
+            if (rpsIdx < 0) shortTermRefPicSet(w, count, rps!!) else if (count > 1) w.u(ceilLog2(count), rpsIdx)
+            // slice_temporal_mvp_enabled_flag.
+            if (c.temporalMvp) w.u(1, 1)
+        }
+        if (c.sao) {
+            w.flag(saoLuma)
+            if (c.chromaFormat != 0) w.flag(saoChroma)
+        }
+        if (sliceType != SliceType.I) {
+            val b = sliceType == SliceType.B
+            // num_ref_idx_active_override_flag, against the PPS's default of one picture in each list.
+            val override = numRefL0 != 1 || (b && numRefL1 != 1)
+            w.flag(override)
+            if (override) {
+                w.ue(numRefL0 - 1)
+                if (b) w.ue(numRefL1 - 1)
+            }
+            // mvd_l1_zero_flag.
+            if (b) w.u(1, 0)
+            if (c.temporalMvp) {
+                // collocated_from_l0_flag 0 in a B slice: ColPic is RefPicList1[ 0 ], the nearest later picture.
+                // collocated_ref_idx is 0, coded only where the list holds more than one picture.
+                if (b) w.u(1, 0)
+                if ((if (b) numRefL1 else numRefL0) > 1) w.ue(0)
+            }
+            // five_minus_max_num_merge_cand.
+            w.ue(0)
+        }
+        w.se(qp - c.initQp)
+        w.byteAlignment()
     }
 
     /**

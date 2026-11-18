@@ -90,7 +90,7 @@ class HevcEncoderTest {
         return (1000.0 * kotlin.math.log10(max * max * n / sse)).toInt()
     }
 
-    private fun assertSame(src: HeifPlanes, out: HeifPlanes, label: String) {
+    internal fun assertSame(src: HeifPlanes, out: HeifPlanes, label: String) {
         for (c in src.planes.indices) {
             val w = if (c == 0) src.width else (src.width + src.subX) shr src.subX
             val h = if (c == 0) src.height else (src.height + src.subY) shr src.subY

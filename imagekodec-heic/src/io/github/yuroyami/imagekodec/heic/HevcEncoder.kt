@@ -16,6 +16,15 @@ import io.github.yuroyami.imagekodec.HeifPlanes
  *   search and NxN under a unit whose residual is empty;
  * - 3: all 35 modes ranked, five or eight tested in full, two levels of residual quadtree, all five chroma
  *   modes, and no early stops.
+ *
+ * In the P and B pictures of a sequence (#177), [effort] also sets the inter search:
+ * - 1: the merging candidate of least SATD tested in full, skipped and with its residual; the AMVP 2Nx2N unit
+ *   only where skipping lost; 2Nx2N alone; a pattern search from 8 samples; intra units only where inter
+ *   prediction leaves a residual; one reference picture in each list;
+ * - 2: the best two merging candidates; the AMVP unit always; 2NxN and Nx2N unless 2Nx2N was skipped; a search
+ *   from 16 samples; intra units wherever the unit is not skipped;
+ * - 3: the best three merging candidates; the asymmetric partitions too; a search from 32 samples; each list's
+ *   vector of a bi-predicted unit refined against the other's prediction; two reference pictures in each list.
  * [hash] adds the decoded picture hash SEI message (MD5) after the slice. [qp] fixes the QP instead of
  * [quality], for tests. [adaptiveQp] varies the QP by quantization groups of 32 with the luma activity
  * (cu_qp_delta), at [aqStrength] / 256 QP steps per doubling of a group's energy. It is off by default: on the
@@ -72,19 +81,75 @@ internal class HevcCoded(
 )
 
 /**
- * An encoder of single intra pictures, written from ITU-T H.265: one IDR picture of one I slice, CTBs of 64,
- * coding units of 64 down to 8, transform blocks of 32 down to 4. The picture's reconstruction runs through
- * the decoder's own prediction, scaling, inverse transforms, deblocking and SAO ([PictureDecoder]), so what the
- * encoder measured is what a decoder makes.
+ * How [HevcEncoder.encodeSequence] orders and refers its pictures (#177). [gopSize] frames make a group: 1 codes
+ * IPPP, each P picture referring to the pictures before it; from 2 the last frame of each group is a P picture
+ * and the frames before it B pictures of a dyadic pyramid, coded after it. [irapPeriod] starts an IDR picture every
+ * so many frames, so a reader can seek there; 0 codes the first frame alone as one. The QP of a picture grows
+ * with its distance from an intra one: [pOffset] for a P picture, and [bOffset] plus the B picture's depth in the
+ * pyramid for a B picture, so the pictures that others refer to keep more detail. See `docs/heic.md` for the
+ * measurements behind the defaults.
+ */
+internal class HevcSequenceSettings(
+    val gopSize: Int = 4,
+    val irapPeriod: Int = 0,
+    val pOffset: Int = 3,
+    val bOffset: Int = 4,
+) {
+    init {
+        require(gopSize in 1..16) { "HEVC: a group of $gopSize pictures is not in 1..16" }
+        require(irapPeriod >= 0) { "HEVC: an IRAP period of $irapPeriod frames is negative" }
+        require(pOffset in 0..12 && bOffset in 0..12) { "HEVC: QP offsets $pOffset and $bOffset are not in 0..12" }
+    }
+}
+
+/**
+ * One access unit of a coded sequence, in decoding order, as an ISO/IEC 14496-15 track holds it: [data] is the
+ * sample, its NAL units behind 4-byte lengths (the slice, then the hash SEI if asked for); [frame] the index of
+ * its frame in presentation order; [sync] marks an IDR picture (`stss`); [duration] is its decoding duration
+ * (`stts`) and [compositionOffset] its composition time less its decoding time (`ctts`, never negative), both
+ * in the units of the frame durations.
+ */
+internal class HevcSample(
+    val data: ByteArray,
+    val frame: Int,
+    val sync: Boolean,
+    val duration: Long,
+    val compositionOffset: Long,
+)
+
+/**
+ * A coded sequence: [hvcC] is the payload of an `hvcC` box, [samples] the access units in decoding order and
+ * [annexB] the whole stream with start codes, parameter sets first. Every picture decodes to [width] by [height],
+ * as [HevcCoded]'s does. [presentationOffset] is the composition time of the first frame, which reordering
+ * delays: the media_time of an edit list that shows it at time 0, and 0 for a sequence without B pictures.
+ * [reordered] says whether any sample's composition offset is not 0, so a writer needs a `ctts` box.
+ */
+internal class HevcSequence(
+    val hvcC: ByteArray,
+    val samples: List<HevcSample>,
+    val annexB: ByteArray,
+    val width: Int,
+    val height: Int,
+    val profile: String,
+    val presentationOffset: Long,
+) {
+    val reordered: Boolean get() = samples.any { it.compositionOffset != 0L }
+}
+
+/**
+ * An HEVC encoder written from ITU-T H.265: single intra pictures ([encode]), and sequences of P and B pictures
+ * ([encodeSequence]). Each picture is one slice of CTBs of 64, coding units of 64 down to 8 and transform blocks
+ * of 32 down to 4. Its reconstruction runs through the decoder's own prediction, scaling, inverse transforms,
+ * deblocking and SAO ([PictureDecoder]), and in a sequence through the decoder's own decoded picture buffer,
+ * reference lists, merging candidates, AMVP and interpolation, so what the encoder measured is what a decoder makes.
  */
 internal object HevcEncoder {
 
-    /**
-     * Encodes [planes] (YCbCr or monochrome samples), signalling [fullRange] and the colour description
-     * [colour] (colour_primaries, transfer_characteristics and matrix_coeffs of ITU-T H.273, or null) in the
-     * VUI. [cancel] runs once per CTB row. Throws IllegalArgumentException for a picture HEVC or a level cannot hold.
-     */
-    fun encode(planes: HeifPlanes, fullRange: Boolean, colour: IntArray?, settings: HevcEncoderSettings, cancel: (() -> Unit)?): HevcCoded {
+    /** The checked layout of a picture: chroma_format_idc, the chroma shifts, and the decoded and coded sizes. */
+    private class Layout(val chromaFormat: Int, val subW: Int, val subH: Int, val outW: Int, val outH: Int, val codedW: Int, val codedH: Int, val bitDepthC: Int)
+
+    /** Checks [planes] and [colour] as every entry point takes them; throws IllegalArgumentException for what HEVC cannot hold. */
+    private fun layout(planes: HeifPlanes, colour: IntArray?): Layout {
         val chromaFormat = when {
             planes.planes.size == 1 -> 0
             planes.planes.size != 3 -> throw IllegalArgumentException("HEVC: ${planes.planes.size} planes is neither 1 nor 3")
@@ -106,19 +171,29 @@ internal object HevcEncoder {
         // pic_width_in_luma_samples and pic_height_in_luma_samples are multiples of MinCbSizeY, 8 here.
         val codedW = (outW + 7) and 7.inv()
         val codedH = (outH + 7) and 7.inv()
-        val level = HevcProfile.level(codedW, codedH)
-            ?: throw IllegalArgumentException("HEVC: a picture of ${planes.width} by ${planes.height} passes every level of Table A.8")
-        checkPlanes(planes, subW, subH)
         val bitDepthC = if (chromaFormat == 0) planes.bitDepthLuma else planes.bitDepthChroma
-        val profile = HevcProfile.choose(chromaFormat, planes.bitDepthLuma, bitDepthC, level)
+        return Layout(chromaFormat, subW, subH, outW, outH, codedW, codedH, bitDepthC)
+    }
+
+    /**
+     * Encodes [planes] (YCbCr or monochrome samples), signalling [fullRange] and the colour description
+     * [colour] (colour_primaries, transfer_characteristics and matrix_coeffs of ITU-T H.273, or null) in the
+     * VUI. [cancel] runs once per CTB row. Throws IllegalArgumentException for a picture HEVC or a level cannot hold.
+     */
+    fun encode(planes: HeifPlanes, fullRange: Boolean, colour: IntArray?, settings: HevcEncoderSettings, cancel: (() -> Unit)?): HevcCoded {
+        val l = layout(planes, colour)
+        val level = HevcProfile.level(l.codedW, l.codedH)
+            ?: throw IllegalArgumentException("HEVC: a picture of ${planes.width} by ${planes.height} passes every level of Table A.8")
+        checkPlanes(planes, l.subW, l.subH)
+        val profile = HevcProfile.choose(l.chromaFormat, planes.bitDepthLuma, l.bitDepthC, level)
         val lossless = settings.lossless
         val qp = if (lossless) 26 else settings.sliceQp
         val plan = EffortPlan(settings.effort, lossless)
         val aq = settings.adaptiveQp && !lossless
         val config = HevcStreamConfig(
-            width = codedW, height = codedH,
-            confRight = (codedW - outW) shr subW, confBottom = (codedH - outH) shr subH,
-            chromaFormat = chromaFormat, bitDepthY = planes.bitDepthLuma, bitDepthC = bitDepthC, profile = profile,
+            width = l.codedW, height = l.codedH,
+            confRight = (l.codedW - l.outW) shr l.subW, confBottom = (l.codedH - l.outH) shr l.subH,
+            chromaFormat = l.chromaFormat, bitDepthY = planes.bitDepthLuma, bitDepthC = l.bitDepthC, profile = profile,
             ctbLog2 = 6, minCbLog2 = 3, maxTbLog2 = 5, maxTransformHierarchyDepthIntra = plan.transformDepth,
             sao = !lossless, transformSkip = plan.transformSkip, signDataHiding = !lossless, transquantBypass = lossless,
             deblockingDisabled = lossless, cuQpDeltaDepth = if (aq) 6 - QG_LOG2 else -1, initQp = qp, fullRange = fullRange, colour = colour,
@@ -133,19 +208,152 @@ internal object HevcEncoder {
             store.add(readNalHeader(r), r)
         }
         val sao = !lossless
-        val header = HevcHeaderWriter.sliceHeader(config, sao, sao && chromaFormat != 0, qp)
+        val header = HevcHeaderWriter.sliceHeader(config, sao, sao && l.chromaFormat != 0, qp)
         val slice = BitReader(header).let { r -> readSliceHeader(r, readNalHeader(r), store, null, header.size) }
         val rec = PictureDecoder(slice.sps, slice.pps)
         rec.beginEncoding(slice)
-        val orig = pad(planes, rec, chromaFormat, subW, subH)
+        val orig = pad(planes, rec, l.chromaFormat, l.subW, l.subH)
         val offsets = if (aq) activityOffsets(orig[0], rec.width, rec.height, planes.bitDepthLuma, settings.aqStrength) else null
         val encoder = IntraEncoder(rec, orig, qp, lossless, plan, offsets, QG_LOG2)
+        val units = ArrayList<ByteArray>()
+        units += escapeNal(header + codeSlice(rec, encoder, orig, qp, sao, cancel))
+        if (settings.hash) units += escapeNal(pictureHash(rec, l))
+        val sample = lengthPrefixed(units)
+        val annexB = startCodes(listOf(escapeNal(vps), escapeNal(sps), escapeNal(pps)) + units)
+        return HevcCoded(HevcHeaderWriter.hvcC(config, vps, sps, pps), sample, annexB, l.outW, l.outH, qp, profile.name)
+    }
+
+    /**
+     * Encodes [frames], each shown for its entry of [durations] (in any time unit, at least 1), as one HEVC sequence
+     * ordered and referred by [sequence]: P and B pictures with motion search, merging and AMVP, skipped units,
+     * the partitions [settings]' effort allows, and intra units where they cost less. Every frame has the first's
+     * size, format and depth. [cancel] runs once per CTB row. Throws IllegalArgumentException for frames HEVC or
+     * a level cannot hold.
+     */
+    fun encodeSequence(
+        frames: List<HeifPlanes>, durations: LongArray, fullRange: Boolean, colour: IntArray?,
+        settings: HevcEncoderSettings, sequence: HevcSequenceSettings, cancel: (() -> Unit)?,
+    ): HevcSequence {
+        require(frames.isNotEmpty()) { "HEVC: a sequence of no frames" }
+        require(durations.size == frames.size) { "HEVC: ${durations.size} durations for ${frames.size} frames" }
+        require(durations.all { it >= 1 }) { "HEVC: a frame duration is less than 1" }
+        val first = frames[0]
+        val l = layout(first, colour)
+        for ((i, f) in frames.withIndex()) {
+            require(
+                f.width == first.width && f.height == first.height && f.planes.size == first.planes.size && f.subX == first.subX &&
+                    f.subY == first.subY && f.bitDepthLuma == first.bitDepthLuma && (l.chromaFormat == 0 || f.bitDepthChroma == first.bitDepthChroma),
+            ) { "HEVC: frame $i differs from the first frame's size, format or depth" }
+            checkPlanes(f, l.subW, l.subH)
+        }
+        val lossless = settings.lossless
+        val effort = EffortPlan(settings.effort, lossless)
+        val plan = GopPlanner.plan(frames.size, sequence.gopSize, sequence.irapPeriod, effort.refsPerList)
+        val level = HevcProfile.level(l.codedW, l.codedH, plan.maxDecPicBufferingMinus1 + 1)
+            ?: throw IllegalArgumentException("HEVC: a sequence of ${first.width} by ${first.height} passes every level of Table A.8")
+        val profile = HevcProfile.choose(l.chromaFormat, first.bitDepthLuma, l.bitDepthC, level, sequence = true)
+        val baseQp = if (lossless) 26 else settings.sliceQp
+        // The SPS holds each distinct reference picture set once, up to the 64 of 7.4.3.2.1; the others are coded in their slice.
+        val sets = ArrayList<ShortTermRps>()
+        val rpsIdx = IntArray(plan.pictures.size) { -1 }
+        for ((k, p) in plan.pictures.withIndex()) {
+            val rps = p.rps ?: continue
+            var at = sets.indexOfFirst { sameRps(it, rps) }
+            if (at < 0 && sets.size < 64) {
+                sets += rps
+                at = sets.size - 1
+            }
+            rpsIdx[k] = at
+        }
+        val config = HevcStreamConfig(
+            width = l.codedW, height = l.codedH,
+            confRight = (l.codedW - l.outW) shr l.subW, confBottom = (l.codedH - l.outH) shr l.subH,
+            chromaFormat = l.chromaFormat, bitDepthY = first.bitDepthLuma, bitDepthC = l.bitDepthC, profile = profile,
+            ctbLog2 = 6, minCbLog2 = 3, maxTbLog2 = 5, maxTransformHierarchyDepthIntra = effort.transformDepth,
+            sao = !lossless, transformSkip = effort.transformSkip, signDataHiding = !lossless, transquantBypass = lossless,
+            deblockingDisabled = lossless, cuQpDeltaDepth = -1, initQp = baseQp, fullRange = fullRange, colour = colour,
+            maxDecPicBufferingMinus1 = plan.maxDecPicBufferingMinus1, maxNumReorder = plan.maxNumReorder,
+            log2MaxPocLsb = plan.log2MaxPocLsb, shortTermRps = sets, temporalMvp = true, amp = effort.ampParts,
+            maxTransformHierarchyDepthInter = effort.transformDepth,
+        )
+        val vps = HevcHeaderWriter.vps(config)
+        val sps = HevcHeaderWriter.sps(config)
+        val pps = HevcHeaderWriter.pps(config)
+        val store = ParameterSetStore()
+        for (unit in listOf(vps, sps, pps)) {
+            val r = BitReader(unit)
+            store.add(readNalHeader(r), r)
+        }
+        // The decoder's own buffer marks, keeps and lists the reference pictures, so the encoder predicts from what a decoder holds.
+        val dpb = PictureBuffer(keepOutput = false)
+        val sao = !lossless
+        val accessUnits = ArrayList<List<ByteArray>>(plan.pictures.size)
+        for ((k, p) in plan.pictures.withIndex()) {
+            val qp = if (lossless || settings.qp != null) baseQp else (baseQp + pictureQpOffset(p, sequence)).coerceIn(0, 51)
+            val header = HevcHeaderWriter.sequenceSliceHeader(
+                config, p.sliceType, p.idr, p.poc, p.rps, rpsIdx[k], p.refL0.size, p.refL1.size, sao, sao && l.chromaFormat != 0, qp,
+            )
+            val slice = BitReader(header).let { r -> readSliceHeader(r, readNalHeader(r), store, null, header.size) }
+            val poc = dpb.beginPicture(slice) ?: error("HEVC: picture ${p.frame} is not decoded")
+            check(poc == p.poc) { "HEVC: picture ${p.frame} has PicOrderCntVal $poc, not ${p.poc}" }
+            val rec = PictureDecoder(slice.sps, slice.pps)
+            val current = DecodedPicture(slice.sps, rec.planes, rec.strides)
+            current.poc = poc
+            val inter = p.sliceType != SliceType.I
+            if (inter) {
+                val lists = dpb.refLists(slice, poc, current)
+                check(lists.pictures[0].map { it.poc } == p.refL0.toList()) { "HEVC: picture ${p.frame} lists ${lists.pictures[0].map { it.poc }}, not ${p.refL0.toList()}" }
+                slice.refs = lists
+                rec.beginInterEncoding(slice)
+            } else {
+                rec.beginEncoding(slice)
+            }
+            val orig = pad(frames[p.frame], rec, l.chromaFormat, l.subW, l.subH)
+            val encoder = IntraEncoder(rec, orig, qp, lossless, effort, interSlice = if (inter) slice else null)
+            val units = ArrayList<ByteArray>()
+            units += escapeNal(header + codeSlice(rec, encoder, orig, qp, sao, cancel))
+            if (settings.hash) units += escapeNal(pictureHash(rec, l))
+            current.motion = arrayOf(rec.collocatedMotion())
+            dpb.endPicture(current)
+            accessUnits += units
+        }
+        // Decoding times are the presentation times in order, and each sample's composition time is its frame's,
+        // later by the most that reordering delays any frame, so no composition offset is negative.
+        val n = frames.size
+        val pts = LongArray(n)
+        for (i in 1 until n) pts[i] = pts[i - 1] + durations[i - 1]
+        var shift = 0L
+        for ((j, p) in plan.pictures.withIndex()) shift = maxOf(shift, pts[j] - pts[p.frame])
+        val samples = plan.pictures.mapIndexed { j, p ->
+            HevcSample(lengthPrefixed(accessUnits[j]), p.frame, p.idr, durations[j], pts[p.frame] + shift - pts[j])
+        }
+        val annexB = startCodes(listOf(escapeNal(vps), escapeNal(sps), escapeNal(pps)) + accessUnits.flatten())
+        return HevcSequence(HevcHeaderWriter.hvcC(config, vps, sps, pps), samples, annexB, l.outW, l.outH, profile.name, shift)
+    }
+
+    /** The QP offset of picture [p] from the sequence's QP: 0 for an IDR picture, [HevcSequenceSettings]' offsets for the others. */
+    private fun pictureQpOffset(p: GopPicture, s: HevcSequenceSettings): Int = when (p.sliceType) {
+        SliceType.I -> 0
+        SliceType.P -> s.pOffset
+        else -> s.bOffset + p.layer
+    }
+
+    private fun sameRps(a: ShortTermRps, b: ShortTermRps): Boolean =
+        a.deltaPocS0.contentEquals(b.deltaPocS0) && a.usedS0.contentEquals(b.usedS0) &&
+            a.deltaPocS1.contentEquals(b.deltaPocS1) && a.usedS1.contentEquals(b.usedS1)
+
+    /**
+     * Decides, reconstructs and writes the CTBs of the slice that [rec] and [encoder] code, at [qp] with [sao], and
+     * returns its slice segment data after the header. Deblocking and SAO follow one and two CTB rows behind, as
+     * intra prediction reads the row above unfiltered.
+     */
+    private fun codeSlice(rec: PictureDecoder, encoder: IntraEncoder, orig: Array<ShortArray>, qp: Int, sao: Boolean, cancel: (() -> Unit)?): ByteArray {
         val writer = CabacEncoder(false)
-        Ctx.init(writer.states, 0, qp)
+        Ctx.init(writer.states, encoder.initType, qp)
         writer.start()
         val saoEncoder = if (sao) SaoEncoder(rec, orig, qp, writer) else null
-        val widthInCtbs = slice.sps.picWidthInCtbs
-        val heightInCtbs = slice.sps.picHeightInCtbs
+        val widthInCtbs = rec.sps.picWidthInCtbs
+        val heightInCtbs = rec.sps.picHeightInCtbs
         val total = widthInCtbs * heightInCtbs
         fun writeRow(ry: Int) {
             saoEncoder?.decideRow(ry)
@@ -158,26 +366,22 @@ internal object HevcEncoder {
         for (ry in 0 until heightInCtbs) {
             cancel?.invoke()
             for (rx in 0 until widthInCtbs) encoder.analyseCtb(ry * widthInCtbs + rx)
-            // Deblocking and SAO follow one and two rows behind, as intra prediction reads the row above unfiltered.
             rec.runLoopFilters(ry) { writeRow(it) }
         }
         rec.runLoopFilters(heightInCtbs) { writeRow(it) }
         writer.alignZero()
-        val sliceNal = header + writer.toByteArray()
-        val units = ArrayList<ByteArray>()
-        units += escapeNal(sliceNal)
-        if (settings.hash) {
-            val comps = if (chromaFormat == 0) 1 else 3
-            val hashes = List(comps) { c ->
-                val w = if (c == 0) codedW else codedW shr subW
-                val h = if (c == 0) codedH else codedH shr subH
-                Md5.digest(pictureData(rec.planes[c], rec.strides[c], w, h, if (c == 0) planes.bitDepthLuma else bitDepthC))
-            }
-            units += escapeNal(HevcHeaderWriter.pictureHash(hashes))
+        return writer.toByteArray()
+    }
+
+    /** The decoded picture hash SEI (MD5) of the reconstruction [rec]. */
+    private fun pictureHash(rec: PictureDecoder, l: Layout): ByteArray {
+        val comps = if (l.chromaFormat == 0) 1 else 3
+        val hashes = List(comps) { c ->
+            val w = if (c == 0) l.codedW else l.codedW shr l.subW
+            val h = if (c == 0) l.codedH else l.codedH shr l.subH
+            Md5.digest(pictureData(rec.planes[c], rec.strides[c], w, h, if (c == 0) rec.sps.bitDepthY else l.bitDepthC))
         }
-        val sample = lengthPrefixed(units)
-        val annexB = startCodes(listOf(escapeNal(vps), escapeNal(sps), escapeNal(pps)) + units)
-        return HevcCoded(HevcHeaderWriter.hvcC(config, vps, sps, pps), sample, annexB, outW, outH, qp, profile.name)
+        return HevcHeaderWriter.pictureHash(hashes)
     }
 
     /** Log2MinCuQpDeltaSize under adaptive QP: quantization groups of 32. */
