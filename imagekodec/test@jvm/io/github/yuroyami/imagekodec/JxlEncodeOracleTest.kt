@@ -136,6 +136,39 @@ class JxlEncodeOracleTest {
         if (icc != null) assertContentEquals(icc, ImageKodec.probe(jxl).colorProfile?.icc, "the ICC profile")
     }
 
+    /** Holds ImageKodec's reading of a lossy [jxl] to djxl's within two 8-bit levels, the bound JxlOracleTest sets for an old djxl. */
+    private fun checkLossy(name: String, jxl: ByteArray, source: KiteBitmap) {
+        val want = djxl(jxl)
+        val got = ImageKodec.decode16(jxl)
+        assertEquals(Triple(want.width, want.height, want.channels), Triple(got.width, got.height, got.channels), "$name shape")
+        val bound = 2 * 257
+        val d = worst(want, got)
+        assertTrue(d <= bound, "$name: ImageKodec reads it $d of 65535 away from djxl")
+        // And the picture is the source's, near enough for its distance.
+        val score = ImageKodec.ssimulacra2(source, ImageKodec.decode(jxl))
+        assertTrue(score > 50.0, "$name scores $score against its source")
+    }
+
+    @Test
+    fun lossyFilesReadInDjxlAsInImageKodec() {
+        assumeTrue("djxl is not installed", Tools.hasAll("djxl"))
+        val photo = PhotoScenes.landscape(300, 200).bitmap
+        for (effort in 1..3) for (d in listOf(0.5, 1.0, 3.0, 8.0)) {
+            checkLossy("photo d$d e$effort", ImageKodec.encodeJxl(photo, JxlEncodeOptions(distance = d, effort = effort)), photo)
+        }
+        val cases = listOf(
+            "alpha" to synthetic(131, 77, alpha = true, gray = false, seed = 4),
+            "gray" to synthetic(97, 70, alpha = false, gray = true, seed = 5),
+            "tiny" to synthetic(5, 3, alpha = false, gray = false, seed = 6),
+            "one pixel" to KiteBitmap(1, 1, intArrayOf(argb(0xFF, 200, 30, 90))),
+            "groups" to PhotoScenes.city(600, 300).bitmap,
+        )
+        for ((name, b) in cases) checkLossy(name, ImageKodec.encodeJxl(b, 85), b)
+        val deep = KiteBitmap16(64, 48, 4, ShortArray(64 * 48 * 4) { ((it * 2731) and 0xFFFF).toShort() })
+        val jxl = ImageKodec.encodeJxl16(deep, JxlEncodeOptions(quality = 90))
+        assertEquals(4, djxl(jxl).channels, "a 16-bit lossy file with alpha")
+    }
+
     private fun worst(a: KiteBitmap16, b: KiteBitmap16): Int {
         var worst = 0
         for (i in a.samples.indices) worst = maxOf(worst, abs((a.samples[i].toInt() and 0xFFFF) - (b.samples[i].toInt() and 0xFFFF)))

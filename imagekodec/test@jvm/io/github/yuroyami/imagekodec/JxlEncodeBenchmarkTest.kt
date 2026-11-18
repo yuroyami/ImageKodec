@@ -46,6 +46,58 @@ class JxlEncodeBenchmarkTest {
         return r to (System.nanoTime() - start) / 1_000_000
     }
 
+    /** Our file at the largest distance whose SSIMULACRA 2 score reaches [target], by bisection on the distance. */
+    private fun matchScore(bitmap: KiteBitmap, target: Double, effort: Int): Triple<ByteArray, Double, Double> {
+        var lo = 0.1
+        var hi = 15.0
+        var best: Triple<ByteArray, Double, Double>? = null
+        repeat(9) {
+            val d = (lo + hi) / 2
+            val jxl = ImageKodec.encodeJxl(bitmap, JxlEncodeOptions(distance = d, effort = effort))
+            val score = ImageKodec.ssimulacra2(bitmap, ImageKodec.decode(jxl))
+            if (score >= target) {
+                best = Triple(jxl, score, d)
+                lo = d
+            } else {
+                hi = d
+            }
+        }
+        return best ?: ImageKodec.encodeJxl(bitmap, JxlEncodeOptions(distance = 0.1, effort = effort)).let {
+            Triple(it, ImageKodec.ssimulacra2(bitmap, ImageKodec.decode(it)), 0.1)
+        }
+    }
+
+    @Test
+    fun lossySizesAtEqualScoreAgainstCjxl() {
+        assumeTrue("cjxl is not installed", Tools.hasAll("cjxl"))
+        ImageKodec.encodeJxl(PhotoScenes.bokeh().bitmap, JxlEncodeOptions(distance = 1.0))
+        var worst = 0.0
+        for (d in listOf("1", "2.5")) {
+            println("cjxl -e 7 -d $d: bytes, score, ms | ours at the same score, effort 2: bytes, score, distance, ms, ratio | ours at -d $d: score")
+            var ours = 0L
+            var theirs = 0L
+            for (scene in PhotoScenes.all()) {
+                val (ref, refMs) = cjxl(scene.bitmap, "-d", d, "-e", "7")
+                val refScore = ImageKodec.ssimulacra2(scene.bitmap, ImageKodec.decode(ref))
+                val (jxl, score, dist) = matchScore(scene.bitmap, refScore, 2)
+                val (_, ms) = timed { ImageKodec.encodeJxl(scene.bitmap, JxlEncodeOptions(distance = dist, effort = 2)) }
+                val same = ImageKodec.encodeJxl(scene.bitmap, JxlEncodeOptions(distance = d.toDouble()))
+                val sameScore = ImageKodec.ssimulacra2(scene.bitmap, ImageKodec.decode(same))
+                println(
+                    "%-10s %7d %6.2f %5d ms | %7d %6.2f %5.2f %5d ms %5.3f | %6.2f".format(
+                        scene.name, ref.size, refScore, refMs, jxl.size, score, dist, ms, jxl.size.toDouble() / ref.size, sameScore,
+                    ),
+                )
+                ours += jxl.size
+                theirs += ref.size
+            }
+            val ratio = ours.toDouble() / theirs
+            println("total at -d $d: ours / cjxl = %.3f".format(ratio))
+            worst = maxOf(worst, ratio)
+        }
+        assertTrue(worst < 1.6, "lossy files are %.3f times cjxl's at the same score".format(worst))
+    }
+
     @Test
     fun losslessSizesAgainstCjxl() {
         assumeTrue("cjxl is not installed", Tools.hasAll("cjxl"))
