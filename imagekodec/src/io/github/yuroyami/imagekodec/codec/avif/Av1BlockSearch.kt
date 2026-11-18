@@ -129,6 +129,7 @@ internal class Av1BlockSearch(
         chosen.clear()
         // The last superblock's commit adapted the CDFs that every kept result was priced on.
         forgetMemo()
+        if (effort <= 2 && !lossless) directionEnergies(r, c)
         sbSaved.save(r, c, Av1.BLOCK_64X64)
         mode = Mode.SEARCH
         sink = trialSink
@@ -1010,26 +1011,32 @@ internal class Av1BlockSearch(
     /** The directional modes the last [rankLuma] ranked, as a mask by mode less V_PRED. */
     private var directions = 0xFF
     private val directionEnergy = IntArray(8)
+    /** Each 4x4 luma block's energy by direction, 8 a block, 16 blocks a row, over the superblock being searched. */
+    private val unitEnergy = IntArray(16 * 16 * 8)
+    private var unitRow = 0
+    private var unitCol = 0
 
     /**
-     * The [DIRECTIONS] directional modes whose lines the source luma of the block of [bSize] at ([r], [c]) follows most,
-     * as a mask by mode less V_PRED (#176). A line runs across the gradient, so each sample's central differences
-     * (gx, gy) give |gx| + |gy| to the mode whose angle is nearest atan2(gx, gy) modulo 180 degrees: V_PRED for a
-     * horizontal gradient, H_PRED for a vertical one, and the six between at steps of 22.5 degrees, D203_PRED's line
-     * being that of 23 degrees. A mode whose lines the block does not hold seldom predicts it best, and ranking three
-     * of the eight cost nothing measurable on the photo scenes.
+     * Fills [unitEnergy] for the superblock at ([r], [c]): each sample's central differences (gx, gy) give |gx| + |gy|
+     * to the directional mode whose angle is nearest atan2(gx, gy) modulo 180 degrees, as a line runs across the
+     * gradient: V_PRED for a horizontal gradient, H_PRED for a vertical one, and the six between at steps of 22.5
+     * degrees, D203_PRED's line being that of 23 degrees. Samples on the picture's border, which lack a neighbour,
+     * give nothing. A block's energies are the sums of its 4x4 blocks', the same whatever partition asks.
      */
-    private fun strongestDirections(r: Int, c: Int, bSize: Int): Int {
-        val e = directionEnergy
+    private fun directionEnergies(r: Int, c: Int) {
+        val e = unitEnergy
         e.fill(0)
+        unitRow = r
+        unitCol = c
         val s = src.planes[0]
         val stride = d.planeWidth[0]
         val x0 = maxOf(1, c * 4)
         val y0 = maxOf(1, r * 4)
-        val x1 = minOf(c * 4 + Av1.blockWidth[bSize], src.width - 1)
-        val y1 = minOf(r * 4 + Av1.blockHeight[bSize], src.height - 1)
+        val x1 = minOf(c * 4 + 64, src.width - 1)
+        val y1 = minOf(r * 4 + 64, src.height - 1)
         for (y in y0 until y1) {
             val at = y * stride
+            val row = ((y - r * 4) shr 2) * 16
             for (x in x0 until x1) {
                 var gx = s[at + x + 1] - s[at + x - 1]
                 var gy = s[at + stride + x] - s[at - stride + x]
@@ -1049,8 +1056,24 @@ internal class Av1BlockSearch(
                     t * 1024 < gy * 5148 -> if (gx < 0) Av1.D113_PRED else Av1.D67_PRED
                     else -> Av1.V_PRED
                 }
-                e[mode - Av1.V_PRED] += t + gy
+                e[(row + ((x - c * 4) shr 2)) * 8 + mode - Av1.V_PRED] += t + gy
             }
+        }
+    }
+
+    /**
+     * The [DIRECTIONS] directional modes whose lines the source luma of the block of [bSize] at ([r], [c]) follows most,
+     * by the energies of [directionEnergies], as a mask by mode less V_PRED (#176). A mode whose lines the block does
+     * not hold seldom predicts it best, and ranking three of the eight cost nothing measurable on the photo scenes.
+     */
+    private fun strongestDirections(r: Int, c: Int, bSize: Int): Int {
+        val e = directionEnergy
+        e.fill(0)
+        val u0 = r - unitRow
+        val v0 = c - unitCol
+        for (u in u0 until minOf(16, u0 + Av1.num4x4High[bSize])) for (v in v0 until minOf(16, v0 + Av1.num4x4Wide[bSize])) {
+            val at = (u * 16 + v) * 8
+            for (i in 0 until 8) e[i] += unitEnergy[at + i]
         }
         // The strongest first, the lower mode on a tie.
         var mask = 0
