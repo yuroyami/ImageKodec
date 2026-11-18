@@ -306,6 +306,7 @@ internal class Av1BlockSearch(
      * [chosen].
      */
     private fun block(r: Int, c: Int, bSize: Int, depth: Int): Long {
+        keptLumaValid = false
         val saved = saves[depth]
         saved.save(r, c, bSize)
         val ch = Av1BlockChoice()
@@ -355,6 +356,7 @@ internal class Av1BlockSearch(
                     best.copyFrom(ch)
                     bestCode = code
                     lastWasBest = true
+                    keepLuma(r, c, bSize)
                 } else {
                     lastWasBest = false
                 }
@@ -366,6 +368,7 @@ internal class Av1BlockSearch(
                         best.copyFrom(ch)
                         bestCode = code
                         lastWasBest = true
+                        keepLuma(r, c, bSize)
                     } else {
                         lastWasBest = false
                     }
@@ -389,19 +392,30 @@ internal class Av1BlockSearch(
                     bestJ = j
                     best.copyFrom(ch)
                     lastWasBest = true
+                    keepLuma(r, c, bSize)
                 } else {
                     lastWasBest = false
                 }
             }
         }
-        // Chroma, on the chosen luma.
+        // Chroma, on the chosen luma. Ranking reads the block's luma and nothing else the block's coding leaves, so
+        // the best luma's samples are put back rather than coded again; the trial of the chroma candidate, or of the
+        // best once more at the end, then codes the whole block (#176).
         if (hasChroma && !best.isInter) {
             if (!lastWasBest) {
-                trial(r, c, bSize, best, saved)
-                lastWasBest = true
+                if (keptLumaValid) {
+                    putLuma()
+                } else {
+                    trial(r, c, bSize, best, saved)
+                    lastWasBest = true
+                }
             }
             val base = best.copy()
+            // Ranking leaves its predictions in the block's chroma; what was there is put back, so that a block
+            // whose ranked chroma mode is the one already coded stays as it was coded.
+            keepChroma(r, c, bSize)
             val ranked = rankChroma(r, c, bSize, base)
+            putChroma()
             val keepUv = minOf(ranked, if (effort <= 2) 1 else 4)
             for (k in 0 until keepUv) {
                 ch.copyFrom(base)
@@ -590,6 +604,79 @@ internal class Av1BlockSearch(
         }
         ch.colorMapUV = map
         return true
+    }
+
+    /** The luma samples the best candidate so far of the block [block] decides left, and where they go. */
+    private val keptLuma = ShortArray(64 * 64)
+    private var keptLumaValid = false
+    private var keptX = 0
+    private var keptY = 0
+    private var keptW = 0
+    private var keptH = 0
+    private var keptMaxLumaW = 0
+    private var keptMaxLumaH = 0
+
+    /**
+     * Keeps the luma the last trial left in the block of [bSize] at ([r], [c]), and how far its transform blocks
+     * reached, which chroma from luma reads.
+     */
+    private fun keepLuma(r: Int, c: Int, bSize: Int) {
+        val stride = d.planeWidth[0]
+        keptX = c * 4
+        keptY = r * 4
+        keptW = minOf(Av1.blockWidth[bSize], stride - keptX)
+        keptH = minOf(Av1.blockHeight[bSize], d.planeHeight[0] - keptY)
+        val f = d.frame[0]
+        for (y in 0 until keptH) {
+            val at = (keptY + y) * stride + keptX
+            f.copyInto(keptLuma, y * keptW, at, at + keptW)
+        }
+        keptMaxLumaW = d.maxLumaW
+        keptMaxLumaH = d.maxLumaH
+        keptLumaValid = true
+    }
+
+    /** Puts what [keepLuma] kept back in the frame decoder. */
+    private fun putLuma() {
+        val stride = d.planeWidth[0]
+        val f = d.frame[0]
+        for (y in 0 until keptH) keptLuma.copyInto(f, (keptY + y) * stride + keptX, y * keptW, (y + 1) * keptW)
+        d.maxLumaW = keptMaxLumaW
+        d.maxLumaH = keptMaxLumaH
+    }
+
+    private val keptChroma = ShortArray(2 * 64 * 64)
+    private var chromaX = 0
+    private var chromaY = 0
+    private var chromaW = 0
+    private var chromaH = 0
+
+    /** Keeps the samples of both chroma planes over the area [rankChroma] predicts for the block of [bSize] at ([r], [c]). */
+    private fun keepChroma(r: Int, c: Int, bSize: Int) {
+        val stride = d.planeWidth[1]
+        chromaX = (c shr d.subX) * 4
+        chromaY = (r shr d.subY) * 4
+        chromaW = minOf(maxOf(4, Av1.blockWidth[bSize] shr d.subX), stride - chromaX)
+        chromaH = minOf(maxOf(4, Av1.blockHeight[bSize] shr d.subY), d.planeHeight[1] - chromaY)
+        for (p in 0 until 2) {
+            val f = d.frame[1 + p]
+            for (y in 0 until chromaH) {
+                val at = (chromaY + y) * stride + chromaX
+                f.copyInto(keptChroma, (p * chromaH + y) * chromaW, at, at + chromaW)
+            }
+        }
+    }
+
+    /** Puts what [keepChroma] kept back in the frame. */
+    private fun putChroma() {
+        val stride = d.planeWidth[1]
+        for (p in 0 until 2) {
+            val f = d.frame[1 + p]
+            for (y in 0 until chromaH) {
+                val from = (p * chromaH + y) * chromaW
+                keptChroma.copyInto(f, (chromaY + y) * stride + chromaX, from, from + chromaW)
+            }
+        }
     }
 
     /** Codes [ch] as the block of [bSize] at ([r], [c]) into the frozen counter: its cost J. */
