@@ -119,6 +119,8 @@ internal class Av1BlockSearch(
     private fun superblock(r: Int, c: Int) {
         d.startSuperblock(r, c)
         chosen.clear()
+        // The last superblock's commit adapted the CDFs that every kept result was priced on.
+        forgetMemo()
         sbSaved.save(r, c, Av1.BLOCK_64X64)
         mode = Mode.SEARCH
         sink = trialSink
@@ -1270,6 +1272,24 @@ internal class Av1BlockSearch(
             txType = Av1.DCT_DCT
             return endOfBlock(levels, d.scanFor(txSz, Av1.DCT_DCT), 16)
         }
+        val types = candidateTypes(plane, txSz, x4, y4)
+        val memoKey = ((startY and 63) shl 18) or ((startX and 63) shl 12) or (txSz shl 7) or (plane shl 5) or d.miSize
+        val memoExtra = (if (d.isInter) 1 shl 20 else 0) or ((if (d.useFilterIntra) Av1Tables.filterIntraModeToIntraDir[d.filterIntraMode] else d.yMode) shl 8)
+        val w4 = w shr 2
+        val h4 = h shr 2
+        if (mode != Mode.COMMIT) {
+            val ctx = memoCtx
+            for (i in 0 until w4) {
+                ctx[i] = d.aboveLevelContext[plane][x4 + i]
+                ctx[w4 + i] = d.aboveDcContext[plane][x4 + i]
+            }
+            for (i in 0 until h4) {
+                ctx[2 * w4 + i] = d.leftLevelContext[plane][y4 + i]
+                ctx[2 * w4 + h4 + i] = d.leftDcContext[plane][y4 + i]
+            }
+            val eob = recall(memoKey, memoExtra, w * h, 2 * (w4 + h4), types)
+            if (eob >= 0) return eob
+        }
         // No residual: the prediction's error, and the price of all_zero.
         var zeroError = 0L
         for (i in 0 until vh) for (j in 0 until vw) {
@@ -1281,7 +1301,6 @@ internal class Av1BlockSearch(
         var bestJ = (zeroError shl 8) + (lambda256 * costSink.cost shr 8)
         var bestEob = 0
         var bestType = Av1.DCT_DCT
-        val types = candidateTypes(plane, txSz, x4, y4)
         val dqDenom = Av1Transform.dqDenom(txSz)
         val scale = Av1ForwardTransform.distortionScale(txSz).toLong()
         val n = tw * th
@@ -1358,7 +1377,86 @@ internal class Av1BlockSearch(
             }
         }
         txType = bestType
+        if (mode != Mode.COMMIT) remember(memoKey, memoExtra, w * h, 2 * (w4 + h4), types, n, bestEob, bestType)
         return bestEob
+    }
+
+    // ---- results of [choose] kept for a repeat -----------------------------------------
+
+    /**
+     * What [choose] found for one transform block, with everything it read: the residual, the coefficient contexts
+     * beside the block, the types it tried, and the block's size and intra direction, which the symbols' contexts read.
+     */
+    private class Memo {
+        var extra = 0
+        var residual = IntArray(16)
+        val ctx = IntArray(64)
+        val types = IntArray(17)
+        var levels = IntArray(16)
+        var n = 0
+        var eob = 0
+        var type = 0
+    }
+
+    /**
+     * [choose] is a function of what [Memo] keeps and of the CDFs, which stay frozen while a superblock is searched.
+     * The search codes one transform block with the same inputs many times over: the chroma of each luma candidate,
+     * the luma of each chroma candidate, and the winners again when a partition is replayed. So each result is kept
+     * until the superblock is committed, the last [MEMO_WAYS] for each place and size, and a call whose inputs match
+     * one exactly takes its result, which is the result it would compute.
+     */
+    private val memo = HashMap<Int, ArrayList<Memo>>()
+    private val memoFree = ArrayList<Memo>()
+    private val memoCtx = IntArray(64)
+
+    private fun forgetMemo() {
+        for (list in memo.values) memoFree.addAll(list)
+        memo.clear()
+    }
+
+    /** The end of block a kept result gives, its levels into [levels] and its type into [txType]; -1 for none. */
+    private fun recall(key: Int, extra: Int, size: Int, ctxSize: Int, types: IntArray): Int {
+        val list = memo[key]
+        if (list != null) {
+            next@ for (k in list.indices.reversed()) {
+                val m = list[k]
+                if (m.extra != extra) continue
+                var t = 0
+                while (true) {
+                    if (m.types[t] != types[t]) continue@next
+                    if (types[t] < 0) break
+                    t++
+                }
+                for (i in 0 until ctxSize) if (m.ctx[i] != memoCtx[i]) continue@next
+                val res = m.residual
+                for (i in 0 until size) if (res[i] != residual[i]) continue@next
+                m.levels.copyInto(levels, 0, 0, m.n)
+                txType = m.type
+                return m.eob
+            }
+        }
+        return -1
+    }
+
+    private fun remember(key: Int, extra: Int, size: Int, ctxSize: Int, types: IntArray, n: Int, eob: Int, type: Int) {
+        val list = memo.getOrPut(key) { ArrayList(MEMO_WAYS) }
+        val m = if (list.size == MEMO_WAYS) list.removeAt(0) else if (memoFree.isNotEmpty()) memoFree.removeAt(memoFree.size - 1) else Memo()
+        m.extra = extra
+        if (m.residual.size < size) m.residual = IntArray(size)
+        residual.copyInto(m.residual, 0, 0, size)
+        memoCtx.copyInto(m.ctx, 0, 0, ctxSize)
+        var t = 0
+        while (true) {
+            m.types[t] = types[t]
+            if (types[t] < 0) break
+            t++
+        }
+        if (m.levels.size < n) m.levels = IntArray(n)
+        levels.copyInto(m.levels, 0, 0, n)
+        m.n = n
+        m.eob = eob
+        m.type = type
+        list += m
     }
 
     /** Whether the levels go through [optimize]: from effort 2, and in lossy coding. */
@@ -1553,6 +1651,8 @@ internal class Av1BlockSearch(
         /** The eight neighbours of a point, the four nearest first: row and column steps. */
         private val SQUARE = intArrayOf(-1, 0, 0, -1, 0, 1, 1, 0, -1, -1, -1, 1, 1, -1, 1, 1)
         val PRUNE = LongArray(4)
+        /** How many results of [choose] are kept for each place and size of transform block. */
+        private const val MEMO_WAYS = 4
         /** The floor of the square root of [x], by Newton's method in integers. */
         fun isqrt(x: Long): Long {
             if (x <= 0) return 0
