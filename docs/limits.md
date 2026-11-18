@@ -20,7 +20,7 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
   `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
   can move by up to 255 sixteen-bit units to stay in that level.
-- There is no encoder for lossy WebP, JPEG 2000, JPEG XL or JPEG XR. The AVIF encoder writes still
+- There is no encoder for lossy WebP, JPEG 2000 or JPEG XL. The AVIF encoder writes still
   intra pictures only (see [AVIF](#avif)). See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
@@ -247,6 +247,11 @@ picture.
 - A file whose image codestream runs past its end fails, and so does a tile layout that starts a
   tile nowhere. JxrEncApp writes the size of the whole file as the size of a planar alpha plane,
   so that size is not held to the file.
+- The encoder (#181) takes at most 2^28 pixels, writes at most 4096 tiles across and down, and keeps
+  about two working planes of `Int` a channel besides the bitmap. It writes soft tiles only, of one
+  square size, 4:4:4 or 4:2:0 chroma, and the gray, BGR, BGRA, 16-bit gray, RGB and RGBA formats.
+  16-bit and lossless encodes keep 4:4:4. With two levels of overlap, 4:2:0 needs an image two
+  macroblocks wide, as jxrlib does, so a narrower one gets one level.
 
 ## Orientation
 

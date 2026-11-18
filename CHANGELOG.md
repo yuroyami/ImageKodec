@@ -14,6 +14,14 @@ reviewable in the diff.
 
 ### Added
 
+- `encodeJxr` and `encodeJxr16` write JPEG XR, written from ITU-T T.832: lossy at a quality that
+  means what `JxrEncApp -q` means, or lossless at 8 and 16 bits, in gray, RGB and RGBA, with 4:4:4
+  or 4:2:0 chroma, the three overlap modes, planar or interleaved alpha, tiles with quantizers of
+  their own, spatial or frequency order, and the ICC profile, XMP and EXIF of an `ImageMetadata`.
+  `JxrEncodeOptions` holds the settings. On the photo scenes of the tests the files are 5 percent
+  smaller than `JxrEncApp`'s at equal SSIMULACRA 2, and every file decodes in `JxrDecApp` to the
+  samples ImageKodec's decoder gives. See [Writing images](docs/encoding.md#jpeg-xr) (#181).
+
 - `ImageKodec.encodeAvif(bitmap, quality)`, `encodeAvif(bitmap, options, metadata, cancellationCheck)` and
   `encodeAvif16` write AVIF files with the core's own intra AV1 encoder, registered by default as the HEIF
   encoder of `av01` items, through the HEIF writer of #174 and the same `HeifEncodeOptions` (#176). Each

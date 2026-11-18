@@ -1,6 +1,6 @@
 # Writing images
 
-ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, lossless WebP, AVIF and, with the
+ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, lossless WebP, AVIF, JPEG XR and, with the
 `imagekodec-heic` module, HEIC. Every encoder takes a
 `KiteBitmap` (or a `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows
 it) and returns the file as a `ByteArray`.
@@ -19,6 +19,8 @@ ImageKodec.encodeTiff16(bitmap16)               // the same at 16 bits, read bac
 ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than the PNG
 ImageKodec.encodeAvif(bitmap, quality = 50)     // AV1 in HEIF, built in
 ImageKodec.encodeHeic(bitmap, quality = 50)     // HEVC in HEIF, needs ImageKodecHeic.install()
+ImageKodec.encodeJxr(bitmap, quality = 80)      // lossy JPEG XR, as JxrEncApp -q 0.8
+ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(lossless = true)) // lossless JPEG XR
 ```
 
 `encodeJpeg` uses a quality of 90 when you pass none.
@@ -39,6 +41,43 @@ val withMetadata = ImageKodec.encodeJpeg(bitmap, 75, metadata, JpegEncoderKind.J
 - `repackJpeg` makes its output smaller still, by 6 to 17 percent on the same scenes, with Huffman tables built for the image. `repackJpeg(jpeg, progressive = true)` writes it progressive.
 - The output is the same on every platform. On the JVM it matches pyjpegli 0.3.2, a build of Jpegli, byte for byte on most images and within 0.1 percent in size on the rest. Jpegli works in float32 with fused multiply-adds, this port in Double, so a coefficient now and then rounds the other way.
 - Jpegli's XYB colour space is not written: it needs a reader that applies the ICC profile.
+
+## JPEG XR
+
+`encodeJxr` writes JPEG XR (ITU-T T.832 | ISO/IEC 29199-2), the format of HD Photo and of XPS (#181).
+It was written from T.832, with its Annex D as the guide to the encoding side.
+
+```kotlin
+val jxr = ImageKodec.encodeJxr(bitmap, 80)
+val exact = ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(lossless = true))
+val deep = ImageKodec.encodeJxr16(bitmap16, JxrEncodeOptions(quality = 90), metadata)
+val tiled = ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(quality = 60, tileSize = 256, frequencyOrder = true))
+```
+
+- The pixel format follows the bitmap: 8bppGray when every pixel is gray and opaque, 24bppBGR when
+  it is opaque, 32bppBGRA with alpha; `encodeJxr16` writes 16bppGray, 48bppRGB or 64bppRGBA, and gray
+  with alpha as 64bppRGBA. Colour goes through the reversible colour transform of T.832 to YUV.
+- `quality` (0 to 100, default 90) means what `JxrEncApp -q` means at the quality divided by 100: on the
+  six photo scenes of the tests, both score the same in SSIMULACRA 2 at each quality from 10 to 90,
+  within half a point. Like `JxrEncApp`, it codes 4:4:4 with one level of overlap filtering from 50
+  up, and 4:2:0 with two levels below. `chroma`, `overlap` and `chromaQuality` set them yourself.
+- At equal SSIMULACRA 2 the files are 5 percent smaller than `JxrEncApp`'s in total over those
+  scenes and the qualities 30 to 90, and between 42 percent smaller and 7 percent larger scene by
+  scene. The encodes take 2 to 31 ms there on the JVM, where `JxrEncApp` takes 5 to 37 with its
+  process start.
+- `lossless = true` codes with a quantizer of 1 and no overlap filtering: the file decodes to the
+  input exactly, at 8 and 16 bits, gray, colour and alpha. `overlap = 1` or `2` stay lossless too.
+- Alpha is coded losslessly as its own codestream after the image, as `JxrEncApp` does by default;
+  `planarAlpha = false` interleaves it with the colour, and `alphaLossless = false` codes it at
+  `alphaQuality`.
+- `tileSize` cuts the image into tiles of that side, each a packet the index table points to.
+  `tileQualities` gives each tile its own quantizers, and `frequencyOrder` writes each tile as its DC,
+  lowpass, highpass and flexbits packets, all DC packets first, so a reader can stop early.
+- The ICC profile, the XMP packet and the EXIF block of an `ImageMetadata` go into the file's
+  directory. The EXIF orientation becomes the Transformation tag, the camera's make, model and
+  dates become tags of the directory, and the EXIF and GPS directories are copied after it.
+- `cancellationCheck` runs before each row of macroblocks and may throw to stop the encode.
+- Every file decodes in jxrlib's `JxrDecApp` to the samples ImageKodec's decoder gives.
 
 ## Keeping a photo's metadata
 
@@ -161,12 +200,16 @@ The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed
 
 ## What the encoders do not write
 
-- There is no encoder for lossy WebP, JPEG 2000, JPEG XL or JPEG XR.
+- There is no encoder for lossy WebP, JPEG 2000 or JPEG XL.
 - The AV1 encoder writes still intra pictures only: no image sequence, no inter frames, no film
   grain, no 128 by 128 superblocks, no intra block copy, no delta quantizer, no Wiener restoration
   filter (the self-guided one only), no chroma palette, and no 4:1 or three-way partitions.
 - The HEIC encoder writes still images only, with no image sequence, depth map, gain map or
   premultiplied alpha. See [Writing HEIC](heic.md#writing-heic).
+- The JPEG XR encoder writes neither hard tiles (the decoder reads them), 4:2:2 chroma, CMYK,
+  N-channel, fixed-point, half, float, RGBE, premultiplied or packed 5, 5-6-5 and 10-bit formats,
+  nor a gain map. Its tiles are square, and its quantizers are one per band set for the image or
+  for each tile, not per macroblock.
 - The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit
   output. It picks a filter for each row, which is a compression choice and not a format
   capability. Use `encodeTiff16` for 16-bit output.

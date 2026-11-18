@@ -162,7 +162,7 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | JPEG 2000 | all of Part 1, JP2 and raw codestream | no |
 | AVIF | stills and image sequences, 8 to 12 bits | intra stills and grids, 8 to 12 bits, alpha, lossless |
 | JPEG XL | both coding modes, layers and animation | no |
-| JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | no |
+| JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | lossy and lossless, 8 and 16 bits, alpha, tiles |
 | HEIC | stills, grids, alpha, depth and gain maps, and image sequences, 8 to 16 bits, with the `imagekodec-heic` module | intra stills and grids, 8 to 12 bits, alpha, lossless, with the `imagekodec-heic` module |
 
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
@@ -190,7 +190,7 @@ in a browser on the web, so those two modules are for browser apps.
 
 - Every entry point takes the complete file as a `ByteArray`. There is no streaming decode.
 - `decode` returns 8 bits a channel. Use `decode16` for deeper samples.
-- There is no encoder for lossy WebP, JPEG 2000, JPEG XL or JPEG XR.
+- There is no encoder for lossy WebP, JPEG 2000 or JPEG XL.
 - A decode refuses an image of more than 2^28 pixels (about 1 GiB of ARGB).
 
 [Limits](docs/limits.md) has the full list, format by format.
