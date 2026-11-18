@@ -72,16 +72,18 @@ internal object JxrEncoder {
 
     // --- Planning ------------------------------------------------------------------------------
 
-    /** What one codestream codes: its colour format, overlap and the quantizer indices of each band and channel. */
+    /**
+     * What one codestream codes: its colour format, overlap, scaling, and the quantizer index of
+     * luma and of chroma, which every band shares, for the frame or for each tile in raster order.
+     */
     private class Plan(
         val cf: Int,
         val overlap: Int,
         val scaled: Boolean,
-        val dc: IntArray,
-        val lp: IntArray,
-        val hp: IntArray,
-        /** Per tile, raster order, or null for one set for the frame. */
+        val index: IntArray,
         val tileIndices: Array<IntArray>?,
+        /** What the highpass quantizer adds to a magnitude before dividing, in 64ths of a step. */
+        val hpRound: Int = 32,
     )
 
     private fun clamp(i: Int) = i.coerceIn(0, 255)
@@ -104,14 +106,29 @@ internal object JxrEncoder {
         val a = QUALITY_ANCHORS[i]
         val b = if (i == 10) a else QUALITY_ANCHORS[i + 1]
         val idx = (a * (10 - f) + b * f + 5) / 10
-        // 16-bit samples carry 8 more bits, which 8 doublings of the step, 128 indices, take back.
-        return if (depth == 16) idx + 128 else idx
+        if (depth == 8) return idx
+        // 16-bit samples carry 8 more bits: the index whose step is 256 times as long.
+        val want = JxrPlane.remapQP(idx, JxrPlane.SHIFT_ZERO, true).toLong() * 256
+        var j = idx
+        while (j < 255 && JxrPlane.remapQP(j, JxrPlane.SHIFT_ZERO, true) < want) j++
+        return j
     }
 
-    private fun chromaOffset(quality: Int, cf: Int): Int = if (cf == JxrColor.YUV_420) 4 else 12 + (100 - quality) / 10
+    /**
+     * The highpass rounding at [quality]: a wide dead zone, which drops the small coefficients that
+     * cost more bits than they bring, narrowing from quality 70 up, where the steps are fine. Both
+     * were measured on the photo scenes, as the size at equal SSIMULACRA 2.
+     */
+    private fun highpassRounding(quality: Int): Int = if (quality <= 70) 2 else 2 + (quality - 70)
 
-    /** The luma quantizer index at qualities 0, 10, ..., 100. */
-    private val QUALITY_ANCHORS = intArrayOf(68, 60, 54, 50, 46, 41, 34, 28, 20, 13, 4)
+    /**
+     * How many indices coarser chroma is than luma: chroma of 4:4:4 carries less of what the eye
+     * sees the coarser the picture, and 4:2:0 chroma has already lost half its resolution.
+     */
+    private fun chromaOffset(quality: Int, cf: Int): Int = if (cf == JxrColor.YUV_420) 4 else 16 + (100 - quality) / 5
+
+    /** The luma quantizer index at qualities 0, 10, ..., 100, measured against `JxrEncApp -q` as [indices] says. */
+    private val QUALITY_ANCHORS = intArrayOf(67, 60, 51, 47, 42, 37, 30, 23, 18, 10, 2)
 
     // --- Encoding ------------------------------------------------------------------------------
 
@@ -141,11 +158,11 @@ internal object JxrEncoder {
         var overlap = o.overlap ?: if (lossless) 0 else if (o.quality >= 50) 1 else 2
         if (overlap == 2 && cf == JxrColor.YUV_420 && mbW < 2) overlap = 1
         val plan = if (lossless) {
-            Plan(cf, overlap, false, intArrayOf(1, 1), intArrayOf(1, 1), intArrayOf(1, 1), null)
+            Plan(cf, overlap, false, intArrayOf(1, 1), null)
         } else {
             val q = indices(o.quality, o.chromaQuality, src.depth, cf)
             val perTile = o.tileQualities?.let { t -> Array(t.size) { indices(t[it], o.chromaQuality, src.depth, cf) } }
-            Plan(cf, overlap, true, q, q, q, perTile)
+            Plan(cf, overlap, true, q, perTile, highpassRounding(o.quality))
         }
         val alpha = src.alpha
         val alphaPlan = if (alpha == null) {
@@ -154,10 +171,10 @@ internal object JxrEncoder {
             // Interleaved alpha is written out with the colour plane's scaling, so it shares the colour's scaled flag.
             val scaled = !o.planarAlpha && plan.scaled
             val one = intArrayOf(if (scaled) 0 else 1)
-            Plan(JxrColor.Y_ONLY, overlap, scaled, one, one, one, null)
+            Plan(JxrColor.Y_ONLY, overlap, scaled, one, null)
         } else {
             val a = intArrayOf(clamp(lumaIndex(o.alphaQuality, src.depth)))
-            Plan(JxrColor.Y_ONLY, overlap, true, a, a, a, null)
+            Plan(JxrColor.Y_ONLY, overlap, true, a, null, highpassRounding(o.alphaQuality))
         }
         val interleaved = alpha != null && !o.planarAlpha
         val image = codestream(
@@ -322,28 +339,32 @@ internal object JxrEncoder {
         }
         cancel?.invoke()
         val coef = Array(channels) { ch ->
-            if (ch > 0 && plan.cf == JxrColor.YUV_420) {
+            val c = if (ch > 0 && plan.cf == JxrColor.YUV_420) {
                 val half = downsample(planes[ch], ew, eh)
                 transformChannel(half, ew / 2, eh / 2, mbW, mbH, chroma420 = true, plan.overlap, plan.scaled)
             } else {
                 transformChannel(planes[ch], ew, eh, mbW, mbH, chroma420 = false, plan.overlap, plan.scaled && ch > 0)
             }
+            // Each plane goes once its coefficients are out, so at most one plane and its coefficients overlap.
+            planes[ch] = IntArray(0)
+            cancel?.invoke()
+            c
         }
         val dcSteps = IntArray(channels)
         val lpSteps = IntArray(channels)
         val hpSteps = IntArray(channels)
         val tileSteps = plan.tileIndices?.let { all -> Array(all.size) { steps(all[it], channels, plan.scaled) } }
-        val frame = steps(plan.dc, channels, plan.scaled)
+        val frame = steps(plan.index, channels, plan.scaled)
         for (ch in 0 until channels) {
             dcSteps[ch] = frame[0][ch]
             lpSteps[ch] = frame[1][ch]
             hpSteps[ch] = frame[2][ch]
         }
         // Rounding of the quantizer in 64ths of a step: DC and lowpass to the nearest, highpass with a dead zone.
-        val lossless = !plan.scaled && plan.dc[0] <= 1
+        val lossless = !plan.scaled
         val encoder = JxrPlaneEncoder(
             plan.cf, channels, mbW, mbH, tileX, tileY, coef, dcSteps, lpSteps, hpSteps,
-            dcRound = 32, lpRound = 32, hpRound = if (lossless) 32 else 22, tileSteps,
+            dcRound = 32, lpRound = if (lossless) 32 else 28, hpRound = plan.hpRound, tileSteps,
         )
         return PlaneJob(encoder, plan, channels)
     }
@@ -488,13 +509,13 @@ internal object JxrEncoder {
         if (depth == 16) w.bits(0, 8) // SHIFT_BITS
         val frame = plan.tileIndices == null
         w.bit(frame) // DC_FRAME_UNIFORM_FLAG
-        if (frame) writeQuantizer(w, plan.dc, channels)
+        if (frame) writeQuantizer(w, plan.index, channels)
         w.bit(false) // USE_DC_QP_FLAG
         w.bit(frame) // LP_FRAME_UNIFORM_FLAG
-        if (frame) writeQuantizer(w, plan.lp, channels)
+        if (frame) writeQuantizer(w, plan.index, channels)
         w.bit(false) // USE_LP_QP_FLAG
         w.bit(frame) // HP_FRAME_UNIFORM_FLAG
-        if (frame) writeQuantizer(w, plan.hp, channels)
+        if (frame) writeQuantizer(w, plan.index, channels)
         w.alignToByte()
     }
 

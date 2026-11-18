@@ -174,13 +174,12 @@ class JxrEncodeOracleTest {
         assumeTrue(Tools.hasAll("JxrDecApp"))
         val sizes = listOf(83 to 61, 16 to 16, 1 to 1, 5 to 37)
         for ((w, h) in sizes) {
-            for ((gray, alpha) in listOf(false to false, true to false, false to true)) {
+            for ((gray, alpha) in listOf(false to false, true to false, false to true, true to true)) {
                 val src = scene(w, h, w * 7 + h, alpha, gray)
-                val channels = if (gray) 1 else if (alpha) 4 else 3
+                val channels = if (alpha) 4 else if (gray) 1 else 3
                 for (planar in listOf(true, false)) {
                     if (!alpha && !planar) continue
                     for (case in lossless) {
-                        if (case.options.tileQualities != null && (w < 96 || h < 96)) continue
                         val o = case.options
                         val jxr = ImageKodec.encodeJxr(src, JxrEncodeOptions(lossless = true, overlap = o.overlap, tileSize = o.tileSize, frequencyOrder = o.frequencyOrder, planarAlpha = planar))
                         check("$w x $h ${channels}ch planar $planar ${case.name}", jxr, samples(src, channels))
@@ -188,7 +187,7 @@ class JxrEncodeOracleTest {
                     for (case in lossy) {
                         val o = case.options
                         val tiles = ((w + 47) / 48) * ((h + 47) / 48)
-                        if (o.tileQualities != null && o.tileQualities!!.size != tiles) continue
+                        if ((o.tileQualities?.size ?: tiles) != tiles) continue
                         val jxr = ImageKodec.encodeJxr(
                             src,
                             JxrEncodeOptions(
@@ -203,6 +202,86 @@ class JxrEncodeOracleTest {
             }
         }
         println("JxrEncodeOracleTest: $files files, $compared samples equal to JxrDecApp's")
+    }
+
+    /** A big-endian EXIF block: IFD0 with text tags, orientation 6 and the EXIF and GPS directories, and an Interoperability directory. */
+    private fun exif(): ByteArray {
+        val b = ByteBuffer.allocate(512).order(ByteOrder.BIG_ENDIAN)
+        class E(val tag: Int, val type: Int, val count: Int, val value: Int)
+        val data = ByteBuffer.allocate(256).order(ByteOrder.BIG_ENDIAN)
+        val dataAt = 300
+        fun ascii(s: String): Pair<Int, Int> {
+            val at = dataAt + data.position()
+            data.put((s + "\u0000").encodeToByteArray())
+            if (data.position() % 2 == 1) data.put(0)
+            return at to s.length + 1
+        }
+        fun rationals(vararg v: Int): Int {
+            val at = dataAt + data.position()
+            for (x in v) data.putInt(x)
+            return at
+        }
+        fun ifd(at: Int, entries: List<E>) {
+            b.position(at)
+            b.putShort(entries.size.toShort())
+            for (e in entries) {
+                b.putShort(e.tag.toShort()).putShort(e.type.toShort()).putInt(e.count)
+                if (e.type == 3 && e.count == 1) b.putShort(e.value.toShort()).putShort(0) else b.putInt(e.value)
+            }
+            b.putInt(0)
+        }
+        val (make, makeN) = ascii("KiteCam")
+        val (date, dateN) = ascii("2026:11:09 08:30:00")
+        val exposure = rationals(1, 250)
+        val latitude = rationals(51, 1, 30, 1, 0, 1)
+        ifd(8, listOf(
+            E(0x010F, 2, makeN, make), E(0x0110, 2, 3, 0x58310000), E(0x0112, 3, 1, 6), E(0x0132, 2, dateN, date),
+            E(0x8769, 4, 1, 100), E(0x8825, 4, 1, 200),
+        ))
+        ifd(100, listOf(E(0x829A, 5, 1, exposure), E(0x8827, 3, 1, 200), E(0x9003, 2, dateN, date), E(0xA005, 4, 1, 250)))
+        ifd(200, listOf(E(0x0001, 2, 2, 0x4E000000), E(0x0002, 5, 3, latitude)))
+        ifd(250, listOf(E(0x0001, 2, 4, 0x52393800)))
+        b.position(0)
+        b.put(byteArrayOf(0x4D, 0x4D, 0, 0x2A, 0, 0, 0, 8))
+        val out = b.array().copyOf(dataAt + data.position())
+        data.array().copyInto(out, dataAt, 0, data.position())
+        return out
+    }
+
+    /** A display profile with one tag, its copyright: enough for exiftool to read its class and colour space. */
+    private fun icc(): ByteArray = ByteArray(156).also {
+        ByteBuffer.wrap(it).putInt(0, 156).putInt(4, 0x6C636D73).putInt(8, 0x02100000).putInt(12, 0x6D6E7472)
+            .putInt(16, 0x52474220).putInt(20, 0x58595A20).putInt(36, 0x61637370)
+            .putInt(128, 1).putInt(132, 0x63707274).putInt(136, 144).putInt(140, 12)
+            .putInt(144, 0x74657874).putInt(152, 0x4B697465)
+    }
+
+    @Test
+    fun exiftoolReadsTheMetadata() {
+        assumeTrue(Tools.hasAll("exiftool", "JxrDecApp"))
+        val xmp = """<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">""" +
+            """<rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator><rdf:Seq><rdf:li>Kite Tester</rdf:li></rdf:Seq></dc:creator>""" +
+            """</rdf:Description></rdf:RDF></x:xmpmeta>"""
+        val src = scene(40, 24, 9, alpha = true, gray = false)
+        val profile = icc()
+        val jxr = ImageKodec.encodeJxr(src, JxrEncodeOptions(quality = 80), ImageMetadata(exif(), xmp, profile))
+        val file = temp(".jxr").apply { writeBytes(jxr) }
+        val (code, text) = run(Tools.require("exiftool").path, "-a", "-s", "-n", file.path)
+        assertTrue(code == 0, "exiftool failed: $text")
+        val tags = text.lines().filter { ":" in it }.associate { it.substringBefore(":").trim() to it.substringAfter(":").trim() }
+        val want = mapOf(
+            "Make" to "KiteCam", "Model" to "X1", "ModifyDate" to "2026:11:09 08:30:00", "DateTimeOriginal" to "2026:11:09 08:30:00",
+            "ExposureTime" to "0.004", "ISO" to "200", "InteropIndex" to "R98", "GPSLatitudeRef" to "N", "GPSLatitude" to "51.5",
+            "Creator" to "Kite Tester", "ProfileClass" to "mntr", "ColorSpaceData" to "RGB", "ProfileCopyright" to "Kite", "PixelFormat" to "15",
+            "ImageWidth" to "40", "ImageHeight" to "24",
+        )
+        for ((tag, value) in want) assertEquals(value, tags[tag], "exiftool's $tag in:\n$text")
+
+        // The orientation is the Transformation tag, which the decoder turns back into EXIF's 6.
+        assertEquals(Orientation.Rotate90, ImageKodec.probe(jxr).orientation)
+        assertTrue(ImageKodec.probe(jxr).colorProfile?.icc?.contentEquals(profile) == true, "the ICC profile")
+        check("metadata", jxr)
+        println("exiftool: ${want.size} tags read back")
     }
 
     @Test
