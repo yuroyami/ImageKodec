@@ -2142,7 +2142,10 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         }
         if (skip == 0) {
             val eob = coeffs(plane, startX, startY, txSz)
-            if (eob > 0) transform.reconstruct(this, plane, startX, startY, txSz)
+            if (eob > 0) {
+                val known = enc?.knownResidual
+                if (known != null) transform.add(this, plane, startX, startY, txSz, known) else transform.reconstruct(this, plane, startX, startY, txSz)
+            }
         }
         for (i in 0 until stepY) for (j in 0 until stepX) {
             val lr = (row shr sy) + i

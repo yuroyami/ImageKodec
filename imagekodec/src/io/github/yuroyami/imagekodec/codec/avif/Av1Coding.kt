@@ -33,6 +33,15 @@ internal abstract class Av1Coding {
     var txType: Int = Av1.DCT_DCT
 
     /**
+     * The residual of the last [coefficients] as [Av1Transform.residual] would make it from its levels, when the
+     * encoder still has it from coding the same levels before; null when the decoder has to make it (#176).
+     */
+    open val knownResidual: IntArray? get() = null
+
+    /** The residual the decoder made for the last [coefficients], `w` by `h` of [txSz], before the type's flips. */
+    open fun madeResidual(residual: LongArray, txSz: Int) {}
+
+    /**
      * The restoration type of unit ([unitRow], [unitCol]) of [plane], with its Wiener taps into [wiener] at [wienerAt]
      * (two passes of three) or its self-guided projection into [xqd] at [xqdAt] and its set in [lrSgrSet].
      */

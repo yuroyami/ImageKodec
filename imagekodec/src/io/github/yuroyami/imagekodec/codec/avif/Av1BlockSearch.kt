@@ -92,7 +92,27 @@ internal class Av1BlockSearch(
     override fun lrUnit(plane: Int, unitRow: Int, unitCol: Int, wiener: IntArray, wienerAt: Int, xqd: IntArray, xqdAt: Int): Int =
         Av1FrameHeader.RESTORE_NONE
 
+    override val knownResidual: IntArray? get() = known
+
+    /** The residual of the result [recall] took, when its entry has it. */
+    private var known: IntArray? = null
+
+    /** The entry [remember] made or [recall] took without a residual, which the decoder's residual completes. */
+    private var pending: Memo? = null
+
+    override fun madeResidual(residual: LongArray, txSz: Int) {
+        val m = pending ?: return
+        pending = null
+        val n = Av1.txWidth[txSz] * Av1.txHeight[txSz]
+        if (m.residual2.size < n) m.residual2 = IntArray(n)
+        // Each value is the inverse transform's output, which a conformant block holds to 8 + bitDepth bits.
+        for (i in 0 until n) m.residual2[i] = residual[i].toInt()
+        m.hasResidual2 = true
+    }
+
     override fun coefficients(d: Av1FrameDecoder, plane: Int, startX: Int, startY: Int, txSz: Int): Int {
+        known = null
+        pending = null
         val eob = choose(plane, startX, startY, txSz)
         if (eob > 0) nonZero++
         if (mode == Mode.COMMIT) {
@@ -1543,6 +1563,8 @@ internal class Av1BlockSearch(
     /**
      * What [choose] found for one transform block, with everything it read: the residual, the coefficient contexts
      * beside the block, the types it tried, and the block's size and intra direction, which the symbols' contexts read.
+     * Once the decoder has reconstructed its levels, also the residual its inverse transform made of them
+     * ([residual2]), which a repeat adds to the prediction without transforming again (#176).
      */
     private class Memo {
         var extra = 0
@@ -1553,6 +1575,8 @@ internal class Av1BlockSearch(
         var n = 0
         var eob = 0
         var type = 0
+        var residual2 = IntArray(16)
+        var hasResidual2 = false
     }
 
     /**
@@ -1589,6 +1613,7 @@ internal class Av1BlockSearch(
                 for (i in 0 until size) if (res[i] != residual[i]) continue@next
                 m.levels.copyInto(levels, 0, 0, m.n)
                 txType = m.type
+                if (m.hasResidual2) known = m.residual2 else if (m.eob > 0) pending = m
                 return m.eob
             }
         }
@@ -1613,6 +1638,8 @@ internal class Av1BlockSearch(
         m.n = n
         m.eob = eob
         m.type = type
+        m.hasResidual2 = false
+        pending = if (eob > 0) m else null
         list += m
     }
 
