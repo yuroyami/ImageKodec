@@ -161,6 +161,11 @@ class FuzzTest {
         "jp2-roi" to Jp2FeatureFixtures.roi,
         "jp2-poc-ppt" to Jp2FeatureFixtures.pocPpt,
         "jp2-ppm" to Jp2FeatureFixtures.ppm,
+        // The encoder's own output: two layers, SOP and EPH, a pass a segment, and a cdef opacity channel (#180).
+        "jp2-encoded" to ImageKodec.encodeJp2(
+            KiteBitmap(9, 7, IntArray(63) { (((it * 37) and 0xFF) shl 24) or (it * 0x030507) }),
+            Jp2EncodeOptions(layers = 2, levels = 2, sopMarkers = true, ephMarkers = true, terminateEachPass = true),
+        ),
         // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
         *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
         // An AVIF the core's own encoder writes: 4:4:4 with alpha, palette blocks among intra ones, CDEF and restoration (#176).
