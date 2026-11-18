@@ -356,9 +356,16 @@ long as heif-enc with its own threads; with four threads, 1.4 and 3.5 times as l
   the curve's code points with the header's own primaries and white, within 0.02 of 255 of the same light coded
   in BT.2020's primaries.
 - A sample outside the range of 0 to 1, which a float file can hold, is clipped.
-- A CMYK file, whose black is an extra channel, throws `UnsupportedImageException`. No tool here
-  writes one to check a reading against: cjxl 0.7 reads neither a CMYK PAM nor a CMYK JPEG, and has no
-  `jxl_from_tree`.
+- A CMYK file keeps C, M and Y in the colour channels and K in a black extra channel, with a CMYK
+  profile (#189). A sample of 1 is no ink and 0 full ink, as libjxl hands CMYK to lcms2 (100 - 100 v
+  percent). `decode` applies the black through that profile, as libjxl converts CMYK through its
+  colour engine, at the intent the profile's header names, within a level of lcms2;
+  `ColorTarget.Srgb` picks another intent. cjxl 0.7 reads no CMYK source, so ImageKodec's encoder
+  writes the test files, lossless, through an internal entry. The djxl 0.7 here has no colour engine:
+  it writes the stored samples, colour and black apart, and those are held to it exactly. So neither
+  the ink convention nor djxl 0.11's conversion is checked against libjxl here; where djxl is 0.11 or
+  newer, as in CI, the test holds its sRGB to `ColorTarget.Srgb` within 3 levels. A black channel
+  without a CMYK profile, more than one, or with XYB colour throws `UnsupportedImageException`.
 
 ### Speed and memory
 

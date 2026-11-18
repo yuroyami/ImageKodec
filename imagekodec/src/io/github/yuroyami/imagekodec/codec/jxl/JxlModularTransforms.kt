@@ -41,7 +41,8 @@ internal object JxlModularTransforms {
     private fun palette(planes: List<IntArray>, w: Int, h: Int, limit: Int): Result? {
         val n = w * h
         val nc = planes.size
-        // A colour as one key: up to four samples of 16 bits.
+        // A colour as one key: up to four samples of 16 bits. CMYK with alpha has five, which no key holds.
+        if (nc > 4) return null
         val seen = HashMap<Long, Int>()
         val keys = LongArray(n)
         for (i in 0 until n) {

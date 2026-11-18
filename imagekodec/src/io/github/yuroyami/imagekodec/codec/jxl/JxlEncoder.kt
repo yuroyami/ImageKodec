@@ -7,10 +7,13 @@ import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteBitmap16
 
 /**
- * The samples of one picture to encode: [colors] colour planes (gray, or red, green and blue),
- * then alpha when [alpha] is set, each of [w] by [h] samples of [bits] bits.
+ * The samples of one picture to encode: [colors] colour planes (gray, or red, green and blue, or
+ * C, M and Y), then black when [black] is set, then alpha when [alpha] is set, each of [w] by [h]
+ * samples of [bits] bits.
  */
-internal class JxlEncPicture(val w: Int, val h: Int, val bits: Int, val colors: Int, val alpha: Boolean, val planes: Array<IntArray>) {
+internal class JxlEncPicture(
+    val w: Int, val h: Int, val bits: Int, val colors: Int, val alpha: Boolean, val planes: Array<IntArray>, val black: Boolean = false,
+) {
     companion object {
         fun of(bitmap: KiteBitmap, keepAlpha: Boolean = bitmap.hasTransparency(), allowGray: Boolean = true): JxlEncPicture {
             val argb = bitmap.argb
@@ -57,6 +60,35 @@ internal object JxlEncoder {
     fun encode16(bitmap: KiteBitmap16, options: JxlEncodeOptions, metadata: ImageMetadata, cancel: (() -> Unit)?): ByteArray =
         encodePictures(listOf(JxlEncPicture.of(bitmap)), null, 0, options, metadata, cancel)
 
+    /**
+     * A lossless CMYK file (#189): [ink] holds cyan, magenta, yellow and black of each pixel at
+     * [bits] bits, from no ink (0) to full, and [alpha] one straight sample a pixel when given.
+     * [icc] is the CMYK profile the colour encoding must carry (18181-1 A.4). JPEG XL stores ink as
+     * libjxl does, 1 for none and 0 for full (its CMS reads a sample v as 100 - 100 v percent of
+     * ink), so each sample is stored inverted: C, M and Y as the colour channels, K as a kBlack
+     * extra channel. [checkProfile] false lets a test write a file of another profile, which a
+     * decoder must refuse.
+     */
+    fun encodeCmyk(
+        width: Int, height: Int, bits: Int, ink: IntArray, alpha: IntArray?, icc: ByteArray,
+        options: JxlEncodeOptions, metadata: ImageMetadata, cancel: (() -> Unit)?, checkProfile: Boolean = true,
+    ): ByteArray {
+        require(bits == 8 || bits == 16) { "JPEG XL CMYK of $bits bits" }
+        require(!checkProfile || (icc.size >= 128 && icc.decodeToString(16, 20) == "CMYK")) { "JPEG XL CMYK needs a CMYK profile" }
+        require(options.lossless) { "JPEG XL CMYK is written lossless" }
+        require(width in 1..MAX_SIDE && height in 1..MAX_SIDE) { "JPEG XL: ${width}x$height" }
+        val n = width * height
+        require(ink.size.toLong() == n * 4L) { "${ink.size} ink samples for $width by $height pixels" }
+        require(alpha == null || alpha.size == n) { "${alpha?.size} alpha samples for $width by $height pixels" }
+        val max = (1 shl bits) - 1
+        val planes = Array(4 + if (alpha != null) 1 else 0) { c ->
+            if (c == 4) alpha!!.copyOf() else IntArray(n) { max - ink[it * 4 + c] }
+        }
+        val picture = JxlEncPicture(width, height, bits, 3, alpha != null, planes, black = true)
+        val withIcc = ImageMetadata(exif = metadata.exif, xmp = metadata.xmp, icc = icc)
+        return encodePictures(listOf(picture), null, 0, options, withIcc, cancel)
+    }
+
     fun encode(animation: KiteAnimation, options: JxlEncodeOptions, metadata: ImageMetadata, cancel: (() -> Unit)?): ByteArray {
         for (f in animation.frames) {
             require(f.bitmap.width == animation.width && f.bitmap.height == animation.height) {
@@ -99,6 +131,7 @@ internal object JxlEncoder {
             animation = if (durations != null) intArrayOf(1000, 1) else null,
             loops = loops,
             icc = metadata.icc,
+            black = first.black,
         )
         val bw = JxlBitWriter(1 shl 16)
         JxlEncHeaders.writeImageHeader(bw, image)
@@ -186,7 +219,8 @@ internal object JxlEncoder {
         val colorPlanes = if (gray) 1 else 3
         val src = ArrayList<IntArray>()
         for (c in 0 until colorPlanes) src.add(p.planes[if (p.colors == 1) 0 else c])
-        if (p.alpha) src.add(p.planes[p.colors])
+        if (p.black) src.add(p.planes[p.colors])
+        if (p.alpha) src.add(p.planes[p.colors + if (p.black) 1 else 0])
         val candidates = JxlModularTransforms.candidates(src, p.w, p.h, colorPlanes, p.bits, effort)
         var best: List<ByteArray>? = null
         for (cand in candidates) {

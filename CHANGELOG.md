@@ -38,7 +38,11 @@ reviewable in the diff.
 - JPEG XL writes a lossy picture whose header has only an ICC profile into that profile when it is one
   of matrix and curves, as libjxl does through a colour engine, and describes a header of its own
   primaries with an ICC profile made from it, so `ColorTarget.Srgb` converts it as djxl does. The intensity
-  target is the peak that tone mapping takes. A CMYK file is refused by name instead of losing its black (#189).
+  target is the peak that tone mapping takes (#189).
+- JPEG XL decodes CMYK: C, M and Y in the colour channels and K in a black extra channel, applied through
+  the file's CMYK profile at the profile's intent, as libjxl converts CMYK, or at the intent of
+  `ColorTarget.Srgb`. The stored samples equal djxl 0.7's, and the picture lcms2's within a level. A black
+  channel without a CMYK profile stays refused (#189).
 - JPEG XL writes a lossy picture whose header has only an ICC profile of lookup tables into that profile
   too, through its B2A0 table (lut8Type, lut16Type or lutBToAType), read as lcms2 reads it, and `probe`
   reports the profile. A header of its own primaries or white point with the PQ or HLG curve is described

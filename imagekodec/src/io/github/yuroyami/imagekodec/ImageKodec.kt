@@ -763,13 +763,14 @@ public object ImageKodec {
     /**
      * The CMYK ink of page [page] of [data], at 16 bits with [wide] and else at 8 with each side
      * divided by [reduction], or null when the page holds no ink this reads: a CMYK or YCCK
-     * JPEG, alone or in a BMP, a CMYK TIFF or a CMYK JPEG XR.
+     * JPEG, alone or in a BMP, a CMYK TIFF, or a CMYK JPEG XR or JPEG XL.
      */
     private fun inkOf(data: ByteArray, page: Int, reduction: Int, wide: Boolean, cancel: (() -> Unit)?): Ink? = when (detect(data)) {
         ImageFormat.JPEG -> if (wide) JpegDecoder.decodeInk16(data, cancel) else JpegDecoder.decodeInk(data, scale = reduction.countTrailingZeroBits(), cancel = cancel)
         ImageFormat.TIFF -> TiffDecoder.decodeInk(data, page, wide, cancel)?.let { if (wide) it else it.reducedBy(reduction) }
         ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { inkOf(it, 0, reduction, wide, cancel) }
         ImageFormat.JXR -> JxrDecoder.decodeInk(data, wide, cancel)?.let { if (wide) it else it.reducedBy(reduction) }
+        ImageFormat.JXL -> if (page == 0) JxlDecoder.decodeInk(data, wide, cancel)?.let { if (wide) it else it.reducedBy(reduction) } else null
         else -> null
     }
 

@@ -241,3 +241,5 @@ being true.
   sees negatives, and it interpolates a Lab-indexed grid trilinearly (#189).
 - Ubuntu 24.04's djxl 0.7 has no colour engine: it writes a lossy file with only an ICC profile as linear sRGB, and
   converts to another space with `--color_space` only into an 8-bit PNG (#189).
+- djxl 0.7 writes a CMYK file's stored samples, never converted, whatever `--color_space` asks: to `out.ppm` it writes
+  the colour (with alpha) as `out-ec0.ppm` and the black as `out-ec1.pgm` (#189).

@@ -568,7 +568,8 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
 - The JPEG XL encoder writes no lossless JPEG recompression, no progressive passes, no patches,
   splines or noise, no LZ77 and no prefix codes, no Gaborish, no adaptive quantization, no
   squeeze and no float samples. Its lossy files are 8 or 16 bits in sRGB; an ICC profile in the
-  metadata is written as the profile of the samples without converting them.
+  metadata is written as the profile of the samples without converting them. CMYK, with its black
+  channel, is written lossless by an internal entry for the tests only (#189).
 - The AV1 encoder writes no film grain, no 128 by 128 superblocks, no superres, no delta quantizer, no
   quantizer matrices, no segmentation and no 4:1 or three-way partitions. Intra block copy copies only
   places whose source matches the block exactly, and not at effort 1. Its sequences hold shown key and

@@ -61,7 +61,7 @@ when you pass `applyOrientation = true`.
 | JPEG 2000 | JP2 and JPH containers and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN); HTJ2K (ITU-T T.814), the HT block coder's cleanup, SigProp and MagRef passes, alone or beside Part 1 tile-components; the sRGB, gray, sYCC, e-sYCC, CMYK, CMY and CIELab colour spaces |
 | AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, every matrix but SMPTE ST 2085 (constant luminance and ICtCp as zimg converts them), alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
 | HEIC | with the `imagekodec-heic` module installed: intra, P and B HEVC pictures and image sequences of the Main, Main 10, Main Still Picture and format range extensions profiles with their range extension tools, 8 to 16 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, with deblocking, SAO, wavefront rows, tiles and dependent slices, and the HEIF structure of the AVIF row. Without the module, `probe` and `readMetadata` still read the container |
-| JPEG XL | the bare codestream and the container, both coding modes: lossy VarDCT with every transform size, and Modular, lossless or lossy. Progressive passes, LF frames, patches, splines, noise, both smoothing filters, upsampling, samples of up to 16 bits and float samples, alpha straight or premultiplied, extra channels, spot colors, recompressed JPEGs, layers with every blend mode, animations |
+| JPEG XL | the bare codestream and the container, both coding modes: lossy VarDCT with every transform size, and Modular, lossless or lossy. Progressive passes, LF frames, patches, splines, noise, both smoothing filters, upsampling, samples of up to 16 bits and float samples, alpha straight or premultiplied, extra channels, spot colors, CMYK with its black channel and profile, recompressed JPEGs, layers with every blend mode, animations |
 | JPEG XR | the container of T.832 Annex A and HD Photo's, lossless and lossy, spatial and frequency order, the three overlap modes, Y only, 4:2:0, 4:2:2 and 4:4:4, soft and hard tiles, planar and interleaved alpha, straight or premultiplied, in the gray, RGB and BGR pixel formats at 8 and 16 bits, 16-bit and 32-bit fixed point, half and float, the packed 5-5-5, 5-6-5 and 10-10-10 formats, 32bppRGBE, a mantissa a channel and a shared exponent, CMYK at 8 and 16 bits with or without alpha, and the N-channel formats of 3 to 8 channels |
 
 Chroma subsampling, in the JPEG, AVIF and HEIC rows, means that the file stores color at a lower
@@ -111,6 +111,10 @@ the profile's B2A0 table, or the inverse of its colorants and curves, and `probe
 A header whose primaries or white point have no code point is described by an ICC profile made from
 it, as libjxl makes one; with the PQ or HLG curve that profile holds the curve as a table, and a
 conversion with `ColorTarget.Srgb` takes the curve with the header's own primaries and tone-maps it.
+
+A CMYK file, its black in an extra channel, converts through its CMYK profile at the intent the
+profile names, as libjxl applies the black through its colour engine. `probe` reports four colour
+channels and the profile, and `ColorTarget.Srgb` converts at the intent it gives.
 
 Layers are blended into one image. The orientation is reported as `ImageInfo.orientation`, and
 `applyOrientation` applies it. An animation plays through `decodeAnimation` with the duration of

@@ -12,8 +12,10 @@ internal class JxlEncImage(
     val animation: IntArray?,
     val loops: Long,
     val icc: ByteArray?,
+    /** A black extra channel (kBlack) ahead of alpha: the colour channels are then C, M and Y. */
+    val black: Boolean = false,
 ) {
-    val extraChannels: Int get() = if (alpha) 1 else 0
+    val extraChannels: Int get() = (if (black) 1 else 0) + (if (alpha) 1 else 0)
 }
 
 /** The fields of one frame header the encoder sets (18181-1 C.2 FrameHeader). */
@@ -74,7 +76,7 @@ internal object JxlEncHeaders {
         bw.write(8, 0xFF)
         bw.write(8, 0x0A)
         writeSize(bw, im.width, im.height)
-        val allDefault = im.bits == 8 && !im.alpha && im.xyb && !im.gray && im.animation == null && im.icc == null
+        val allDefault = im.bits == 8 && im.extraChannels == 0 && im.xyb && !im.gray && im.animation == null && im.icc == null
         bw.bool(allDefault)
         if (!allDefault) {
             val extraFields = im.animation != null
@@ -93,6 +95,13 @@ internal object JxlEncHeaders {
             writeBitDepth(bw, im.bits)
             bw.bool(im.bits <= 12)
             bw.u32(im.extraChannels, fv(0), fv(1), fo(4, 2), fo(12, 1))
+            if (im.black) {
+                bw.bool(false)
+                bw.enumValue(JxlExtraChannel.BLACK)
+                writeBitDepth(bw, im.bits)
+                bw.u32(0, fv(0), fv(3), fv(4), fo(3, 1)) // not subsampled
+                bw.u32(0, fv(0), fb(4), fo(5, 16), fo(10, 48)) // no name
+            }
             if (im.alpha) {
                 if (im.bits == 8) {
                     bw.bool(true) // the default: 8-bit straight alpha
