@@ -49,6 +49,13 @@ public class ColorProfile(
     internal var png: Boolean = false
 
     /**
+     * The red, green, blue and white x and y of HDR [cicp] whose primaries have no code point
+     * (JPEG XL's own primaries or white point with PQ or HLG). A conversion then reads [cicp]
+     * with these primaries ahead of [icc], which only describes them.
+     */
+    internal var cicpPrimaries: DoubleArray? = null
+
+    /**
      * The data color space the profile's header names, trimmed: "RGB", "GRAY",
      * "CMYK", "Lab" and so on; null without a profile or with a header too short.
      */

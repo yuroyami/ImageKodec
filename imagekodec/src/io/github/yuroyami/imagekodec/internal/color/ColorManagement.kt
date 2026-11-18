@@ -20,6 +20,9 @@ internal object ColorManagement {
     fun converter(profile: ColorProfile, intent: RenderingIntent, channels: Int = 3): SrgbConverter? {
         val order: List<() -> Found?> = if (profile.png) {
             listOf({ cicp(profile, channels) }, { icc(profile, intent) }, { srgb(profile) }, { gammaAndChromaticities(profile, channels) })
+        } else if (profile.cicpPrimaries != null) {
+            // HDR code points of primaries of their own, which the profile only describes.
+            listOf({ cicp(profile, channels) }, { icc(profile, intent) })
         } else {
             listOf({ icc(profile, intent) }, { cicp(profile, channels) })
         }
@@ -47,7 +50,8 @@ internal object ColorManagement {
         val c = profile.cicp ?: return null
         if (c.size != 4 || (profile.png && c[2] != 0)) return null
         val narrow = profile.png && c[3] == 0
-        val primaries = (if (c[0] == 2) Cicp.primaries(1) else Cicp.primaries(c[0])) ?: return null
+        val primaries = profile.cicpPrimaries?.takeIf { it.size == 8 && c[0] == 2 }
+            ?: (if (c[0] == 2) Cicp.primaries(1) else Cicp.primaries(c[0])) ?: return null
         val transfer = (if (c[1] == 2) Cicp.transfer(13) else Cicp.transfer(c[1])) ?: return null
         val converter = when (transfer) {
             is Cicp.Transfer.Sdr -> SrgbConverter.shaper(transfer.curve, primaries.takeIf { channels != 1 }, narrow)

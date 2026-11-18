@@ -367,11 +367,16 @@ internal object JxlDecoder {
         // Primaries or a white point of their own have no code points: libjxl describes every such
         // header with an ICC profile it makes (MaybeCreateProfile), and so does this for the SDR curves.
         if (primaries == 2 && !c.isGray && !hdr) JxlColor.matrixProfile(c)?.let { return ColorProfile(icc = it) }
+        // With PQ or HLG, the profile libjxl makes holds the curve as a table and no tone mapping,
+        // so it only describes the samples: they convert as the code points of the curve do, with
+        // their own primaries.
+        val ownHdr = primaries == 2 && !c.isGray && hdr
         return ColorProfile(
+            icc = if (ownHdr) JxlColor.hdrProfile(c) else null,
             cicp = intArrayOf(primaries, transfer, 0, 1),
             gamma = if (c.haveGamma) (c.gamma + 50) / 100 else null,
             // The intensity target is the brightest the picture gets, which tone mapping takes as its peak.
             contentLight = if (hdr) intArrayOf(minOf(h.intensityTarget * 10000.0, Int.MAX_VALUE.toDouble()).toInt(), 0) else null,
-        )
+        ).also { if (ownHdr) it.cicpPrimaries = JxlColor.chromaticities(c) }
     }
 }
