@@ -45,7 +45,7 @@ internal class Av1Coded(val params: Av1StreamParams, val sequenceHeaderObu: Byte
  * 3. The recorded decisions are coded again into the arithmetic coder under the final frame header.
  */
 @OptIn(ExperimentalHeifCodecApi::class)
-internal class Av1Encoder(private val planes: HeifPlanes, private val settings: Av1EncodeSettings, var cancel: (() -> Unit)?, sequence: Boolean = false) {
+internal class Av1Encoder(private val planes: HeifPlanes, private val settings: Av1EncodeSettings, var cancel: (() -> Unit)?, private val sequence: Boolean = false) {
 
     private val width = planes.width
     private val height = planes.height
@@ -97,7 +97,7 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         val record = Av1Record()
         lastRecord = record
         val compound = settings.compound ?: (effort >= 2)
-        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort, if (intrabc) hash else null, settings.chromaPalette, compound)
+        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort, if (intrabc) hash else null, settings.chromaPalette, compound, still = !sequence)
         for (tile in 0 until fh1.tileCols * fh1.tileRows) block.tile(tile)
         // The filters on the reconstruction, then the final header.
         val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration)

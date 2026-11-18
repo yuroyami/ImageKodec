@@ -25,10 +25,11 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * Efforts 1 and 2 take cheaper estimates first (#176): they rank only the three directional modes whose lines the
  * block's source gradients follow most ([strongestDirections]) and, for chroma, those and the luma's mode; they code
  * only the transform type whose coefficients have the least sum of magnitudes, the one that gathers the residual
- * into fewest; and they do not split a block that its whole codes at the largest transform when its source varies
- * by less than lambda a sample. Measured on the photo scenes as the size at equal SSIMULACRA 2 score over
- * qualities 30 to 90, each cost under a percent and the four together 0.8 percent at effort 1 and nothing at effort
- * 2, for a quarter and a fifth of the time.
+ * into fewest; and effort 2 does not split a block of a still picture that its whole codes at the largest transform
+ * when its source varies by less than lambda a sample. Measured on the photo scenes as the size at equal SSIMULACRA 2
+ * score over qualities 30 to 90, each cost under a percent; together they took a fifth of effort 1's time and a
+ * third of effort 2's. The split pruning cost a percent at effort 1, and in a sequence it made the inter frames that
+ * predict from the key frame larger and slower, so it stays out of both.
  *
  * Effort 2 was set by measuring, on the photo scenes of the tests, what each step of effort 3 brought against its
  * time, as the size at equal SSIMULACRA 2 score (#176). Kept: 4 by 4 blocks (4.6 percent smaller for 9 percent more
@@ -50,6 +51,8 @@ internal class Av1BlockSearch(
     private val chromaPalettes: Boolean = true,
     /** Whether a block of an inter frame that allows it may average two references (#177). */
     private val compound: Boolean = true,
+    /** Whether the frame is a still picture rather than a frame of a sequence, which the split pruning is for. */
+    private val still: Boolean = true,
 ) : Av1Coding() {
 
     private val bitDepth = d.bitDepth
@@ -197,11 +200,11 @@ internal class Av1BlockSearch(
             when (p) {
                 Av1.PARTITION_NONE -> {
                     j += block(r, c, bSize, depth + 1)
-                    // A block that codes no residual at a small error seldom gains from a split, nor at efforts 1 and
-                    // 2 a block up to 32 by 32 that keeps the largest transform and whose source varies by less than
-                    // lambda a sample (#176).
+                    // A block that codes no residual at a small error seldom gains from a split, nor, in a still
+                    // picture at effort 2, a block up to 32 by 32 that keeps the largest transform and whose source
+                    // varies by less than lambda a sample (#176).
                     val whole = chosen[record.key(r, c, bSize)]!!
-                    noneSkipped = whole.skip == 1 || (effort <= 2 && bSize <= Av1.BLOCK_32X32 && smooth(r, c, bSize, whole))
+                    noneSkipped = whole.skip == 1 || (still && effort == 2 && bSize <= Av1.BLOCK_32X32 && smooth(r, c, bSize, whole))
                 }
                 Av1.PARTITION_SPLIT -> {
                     for (q in 0 until 4) {
