@@ -166,6 +166,15 @@ class FuzzTest {
             KiteBitmap(9, 7, IntArray(63) { (((it * 37) and 0xFF) shl 24) or (it * 0x030507) }),
             Jp2EncodeOptions(layers = 2, levels = 2, sopMarkers = true, ephMarkers = true, terminateEachPass = true),
         ),
+        // HTJ2K from the encoder: lossy with SigProp and MagRef passes, and lossless with alpha and stripe-causal blocks (#187).
+        "jp2-ht" to ImageKodec.encodeJp2(
+            KiteBitmap(11, 9, IntArray(99) { 0xFF000000.toInt() or (it * 0x0A0503) }),
+            Jp2EncodeOptions(levels = 1, quality = 85, codeBlockWidth = 8, codeBlockHeight = 8, highThroughput = true),
+        ),
+        "jp2-ht-lossless" to ImageKodec.encodeJp2(
+            KiteBitmap(7, 6, IntArray(42) { (((it * 41) and 0xFF) shl 24) or (it * 0x050307) }),
+            Jp2EncodeOptions(lossless = true, levels = 1, verticalCausal = true, codestreamOnly = true, highThroughput = true),
+        ),
         // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
         *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
         // An AVIF the core's own encoder writes: 4:4:4 with alpha, palette blocks among intra ones, CDEF and restoration (#176).

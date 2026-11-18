@@ -272,6 +272,15 @@ class Jp2HtOracleTest {
     }
 
     @Test
+    fun theCommittedFixturesDecodeAlikeInOpenjpeg() {
+        assumeTrue("OpenJPEG tools not installed", tools())
+        compare("rgbaLossless", openjpeg(Jp2HtFixtures.rgbaLossless, false), kodec(Jp2HtFixtures.rgbaLossless, 8), 0, 0.0)
+        compare("gray12", openjpeg(Jp2HtFixtures.gray12, false), kodec(Jp2HtFixtures.gray12, 12), 0, 0.0)
+        val (worst, mean) = compare("rgbLossy", openjpeg(Jp2HtFixtures.rgbLossy, true), kodec(Jp2HtFixtures.rgbLossy, 8), lossyAllowance, lossyMean)
+        println("[#187] committed lossy fixture against OpenJPEG: worst=$worst mean=${"%.4f".format(mean)}")
+    }
+
+    @Test
     fun opjDumpReadsTheHtCodeBlockStyleAndTheFileIsJph() {
         assumeTrue("OpenJPEG tools not installed", tools())
         val bitmap = picture(97, 61, 3, seed = 10).toBitmap()
