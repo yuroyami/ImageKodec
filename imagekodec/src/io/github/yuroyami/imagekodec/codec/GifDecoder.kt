@@ -1,5 +1,8 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.archivekodec.ArchiveException
+import io.github.yuroyami.archivekodec.codec.lzw.Lzw
+import io.github.yuroyami.archivekodec.codec.lzw.LzwOptions
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
@@ -12,9 +15,9 @@ import io.github.yuroyami.imagekodec.internal.ByteReader
  * giflib's `DGifSlurp`, with the GIF89a spec + NETSCAPE2.0 extension note as
  * ground truth. Full container support:
  *
- *  - variable-width LZW with dictionary growth, mid-stream CLEAR codes, the
- *    KwKwK self-referencing case, and the "deferred clear" files that keep
- *    emitting 12-bit codes on a full dictionary
+ *  - variable-width LZW through ArchiveKodec's `Lzw`, including mid-stream CLEAR
+ *    codes and the "deferred clear" files that keep emitting 12-bit codes on a
+ *    full dictionary
  *  - global and per-frame local color tables
  *  - 4-pass interlacing
  *  - full animation compositing: frame rects offset into the logical screen,
@@ -33,7 +36,6 @@ internal object GifDecoder {
 
     private const val MAX_DIMENSION = 1 shl 16       // GIF fields are u16 anyway
     private const val MAX_TOTAL_PIXELS = 1L shl 28   // largest canvas; frames are counted against the input size
-    private const val MAX_CODES = 4096               // LZW dictionary limit (12-bit codes)
 
     /**
      * Decodes at most [maxFrames] frames and reads nothing past the last of them.
@@ -241,127 +243,19 @@ internal object GifDecoder {
     }
 
     /**
-     * GIF's variable-width LSB-first LZW. Decodes exactly [expected] indices;
-     * surplus compressed data is ignored (real encoders pad), a shortfall is a
-     * decode error. Handles mid-stream CLEAR, the KwKwK case (`code == avail`),
-     * dictionary growth with code-width bumps at 2^width, and deferred-clear
-     * streams that stay at 12 bits on a full table.
+     * GIF's LZW, decoded by ArchiveKodec. Decodes exactly [expected] indices. Surplus compressed
+     * data is ignored (real encoders pad), and a shortfall is a decode error.
      */
     private fun lzwDecode(input: ByteArray, minCodeSize: Int, expected: Int): ByteArray {
-        if (minCodeSize < 2 || minCodeSize > 11) {
+        if (minCodeSize < 2 || minCodeSize > 8) {
             throw ImageDecodeException("GIF: LZW minimum code size $minCodeSize out of range")
         }
-        val clear = 1 shl minCodeSize
-        val end = clear + 1
-
-        val prefix = IntArray(MAX_CODES)
-        val suffix = ByteArray(MAX_CODES)
-        val first = ByteArray(MAX_CODES)     // first byte of each code's chain, O(1) KwKwK
-        for (i in 0 until clear) {
-            suffix[i] = i.toByte()
-            first[i] = i.toByte()
+        val options = LzwOptions.gif(minCodeSize).copy { expectedSize = expected.toLong() }
+        return try {
+            Lzw.decode(input, options).output
+        } catch (e: ArchiveException) {
+            throw ImageDecodeException("GIF: ${e.message}", e)
         }
-
-        val out = ByteArray(expected)
-        var outAt = 0
-        val stack = ByteArray(MAX_CODES)
-
-        // All hot-loop state lives in plain locals (no captured-var closures:
-        // those box each `var` into a Ref object, a per-bit-read indirection
-        // that Kotlin/Native in particular does not optimise away).
-        var codeSize = minCodeSize + 1
-        var codeMask = (1 shl codeSize) - 1
-        var avail = clear + 2
-        var oldCode = -1
-
-        var bitBuf = 0
-        var bitCnt = 0
-        var inAt = 0
-
-        while (outAt < expected) {
-            while (bitCnt < codeSize) {
-                if (inAt == input.size) {
-                    throw ImageDecodeException("GIF: LZW data ended after $outAt of $expected pixels")
-                }
-                bitBuf = bitBuf or ((input[inAt++].toInt() and 0xFF) shl bitCnt)
-                bitCnt += 8
-            }
-            val code = bitBuf and codeMask
-            bitBuf = bitBuf ushr codeSize
-            bitCnt -= codeSize
-
-            when {
-                code == clear -> {
-                    codeSize = minCodeSize + 1
-                    codeMask = (1 shl codeSize) - 1
-                    avail = clear + 2
-                    oldCode = -1
-                }
-                code == end -> {
-                    if (outAt < expected) {
-                        throw ImageDecodeException("GIF: LZW end code after $outAt of $expected pixels")
-                    }
-                }
-                oldCode == -1 -> {
-                    if (code >= clear) throw ImageDecodeException("GIF: first LZW code $code is not a literal")
-                    out[outAt++] = code.toByte()
-                    oldCode = code
-                }
-                else -> {
-                    if (code > avail || (code == avail && avail == MAX_CODES)) {
-                        throw ImageDecodeException("GIF: LZW code $code beyond dictionary ($avail)")
-                    }
-                    if (code == avail) {
-                        // KwKwK: chain is oldCode's chain + oldCode's first byte;
-                        // and that's exactly what the new dictionary entry becomes,
-                        // so wire it up first and emit the new code's chain.
-                        prefix[avail] = oldCode
-                        suffix[avail] = first[oldCode]
-                        first[avail] = first[oldCode]
-                        avail++
-                        outAt = emitChain(code, clear, prefix, suffix, stack, out, outAt, expected)
-                    } else {
-                        outAt = emitChain(code, clear, prefix, suffix, stack, out, outAt, expected)
-                        if (avail < MAX_CODES) {
-                            prefix[avail] = oldCode
-                            suffix[avail] = first[code]
-                            first[avail] = first[oldCode]
-                            avail++
-                        }
-                    }
-                    if (avail == (1 shl codeSize) && codeSize < 12) {
-                        codeSize++
-                        codeMask = (1 shl codeSize) - 1
-                    }
-                    oldCode = code
-                }
-            }
-        }
-        return out
-    }
-
-    /** Emit [code]'s chain into [out] at [outAt]; returns the new write position. */
-    private fun emitChain(
-        code: Int,
-        clear: Int,
-        prefix: IntArray,
-        suffix: ByteArray,
-        stack: ByteArray,
-        out: ByteArray,
-        outAt: Int,
-        expected: Int,
-    ): Int {
-        var c = code
-        var sp = 0
-        while (c >= clear) {
-            stack[sp++] = suffix[c]
-            c = prefix[c]
-            if (sp >= MAX_CODES) throw ImageDecodeException("GIF: corrupt LZW prefix chain")
-        }
-        stack[sp++] = suffix[c]
-        var at = outAt
-        while (sp > 0 && at < expected) out[at++] = stack[--sp]
-        return at
     }
 
     /** Undo the 4-pass interlace: storage order → natural row order. */

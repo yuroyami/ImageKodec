@@ -26,7 +26,11 @@ product:
     - wasmWasi
 
 # The image codec core: format sniffing, the decoders and encoders, the ARGB pixel buffer and the
-# malformed-input guards. It depends on kotlin-stdlib only, so it has no dependencies section.
+# malformed-input guards.
+
+# ArchiveKodec supplies DEFLATE, zlib and CRC-32. Its types stay out of the public API.
+dependencies:
+  - $libs.archivekodec
 
 # The JVM actuals of the test helpers in test@jvmAndAndroid also serve the Android host tests.
 aliases:
@@ -51,7 +55,7 @@ settings:
         Pure-Kotlin image codec core for Kotlin Multiplatform. Decodes PNG and APNG, JPEG, GIF, BMP, TIFF, JPEG 2000,
         WebP (lossy, lossless and animated), AVIF, JPEG XL and JPEG XR; encodes PNG and APNG, JPEG, GIF, BMP, TIFF and
         lossless WebP. Header-only probing, EXIF orientation, EXIF, XMP and ICC metadata kept through a re-encode,
-        colour conversion to sRGB, geometry ops and hostile-input guards. kotlin-stdlib only; 22 targets across
+        colour conversion to sRGB, geometry ops and hostile-input guards. Pure Kotlin; 22 targets across
         Android, JVM, Apple, Linux, Windows, androidNative, JS and Wasm.
 
 # The decompression-bomb guards sit at about 1 GiB of decoded pixels, and the fuzz suite drives

@@ -3,7 +3,7 @@ package io.github.yuroyami.imagekodec.internal.flate
 /**
  * A minimal growable byte buffer: the pure-Kotlin equivalent of a `ByteArrayOutputStream`,
  * with no `java.io` dependency so it lives in `commonMain`. Amortised O(1) append by
- * doubling. Used by the DEFLATE encoder and the gzip/zlib framers.
+ * doubling. The encoders build their files in it.
  */
 internal class ByteArrayBuilder(initialCapacity: Int = 64) {
     private var buf = ByteArray(if (initialCapacity < 16) 16 else initialCapacity)

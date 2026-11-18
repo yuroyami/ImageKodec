@@ -1,6 +1,6 @@
 package io.github.yuroyami.imagekodec
 
-import io.github.yuroyami.imagekodec.internal.flate.Crc32
+import io.github.yuroyami.archivekodec.checksum.Crc32
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals

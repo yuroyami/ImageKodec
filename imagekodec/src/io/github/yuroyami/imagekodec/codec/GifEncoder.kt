@@ -1,12 +1,14 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.archivekodec.codec.lzw.Lzw
+import io.github.yuroyami.archivekodec.codec.lzw.LzwOptions
 import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
 
 /**
  * GIF89a encoder: colour quantisation, optional error-diffusion dithering, and a
- * real variable-width LZW compressor. Writes stills and animations through the
+ * the variable-width LZW compressor of ArchiveKodec (`Lzw`). Writes stills and animations through the
  * same path, because in GIF a still simply is an animation of one frame.
  *
  * **Palette.** GIF allows 256 colours per table, so the encoder counts the
@@ -33,7 +35,6 @@ import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
  */
 internal object GifEncoder {
 
-    private const val MAX_CODES = 4096
     private const val MAX_SIDE = 65535                // width and height are 16-bit fields
     private const val TRANSPARENT_CUTOFF = 128       // alpha < this becomes the transparent index
 
@@ -120,7 +121,7 @@ internal object GifEncoder {
             out.append(0)
 
             out.append(minCodeSize.toByte())
-            writeSubBlocks(out, lzwEncode(indices, minCodeSize))
+            writeSubBlocks(out, Lzw.encode(indices, LzwOptions.gif(minCodeSize)))
         }
 
         out.append(0x3B.toByte())                        // trailer
@@ -426,80 +427,6 @@ internal object GifEncoder {
             }
             cache[key] = best
             return best
-        }
-    }
-
-    // --- LZW ---------------------------------------------------------------------
-
-    /**
-     * GIF's variable-width LSB-first LZW, the exact inverse of the decoder in
-     * [GifDecoder]: codes widen when the next free code reaches `2^width`, and a
-     * full 4096-entry table emits a CLEAR and starts over.
-     */
-    private fun lzwEncode(indices: ByteArray, minCodeSize: Int): ByteArray {
-        val clear = 1 shl minCodeSize
-        val end = clear + 1
-        val bits = BitWriter()
-
-        var codeSize = minCodeSize + 1
-        var next = end + 1
-        val dict = HashMap<Int, Int>(1024)
-
-        bits.write(clear, codeSize)
-        if (indices.isEmpty()) {
-            bits.write(end, codeSize)
-            return bits.finish()
-        }
-
-        var prefix = indices[0].toInt() and 0xFF
-        for (i in 1 until indices.size) {
-            val k = indices[i].toInt() and 0xFF
-            val key = (prefix shl 8) or k
-            val existing = dict[key]
-            if (existing != null) {
-                prefix = existing
-                continue
-            }
-            bits.write(prefix, codeSize)
-            if (next < MAX_CODES) {
-                dict[key] = next++
-                // The decoder learns each entry one code later than the encoder
-                // creates it, so its `avail` always trails this `next` by one.
-                // Widening at `next > 2^width` (not `==`) is what keeps the two
-                // sides reading and writing the same number of bits.
-                if (next > (1 shl codeSize) && codeSize < 12) codeSize++
-            } else {
-                bits.write(clear, codeSize)
-                dict.clear()
-                codeSize = minCodeSize + 1
-                next = end + 1
-            }
-            prefix = k
-        }
-        bits.write(prefix, codeSize)
-        bits.write(end, codeSize)
-        return bits.finish()
-    }
-
-    /** LSB-first bit packer: GIF fills each byte from bit 0 upward. */
-    private class BitWriter {
-        private val out = ByteArrayBuilder(256)
-        private var acc = 0
-        private var count = 0
-
-        fun write(code: Int, width: Int) {
-            acc = acc or (code shl count)
-            count += width
-            while (count >= 8) {
-                out.append((acc and 0xFF).toByte())
-                acc = acc ushr 8
-                count -= 8
-            }
-        }
-
-        fun finish(): ByteArray {
-            if (count > 0) out.append((acc and 0xFF).toByte())
-            return out.toByteArray()
         }
     }
 }

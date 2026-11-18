@@ -84,7 +84,14 @@ reviewable in the diff.
 
 ### Changed
 
-- The build moves from Gradle to the Kotlin Toolchain 0.13 (`./kotlin`, with
+- The core artifact now depends on `io.github.yuroyami:archivekodec:0.2.0` for DEFLATE, zlib,
+  CRC-32, LZW, PackBits and Huffman code lengths, instead of its own copy of that code. PNG,
+  TIFF, APNG and the ICC and text chunks inflate and deflate through ArchiveKodec. GIF and TIFF
+  LZW, TIFF PackBits and the Huffman codes of the lossless WebP encoder use it too. The public
+  API does not change.
+- A GIF whose LZW minimum code size is above 8 now fails to decode. The GIF specification
+  allows 2 to 8, and the decoder accepted up to 11 before.
+- The build moves from Gradle to the Kotlin Toolchain 0.14 (`./kotlin`, with
   `project.yaml` and a `module.yaml` for each module). Kotlin stays at 2.4.21. The
   coordinates, the targets and the klib names do not change, so libraries built
   against 0.3.0 still link.

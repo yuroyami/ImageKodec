@@ -1,7 +1,7 @@
 package io.github.yuroyami.imagekodec
 
+import io.github.yuroyami.archivekodec.checksum.Crc32
 import io.github.yuroyami.imagekodec.codec.Vp8Tables
-import io.github.yuroyami.imagekodec.internal.flate.Crc32
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

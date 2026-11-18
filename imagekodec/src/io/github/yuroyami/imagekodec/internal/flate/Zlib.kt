@@ -1,47 +1,33 @@
 package io.github.yuroyami.imagekodec.internal.flate
 
-/*
- * Vendored from ArchiveKodec (io.github.yuroyami.archivekodec.wrapper.Zlib), trimmed
- * to the decompress path: PNG only inflates here; the PNG *encoder* will bring the
- * deflate side when it lands. Swap for the `archivekodec` artifact once it is on
- * Maven Central.
- */
+import io.github.yuroyami.archivekodec.codec.deflate.InflateBlockListener
+import io.github.yuroyami.archivekodec.codec.deflate.InflateOptions
+import io.github.yuroyami.archivekodec.security.ArchiveLimits
+import io.github.yuroyami.archivekodec.wrapper.Zlib as ArchiveZlib
 
 /**
- * zlib (RFC 1950) framing over [Inflate]/[Deflate]: a 2-byte CMF/FLG header and
- * a big-endian Adler-32 trailer. This is the wrapper PNG `IDAT` uses. The
- * compress side arrived with the PNG encoder (vendored from ArchiveKodec like the
- * rest of this package).
+ * zlib (RFC 1950) streams for PNG `IDAT`, `iCCP`, `zTXt` and TIFF Deflate strips, through ArchiveKodec.
+ *
+ * The decoders read the way libpng and libtiff do in practice: the Adler-32 trailer is not checked,
+ * and bytes after the stream are ignored.
  */
 internal object Zlib {
 
     /** Compress [data] into a zlib stream. */
-    fun compress(data: ByteArray): ByteArray {
-        val out = ByteArrayBuilder(data.size / 2 + 16)
-        // CMF = 0x78 (CM=8, CINFO=7 → 32 KiB window), FLG = 0x9C so that
-        // (CMF*256 + FLG) % 31 == 0 with FLEVEL=2, FDICT=0.
-        out.append(0x78.toByte())
-        out.append(0x9C.toByte())
-        out.append(Deflate.encode(data))
-        val adler = Adler32.of(data)
-        out.append(((adler ushr 24) and 0xFF).toByte())   // big-endian
-        out.append(((adler ushr 16) and 0xFF).toByte())
-        out.append(((adler ushr 8) and 0xFF).toByte())
-        out.append((adler and 0xFF).toByte())
-        return out.toByteArray()
-    }
+    fun compress(data: ByteArray): ByteArray = ArchiveZlib.compress(data)
 
     /**
-     * Decompress a zlib stream. The Adler-32 trailer is not re-validated here.
+     * Decompress a zlib stream.
      *
-     * [maximumSize] is the decompression-bomb guard, enforced *during* inflate:
-     * the stream aborts the moment the output would exceed it, before that
-     * memory is allocated. PNG/TIFF callers pass the exact expected size
-     * computed from the headers, so anything larger is malformed by definition;
-     * that exact size also preallocates the output buffer (no growth copies).
-     * A caller whose [maximumSize] is only a ceiling passes a [sizeHint] of its
-     * own, or 0 to let the buffer grow, so a small stream does not take the
-     * whole ceiling's memory.
+     * [maximumSize] is the decompression-bomb guard. The inflater stops as soon as the output would
+     * pass it, before it allocates that memory. PNG and TIFF pass the exact size that the headers
+     * give, which also preallocates the output. A caller whose [maximumSize] is only a ceiling passes
+     * a [sizeHint] of its own, or 0 to let the buffer grow.
+     *
+     * [cancel] runs after each DEFLATE block, so an image decode can stop inside its inflate.
+     *
+     * @throws io.github.yuroyami.archivekodec.ArchiveException for a malformed or truncated stream,
+     *   or for output past [maximumSize].
      */
     fun decompress(
         input: ByteArray,
@@ -50,22 +36,13 @@ internal object Zlib {
         cancel: (() -> Unit)? = null,
     ): ByteArray {
         require(maximumSize > 0) { "maximumSize must be > 0" }
-        if (input.size < 2) throw InflateException(InflateError.INVALID_ZLIB_HEADER)
-
-        val cmf = input[0].toInt() and 0xFF
-        val flg = input[1].toInt() and 0xFF
-        if ((cmf and 0x0F) != 8 || ((cmf ushr 4) and 0x0F) > 7) {
-            throw InflateException(InflateError.INVALID_ZLIB_HEADER)
+        val options = InflateOptions {
+            limits = ArchiveLimits { maxUncompressedBytes = maximumSize }
+            this.sizeHint = sizeHint.toLong()
+            verifyChecksum = false
+            allowTrailingData = true
+            if (cancel != null) onBlock = InflateBlockListener { _, _ -> cancel() }
         }
-        if ((flg and 0x20) != 0) throw InflateException(InflateError.INVALID_ZLIB_HEADER) // FDICT
-        if (((cmf shl 8) or flg) % 31 != 0) throw InflateException(InflateError.INVALID_ZLIB_HEADER)
-
-        return Inflate.inflate(
-            input,
-            offset = 2,
-            sizeHint = sizeHint,
-            maxOutput = maximumSize,
-            cancel = cancel,
-        )
+        return ArchiveZlib.decompress(input, options).output
     }
 }

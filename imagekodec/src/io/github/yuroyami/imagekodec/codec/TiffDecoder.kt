@@ -1,12 +1,16 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.archivekodec.ArchiveException
+import io.github.yuroyami.archivekodec.codec.lzw.Lzw
+import io.github.yuroyami.archivekodec.codec.lzw.LzwOptions
+import io.github.yuroyami.archivekodec.codec.packbits.PackBits
+import io.github.yuroyami.archivekodec.codec.packbits.PackBitsOptions
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.internal.color.Ink
-import io.github.yuroyami.imagekodec.internal.flate.InflateException
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 
 /**
@@ -417,7 +421,7 @@ internal object TiffDecoder {
                 5 -> tiffLzw(comp, expect)
                 8, 32946 -> try {
                     Zlib.decompress(comp, expect.toLong(), cancel = cancel)
-                } catch (e: InflateException) {
+                } catch (e: ArchiveException) {
                     throw ImageDecodeException("TIFF: strip inflate failed: ${e.message}", e)
                 }
                 32773 -> packBits(comp, expect)
@@ -929,120 +933,17 @@ internal object TiffDecoder {
         return CcittFax.decode(comp, k, opts)
     }
 
-    /** TIFF flavor of LZW: MSB-first codes, EarlyChange (code width bumps one early). */
-    private fun tiffLzw(input: ByteArray, expected: Int): ByteArray {
-        val clear = 256
-        val eoi = 257
-        val out = ByteArray(expected)
-        var outAt = 0
-
-        val prefix = IntArray(4096)
-        val suffix = ByteArray(4096)
-        val first = ByteArray(4096)
-        for (i in 0 until 256) {
-            suffix[i] = i.toByte()
-            first[i] = i.toByte()
-        }
-        val stack = ByteArray(4096)
-
-        var codeSize = 9
-        var avail = 258
-        var oldCode = -1
-
-        var bitBuf = 0
-        var bitCnt = 0
-        var inAt = 0
-
-        fun readCode(): Int {
-            while (bitCnt < codeSize) {
-                if (inAt == input.size) return -1
-                bitBuf = (bitBuf shl 8) or (input[inAt++].toInt() and 0xFF)
-                bitCnt += 8
-            }
-            val code = (bitBuf ushr (bitCnt - codeSize)) and ((1 shl codeSize) - 1)
-            bitCnt -= codeSize
-            return code
-        }
-
-        fun emit(code: Int) {
-            var c = code
-            var sp = 0
-            while (c >= clear) {
-                stack[sp++] = suffix[c]
-                c = prefix[c]
-                if (sp >= stack.size) err("corrupt LZW chain")
-            }
-            stack[sp++] = suffix[c]
-            while (sp > 0 && outAt < expected) out[outAt++] = stack[--sp]
-        }
-
-        while (outAt < expected) {
-            val code = readCode()
-            when {
-                code == -1 -> err("LZW data ended after $outAt of $expected bytes")
-                code == eoi -> break
-                code == clear -> {
-                    codeSize = 9
-                    avail = 258
-                    oldCode = -1
-                }
-                oldCode == -1 -> {
-                    if (code >= clear) err("first LZW code $code not a literal")
-                    out[outAt++] = code.toByte()
-                    oldCode = code
-                }
-                else -> {
-                    if (code > avail) err("LZW code $code beyond dictionary")
-                    if (code == avail) {
-                        prefix[avail] = oldCode
-                        suffix[avail] = first[oldCode]
-                        first[avail] = first[oldCode]
-                        avail++
-                        emit(code)
-                    } else {
-                        emit(code)
-                        if (avail < 4096) {
-                            prefix[avail] = oldCode
-                            suffix[avail] = first[code]
-                            first[avail] = first[oldCode]
-                            avail++
-                        }
-                    }
-                    // EarlyChange: width grows one code before the table fills.
-                    if (avail == (1 shl codeSize) - 1 && codeSize < 12) codeSize++
-                    oldCode = code
-                }
-            }
-        }
-        if (outAt != expected) err("LZW data ended after $outAt of $expected bytes")
-        return out
+    /** TIFF LZW (MSB-first codes with early change), decoded by ArchiveKodec. */
+    private fun tiffLzw(input: ByteArray, expected: Int): ByteArray = try {
+        Lzw.decode(input, LzwOptions { expectedSize = expected.toLong() }).output
+    } catch (e: ArchiveException) {
+        throw ImageDecodeException("TIFF: ${e.message}", e)
     }
 
-    /** PackBits (Apple RLE). */
-    private fun packBits(input: ByteArray, expected: Int): ByteArray {
-        val out = ByteArray(expected)
-        var o = 0
-        var i = 0
-        while (o < expected && i < input.size) {
-            val n = input[i++].toInt()
-            when {
-                n >= 0 -> {
-                    val run = n + 1
-                    if (i + run > input.size) err("PackBits literal overruns input")
-                    for (k in 0 until run) {
-                        if (o < expected) out[o++] = input[i + k]
-                    }
-                    i += run
-                }
-                n != -128 -> {
-                    if (i >= input.size) err("PackBits run overruns input")
-                    val b = input[i++]
-                    repeat(1 - n) { if (o < expected) out[o++] = b }
-                }
-                // -128: no-op
-            }
-        }
-        if (o != expected) err("PackBits data ended after $o of $expected bytes")
-        return out
+    /** PackBits (Apple RLE), decoded by ArchiveKodec. */
+    private fun packBits(input: ByteArray, expected: Int): ByteArray = try {
+        PackBits.decode(input, PackBitsOptions { expectedSize = expected.toLong() }).output
+    } catch (e: ArchiveException) {
+        throw ImageDecodeException("TIFF: ${e.message}", e)
     }
 }

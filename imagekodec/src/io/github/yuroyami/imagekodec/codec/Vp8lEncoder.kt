@@ -1,8 +1,8 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.archivekodec.codec.huffman.HuffmanCode
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
-import io.github.yuroyami.imagekodec.internal.flate.Deflater
 import kotlin.math.abs
 import kotlin.math.ln
 
@@ -940,8 +940,8 @@ internal object Vp8lEncoder {
         private val used = freq.indices.filter { freq[it] > 0 }
 
         init {
-            lengths = if (used.size <= 1) IntArray(freq.size) else Deflater.codeLengths(freq, 15)
-            codes = Deflater.canonicalCodes(lengths)
+            lengths = if (used.size <= 1) IntArray(freq.size) else HuffmanCode.lengths(freq, 15)
+            codes = HuffmanCode.canonicalCodes(lengths)
         }
 
         /** A code with one symbol or none reads no bits, so writes none. */
@@ -977,9 +977,9 @@ internal object Vp8lEncoder {
                 clFreq[runs[r]]++
                 r += 2
             }
-            val clLengths = Deflater.codeLengths(clFreq, 7)
+            val clLengths = HuffmanCode.lengths(clFreq, 7)
             if (clFreq.count { it > 0 } == 1) clLengths[clFreq.indexOfFirst { it > 0 }] = 1
-            val clCodes = Deflater.canonicalCodes(clLengths)
+            val clCodes = HuffmanCode.canonicalCodes(clLengths)
             var numCodeLengths = CODE_LENGTH_CODES
             while (numCodeLengths > 4 && clLengths[CODE_LENGTH_CODE_ORDER[numCodeLengths - 1]] == 0) numCodeLengths--
             out.write(numCodeLengths - 4, 4)

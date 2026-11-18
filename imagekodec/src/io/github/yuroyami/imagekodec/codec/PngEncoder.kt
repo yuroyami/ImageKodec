@@ -1,9 +1,9 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.archivekodec.checksum.Crc32
 import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
-import io.github.yuroyami.imagekodec.internal.flate.Crc32
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 import kotlin.math.abs
 
@@ -15,7 +15,7 @@ import kotlin.math.abs
  * out of scope for v1: every decoder reads truecolor, and correctness beats
  * bytes here. Per row, all five filters are tried and the one with the minimal
  * sum of absolute differences wins (the classic libpng "MSAD" heuristic) before
- * the stream goes through the vendored zlib deflate.
+ * the stream goes through ArchiveKodec's zlib deflate.
  *
  * An animation is written as APNG (PNG Third Edition): the first frame is the default
  * image, so a reader without APNG support shows it, and every later frame is the

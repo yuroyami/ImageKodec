@@ -1,6 +1,6 @@
 package io.github.yuroyami.imagekodec
 
-import io.github.yuroyami.imagekodec.internal.flate.InflateException
+import io.github.yuroyami.archivekodec.security.DecompressionBombException
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 import java.util.zip.Deflater
 import java.io.ByteArrayOutputStream
@@ -140,12 +140,12 @@ class InflateOracleTest {
         // the inflate the moment output would exceed it, throwing rather than
         // materialising megabytes first.
         val bomb = zlibCompress(ByteArray(8 * 1024 * 1024), level = 9)
-        assertFailsWith<InflateException> {
+        assertFailsWith<DecompressionBombException> {
             Zlib.decompress(bomb, maximumSize = 10_000)
         }
     }
 
-    /** Our encoder's stored, fixed and dynamic blocks, read back by the JDK's zlib (#20). */
+    /** The zlib streams that the encoders write, with stored, fixed and dynamic blocks, read back by the JDK's zlib (#20). */
     @Test
     fun ourBlocksDecodeInZlib() {
         val random = kotlin.random.Random(20)
@@ -155,8 +155,8 @@ class InflateOracleTest {
             random.nextBytes(70_000) + ByteArray(50_000) { (it / 1000).toByte() } + text + random.nextBytes(20_000),
             ByteArray(0),
         )) {
-            val packed = io.github.yuroyami.imagekodec.internal.flate.Deflate.encode(data)
-            val inflater = java.util.zip.Inflater(true)
+            val packed = Zlib.compress(data)
+            val inflater = java.util.zip.Inflater()
             inflater.setInput(packed)
             val out = java.io.ByteArrayOutputStream()
             val buf = ByteArray(65536)

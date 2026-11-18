@@ -45,7 +45,7 @@ class WebpDecoderTest {
             bytes[i * 4 + 2] = (p ushr 8).toByte()
             bytes[i * 4 + 3] = p.toByte()
         }
-        return io.github.yuroyami.imagekodec.internal.flate.Crc32().apply { update(bytes) }.value()
+        return io.github.yuroyami.archivekodec.checksum.Crc32().apply { update(bytes) }.value()
     }
 
     // --- sniffing and probing ----------------------------------------------------

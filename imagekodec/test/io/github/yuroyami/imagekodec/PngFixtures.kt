@@ -1,6 +1,6 @@
 package io.github.yuroyami.imagekodec
 
-import io.github.yuroyami.imagekodec.internal.flate.Crc32
+import io.github.yuroyami.archivekodec.checksum.Crc32
 
 /** Building blocks for PNG files that a test has to assemble by hand. */
 

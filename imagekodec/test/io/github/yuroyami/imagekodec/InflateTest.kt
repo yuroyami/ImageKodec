@@ -1,8 +1,7 @@
 package io.github.yuroyami.imagekodec
 
-import io.github.yuroyami.imagekodec.internal.flate.Inflate
-import io.github.yuroyami.imagekodec.internal.flate.InflateError
-import io.github.yuroyami.imagekodec.internal.flate.InflateException
+import io.github.yuroyami.archivekodec.codec.deflate.InflateError
+import io.github.yuroyami.archivekodec.codec.deflate.InflateException
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -36,20 +35,5 @@ class InflateTest {
         assertFailsWith<ImageDecodeException> { ImageKodec.decode(png) }
         assertFailsWith<ImageDecodeException> { ImageKodec.decodeReduced(png, 2) }
         assertFailsWith<ImageDecodeException> { ImageKodec.decodeAnimation(png) }
-    }
-
-    @Test
-    fun rawDeflateMutationsOnlyThrowInflateErrors() {
-        val seeds = listOf(hex(FLUSHED_ZLIB).copyOfRange(2, hex(FLUSHED_ZLIB).size - 4),
-            hex(INVALID_DISTANCE_ZLIB).copyOfRange(2, hex(INVALID_DISTANCE_ZLIB).size))
-        for (seed in seeds) for (at in seed.indices) for (bit in 0..7) {
-            val bytes = seed.copyOf()
-            bytes[at] = (bytes[at].toInt() xor (1 shl bit)).toByte()
-            try {
-                Inflate.inflate(bytes, maxOutput = 4096)
-            } catch (_: InflateException) {
-                // Malformed data and the output cap have the same typed contract.
-            }
-        }
     }
 }

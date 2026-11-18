@@ -1,5 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.archivekodec.ArchiveException
+import io.github.yuroyami.archivekodec.checksum.Crc32
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
@@ -8,11 +10,9 @@ import io.github.yuroyami.imagekodec.KiteFrame
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.internal.ByteReader
-import io.github.yuroyami.imagekodec.internal.sourceOver
-import io.github.yuroyami.imagekodec.internal.flate.Crc32
 import io.github.yuroyami.imagekodec.internal.flate.MAX_ARRAY
-import io.github.yuroyami.imagekodec.internal.flate.InflateException
 import io.github.yuroyami.imagekodec.internal.flate.Zlib
+import io.github.yuroyami.imagekodec.internal.sourceOver
 
 /**
  * PNG decoder (W3C PNG spec / RFC 2083), ported against `stb_image.h`'s
@@ -517,7 +517,7 @@ internal object PngDecoder {
         if (expected > MAX_ARRAY) throw ImageDecodeException("PNG: $expected inflated bytes do not fit in one array")
         val inflated = try {
             Zlib.decompress(compressed, maximumSize = expected, cancel = cancel)
-        } catch (e: InflateException) {
+        } catch (e: ArchiveException) {
             throw ImageDecodeException("PNG: IDAT inflate failed: ${e.message}", e)
         }
         if (inflated.size.toLong() != expected) {

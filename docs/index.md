@@ -20,7 +20,8 @@ web. Common code that needs real pixels (a thumbnail hash, a server-side resize,
 a PDF) therefore has to call per-platform code.
 
 ImageKodec decodes in common Kotlin instead. Every format comes back as non-premultiplied ARGB_8888
-in a plain `IntArray`, and the core artifact depends on `kotlin-stdlib` and nothing else.
+in a plain `IntArray`. The core artifact is pure Kotlin, and its one dependency is ArchiveKodec,
+which supplies DEFLATE, zlib, LZW and PackBits.
 
 ## Install
 
