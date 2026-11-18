@@ -201,8 +201,16 @@ reviewable in the diff.
   table with `stts`, `ctts` when pictures are reordered, `stsc`, `stsz`, `stco` or `co64`, and `stss`).
   `HeifEncoder.openSequence`, `HeifSequenceEncoder` and `HeifCodedSample`, under `ExperimentalHeifCodecApi`,
   let a module code the pictures of a track; `encodeHeic(animation, options, metadata, cancellationCheck)`
-  goes through them and, until the `imagekodec-heic` module has an HEVC sequence encoder, throws
-  `UnsupportedImageException` that says so (#177).
+  goes through them, and without the `imagekodec-heic` module throws `UnsupportedImageException` that names
+  it (#177).
+- `encodeHeic(animation, options)` writes a HEIC image sequence through the HEVC sequence encoder of
+  `imagekodec-heic`, P and B pictures with an IDR picture every `keyFrameInterval` frames. The file leads with
+  the brand of its first picture (`heic` or `heix`), the primary item, and lists `hevc` or `hevx` among the
+  compatible brands, as libheif 1.17 refuses a major brand of `hevc`. ffmpeg reads every frame at its time
+  and, in a lossless file, exactly; heif-convert reads the first frame (`HeicSequenceEncodeOracleTest`) (#177).
+- `decodeAnimation` gives the last frame of a reordered track, as an HEVC track with B pictures is, the time
+  left of the track. It gave the `stts` duration of the last sample by composition time, which in such a
+  track is the slot of another frame (#177).
 - `ImageKodec.encodeHeic(bitmap, quality)`, `encodeHeic(bitmap, options, metadata, cancellationCheck)` and
   `encodeHeic16` write HEIC files: a HEIF writer in the core (`ftyp`, `meta` with `hdlr`, `pitm`, `iloc`,
   `iinf`, `iref`, `iprp` and `idat`, then `mdat`) around the intra HEVC encoder of `imagekodec-heic`, which

@@ -1,9 +1,11 @@
 package io.github.yuroyami.imagekodec.heic
 
 import io.github.yuroyami.imagekodec.HeifCodedPicture
+import io.github.yuroyami.imagekodec.HeifCodedSample
 import io.github.yuroyami.imagekodec.HeifEncodeParameters
 import io.github.yuroyami.imagekodec.HeifEncoder
 import io.github.yuroyami.imagekodec.HeifPlanes
+import io.github.yuroyami.imagekodec.HeifSequenceEncoder
 
 /** The intra [HevcEncoder] as the encoder of `hvc1` items, for the core's HEIF writer (#174). */
 internal object HevcHeifEncoder : HeifEncoder {
@@ -43,6 +45,47 @@ internal object HevcHeifEncoder : HeifEncoder {
         }
         val settings = HevcEncoderSettings(quality = parameters.quality, lossless = parameters.lossless, effort = parameters.effort)
         return HevcEncoder.encodeSequence(frames, durations, frames.firstOrNull()?.fullRange ?: false, colour, settings, sequence, cancellationCheck)
+    }
+
+    override fun openSequence(parameters: HeifEncodeParameters, keyFrameInterval: Int): HeifSequenceEncoder =
+        Sequence(parameters, HevcSequenceSettings(irapPeriod = keyFrameInterval))
+
+    /**
+     * An `hvc1` track (#177). B pictures refer to pictures after them, so the planner needs the whole sequence:
+     * [encode] keeps each picture, and [finish] codes them all and gives the samples in decoding order.
+     */
+    private class Sequence(private val parameters: HeifEncodeParameters, private val settings: HevcSequenceSettings) : HeifSequenceEncoder {
+        private val frames = ArrayList<HeifPlanes>()
+        private var coded: HevcSequence? = null
+
+        override val sampleEntryType: String = "hvc1"
+        override val brand: String get() = sequenceBrand(done())
+        override val imageBrand: String get() = if (done().profile == "Main") "heic" else "heix"
+        override val configuration: ByteArray get() = done().hvcC
+
+        override fun encode(planes: HeifPlanes, cancellationCheck: (() -> Unit)?): List<HeifCodedSample> {
+            check(coded == null) { "HEVC: the sequence is finished" }
+            frames.firstOrNull()?.let { f ->
+                require(planes.width == f.width && planes.height == f.height && planes.bitDepthLuma == f.bitDepthLuma && planes.bitDepthChroma == f.bitDepthChroma &&
+                    planes.subX == f.subX && planes.subY == f.subY && planes.planes.size == f.planes.size) {
+                    "HEVC: every picture of a sequence has the first one's size, depth and chroma format"
+                }
+            }
+            frames += planes
+            return emptyList()
+        }
+
+        override fun finish(cancellationCheck: (() -> Unit)?): List<HeifCodedSample> {
+            check(coded == null) { "HEVC: the sequence is finished" }
+            require(frames.isNotEmpty()) { "HEVC: a sequence of no pictures" }
+            // The core writes the timing of the track, so each picture lasts one tick here.
+            val sequence = encodeSequence(frames, LongArray(frames.size) { 1 }, parameters, settings, cancellationCheck)
+            coded = sequence
+            frames.clear()
+            return sequence.samples.map { HeifCodedSample(it.data, it.frame, it.sync) }
+        }
+
+        private fun done(): HevcSequence = checkNotNull(coded) { "HEVC: the sequence is not finished" }
     }
 
     /**

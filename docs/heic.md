@@ -319,10 +319,18 @@ than 0.04. The scenes are synthetic and short; no camera footage was measured.
 
 `encodeHeic(animation, options)` is in place for image sequences (#177): the core writes the track as it
 does for an animated AVIF, and asks the `hvc1` encoder for a sequence encoder through
-`HeifEncoder.openSequence`. The module's encoder has none yet, so the call throws
-`UnsupportedImageException` that says so; without the module it names the module, as `encodeHeic` of a
-bitmap does. A sequence encoder hands its samples back in decoding order, each naming the picture it
-codes, and the core writes the composition offsets (`ctts`) that reordered pictures need.
+`HeifEncoder.openSequence`. The module's sequence encoder keeps every picture until the last, as the
+B pictures of a group refer to the pictures after them, then codes them with `encodeSequence` and hands
+the samples back in decoding order, each naming the picture it codes. The core writes the composition
+offsets (`ctts`) that reordered pictures need, and `keyFrameInterval` becomes the IDR period. Without
+the module the call throws `UnsupportedImageException` that names the module, as `encodeHeic` of a bitmap
+does.
+
+The file leads with the brand of its first picture, `heic` or `heix`, since that picture is also the
+primary item, and lists `hevc` or `hevx` among the compatible brands: libheif 1.17 refuses a file whose
+major brand is `hevc`. `HeicSequenceEncodeOracleTest` holds the files to ffmpeg, which must read every
+frame of the track at its presentation time, and exactly in a lossless file, and to heif-convert, which
+must read the first frame as the primary item.
 
 ## Platforms
 

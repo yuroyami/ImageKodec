@@ -447,8 +447,8 @@ The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed
 
 `encodeAvif(animation, options)` writes an AV1 image sequence (#177): a track of every frame with its
 delay, which `decodeAnimation` plays and libavif and ffmpeg read. `encodeHeic(animation, options)` writes
-the same track around HEVC pictures once the `imagekodec-heic` module has a sequence encoder; until then
-it throws `UnsupportedImageException` that says so.
+the same track around HEVC P and B pictures with the `imagekodec-heic` module, and without it throws
+`UnsupportedImageException` that names the module.
 
 ```kotlin
 val animated = ImageKodec.encodeAvif(animation, HeifEncodeOptions(quality = 60))

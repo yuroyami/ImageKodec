@@ -68,7 +68,7 @@ internal object HeifEncode {
         return writer.build()
     }
 
-    const val NEEDS_HEIC_SEQUENCE = "HEIC image sequences need a sequence encoder for 'hvc1', which the imagekodec-heic module does not provide yet"
+    const val NEEDS_HEIC_SEQUENCE = "HEIC image sequences need a sequence encoder for 'hvc1', and the registered one codes still pictures only"
 
     /** The timescale of a sequence's track: milliseconds, the unit of [KiteFrame.delayMillis]. */
     private const val TIMESCALE = 1000L
@@ -154,7 +154,11 @@ internal object HeifEncode {
         }
         Writing(encoder, options, metadata, cancel, heif).metadata(primary)
         // AVIF 1.1 section 6 and ISO/IEC 23008-12 Annex B: the sequence brand first, the still image brand beside it.
-        return heif.build(colourCoder.brand, listOf(colourCoder.imageBrand, colourCoder.brand, "msf1", "iso8", "mif1", "miaf"))
+        // libheif 1.17 refuses a file whose major brand is HEVC's sequence brand 'hevc' or 'hevx' ("unsupported
+        // HEIF/AVIF file type"), so a HEIC sequence leads with the brand of its first picture, which is the
+        // primary item, and lists the sequence brand among the compatible ones. AVIF leads with 'avis'.
+        val major = if (itemType == "hvc1") colourCoder.imageBrand else colourCoder.brand
+        return heif.build(major, listOf(colourCoder.imageBrand, colourCoder.brand, "msf1", "iso8", "mif1", "miaf"))
     }
 
     /**

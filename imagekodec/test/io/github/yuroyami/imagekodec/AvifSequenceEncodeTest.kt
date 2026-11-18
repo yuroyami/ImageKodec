@@ -147,7 +147,7 @@ class AvifSequenceEncodeTest {
         val a = moving(8, 8, 2)
         val none = assertFailsWith<UnsupportedImageException> { ImageKodec.encodeHeic(a, HeifEncodeOptions()) }
         assertTrue("imagekodec-heic" in (none.message ?: ""), none.message)
-        // An HEVC encoder that codes still pictures only, as the module's is before it gains a sequence encoder.
+        // An HEVC encoder that codes still pictures only, which says the sequence encoder is missing.
         ImageKodec.registerHeifEncoder(object : HeifEncoder {
             override val itemType = "hvc1"
             override val configurationType = "hvcC"
