@@ -973,8 +973,9 @@ public object ImageKodec {
      * result returns the exact same pixels.
      *
      * The file is little endian, in strips of about 8 KiB compressed with Deflate after
-     * the horizontal differencing predictor, as libtiff writes with `-c zip -p 2`. It
-     * does not write tiles, CMYK, palettes or JPEG compression, which the decoder reads.
+     * the horizontal differencing predictor, as libtiff writes with `-c zip -p 2`. The
+     * overload with [TiffEncodeOptions] writes the other compressions, tiles, bi-level and
+     * palette pages, and [encodeTiffCmyk] writes CMYK.
      */
     public fun encodeTiff(bitmap: KiteBitmap): ByteArray = TiffEncoder.encode(listOf(bitmap))
 
@@ -1003,6 +1004,114 @@ public object ImageKodec {
      */
     @Throws(IllegalArgumentException::class)
     public fun encodeTiff16(pages: List<KiteBitmap16>): ByteArray = TiffEncoder.encode16(pages)
+
+    /**
+     * Encode [bitmap] as a TIFF as [options] says (#184): the compression (none, PackBits, LZW,
+     * Deflate, CCITT Group 3 or 4, or JPEG), strips or tiles, and the samples (bi-level, gray,
+     * palette or RGB). `TiffEncodeOptions()` gives what [encodeTiff] without options gives, byte
+     * for byte. Every combination is lossless but JPEG, a bi-level page, and a gray page made from
+     * colour: decoding the result returns the exact same pixels.
+     *
+     * [metadata]'s ICC profile goes in InterColorProfile (tag 34675) and its XMP packet in tag 700.
+     * Its EXIF block is not written: in a TIFF it is a directory of its own, whose offsets would
+     * have to be rebuilt.
+     *
+     * [cancellationCheck], when given, runs before each strip or tile and every 64 rows of fax
+     * coding, and may throw to stop the encode; what it throws comes out of this call as it is.
+     *
+     * @throws IllegalArgumentException if [options] do not fit [bitmap]: a CCITT compression with
+     *   samples other than bi-level, or wider than 65536 pixels a strip or tile; JPEG with alpha or
+     *   with bi-level or palette samples; a palette for a bitmap with alpha or more than 256
+     *   colours; or a JPEG strip of rows that is not a whole number of blocks
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiff(
+        bitmap: KiteBitmap,
+        options: TiffEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = TiffEncoder.encode(listOf(bitmap), options, metadata, cancellationCheck)
+
+    /**
+     * Encode [pages] as one multi-page TIFF, each page as [encodeTiff] with [options] writes one and
+     * marked with its page number. Every page carries [metadata]'s ICC profile; the XMP packet goes
+     * with the first.
+     *
+     * @throws IllegalArgumentException if [pages] is empty, or as [encodeTiff] with options does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiff(
+        pages: List<KiteBitmap>,
+        options: TiffEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = TiffEncoder.encode(pages, options, metadata, cancellationCheck)
+
+    /**
+     * Encode [bitmap] as a 16-bit TIFF as [options] says: none, PackBits, LZW or Deflate, strips or
+     * tiles, gray or RGB samples. [TiffPhotometric.Auto] keeps the channels [bitmap] has, as
+     * [encodeTiff16] without options does. [TiffPhotometric.Rgb] repeats a gray sample three times,
+     * and [TiffPhotometric.Gray] takes the luma of a colour pixel. Alpha is kept. Metadata and
+     * cancellation as [encodeTiff] with options.
+     *
+     * @throws IllegalArgumentException for a CCITT or JPEG compression, or bi-level or palette
+     *   samples, which have no 16-bit form
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiff16(
+        bitmap: KiteBitmap16,
+        options: TiffEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = TiffEncoder.encode16(listOf(bitmap), options, metadata, cancellationCheck)
+
+    /**
+     * Encode [pages] as one multi-page 16-bit TIFF, each page as [encodeTiff16] with [options]
+     * writes one.
+     *
+     * @throws IllegalArgumentException if [pages] is empty, or as [encodeTiff16] with options does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiff16(
+        pages: List<KiteBitmap16>,
+        options: TiffEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = TiffEncoder.encode16(pages, options, metadata, cancellationCheck)
+
+    /**
+     * Encode CMYK [ink] as a TIFF of separations (photometric 5, InkSet 1, #184), lossless. [ink]
+     * holds four samples a pixel, cyan, magenta, yellow and black, from no ink (0) to full (255), row
+     * by row from the top, as [convertCmykToSrgb] takes them. Give [metadata] the press's ICC
+     * profile, so that a reader can convert the ink; without one, [decode] draws it as libtiff's
+     * RGBA interface does.
+     *
+     * [options] picks the compression and the layout as for [encodeTiff]; its photometric must be
+     * [TiffPhotometric.Auto]. The predictor applies to the ink as to colour.
+     *
+     * @throws IllegalArgumentException if [ink] does not hold [width] times [height] pixels, a side
+     *   is not positive, or [options] asks for CCITT, JPEG or a photometric other than Auto
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiffCmyk(
+        width: Int,
+        height: Int,
+        ink: ByteArray,
+        options: TiffEncodeOptions = TiffEncodeOptions(),
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = TiffEncoder.encodeCmyk(width, height, ink, null, options, metadata, cancellationCheck)
+
+    /** [encodeTiffCmyk] at 16 bits a sample, from no ink (0) to full (65535). */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeTiffCmyk(
+        width: Int,
+        height: Int,
+        ink: ShortArray,
+        options: TiffEncodeOptions = TiffEncodeOptions(),
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = TiffEncoder.encodeCmyk(width, height, null, ink, options, metadata, cancellationCheck)
 
     /**
      * Encode [bitmap] as a lossless WebP: decoding the result returns the exact same
@@ -1431,6 +1540,18 @@ public object ImageKodec {
      * Uncompressed and lossless either way.
      */
     public fun encodeBmp(bitmap: KiteBitmap): ByteArray = BmpEncoder.encode(bitmap)
+
+    /**
+     * Encode [bitmap] as a BMP of the depth [options] gives (#184): a palette of 1, 4 or 8 bits, with
+     * BI_RLE4 or BI_RLE8 on request, 16-bit 5-5-5, 24-bit BI_RGB or 32-bit BI_BITFIELDS with alpha.
+     * `BmpEncodeOptions()` gives what [encodeBmp] without options gives, byte for byte. Every depth
+     * but 16 is lossless.
+     *
+     * @throws IllegalArgumentException if [bitmap] has alpha and the depth is not 32, or has more
+     *   colours than a palette depth holds
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeBmp(bitmap: KiteBitmap, options: BmpEncodeOptions): ByteArray = BmpEncoder.encode(bitmap, options)
 
     /**
      * Encode [bitmap] as a GIF89a. Colours are quantised to the format's 256-entry
