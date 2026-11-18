@@ -211,8 +211,9 @@ being true.
 - `PictureDecoder.flags` is a `ByteArray` in which `FLAG_CODED` makes a unit's `Byte` negative, so test a bit above 7 only
   after `and 0xFF`: sign extension once kept every coded unit from the deblocking filter as if it were a palette unit (#188).
 - x265 3.5 aborts with heap corruption on a 48x32 `gray10le` sequence with B pictures; 64x48 works (#188).
-- OpenJPEG 2.5.0 refuses an HT code-block of more than three coding passes and the MIXED style 0x80,
-  and ffmpeg 6.1's HTJ2K decoder differs from it and from the source on some lossless files, so HTJ2K
-  is checked against `opj_decompress` alone and neither form is decoded (#187).
+- OpenJPEG 2.5.0 refuses the MIXED style 0x80 and an HT segment of more than three coding passes, and
+  reads passes after the third in later segments as empty, where ffmpeg 6.1 moves the cleanup pass down
+  by them; ffmpeg also differs from both on some lossless files. So HTJ2K is checked against
+  `opj_decompress` alone, and neither MIXED nor placeholder passes are decoded (#187).
 - OpenJPEG 2.5.0's `opj_decompress` converts a CIELab JP2 to colours far from any L*a*b* reading of its
   samples, so CIELab is checked against lcms2 through `tools/icc_lcms.c convert-lab` (#187).

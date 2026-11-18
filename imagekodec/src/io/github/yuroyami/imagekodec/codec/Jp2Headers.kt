@@ -61,7 +61,8 @@ internal object Jp2Headers {
     const val STYLE_MIXED = 0x80
 
     private fun checkStyle(r: Reader, style: Int) {
-        // OpenJPEG 2.5 refuses the mixed style too, so no file of it could be checked against a decoder.
+        // OpenJPEG 2.5 refuses the mixed style too ("Unsupported Mixed HT code-block style"), so no
+        // file of it could be checked against a decoder.
         if (style and STYLE_MIXED != 0) r.unsupported("with mixed HT and Part 1 code-blocks (HTJ2K MIXED, code-block style 0x${style.toString(16)})")
     }
 

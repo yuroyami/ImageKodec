@@ -88,9 +88,9 @@ and fail during the decode.
   `UnsupportedImageException`, which is the limit of OpenJPEG.
 - HTJ2K (ITU-T T.814) decodes, but two of its forms throw `UnsupportedImageException`: code-block
   style 0x80, which mixes HT and Part 1 code-blocks (MIXED), and an HT code-block of more than three
-  coding passes, which holds placeholder passes or more than one HT set. OpenJPEG 2.5 refuses both,
-  and ffmpeg 6.1 reads the second another way, so no reading of either could be checked against a
-  decoder.
+  coding passes, which holds placeholder passes or more than one HT set. OpenJPEG 2.5 refuses the
+  first and does not read the second, which ffmpeg 6.1 reads another way, so no reading of either
+  could be checked against a decoder.
 - The encoder writes at most 65535 tiles and 100 layers, 8 bits a sample from a `KiteBitmap` and 16
   from a `KiteBitmap16`. It pads a flat picture that codes to fewer bytes than the decoder's expansion
   guard expects of its size with a `COM` segment, so ImageKodec reads back every file it writes. A

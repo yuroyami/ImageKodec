@@ -1153,8 +1153,8 @@ public object JpxDecoder {
         if (style and Jp2Headers.STYLE_HT != 0) {
             val passes = cb.segments.sumOf { it.passes }
             // Placeholder passes and later HT sets (T.814) move the cleanup pass below the plane the
-            // zero bit planes give. OpenJPEG 2.5 refuses them and ffmpeg 6.1 reads them otherwise, so
-            // no reading of them could be checked here.
+            // zero bit planes give. OpenJPEG 2.5 reads them as empty and ffmpeg 6.1 moves the cleanup
+            // pass down by them, so no reading of them could be checked here.
             if (passes > 3 || cb.segments.size > 2) {
                 throw UnsupportedImageException("JPEG 2000 HT code-block with $passes coding passes (more than one HT set)")
             }
