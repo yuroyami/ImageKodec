@@ -216,7 +216,7 @@ internal object Jp2Encoder {
         fixQuantization(setup, tiles)
         val layers = o.layerCount
         for (tile in tiles) tile.order = packetOrder(tile, layers, o.progression)
-        rateControl(setup, tiles, layers)
+        rateControl(setup, tiles, layers, metadata)
         val codestream = codestream(setup, tiles, layers, metadata)
         return if (o.codestreamOnly) codestream else Jp2Boxes.file(image.width, image.height, image.components, image.precision, image.gray, image.alpha, metadata, codestream)
     }
@@ -546,7 +546,7 @@ internal object Jp2Encoder {
 
     // ---- rate control ---------------------------------------------------------------------------
 
-    private fun rateControl(s: Setup, tiles: List<Tile>, layers: Int) {
+    private fun rateControl(s: Setup, tiles: List<Tile>, layers: Int, metadata: ImageMetadata) {
         val blocks = ArrayList<Block>()
         for (tile in tiles) for (comp in tile.comps) forEachBand(comp) { band, _ ->
             for (p in band.precincts) for (b in p.blocks) if (b != null) {
@@ -559,7 +559,9 @@ internal object Jp2Encoder {
         for (b in blocks) for (v in b.hullSlopes) all += v
         val slopes = all.sortedDescending().distinct().toDoubleArray()
         val writers = tiles.map { Jp2PacketWriter(it, layers, s.style, s.o.sopMarkers, s.o.ephMarkers) }
-        val fixed = headerBytes(s, tiles, layers)
+        // A ratio counts the whole file, the JP2 boxes included.
+        val image = s.image
+        val fixed = headerBytes(s, tiles, layers) + if (s.o.codestreamOnly) 0 else Jp2Boxes.overhead(image.components, image.alpha, metadata)
 
         /** Sets layer [l] to threshold index [k] (-1 for nothing), or to every pass with [all]. */
         fun assign(l: Int, k: Int, all: Boolean = false) {
