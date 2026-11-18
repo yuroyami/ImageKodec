@@ -493,7 +493,7 @@ internal class IntraEncoder(
                 stampCu(best!!)
             }
         }
-        val chosen = best!!
+        val chosen = best
         // Commit: the estimate's states move past the split flag and the unit.
         start.copyInto(est.states)
         if (flagCoded) est.encode(splitContext(x, y, depth), 0)

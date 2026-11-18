@@ -131,6 +131,31 @@ class HevcInterEncoderTest {
     }
 
     @Test
+    fun plansOrderAndReferTheirPictures() {
+        val ippp = GopPlanner.plan(5, 1, 0, 1)
+        assertEquals(listOf(0, 1, 2, 3, 4), ippp.pictures.map { it.frame })
+        assertEquals(0, ippp.maxNumReorder)
+        // The picture before and the current one.
+        assertEquals(1, ippp.maxDecPicBufferingMinus1)
+        val pyramid = GopPlanner.plan(9, 4, 0, 1)
+        assertEquals(listOf(0, 4, 2, 1, 3, 8, 6, 5, 7), pyramid.pictures.map { it.frame })
+        assertEquals(listOf(SliceType.I, SliceType.P, SliceType.B, SliceType.B, SliceType.B, SliceType.P, SliceType.B, SliceType.B, SliceType.B), pyramid.pictures.map { it.sliceType })
+        // Frame 1 follows frames 4 and 2 in decoding order and precedes them in output order.
+        assertEquals(2, pyramid.maxNumReorder)
+        val b1 = pyramid.pictures[3]
+        assertEquals(listOf(0), b1.refL0.toList())
+        assertEquals(listOf(2), b1.refL1.toList())
+        // Frame 1 keeps frame 4 for frame 3, unused by itself.
+        assertEquals(listOf(-1), b1.rps!!.deltaPocS0.toList())
+        assertEquals(listOf(1, 3), b1.rps!!.deltaPocS1.toList())
+        assertEquals(listOf(true, false), b1.rps!!.usedS1.toList())
+        val periods = GopPlanner.plan(7, 2, 3, 2)
+        assertEquals(listOf(0, 2, 1, 3, 5, 4, 6), periods.pictures.map { it.frame })
+        assertEquals(listOf(true, false, false, true, false, false, true), periods.pictures.map { it.idr })
+        assertEquals(listOf(0, 2, 1, 0, 2, 1, 0), periods.pictures.map { it.poc })
+    }
+
+    @Test
     fun timingAddsUp() {
         val src = frames(16, 16, 1, 8, 9)
         val d = LongArray(src.size) { 10L * (it + 1) }

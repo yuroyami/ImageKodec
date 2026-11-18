@@ -65,7 +65,7 @@ internal object GopPlanner {
             }
             val decoded = HashSet<Int>()
             for (j in periodStart until k) decoded += out[j].poc
-            val keep = sortedSetOf<Int>()
+            val keep = HashSet<Int>()
             var j = k
             while (j < out.size && !out[j].idr) {
                 for (r in out[j].refL0) if (r in decoded) keep += r

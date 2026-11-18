@@ -270,7 +270,7 @@ class HevcInterBenchmarkTest {
             Setting(50, 2, 4, 4, 4), Setting(50, 2, 4, 5, 5), Setting(50, 2, 1, 0, 0), Setting(50, 2, 1, 2, 2), Setting(50, 2, 1, 5, 5),
         )
 
-        // A loose bound that catches a regression; see docs/heic.md for the measured ratio.
-        const val BOUND = 3.0
+        // The default measured 0.556 (docs/heic.md): this catches a regression of about a third.
+        const val BOUND = 0.75
     }
 }
