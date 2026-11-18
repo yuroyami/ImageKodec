@@ -9,7 +9,7 @@ dependencies:
   - //imagekodec
   - //imagekodec-compose
   - $compose.desktop.currentOs
-  - $compose.material3
+  - $libs.compose.material3
 
 settings:
   kotlin:
