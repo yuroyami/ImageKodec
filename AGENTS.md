@@ -234,8 +234,9 @@ being true.
   move signed 16-bit gray by half its range as 6 does, so the test moves its samples itself (#189).
 - libheif 1.17 refuses a file whose major brand is `hevc` ("unsupported HEIF/AVIF file type"), so a HEIC
   sequence leads with `heic` or `heix` and lists `hevc` as compatible (#177).
-- An HEVC track with B pictures shows its last frame from a sample that is not the last one, so that
-  sample's `stts` duration is another frame's slot; the last frame lasts what is left of the track (#177).
+- A sample's `stts` duration is the duration of the picture it codes, as ffmpeg's muxer writes it, so a track
+  with B pictures needs negative `ctts` offsets (version 1). Readers take the last frame's duration from its
+  own sample's `stts`; ffprobe's start times alone do not show a wrong one (#177).
 - lcms2 passes a negative value through a parametric gamma within 0.0001 of 1, so a B2A table's PCS side
   sees negatives, and it interpolates a Lab-indexed grid trilinearly (#189).
 - Ubuntu 24.04's djxl 0.7 has no colour engine: it writes a lossy file with only an ICC profile as linear sRGB, and

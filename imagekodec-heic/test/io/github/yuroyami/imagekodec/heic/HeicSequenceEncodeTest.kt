@@ -144,10 +144,10 @@ class HeicSequenceEncodeTest {
     private companion object {
         /** The MD5 of each file, written on the JVM; every other target must write the same bytes. */
         val EXPECTED = listOf(
-            "1f4d3d1f52aa95e78df42059c4652009",
-            "558b6a7bf290e98924e026966c9dfd27",
+            "a47b4d2573f96b1ef0afc74d82180a74",
+            "92879ffbb40b46301ef44338b0b35d09",
             "d662aa7b224f4db16cdad45498a86607",
-            "957dbb4f499f3b5b15faeaf545c8885d",
+            "ee5b569d64538b5888c3fbd0cb8cae2d",
         )
     }
 }

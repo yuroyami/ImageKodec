@@ -162,9 +162,11 @@ internal object HeifEncode {
     }
 
     /**
-     * A track of [samples], in decoding order, whose pictures last [durations] in display order: each sample's
-     * decoding time is the display time of the picture at its place, and its composition offset moves it to the
-     * display time of the picture it codes, so a sequence without reordering has none.
+     * A track of [samples], in decoding order, whose pictures last [durations] in display order. Each sample's
+     * `stts` duration is the duration of the picture it codes, as ffmpeg's muxer writes it and as readers take
+     * the last picture's duration from it, and its composition offset moves its decoding time to the display time
+     * of that picture. A sequence without reordering has no offsets; one with B pictures has negative ones,
+     * which `ctts` version 1 holds, and no picture is composed before 0.
      */
     private fun track(
         samples: List<HeifCodedSample>, durations: LongArray, entry: ByteArray, w: Int, h: Int, playCount: Long, handler: String, auxiliaryOf: IntArray?,
@@ -176,9 +178,11 @@ internal object HeifEncode {
         check(samples[0].sync) { "the first sample of a sequence is not a sync sample" }
         val start = LongArray(n + 1)
         for (j in 0 until n) start[j + 1] = start[j] + durations[j]
-        val offsets = LongArray(n) { i -> start[samples[i].frameIndex] - start[i] }
+        val own = LongArray(n) { i -> durations[samples[i].frameIndex] }
+        var decoding = 0L
+        val offsets = LongArray(n) { i -> (start[samples[i].frameIndex] - decoding).also { decoding += own[i] } }
         return HeifWriter.Track(
-            entry, samples.map { it.data }, durations.copyOf(), if (offsets.all { it == 0L }) null else offsets,
+            entry, samples.map { it.data }, own, if (offsets.all { it == 0L }) null else offsets,
             BooleanArray(n) { samples[it].sync }, w, h, TIMESCALE, playCount, handler, auxiliaryOf,
         )
     }

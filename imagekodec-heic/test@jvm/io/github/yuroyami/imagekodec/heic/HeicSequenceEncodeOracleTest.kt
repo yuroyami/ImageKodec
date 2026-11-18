@@ -19,9 +19,11 @@ import kotlin.test.assertTrue
  * `encodeHeic` of an animation (#177) against ffmpeg and libheif. ffmpeg reads the `hvc1` track of the file: its
  * frames come out in presentation order, so P and B pictures, the composition offsets (`ctts`) and the edit list
  * are all on trial. A lossless file, coded through the identity matrix, must give every source frame exactly in
- * ffmpeg's RGB; a lossy one, in 4:4:4, must give ffmpeg's RGB within a level on average of `decodeAnimation`'s; each frame's
- * presentation time must be the sum of the delays before it, from 0. heif-convert reads the primary item, which
- * must be the first frame.
+ * ffmpeg's RGB; a lossy one, in 4:4:4, must give ffmpeg's RGB within a level on average of `decodeAnimation`'s. In
+ * ffprobe each frame's presentation time must be the sum of the delays before it, from 0, and the stream must last
+ * the sum of them all; `decodeAnimation`, which takes the last frame's duration from its own sample's `stts`, must
+ * give every delay. ffmpeg 6 gives every packet of a track with negative composition offsets the same duration,
+ * so its packet durations are no reference. heif-convert reads the primary item, which must be the first frame.
  */
 class HeicSequenceEncodeOracleTest {
 
@@ -56,7 +58,8 @@ class HeicSequenceEncodeOracleTest {
                 val b = ((x + y) * 3 + n * 2).coerceIn(0, 255)
                 if (gray) 0xFF000000.toInt() or (g * 0x010101) else 0xFF000000.toInt() or (r shl 16) or (g shl 8) or b
             }
-            KiteFrame(KiteBitmap(w, h, argb), 40 + 20 * (t % 3), (40 + 20 * (t % 3)) / 10)
+            // Every frame has a delay of its own, so a duration given to the wrong frame shows.
+            KiteFrame(KiteBitmap(w, h, argb), 30 + 10 * t, 3 + t)
         }, loopCount = 0)
     }
 
@@ -91,11 +94,11 @@ class HeicSequenceEncodeOracleTest {
         }
     }
 
-    /** The presentation time in milliseconds of each frame of [stream] of [file], in presentation order. */
-    private fun times(file: File, stream: Int): List<Long> {
+    /** ffprobe's [entries] of [stream] of [file] in milliseconds, one value a line. */
+    private fun probe(file: File, stream: Int, entries: String): List<Long> {
         val (code, out) = run(
-            Tools.require("ffprobe").path, "-v", "error", "-select_streams", "$stream", "-show_entries",
-            "frame=best_effort_timestamp_time", "-of", "csv=p=0", file.path,
+            Tools.require("ffprobe").path, "-v", "error", "-select_streams", "$stream", "-show_entries", entries,
+            "-of", "csv=p=0", file.path,
         )
         assertEquals(0, code, "ffprobe: ${out.decodeToString()}")
         return out.decodeToString().lines().filter { it.isNotBlank() }.map { Math.round(it.trim().trimEnd(',').toDouble() * 1000) }
@@ -124,7 +127,9 @@ class HeicSequenceEncodeOracleTest {
         }
         var at = 0L
         val want = a.frames.map { f -> at.also { at += f.delayMillis } }
-        assertEquals(want, times(file, stream), "$name: presentation times")
+        assertEquals(want, probe(file, stream, "frame=best_effort_timestamp_time"), "$name: presentation times")
+        assertEquals(listOf(at), probe(file, stream, "stream=duration"), "$name: the track's duration")
+        assertEquals(a.frames.map { it.delayMillis }, ours.frames.map { it.delayMillis }, "$name: decodeAnimation's delays")
         if (options.lossless) {
             val png = temp(".png")
             val (code, log) = run(Tools.require("heif-convert").path, file.path, png.path)
