@@ -927,14 +927,75 @@ public object ImageKodec {
      * Encode [bitmap] as a lossless WebP: decoding the result returns the exact same
      * pixels, alpha included. It is tried as a palette when it has 256 colours or fewer,
      * and through the subtract-green, predictor and cross-colour transforms, with LZ77
-     * and a colour cache, and the smallest of the results is kept. Lossy WebP is not
-     * written.
+     * and a colour cache, and the smallest of the results is kept. [WebpEncodeOptions] writes
+     * lossy WebP.
      *
      * @throws IllegalArgumentException if a side of [bitmap] is larger than 16384, which a
      *   WebP cannot store
      */
     @Throws(IllegalArgumentException::class)
     public fun encodeWebp(bitmap: KiteBitmap): ByteArray = WebpEncoder.encode(bitmap)
+
+    /**
+     * Encode [bitmap] as a lossy WebP at [quality] 0..100, with the meaning of `cwebp -q`, and
+     * otherwise [WebpEncodeOptions]' defaults: a `VP8 ` image in YUV 4:2:0, with its alpha, when any
+     * pixel carries some, kept exact in an `ALPH` chunk (#178).
+     *
+     * @throws IllegalArgumentException if [quality] is outside 0..100, or a side of [bitmap] is
+     *   larger than 16383, which a VP8 frame cannot store
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeWebp(bitmap: KiteBitmap, quality: Int): ByteArray =
+        WebpEncoder.encode(bitmap, WebpEncodeOptions(quality = quality), ImageMetadata(), null)
+
+    /**
+     * Encode [bitmap] as a WebP as [options] say (#178): lossless as [encodeWebp] without options
+     * writes it, or lossy, a `VP8 ` image with its alpha in an `ALPH` chunk. [metadata] goes in the
+     * extended format, as the overload that takes only metadata writes it: `VP8X`, `ICCP`, the
+     * image, `EXIF` and `XMP `. A lossy image without alpha or metadata is the simple format, one
+     * `VP8 ` chunk.
+     *
+     * [cancellationCheck], when given, runs after each row of macroblocks of a lossy image, and
+     * once before a lossless one, and may throw to stop the encode; what it throws comes out of
+     * this call as it is.
+     *
+     * @throws IllegalArgumentException if a side of [bitmap] is larger than a WebP stores: 16384
+     *   lossless, 16383 lossy
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeWebp(
+        bitmap: KiteBitmap,
+        options: WebpEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = WebpEncoder.encode(bitmap, options, metadata, cancellationCheck)
+
+    /**
+     * Encode [animation] as an animated WebP (#178): an `ANIM` chunk with the loop count and
+     * [WebpEncodeOptions.background], and an `ANMF` chunk for each frame with its delay to the
+     * millisecond, every frame lossless or every frame lossy as [options] say. Frames must all be
+     * canvas-sized, which is exactly what [decodeAnimation] produces. A single frame is written as
+     * a still image.
+     *
+     * Each frame after the first stores only the rectangle where it differs from what a decoder
+     * shows by then, replacing that rectangle or, when every changed pixel is opaque, drawn over
+     * it with the unchanged pixels transparent, whichever is smaller. Lossless frames decode to
+     * the exact frames. A lossy frame is compared with the decoded frames before it, and leaves in
+     * place only pixels within a few levels of the frame, fewer at a higher quality.
+     *
+     * [cancellationCheck] runs as the still encoder runs it, and after each frame.
+     *
+     * @throws IllegalArgumentException if the frames are not all canvas-sized, the canvas is
+     *   larger than a WebP frame stores, a delay does not fit WebP's 24 bits, or the loop count
+     *   is above 65535
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeWebp(
+        animation: KiteAnimation,
+        options: WebpEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = WebpEncoder.encodeAnimation(animation, options, metadata, cancellationCheck)
 
     /**
      * Encode [bitmap] as a baseline JPEG at [quality] 1..100 (default 90).
