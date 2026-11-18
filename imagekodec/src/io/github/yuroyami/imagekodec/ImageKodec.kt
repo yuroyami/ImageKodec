@@ -24,6 +24,7 @@ import io.github.yuroyami.imagekodec.codec.avif.AvifDecoder
 import io.github.yuroyami.imagekodec.codec.avif.HeifCodecs
 import io.github.yuroyami.imagekodec.codec.avif.HeifEncode
 import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
+import io.github.yuroyami.imagekodec.codec.jxl.JxlEncoder
 import io.github.yuroyami.imagekodec.codec.jxr.JxrDecoder
 import io.github.yuroyami.imagekodec.codec.jxr.JxrEncoder
 import io.github.yuroyami.imagekodec.internal.color.ColorManagement
@@ -1390,6 +1391,70 @@ public object ImageKodec {
         metadata: ImageMetadata = ImageMetadata(),
         cancellationCheck: (() -> Unit)? = null,
     ): ByteArray = cancellable(cancellationCheck) { cancel -> Jp2Encoder.encode16(bitmap, options, metadata, cancel) }
+
+    /**
+     * Encode [bitmap] as a lossy JPEG XL at [quality] 0..100 (default 90), which maps to a
+     * distance as `cjxl -q` maps it; see [JxlEncodeOptions]. The colour is coded with VarDCT in
+     * the XYB colour space and alpha, when the bitmap has any, losslessly with Modular. The
+     * result is a bare codestream (#179).
+     *
+     * @throws IllegalArgumentException if [quality] is outside 0..100, or a side of [bitmap] is
+     *   larger than 262144
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxl(bitmap: KiteBitmap, quality: Int = 90): ByteArray =
+        JxlEncoder.encode(bitmap, JxlEncodeOptions(quality = quality), ImageMetadata(), null)
+
+    /**
+     * Encode [bitmap] as a JPEG XL with [options]: lossy VarDCT at a distance, or, with
+     * [JxlEncodeOptions.lossless], lossless Modular, which decodes to exactly the input. A
+     * bitmap whose pixels are all gray is coded as gray when lossless, and alpha is kept only
+     * when some pixel is not opaque. [metadata]'s ICC profile goes into the codestream, which
+     * then describes the samples; its EXIF block and XMP packet go into `Exif` and `xml `
+     * boxes, which put the codestream in the ISO BMFF container. [cancellationCheck] runs
+     * between the steps of the encode and may throw to stop it (#179).
+     *
+     * @throws IllegalArgumentException if a side of [bitmap] is larger than 262144
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxl(
+        bitmap: KiteBitmap,
+        options: JxlEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JxlEncoder.encode(bitmap, options, metadata, cancellationCheck)
+
+    /**
+     * [encodeJxl] for samples of 16 bits: gray, gray and alpha, RGB or RGBA as [bitmap] holds
+     * them, with a bit depth of 16 in the header. A lossless file decodes to exactly the input
+     * with [decode16] (#179).
+     *
+     * @throws IllegalArgumentException as [encodeJxl] does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxl16(
+        bitmap: KiteBitmap16,
+        options: JxlEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JxlEncoder.encode16(bitmap, options, metadata, cancellationCheck)
+
+    /**
+     * Encode [animation] as an animated JPEG XL: one frame for each of its frames, with its
+     * delay in ticks of a millisecond, and its play count (0 for forever). A frame that changes
+     * only a rectangle of the one before is coded as that rectangle over a saved copy of it.
+     * Lossy or lossless as [options] says (#179).
+     *
+     * @throws IllegalArgumentException if a frame is not of the canvas's size, a delay is
+     *   negative, the play count does not fit 32 bits, or a side is larger than 262144
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxl(
+        animation: KiteAnimation,
+        options: JxlEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JxlEncoder.encode(animation, options, metadata, cancellationCheck)
 
     /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored), each side divided by [reduction]. */
     private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1, cancel: (() -> Unit)? = null): KiteBitmap {

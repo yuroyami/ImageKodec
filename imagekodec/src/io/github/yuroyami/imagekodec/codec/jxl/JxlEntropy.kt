@@ -29,7 +29,7 @@ private val SPECIAL_DISTANCES = byteArrayOf(
 )
 
 /** The fixed prefix code for the logarithm of each ANS frequency: code length, then value. */
-private val LOG_COUNT_CODE = byteArrayOf(
+internal val LOG_COUNT_CODE = byteArrayOf(
     3, 10, 7, 12, 3, 7, 4, 3, 3, 6, 3, 8, 3, 9, 4, 5, 3, 10, 4, 4, 3, 7, 4, 1, 3, 6, 3, 8, 3, 9, 4, 2,
     3, 10, 5, 0, 3, 7, 4, 3, 3, 6, 3, 8, 3, 9, 4, 5, 3, 10, 4, 4, 3, 7, 4, 1, 3, 6, 3, 8, 3, 9, 4, 2,
     3, 10, 6, 11, 3, 7, 4, 3, 3, 6, 3, 8, 3, 9, 4, 5, 3, 10, 4, 4, 3, 7, 4, 1, 3, 6, 3, 8, 3, 9, 4, 2,
