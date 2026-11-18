@@ -77,6 +77,12 @@ tile-part headers with the coding and quantization readers of the decoder, and i
 bytes by their declared lengths. A corrupt packet payload can therefore still probe as decodable
 and fail during the decode.
 
+## PNG
+
+- Apple's CgBI files decode at 8 bits a sample, which is what Xcode writes. A CgBI file of 16-bit
+  colour throws `UnsupportedImageException`: CgBI has no public specification, no tool writes such a
+  file, and no reader of one exists to check a reading against.
+
 ## JPEG 2000
 
 - A malformed header names the marker, the field and the byte position. A damaged code-block, of

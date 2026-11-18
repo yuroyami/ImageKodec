@@ -75,8 +75,8 @@ internal object ImageProbe {
         var hasTrns = false
         var frames = 1
         var loops = 1L
-        var apple = false
         var sawIhdr = false
+        var cgbi = false
         var limit: String? = null
         val color = ColorChunks.Png()
 
@@ -86,7 +86,7 @@ internal object ImageProbe {
             val type = r.bytes(4).decodeToString()
             val n = len.toInt()
             when (type) {
-                "CgBI" -> { apple = true; r.skip(minOf(n, r.remaining)) }
+                "CgBI" -> { cgbi = true; r.skip(minOf(n, r.remaining)) }
                 "IHDR" -> {
                     if (n != 13) throw ImageDecodeException("PNG: IHDR length $n")
                     val h = ByteReader(r.bytes(13))
@@ -124,8 +124,8 @@ internal object ImageProbe {
         if (frames < 1) frames = 1
         val channels = when (colorType) { 0, 3 -> 1; 2 -> 3; 4 -> 2; 6 -> 4; else -> 0 }
         val reason = when {
-            apple -> "Apple CgBI PNG (Xcode-crushed, raw deflate + swapped channels)"
             limit != null -> limit
+            cgbi && (colorType == 2 || colorType == 6) && depth != 8 -> "PNG: a CgBI file of $depth-bit colour (Xcode writes 8 bits only)"
             // A colour type or depth the decoder refuses as damaged leaves nothing to weigh here.
             channels > 0 && depth in 1..16 -> PngDecoder.budgetRefusal(width, height, depth * channels, data.size)
             else -> null

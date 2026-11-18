@@ -21,7 +21,7 @@ info.isDecodable                 // and info.unsupportedReason when it is false
 ```
 
 `isDecodable` is a statement about features. It is false when the file uses something this build
-does not implement, such as a CgBI PNG or a TIFF with floating-point samples, and
+does not implement, such as an AVIF of SMPTE ST 2085 colour or a JPEG XR of N channels, and
 `unsupportedReason` names it. The Coil decoder uses this flag to decide which files to claim.
 
 `isDecodable` stays true for a file that declares only supported features and is then truncated
@@ -51,7 +51,7 @@ when you pass `applyOrientation = true`.
 
 | Format | What decodes |
 | --- | --- |
-| PNG | color types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and color-key, Adam7 interlace |
+| PNG | color types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and color-key, Adam7 interlace, and Apple's CgBI files that Xcode writes into iOS apps (raw deflate, BGR and premultiplied BGRA at 8 bits) |
 | APNG | dispose none/background/previous, blend source/over, frame rects, loop count |
 | JPEG | 8- and 12-bit DCT: baseline SOF0, extended sequential SOF1, progressive SOF2, arithmetic coding SOF9 and SOF10 with DAC conditioning, lossless SOF3 and SOF11 at 2 to 16 bits with every predictor and point transform, hierarchical SOF5 to SOF7 and SOF13 to SOF15 over any of them, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |

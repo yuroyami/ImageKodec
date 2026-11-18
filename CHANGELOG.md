@@ -14,6 +14,10 @@ reviewable in the diff.
 
 ### Added
 
+- PNG decodes Apple's CgBI files, which Xcode writes into iOS apps: the raw deflate stream, and BGR
+  and premultiplied BGRA samples at 8 bits, which come back as straight RGB and RGBA. A CgBI file of
+  16-bit colour, which Xcode does not write, stays refused by name (#189).
+
 - JPEG 2000 decodes HTJ2K (ITU-T T.814): the HT block coder's cleanup pass, with its MagSgn, MEL and
   VLC streams, and its SigProp and MagRef passes, in HT tile-components alone or beside Part 1 ones.
   The `CAP` and `CPF` segments are read, and a JPH file (`ftyp` brand `jph `) is detected and probed

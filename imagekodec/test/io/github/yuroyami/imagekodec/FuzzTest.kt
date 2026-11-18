@@ -100,6 +100,7 @@ class FuzzTest {
         // fields to agree, so a random edit of a plain file stops at the first check.
         "apng" to apngSeed(),
         "png-palette" to paletteSeed(),
+        "png-cgbi" to PngCgbiTest().seed(),
         "gif-subrect" to hex(GIF_SUBRECT),
         "tiff-deflate" to hex(buildTiff(compression = 8)),
         "tiff-tiled" to hex(buildTiff(tiled = true)),

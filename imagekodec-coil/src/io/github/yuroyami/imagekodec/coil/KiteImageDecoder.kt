@@ -38,7 +38,7 @@ import okio.use
  * which this module does not make. Without it a HEIC file falls through to the
  * platform decoder. A HEIF file whose `meta` box runs past the first 64 KiB is
  * read up to the end of that box to decide.
- * Unsupported formats such as SVG, CgBI PNGs and lossless/arithmetic JPEGs fall
+ * Unsupported formats such as SVG, and the features `probe` names as not decodable, fall
  * through to Coil's platform decoders.
  *
  * Static results honor the request's size, FIT/FILL scale, single defined side
