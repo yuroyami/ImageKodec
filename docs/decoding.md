@@ -105,6 +105,13 @@ libjxl's `djxl` reads it. A lossy file gives the 8-bit level nearest to djxl's o
 16-bit file stays within a few 65535ths of it. djxl dithers its 8-bit output and this decoder does
 not, so the two can differ by one level there.
 
+A lossy file is converted from XYB to the colour its header names. When the header gives only an ICC
+profile, the picture is written in that profile, as libjxl writes it through a colour engine: through
+the profile's B2A0 table, or the inverse of its colorants and curves, and `probe` reports the profile.
+A header whose primaries or white point have no code point is described by an ICC profile made from
+it, as libjxl makes one; with the PQ or HLG curve that profile holds the curve as a table, and a
+conversion with `ColorTarget.Srgb` takes the curve with the header's own primaries and tone-maps it.
+
 Layers are blended into one image. The orientation is reported as `ImageInfo.orientation`, and
 `applyOrientation` applies it. An animation plays through `decodeAnimation` with the duration of
 each frame and the loop count of the file, and `decode` shows its first frame. A recompressed JPEG

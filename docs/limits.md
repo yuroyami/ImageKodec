@@ -333,11 +333,14 @@ long as heif-enc with its own threads; with four threads, 1.4 and 3.5 times as l
 - A lossy file stores its color in the XYB space. It converts to the encoding that its header
   names: the white point, the primaries, and the sRGB, linear, gamma, BT.709, DCI, PQ or HLG curve.
 - A lossy picture whose header has only an ICC profile comes out in that profile, as libjxl writes it
-  through a colour engine, when the profile is one of matrix and curves, RGB or gray: linear sRGB goes
-  through the inverse of its colorants and curves, within 7 of 65535 of lcms2. `probe` reports the
-  profile. A profile of lookup tables gives sRGB, and `probe` reports sRGB: the colour engine reads
-  such a profile one way only, into sRGB. The djxl 0.7 here has no colour engine and writes linear sRGB
-  for both, so the lossy files are held to the picture they were coded from.
+  through a colour engine, and `probe` reports the profile. Linear sRGB goes to the PCS and through the
+  profile's B2A0 table (lut8Type, lut16Type or lutBToAType, read as lcms2 reads them: its fixed-point
+  grid, trilinear for a Lab PCS, v2's Lab ahead of a lut16Type), within 4 of 65535 of lcms2, or,
+  for a profile without one, through the inverse of its colorants and curves, within 8 of 65535. B2A0 is
+  the perceptual table, which skcms reads; no black point compensation is applied. An RGB or gray profile
+  with neither, or of another colour space, gives sRGB. The djxl 0.7 here has no colour engine and writes
+  linear sRGB, so the lossy files are held to the picture they were coded from and, for table profiles,
+  to djxl's linear sRGB taken into the profile by lcms2, within 0.05 of 255 (mean 0.002).
 - A file that is not XYB keeps the samples it stores. Its ICC profile is reported, not applied.
 - No tone mapping runs by default. With `colorTarget = ColorTarget.Srgb()`, the shared color
   conversion applies supported profiles or code points and tone-maps HDR.
@@ -346,8 +349,12 @@ long as heif-enc with its own threads; with four threads, 1.4 and 3.5 times as l
   was told nothing.
 - A header with primaries or a white point of its own, or with a gamma other than 2.2 or 2.8, is
   described by an ICC profile of matrix and curves made from it, as libjxl describes every header, and
-  converts through it. With the PQ or HLG curve, which such a profile does not hold, it converts as
-  BT.709's primaries.
+  converts through it. With the PQ or HLG curve, the profile holds the curve as a table of 4096 samples,
+  PQ's display light over 10000 cd/m² or HLG's scene light, as libjxl 0.7 makes it (colorants equal
+  and the curve within 1 of 65535 of djxl's `--icc_out`). Such a profile holds no tone
+  mapping, so it only describes the samples: `cicp` gives 2 for the primaries, and the conversion takes
+  the curve's code points with the header's own primaries and white, within 0.02 of 255 of the same light coded
+  in BT.2020's primaries.
 - A sample outside the range of 0 to 1, which a float file can hold, is clipped.
 - A CMYK file, whose black is an extra channel, throws `UnsupportedImageException`. No tool here
   writes one to check a reading against: cjxl 0.7 reads neither a CMYK PAM nor a CMYK JPEG, and has no

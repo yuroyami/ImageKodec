@@ -33,6 +33,11 @@ reviewable in the diff.
   of matrix and curves, as libjxl does through a colour engine, and describes a header of its own
   primaries with an ICC profile made from it, so `ColorTarget.Srgb` converts it as djxl does. The intensity
   target is the peak that tone mapping takes. A CMYK file is refused by name instead of losing its black (#189).
+- JPEG XL writes a lossy picture whose header has only an ICC profile of lookup tables into that profile
+  too, through its B2A0 table (lut8Type, lut16Type or lutBToAType), read as lcms2 reads it, and `probe`
+  reports the profile. A header of its own primaries or white point with the PQ or HLG curve is described
+  by a profile with the curve as a table, as libjxl makes one, and `ColorTarget.Srgb` converts it with its
+  own primaries where it took BT.709's (#189).
 - PNG decodes Apple's CgBI files, which Xcode writes into iOS apps: the raw deflate stream, and BGR
   and premultiplied BGRA samples at 8 bits, which come back as straight RGB and RGBA. A CgBI file of
   16-bit colour, which Xcode does not write, stays refused by name (#189).
