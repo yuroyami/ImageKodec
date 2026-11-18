@@ -14,6 +14,19 @@ reviewable in the diff.
 
 ### Added
 
+- JPEG 2000 decodes HTJ2K (ITU-T T.814): the HT block coder's cleanup pass, with its MagSgn, MEL and
+  VLC streams, and its SigProp and MagRef passes, in HT tile-components alone or beside Part 1 ones.
+  The `CAP` and `CPF` segments are read, and a JPH file (`ftyp` brand `jph `) is detected and probed
+  as JPEG 2000. Everything outside the block coder is Part 1's: tier 2, the wavelets, ROI, reductions
+  and tiles. `opj_decompress` 2.5 reads every HT file the encoder writes to the same samples, at full
+  size and at every reduction. Code-block style 0x80 (MIXED) and an HT code-block of more than one HT
+  set stay refused, by name (#187).
+- `Jp2EncodeOptions(highThroughput = true)` writes HTJ2K: a `CAP` segment, code-block style 0x40 and,
+  in a JP2 file, the `jph ` brand. Each code-block is one HT set, picked by the rate control; the file
+  has one quality layer (#187).
+- The CIELab colour space of a JP2 header (enumerated 14) converts to sRGB, with its default
+  parameters or its own, as lcms2 converts a Lab profile, relative colorimetric (#187).
+
 - `readMetadata` reads EXIF, XMP and ICC from TIFF (the first page's EXIF and GPS directories
   rebuilt as a block, tag 700, tag 34675), JPEG XL (`Exif` and `xml ` boxes, also inside Brotli
   `brob` boxes, and the codestream's profile), JPEG XR (its EXIF, GPS, XMP and ICC tags), GIF (the

@@ -28,11 +28,12 @@ import kotlin.math.roundToLong
  * on each pass, vertically causal contexts, segmentation symbols), RGN regions of
  * interest by the Maxshift method, reversible 5/3 and irreversible 9/7 inverse DWT,
  * RCT and ICT multiple-component transforms, DC level shift, component subsampling
- * by nearest upsample, and bit depths up to 16.
+ * by nearest upsample, and bit depths up to 16. The high-throughput block coder of Part 15
+ * (HTJ2K, ITU-T T.814) decodes too, one HT set a code-block, beside or in place of EBCOT.
  *
- * Not handled: the high-throughput block coder of Part 15 (HTJ2K), and the Part 2
- * extensions. `ImageKodec.probe` names them, so a caller can find out without
- * attempting a decode.
+ * Not handled: HT code-blocks mixed with EBCOT ones in one tile-component, HT code-blocks of more
+ * than one HT set, and the Part 2 extensions. `ImageKodec.probe` names them, so a caller can find
+ * out without attempting a decode.
  */
 public object JpxDecoder {
 

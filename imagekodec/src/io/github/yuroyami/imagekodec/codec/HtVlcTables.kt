@@ -4,7 +4,7 @@ package io.github.yuroyami.imagekodec.codec
 // (SHA-256 19906c0334e8db2137912f83cceed5a03d954a9c12d9781901a9a27f92ce1c4d).
 
 /**
- * The CxtVLC tables of ITU-T T.814 Annex C, one row a codeword: bits 23 to 25 hold the context,
+ * The CxtVLC tables of ITU-T T.814, one row a codeword: bits 23 to 25 hold the context,
  * 19 to 22 the significance pattern rho, 18 u_off, 14 to 17 e_k, 10 to 13 e_1, 3 to 9 the
  * codeword, first bit lowest, and 0 to 2 its length. [HtVlc] builds the lookups from them.
  */

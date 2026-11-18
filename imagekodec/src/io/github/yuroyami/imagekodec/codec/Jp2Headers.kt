@@ -69,7 +69,7 @@ internal object Jp2Headers {
     const val PCAP_PART15 = 0x00020000L
 
     /**
-     * A CAP segment (A.5.2 as Part 15 extends it): Pcap, then one 16-bit Ccap for each part it sets.
+     * A CAP segment (T.800, as Part 15 uses it): Pcap, then one 16-bit Ccap for each part it sets.
      * Only the Part 15 one says anything to this decoder, and nothing it needs: the code-block styles
      * decide which coder a block uses.
      */

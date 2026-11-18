@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Writes HtVlcTables.kt, the two CxtVLC code tables of the HTJ2K cleanup pass (ITU-T T.814,
-Annex C): for each context, significance pattern rho, u_off and EMB pattern (e_k, e_1), the
+Writes HtVlcTables.kt, the two CxtVLC code tables of the HTJ2K cleanup pass (ITU-T T.814):
+for each context, significance pattern rho, u_off and EMB pattern (e_k, e_1), the
 codeword and its length. The standard gives them as tables, and nothing derives them.
 
 No copy of T.814 was at hand when the HT block coder was written, so this script recovers the
@@ -61,10 +61,9 @@ def main():
         sys.exit(f'expected two lookups, found {len(tables)} at {[hex(o) for o in starts]}')
     initial, later = sorted(tables, key=len, reverse=True)
     for t in (initial, later):
-        for c in range(8):
-            # Context 0 codes a quad only after MEL said it is significant: no rho of 0 there.
-            if any(r[0] == c and r[1] == 0 for r in t) and c == 0:
-                sys.exit('a context-0 row with rho 0')
+        # Context 0 codes a quad only after MEL said it is significant: no rho of 0 there.
+        if any(r[0] == 0 and r[1] == 0 for r in t):
+            sys.exit('a context-0 row with rho 0')
     sha = hashlib.sha256(data).hexdigest()
 
     def emit(name, t, doc):
@@ -81,7 +80,7 @@ def main():
     print(f'// (SHA-256 {sha}).')
     print()
     print('/**')
-    print(' * The CxtVLC tables of ITU-T T.814 Annex C, one row a codeword: bits 23 to 25 hold the context,')
+    print(' * The CxtVLC tables of ITU-T T.814, one row a codeword: bits 23 to 25 hold the context,')
     print(' * 19 to 22 the significance pattern rho, 18 u_off, 14 to 17 e_k, 10 to 13 e_1, 3 to 9 the')
     print(' * codeword, first bit lowest, and 0 to 2 its length. [HtVlc] builds the lookups from them.')
     print(' */')

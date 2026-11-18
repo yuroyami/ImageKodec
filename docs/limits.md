@@ -79,21 +79,34 @@ and fail during the decode.
 
 ## JPEG 2000
 
-- The high-throughput block coder of Part 15 (HTJ2K) throws `UnsupportedImageException`.
-- So do files with more than 1000 layers, or more than 32 progression order changes in one header,
-  which is the limit of OpenJPEG.
-- A malformed header names the marker, the field and the byte position.
+- A malformed header names the marker, the field and the byte position. A damaged code-block, of
+  Part 1 or of the HT block coder, throws `ImageDecodeException`: the HT decoder's MagSgn, MEL, VLC,
+  SigProp and MagRef readers stop at their segment and read fill bits past it, its loops run over the
+  block's samples, and a magnitude past 30 bits is refused before it is formed.
 - The public nullable `JpxDecoder.decode` overloads return null on failure instead of throwing.
+- Files with more than 1000 layers, or more than 32 progression order changes in one header, throw
+  `UnsupportedImageException`, which is the limit of OpenJPEG.
+- HTJ2K (ITU-T T.814) decodes, but two of its forms throw `UnsupportedImageException`: code-block
+  style 0x80, which mixes HT and Part 1 code-blocks (MIXED), and an HT code-block of more than three
+  coding passes, which holds placeholder passes or more than one HT set. OpenJPEG 2.5 refuses both,
+  and ffmpeg 6.1 reads the second another way, so no reading of either could be checked against a
+  decoder.
 - The encoder writes at most 65535 tiles and 100 layers, 8 bits a sample from a `KiteBitmap` and 16
   from a `KiteBitmap16`. It pads a flat picture that codes to fewer bytes than the decoder's expansion
   guard expects of its size with a `COM` segment, so ImageKodec reads back every file it writes. A
   quality target the finest quantization step cannot reach, near quality 100 on a noisy picture,
   comes out a little below it.
+- The HT encoder (`highThroughput`) writes one quality layer and one HT set a code-block, a cleanup
+  pass and at most the SigProp and MagRef passes below it, and no MIXED code-blocks.
 - Color comes from the JP2 header, without a color engine. The palette, the channel definitions and
   the color specification apply in the order of T.800 Annex I. sRGB, grayscale, bi-level, sYCC,
-  e-sYCC, CMYK and CMY convert to RGB or gray. An ICC profile picks gray, RGB or CMYK, and it is
-  applied only with a `colorTarget`. Other color spaces, such as CIELab, throw
-  `UnsupportedImageException` that names them.
+  e-sYCC, CMYK, CMY and CIELab convert to RGB or gray. CIELab converts relative colorimetric, as
+  lcms2 converts a Lab profile: its illuminant's white becomes sRGB's white. An ICC profile picks
+  gray, RGB or CMYK, and it is applied only with a `colorTarget`.
+- The other enumerated colour spaces of JPX (YCbCr(1) to YCbCr(3), PhotoYCC, YCCK, CIEJab, e-sRGB,
+  ROMM-RGB and the two YPbPr spaces), and an ICC profile of another data colour space, throw
+  `UnsupportedImageException` that names them. No installed tool converts them to check a
+  conversion against, and the ranges and offsets that T.801 gives them were not at hand.
 
 ## AVIF
 

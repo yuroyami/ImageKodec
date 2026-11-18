@@ -160,7 +160,7 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | BMP | every header version and depth, RLE, embedded JPEG and PNG | 1, 4 and 8-bit palettes with RLE, 16, 24, and 32-bit with alpha |
 | TIFF | strips and tiles, the common compressions, every page, up to 16 bits | none, PackBits, LZW, Deflate, CCITT G3 and G4, JPEG; strips or tiles; bi-level, gray, palette, RGB and CMYK; 8 or 16 bits, many pages |
 | WebP | lossy and lossless, still and animated | lossy and lossless, still and animated |
-| JPEG 2000 | all of Part 1, JP2 and raw codestream | Part 1, lossy and lossless, 1 to 16 bits, JP2 or raw codestream |
+| JPEG 2000 | all of Part 1 and HTJ2K, JP2, JPH and raw codestream | Part 1 and HTJ2K, lossy and lossless, 1 to 16 bits, JP2, JPH or raw codestream |
 | AVIF | stills and image sequences, 8 to 12 bits | intra stills and grids, 8 to 12 bits, alpha, lossless |
 | JPEG XL | both coding modes, layers and animation | lossy VarDCT and lossless Modular, 8 or 16 bits, alpha, animation |
 | JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | lossy and lossless, 8 and 16 bits, alpha, tiles |

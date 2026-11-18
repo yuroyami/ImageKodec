@@ -12,7 +12,7 @@ internal object Jp2Color {
 
     /**
      * A colour specification box (I.5.3.3): [enumerated] for method 1, else the ICC profile's data colour space.
-     * [lab] holds the parameters of a CIELab space (T.801 M.11.7.4) when the box gives them: the
+     * [lab] holds the parameters of a CIELab space (JPX, T.801) when the box gives them: the
      * range and offset of L*, a* and b*, then the illuminant.
      */
     class ColorSpec(val method: Int, val enumerated: Int, val iccSpace: String?, val icc: ByteArray? = null, val lab: LongArray? = null)

@@ -441,6 +441,7 @@ ImageKodec.encodeJp2(bitmap, 75)                                          // abo
 ImageKodec.encodeJp2(bitmap, Jp2EncodeOptions(lossless = true))           // 5/3 and RCT, exact
 ImageKodec.encodeJp2(bitmap, Jp2EncodeOptions(ratios = listOf(40.0, 20.0, 10.0))) // three layers
 ImageKodec.encodeJp2(bitmap, Jp2EncodeOptions(codestreamOnly = true))     // J2K, for a PDF
+ImageKodec.encodeJp2(bitmap, Jp2EncodeOptions(highThroughput = true))     // HTJ2K, in a JPH file
 ImageKodec.encodeJp2Wide(bitmap16, Jp2EncodeOptions(lossless = true, bitsPerSample = 12))
 ```
 
@@ -462,6 +463,14 @@ ImageKodec.encodeJp2Wide(bitmap16, Jp2EncodeOptions(lossless = true, bitsPerSamp
 - On the photo scenes the files match `opj_compress` (OpenJPEG 2.5.0): within 0.05 dB PSNR at ratios
   10, 20 and 40, at most its size, and about 30 bytes smaller lossless. The encode takes about twice the
   time of `opj_compress`.
+- `highThroughput = true` codes the code-blocks with the HT block coder of HTJ2K (ITU-T T.814, #187),
+  which has no arithmetic coder: the codestream gets a `CAP` segment and code-block style 0x40, and a
+  JP2 file the `jph ` brand. Each code-block is one HT set, its cleanup pass at the bit plane the rate
+  control picks and, lossy, the SigProp and MagRef passes below it; the file has one quality layer.
+  `opj_decompress` 2.5 reads every file to ImageKodec's samples. On the photo scenes the files are 4 to
+  35 percent larger than Part 1 files at the same PSNR, and ImageKodec decodes them 1.3 to 4 times as
+  fast; a lossless one encodes about three times as fast, a lossy one up to twice as slowly
+  (`Jp2HtBenchmarkTest`).
 
 ## JPEG XL
 
@@ -512,8 +521,9 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   never disposes a frame to the background, and its frames are all lossless or all lossy.
 - The JPEG 2000 encoder writes no palette, no component subsampling, no image or tile offset, no signed
   components, no region of interest, no POC, PPM or PPT segments, no tile-parts beyond one a tile, no
-  predictable termination, no HTJ2K and no Part 2 extension. A bare codestream carries no metadata and
-  no channel definitions.
+  predictable termination and no Part 2 extension. Its HTJ2K files have one quality layer and one HT
+  set a code-block, and mix no Part 1 code-blocks among HT ones. A bare codestream carries no metadata
+  and no channel definitions.
 - The JBIG2 encoder writes generic regions only. Symbol dictionaries and text regions, which pay
   only on text and which encoders that merge look-alike glyphs make lossy, are not written, and
   neither are refinement, halftone or striped pages. The CCITT encoder writes no uncompressed mode.

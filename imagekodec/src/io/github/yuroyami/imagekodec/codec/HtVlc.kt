@@ -1,7 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
 /**
- * What the HT block decoder and encoder share (ITU-T T.814, clause 7): the CxtVLC codes of
+ * What the HT block decoder and encoder share (ITU-T T.814): the CxtVLC codes of
  * [HtVlcTables] as lookups, and the MEL coder's exponents.
  *
  * A decode lookup entry, for a context and the next 7 bits of the VLC stream (first bit lowest),
@@ -24,7 +24,7 @@ internal object HtVlc {
     /** The encode lookup of every later line-pair. */
     val encodeLater: Array<IntArray> = encodeLookup(HtVlcTables.LATER)
 
-    /** The MEL coder's exponent of each of its 13 states (T.814 Table 2). */
+    /** The MEL coder's exponent of each of its 13 states (T.814). */
     val MEL_EXPONENT: IntArray = intArrayOf(0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 5)
 
     fun context(row: Int): Int = row ushr 23
