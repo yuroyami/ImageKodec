@@ -13,7 +13,7 @@ being true.
   suites skip themselves when their binary is missing, and a skipped test reports as a pass,
   so read the skip count and not only the green run. CI sets
   `IMAGEKODEC_REQUIRE_ORACLES=1` to fail instead; set it locally to check the same (#14).
-- Ubuntu's ImageMagick is version 6, which has no `magick` command, only
+- Ubuntu 24.04's ImageMagick is version 6, which has no `magick` command, only
   `convert`. `Tools.find("magick")` falls back to it; before it did, the TIFF
   oracle suite skipped on every Ubuntu machine, CI included (#14).
 - A format with no file in the `FuzzTest` corpus is not fuzzed at all. JPEG 2000
@@ -157,7 +157,7 @@ being true.
 - Ubuntu 24.04 has libjxl 0.7.0: no `jxl_from_tree`, `--photon_noise` where 0.11 has
   `--photon_noise_iso`, other rounding, and a PNG writer that refuses a 16-bit picture
   with alpha. `JxlOracleTest` gives it the plain cases at a bound of two levels, so the
-  tight bounds run only where libjxl is 0.11 or newer, which CI is not (#42).
+  tight bounds run only where libjxl is 0.11 or newer, which CI is since it moved to 26.04 (#42).
 - cjxl 0.7.0 reads a PNM file wrong when its samples are not of 8 or 16 bits, so the
   oracle cases for other depths run only where libjxl is 0.11 or newer (#42).
 - cjxl keeps neither a GIF's nor an APNG's play count, and `jxl_from_tree` writes none,
@@ -229,5 +229,8 @@ being true.
   24bppRGB of an RGBE file does not follow from its own RGBE samples (#189).
 - zimg converts constant luminance to light through the curve's OETF and gives the light back through BT.1886's
   gamma of 2.4, and HLG's ICtCp takes BT.2100's HLG matrix and the OOTF on L, M and S one at a time (#189).
-- Ubuntu's djxl 0.7 has no colour engine: it writes a lossy file with only an ICC profile as linear sRGB, and
+- CI's `ubuntu-latest` became Ubuntu 26.04 in November 2026: ImageMagick 7.1.2 and libjxl 0.11.1 where a
+  24.04 machine has 6.9 and 0.7, so an oracle test can pass locally and fail in CI. ImageMagick 7 does not
+  move signed 16-bit gray by half its range as 6 does (#189).
+- Ubuntu 24.04's djxl 0.7 has no colour engine: it writes a lossy file with only an ICC profile as linear sRGB, and
   converts to another space with `--color_space` only into an 8-bit PNG (#189).

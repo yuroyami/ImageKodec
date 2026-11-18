@@ -130,6 +130,15 @@ class JxlColorOracleTest {
         println(reports.joinToString("\n"))
     }
 
+    /** The colour fields of the header of [jxl], to tell which encoding a cjxl version chose. */
+    private fun describe(jxl: ByteArray): String {
+        val s = io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder.open(jxl)
+        val c = s.header.color
+        return "xyb ${s.header.xybEncoded}, wantIcc ${c.wantIcc}, space ${c.colorSpace}, white ${c.whitePoint}, " +
+            "primaries ${c.primaries} ${c.primariesXy.toList()}, gamma ${if (c.haveGamma) c.gamma else "none"}, " +
+            "transfer ${c.transferFunction}, icc ${s.icc?.size} bytes, inverse ${s.header.iccInverse != null}"
+    }
+
     /** [png] with `cHRM` and `gAMA` chunks put before its first `IDAT`. */
     private fun withChunks(png: ByteArray, vararg chunks: ByteArray): ByteArray {
         var at = 8
@@ -150,7 +159,7 @@ class JxlColorOracleTest {
             assertEquals(0, run(Tools.require("cjxl").path, png.path, jxl.path, "-d", "1.0"))
             val bytes = jxl.readBytes()
             val profile = assertNotNull(ImageKodec.probe(bytes).colorProfile)
-            assertNotNull(profile.icc, "$name: a profile made of the header")
+            assertNotNull(profile.icc, "$name: a profile made of the header; ${describe(bytes)}")
             val out = temp(".png")
             // djxl 0.7 converts to another colour space only into an 8-bit PNG, which it dithers.
             assertEquals(0, run(Tools.require("djxl").path, jxl.path, out.path, "--color_space=RGB_D65_SRG_Rel_SRG"))
