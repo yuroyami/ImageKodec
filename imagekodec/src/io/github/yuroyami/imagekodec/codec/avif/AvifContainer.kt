@@ -127,13 +127,20 @@ internal class AvifTrack(
 
     /**
      * The duration of the frame shown [rank]th: the time to the next frame's composition, and for the
-     * last frame its own `stts` duration, as a player shows it until the track ends.
+     * last frame the time left of the track, as a player shows it until the track ends. The track lasts
+     * the sum of its `stts` durations from the first frame shown, so in a track without reordering the
+     * last frame lasts its own `stts` duration. With reordering the last frame shown is not the last
+     * sample, and its own `stts` duration is the slot of another frame (#177); a track whose offsets
+     * leave no time falls back to it.
      */
     fun presentedDuration(rank: Int): Long {
         val order = presentationOrder
         val sample = order[rank]
         if (rank + 1 < order.size) return compositionTimes[order[rank + 1]] - compositionTimes[sample]
-        return durations[sample]
+        var total = 0L
+        for (d in durations) total += d
+        val left = total - (compositionTimes[sample] - compositionTimes[order[0]])
+        return if (left > 0) left else durations[sample]
     }
 
     /** Whether this track is an auxiliary one, such as alpha, rather than one of pictures to show. */
