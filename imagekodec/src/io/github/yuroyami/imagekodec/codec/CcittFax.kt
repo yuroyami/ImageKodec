@@ -1,7 +1,6 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
-import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 
 /*
@@ -9,16 +8,16 @@ import io.github.yuroyami.imagekodec.internal.Budget
  * KitePDF's `/CCITTFaxDecode` filter (the algorithm half; the PdfDictionary
  * parameter-parsing glue stayed behind). Also the compression used by TIFF
  * compressions 2/3/4, which is why it lives in ImageKodec now. JBIG2's MMR
- * regions reuse [decodeGroup4] directly.
+ * regions reuse [decodeGroup4] directly. The encoder is in CcittFaxEncoder.kt and shares the tables.
  */
 
 /**
- * CCITT fax decoding. Bilevel scan-world compression: there is no standalone
+ * CCITT fax decoding and encoding. Bilevel scan-world compression: there is no standalone
  * container/magic for it, so this is a parameterized codec API, not part of
  * [io.github.yuroyami.imagekodec.ImageKodec.decode]'s sniffing.
  *
- * Output is 1 bit per pixel, packed MSB-first, padded to a byte boundary per
- * row; polarity follows [CcittOptions.blackIs1].
+ * A page is 1 bit per pixel, packed MSB-first, padded to a byte boundary per
+ * row; polarity follows [CcittOptions.blackIs1]. [decode] returns one and [encode] takes one.
  */
 public object CcittFax {
     /**
@@ -39,6 +38,45 @@ public object CcittFax {
             k == 0 -> decodeGroup3OneD(reader, options)
             else -> decodeGroup3Mixed(reader, options)
         }
+    }
+
+    /**
+     * Encode [input], a page laid out as [decode] returns one: rows of [CcittOptions.columns] pixels,
+     * packed MSB first and padded to a whole byte, a set bit black when [CcittOptions.blackIs1] and
+     * white otherwise. The padding bits are ignored. [CcittOptions.rows] rows are written, or every
+     * whole row [input] holds when it is 0. [k] selects the coding as [decode] reads it: negative is
+     * Group 4 (T.6), zero is Group 3 one-dimensional (T.4 Modified Huffman), and a positive [k] is
+     * Group 3 two-dimensional, each 1D row followed by up to k - 1 rows coded against the row above.
+     *
+     * [decode] with the same [k] and options returns [input] with its padding cleared. The other
+     * options set the framing, as PDF's `CCITTFaxDecode` names it:
+     * - [CcittOptions.encodedByteAlign] starts each row on a byte, its EOL included in Group 3. Group 4
+     *   pads after each row, and the end of block then starts on a byte too.
+     * - [CcittOptions.endOfLine] writes an EOL before each Group 3 row. T.6 has no EOL, so Group 4
+     *   refuses it.
+     * - [CcittOptions.endOfBlock] ends the data with EOFB in Group 4 and with RTC in Group 3, which
+     *   lets a reader that is given no row count find the end.
+     *
+     * The last byte is padded with zero bits.
+     *
+     * @throws IllegalArgumentException if [CcittOptions.columns] is outside 1 to 65536, if
+     *   [CcittOptions.rows] is negative or [input] holds fewer rows, or if [k] is negative and
+     *   [CcittOptions.endOfLine] is set
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encode(input: ByteArray, k: Int, options: CcittOptions): ByteArray {
+        val cols = options.columns
+        require(cols in 1..CCITT_MAX_ENCODE_COLUMNS) { "CCITT: $cols columns is outside 1 to $CCITT_MAX_ENCODE_COLUMNS" }
+        require(options.rows >= 0) { "CCITT: ${options.rows} rows" }
+        require(k >= 0 || !options.endOfLine) { "CCITT: Group 4 (K < 0) has no EOL, so endOfLine must be false" }
+        val bytesPerRow = (cols + 7) / 8
+        val rows = if (options.rows == 0) input.size / bytesPerRow else options.rows
+        require(rows.toLong() * bytesPerRow <= input.size) {
+            "CCITT: ${input.size} bytes hold fewer than $rows rows of $bytesPerRow bytes"
+        }
+        return encodeCcittRows(
+            input, cols, rows, k, options.blackIs1, options.encodedByteAlign, options.endOfLine, options.endOfBlock,
+        )
     }
 }
 
@@ -183,7 +221,7 @@ internal object CcittFaxTables {
      * Modified Huffman White-run terminators (run lengths 0..63).
      * Entries: code, length, runLength.
      */
-    private val WHITE_TERMINATORS = intArrayOf(
+    val WHITE_TERMINATORS = intArrayOf(
         0b00110101, 8, 0,
         0b000111, 6, 1,
         0b0111, 4, 2,
@@ -251,7 +289,7 @@ internal object CcittFaxTables {
     )
 
     /** Modified Huffman White-run makeups (64, 128, 192, ...). */
-    private val WHITE_MAKEUPS = intArrayOf(
+    val WHITE_MAKEUPS = intArrayOf(
         0b11011, 5, 64,
         0b10010, 5, 128,
         0b010111, 6, 192,
@@ -298,7 +336,7 @@ internal object CcittFaxTables {
     )
 
     /** Modified Huffman Black-run terminators (run lengths 0..63). */
-    private val BLACK_TERMINATORS = intArrayOf(
+    val BLACK_TERMINATORS = intArrayOf(
         0b0000110111, 10, 0,
         0b010, 3, 1,
         0b11, 2, 2,
@@ -366,7 +404,7 @@ internal object CcittFaxTables {
     )
 
     /** Modified Huffman Black-run makeups (64, 128, 192, ...). */
-    private val BLACK_MAKEUPS = intArrayOf(
+    val BLACK_MAKEUPS = intArrayOf(
         0b0000001111, 10, 64,
         0b000011001000, 12, 128,
         0b000011001001, 12, 192,
@@ -433,20 +471,21 @@ internal object CcittFaxTables {
     const val MODE_VR3 = 8
     const val MODE_EXTENSION = 9
 
-    val twoDimensional: HuffmanTable = HuffmanTable.build(
-        intArrayOf(
-            0b1, 1, MODE_V0,
-            0b011, 3, MODE_VR1,
-            0b010, 3, MODE_VL1,
-            0b001, 3, MODE_HORIZONTAL,
-            0b0001, 4, MODE_PASS,
-            0b000011, 6, MODE_VR2,
-            0b000010, 6, MODE_VL2,
-            0b0000011, 7, MODE_VR3,
-            0b0000010, 7, MODE_VL3,
-            0b0000001, 7, MODE_EXTENSION,
-        ),
+    /** The mode codes of T.4 Table 4 and T.6 Table 1, as `code, length, mode` triples. */
+    val TWO_DIMENSIONAL_CODES = intArrayOf(
+        0b1, 1, MODE_V0,
+        0b011, 3, MODE_VR1,
+        0b010, 3, MODE_VL1,
+        0b001, 3, MODE_HORIZONTAL,
+        0b0001, 4, MODE_PASS,
+        0b000011, 6, MODE_VR2,
+        0b000010, 6, MODE_VL2,
+        0b0000011, 7, MODE_VR3,
+        0b0000010, 7, MODE_VL3,
+        0b0000001, 7, MODE_EXTENSION,
     )
+
+    val twoDimensional: HuffmanTable = HuffmanTable.build(TWO_DIMENSIONAL_CODES)
 }
 
 /* ─── 1D run decoder ──────────────────────────────────────────────────────── */
@@ -701,7 +740,16 @@ private fun decodeOneG4Row(reader: BitReader, reference: Changes, coding: Change
                 a0Color = 1 - a0Color
             }
             CcittFaxTables.MODE_EXTENSION -> {
-                if (strict) throw UnsupportedImageException("CCITT: uncompressed 2D extension is not supported")
+                // T.4 Table 4 and T.6 Table 2: the three bits after 0000001 name the extension,
+                // and 111 is the uncompressed mode, the only one either defines.
+                if (reader.hasBits(3) && reader.peekBits(3) == 0b111) {
+                    reader.skipBits(3)
+                    val exit = readUncompressed(reader, coding, maxOf(a0, 0))
+                    a0 = exit shr 1
+                    a0Color = exit and 1
+                    continue
+                }
+                if (strict) throw ImageDecodeException("CCITT: an undefined 2D extension")
                 // Extension codes signal end-of-page-block or escape sequences.
                 // Treat as end of row: emit what we have.
                 coding.fill(cols, a0Color)
@@ -785,6 +833,14 @@ private fun decodeOneG3Row(reader: BitReader, line: Changes, row: Int, allowEol:
     var pos = 0
     var color = 0
     while (pos < cols) {
+        // T.4 4.1.3 and Table 5: twelve bits 000000001111 in place of a run enter the uncompressed mode.
+        if (reader.hasBits(12) && reader.peekBits(12) == UNCOMPRESSED_1D) {
+            reader.skipBits(12)
+            val exit = readUncompressed(reader, line, pos)
+            pos = exit shr 1
+            color = exit and 1
+            continue
+        }
         val run = decodeRun(reader, color == 0)
         if (run == Int.MIN_VALUE && pos == 0 && allowEol) return false
         if (run < 0) throw ImageDecodeException("CCITT: row $row ends after $pos of $cols pixels")
@@ -795,6 +851,43 @@ private fun decodeOneG3Row(reader: BitReader, line: Changes, row: Int, allowEol:
     }
     line.finish()
     return true
+}
+
+/** The entrance to the uncompressed mode in one-dimensional coding (T.4 Table 5). */
+private const val UNCOMPRESSED_1D = 0b000000001111
+
+/**
+ * Reads the uncompressed mode of T.4 4.2.3 and Table 5 (T.6 Table 3 is the same), after its entrance
+ * code, painting [line] from column [from]. Each image pattern is n zeros and a one: n white pixels
+ * then one black for n of 0 to 4, and five white pixels for n of 5. An exit code is n zeros, a one
+ * and a bit T, for n of 6 to 10: n - 6 white pixels, then coding resumes in its own mode with the
+ * colour T (0 white, 1 black) at the next pixel. Returns that column shifted left once, or'ed with T.
+ */
+private fun readUncompressed(reader: BitReader, line: Changes, from: Int): Int {
+    val cols = line.cols
+    var pos = from
+    fun paint(n: Int, color: Int) {
+        if (n > cols - pos) throw ImageDecodeException("CCITT: uncompressed pixels pass the $cols columns")
+        line.fill(pos + n, color)
+        pos += n
+    }
+    while (true) {
+        var zeros = 0
+        while (true) {
+            if (!reader.hasBits(1)) throw ImageDecodeException("CCITT: the data ends in the uncompressed mode")
+            if (reader.readBit() == 1) break
+            if (++zeros > 10) throw ImageDecodeException("CCITT: an invalid code in the uncompressed mode")
+        }
+        when {
+            zeros <= 4 -> { paint(zeros, 0); paint(1, 1) }
+            zeros == 5 -> paint(5, 0)
+            else -> {
+                paint(zeros - 6, 0)
+                if (!reader.hasBits(1)) throw ImageDecodeException("CCITT: the data ends in the uncompressed mode")
+                return (pos shl 1) or reader.readBit()
+            }
+        }
+    }
 }
 
 /** T.4 section 4.2.4 uses six EOL+1 synchronization words for mixed-mode RTC. */

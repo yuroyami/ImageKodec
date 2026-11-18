@@ -7,6 +7,8 @@
 
 package io.github.yuroyami.imagekodec.codec.jxl
 
+import io.github.yuroyami.imagekodec.internal.color.IccWriter
+import io.github.yuroyami.imagekodec.internal.color.ColorMath
 import kotlin.math.abs
 import kotlin.math.cbrt
 import kotlin.math.ln
@@ -240,6 +242,26 @@ internal object JxlColor {
         return DoubleArray(9) { m[it] * scale }
     }
 
+    /**
+     * An ICC profile of matrix and curves for [c], an RGB encoding of an SDR curve whose primaries or
+     * white point have no code points: its colorants adapted to D50 by Bradford, as ICC.1 asks, and a
+     * parametric curve a channel. The video curves are read through BT.1886's gamma of 2.4, as the
+     * code points of the same curves are. Null for a curve no parametric curve holds.
+     */
+    fun matrixProfile(c: JxlColorEncoding): ByteArray? {
+        val curve: DoubleArray = when {
+            c.haveGamma -> doubleArrayOf(1.0 / (c.gamma * GAMMA_UNIT))
+            c.transferFunction == JxlColorEncoding.TF_SRGB -> doubleArrayOf(2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045)
+            c.transferFunction == JxlColorEncoding.TF_LINEAR -> doubleArrayOf(1.0)
+            c.transferFunction == JxlColorEncoding.TF_709 -> doubleArrayOf(2.4)
+            c.transferFunction == JxlColorEncoding.TF_DCI -> doubleArrayOf(2.6)
+            else -> return null
+        }
+        val white = whiteXy(c)
+        val m = ColorMath.rgbToD50(primariesXy(c), white) ?: return null
+        return IccWriter.matrixShaper(m, curve)
+    }
+
     private fun isSrgb(c: JxlColorEncoding): Boolean =
         c.primaries == JxlColorEncoding.PRIMARIES_SRGB && c.whitePoint == JxlColorEncoding.WHITE_D65
 
@@ -350,6 +372,20 @@ internal object JxlColor {
     private fun encodeInPlace(planes: Array<JxlPlane>, image: JxlImageHeader) {
         val target = outputEncoding(image)
         if (target.colorSpace == JxlColorEncoding.XYB) return
+        val inverse = image.iccInverse
+        if (inverse != null && image.color.wantIcc) {
+            // Linear sRGB into the file's own profile, as libjxl's colour engine writes it.
+            val rgb = DoubleArray(3)
+            val p0 = planes[0].data
+            val p1 = planes[1].data
+            val p2 = planes[2].data
+            for (i in p0.indices) {
+                rgb[0] = p0[i].toDouble(); rgb[1] = p1[i].toDouble(); rgb[2] = p2[i].toDouble()
+                inverse.encode(rgb)
+                p0[i] = rgb[0].toFloat(); p1[i] = rgb[1].toFloat(); p2[i] = rgb[2].toFloat()
+            }
+            return
+        }
         if (target.haveGamma || target.transferFunction == JxlColorEncoding.TF_DCI) {
             // DCI is a pure gamma of 2.6 (SMPTE RP 431-2).
             val exponent = if (target.haveGamma) target.gamma * GAMMA_UNIT else 1.0 / 2.6

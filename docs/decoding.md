@@ -21,7 +21,7 @@ info.isDecodable                 // and info.unsupportedReason when it is false
 ```
 
 `isDecodable` is a statement about features. It is false when the file uses something this build
-does not implement, such as a CgBI PNG or a TIFF with floating-point samples, and
+does not implement, such as an AVIF of SMPTE ST 2085 colour or a JPEG XR of N channels, and
 `unsupportedReason` names it. The Coil decoder uses this flag to decide which files to claim.
 
 `isDecodable` stays true for a file that declares only supported features and is then truncated
@@ -51,19 +51,20 @@ when you pass `applyOrientation = true`.
 
 | Format | What decodes |
 | --- | --- |
-| PNG | color types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and color-key, Adam7 interlace |
+| PNG | color types 0/2/3/4/6, depths 1/2/4/8/16, all five filters, `tRNS` palette alpha and color-key, Adam7 interlace, and Apple's CgBI files that Xcode writes into iOS apps (raw deflate, BGR and premultiplied BGRA at 8 bits) |
 | APNG | dispose none/background/previous, blend source/over, frame rects, loop count |
 | JPEG | 8- and 12-bit DCT: baseline SOF0, extended sequential SOF1, progressive SOF2, arithmetic coding SOF9 and SOF10 with DAC conditioning, lossless SOF3 and SOF11 at 2 to 16 bits with every predictor and point transform, hierarchical SOF5 to SOF7 and SOF13 to SOF15 over any of them, restart intervals, sampling factors 1..4 (4:2:0, 4:2:2, 4:4:4, 4:1:1), gray, YCbCr, RGB, CMYK and YCCK |
 | GIF | 87a and 89a, full LZW, interlace, all four disposal methods, per-frame delays, NETSCAPE and ANIMEXTS loop counts |
 | BMP | header versions 12/40/52/56/64/108/124, depths 1/2/4/8/16/24/32, BI_RGB, RLE4, RLE8, BITFIELDS with arbitrary masks, top-down and bottom-up, and BI_JPEG and BI_PNG, whose embedded file decodes as itself |
 | WebP | lossless VP8L and lossy VP8 with its ALPH opacity, still and animated, including frames that mix the two |
-| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4/JPEG (Technical Note 2 and old-style), photometric 0/1/2/3/5/6 including subsampled YCbCr and CMYK, bits 1/2/4/8/16, predictor 2, both planar configurations, every page |
-| JPEG 2000 | JP2 container and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN) |
-| AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
+| TIFF | strips and tiles, raw/PackBits/LZW/Deflate/CCITT G3 (1D/mixed 2D)/G4 with the uncompressed mode/JPEG (Technical Note 2 at 8 and 12 bits, YCbCr in one plane or separate ones, and old-style, in tiles of any layout and in separate planes), photometric 0/1/2/3/5/6 including subsampled YCbCr and CMYK, unsigned integers of 1 to 32 bits, signed integers, IEEE floats of 16, 24, 32 and 64 bits, predictors 2 and 3, both planar configurations, every page |
+| JPEG 2000 | JP2 and JPH containers and raw J2K codestream, all of Part 1: every code-block style, progression order changes (POC), packed packet headers (PPM and PPT) and regions of interest (RGN); HTJ2K (ITU-T T.814), the HT block coder's cleanup, SigProp and MagRef passes, alone or beside Part 1 tile-components; the sRGB, gray, sYCC, e-sYCC, CMYK, CMY and CIELab colour spaces |
+| AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, every matrix but SMPTE ST 2085 (constant luminance and ICtCp as zimg converts them), alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
+| HEIC | with the `imagekodec-heic` module installed: intra, P and B HEVC pictures and image sequences of the Main, Main 10, Main Still Picture and format range extensions profiles with their range extension tools, 8 to 16 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, with deblocking, SAO, wavefront rows, tiles and dependent slices, and the HEIF structure of the AVIF row. Without the module, `probe` and `readMetadata` still read the container |
 | JPEG XL | the bare codestream and the container, both coding modes: lossy VarDCT with every transform size, and Modular, lossless or lossy. Progressive passes, LF frames, patches, splines, noise, both smoothing filters, upsampling, samples of up to 16 bits and float samples, alpha straight or premultiplied, extra channels, spot colors, recompressed JPEGs, layers with every blend mode, animations |
-| JPEG XR | the container of T.832 Annex A and HD Photo's, lossless and lossy, spatial and frequency order, the three overlap modes, Y only, 4:2:0, 4:2:2 and 4:4:4, soft and hard tiles, planar and interleaved alpha, straight or premultiplied, in the gray, RGB and BGR pixel formats at 8 and 16 bits, 16-bit and 32-bit fixed point, half and float, and the packed 5-5-5, 5-6-5 and 10-10-10 formats |
+| JPEG XR | the container of T.832 Annex A and HD Photo's, lossless and lossy, spatial and frequency order, the three overlap modes, Y only, 4:2:0, 4:2:2 and 4:4:4, soft and hard tiles, planar and interleaved alpha, straight or premultiplied, in the gray, RGB and BGR pixel formats at 8 and 16 bits, 16-bit and 32-bit fixed point, half and float, the packed 5-5-5, 5-6-5 and 10-10-10 formats, and 32bppRGBE, a mantissa a channel and a shared exponent |
 
-Chroma subsampling, in the JPEG and AVIF rows, means that the file stores color at a lower
+Chroma subsampling, in the JPEG, AVIF and HEIC rows, means that the file stores color at a lower
 resolution than brightness. ImageKodec upsamples it before it returns the pixels.
 
 ### WebP
@@ -82,6 +83,20 @@ Rotation and mirroring are reported as `ImageInfo.orientation`, as EXIF orientat
 JPEG, and `applyOrientation` applies them. The clean aperture always crops. An image sequence
 plays through `decodeAnimation` with the duration its track gives each frame and the loop count
 its edit list gives, alpha track included. `decode` shows its first frame.
+
+A tone-mapped image (`tmap`) shows its base image. `decodeGainMap` gives its gain map image and the
+ISO 21496-1 metadata of its payload, and `auxiliaryImages` and `decodeAuxiliaryImage` reach the
+alpha, depth and other auxiliary images of the primary image, for AVIF and HEIC alike; the
+[HEIC page](heic.md#depth-maps-mattes-and-gain-maps) has an example.
+
+### HEIC
+
+HEIC decodes with an HEVC decoder written from ITU-T H.265, in the `imagekodec-heic` module, after
+`ImageKodecHeic.install()`. Its planes match the MD5 picture hashes that the encoder stores, and
+libde265's decode, sample for sample. The container goes through the same reader as AVIF, so
+grids, alpha, the clean aperture, rotation, mirror and colour work as they do there. An item with
+no `nclx` box takes its matrix and range from the video usability information of the stream. The
+[HEIC page](heic.md) covers installing the module and what it decodes.
 
 ### JPEG XL
 
@@ -179,4 +194,11 @@ can still be unsupported. `probe` is the call that reports that, through `isDeco
 
 `Jbig2Decoder` and `CcittFax` are public as well. Neither format carries magic bytes or dimensions
 of its own, so both take their parameters explicitly and both return packed 1-bit rows instead of
-going through `decode`. A PDF reader is the usual caller.
+going through `decode`. A PDF reader is the usual caller. `encodeCcitt`, `CcittFax.encode` and
+`encodeJbig2` write the same data ([Writing images](encoding.md#fax-and-jbig2-data-for-pdf-and-tiff)).
+
+`Jbig2Decoder` reads generic, refinement, text and halftone regions, pattern dictionaries, custom
+Huffman tables, and symbol dictionaries arithmetic or Huffman coded. An arithmetic dictionary may
+refine its symbols and aggregate several instances into one (T.88 6.5.8.2), and an immediate generic
+region may leave its length unknown and end with a row count (7.2.7). `CcittFax` reads Group 3 and
+Group 4 data, the uncompressed mode of T.4 4.2.3 included.

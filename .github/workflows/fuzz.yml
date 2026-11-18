@@ -47,3 +47,5 @@ jobs:
         run: |
           echo "IMAGEKODEC_FUZZ_SEED=$IMAGEKODEC_FUZZ_SEED IMAGEKODEC_FUZZ_ROUNDS=$IMAGEKODEC_FUZZ_ROUNDS"
           ./kotlin test -p jvm -m imagekodec --include-classes='*FuzzTest*'
+          # The HEVC decoder of HEIC, which the core's FuzzTest cannot reach (#147).
+          ./kotlin test -p jvm -m imagekodec-heic --include-classes='*FuzzTest*'

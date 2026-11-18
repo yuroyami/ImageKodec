@@ -8,16 +8,16 @@ package io.github.yuroyami.imagekodec.codec.avif
  */
 internal class Av1Transform {
 
-    private companion object {
-        val COS128 = Av1Tables.cos128Lookup
-        const val SINPI_1_9 = 1321L
-        const val SINPI_2_9 = 2482L
-        const val SINPI_3_9 = 3344L
-        const val SINPI_4_9 = 3803L
+    companion object {
+        private val COS128 = Av1Tables.cos128Lookup
+        private const val SINPI_1_9 = 1321L
+        private const val SINPI_2_9 = 2482L
+        private const val SINPI_3_9 = 3344L
+        private const val SINPI_4_9 = 3803L
 
-        fun cos128(angle: Int): Long {
-            val a = angle and 255
-            return when {
+        /** cos128 of the specification for every angle modulo 256, tabulated once from its quarter table. */
+        private val COS: LongArray = LongArray(256) { a ->
+            when {
                 a <= 64 -> COS128[a].toLong()
                 a <= 128 -> -COS128[128 - a].toLong()
                 a <= 192 -> -COS128[a - 128].toLong()
@@ -25,15 +25,59 @@ internal class Av1Transform {
             }
         }
 
-        fun sin128(angle: Int): Long = cos128(angle - 64)
+        private fun cos128(angle: Int): Long = COS[angle and 255]
 
-        fun brev(numBits: Int, x: Int): Int {
-            var t = 0
-            for (i in 0 until numBits) t += ((x shr i) and 1) shl (numBits - 1 - i)
-            return t
+        private fun sin128(angle: Int): Long = COS[(angle - 64) and 255]
+
+        /** brev(numBits, x) for numBits 2 to 6, tabulated. */
+        private val BREV: Array<IntArray> = Array(7) { n ->
+            IntArray(1 shl n) { x ->
+                var t = 0
+                for (i in 0 until n) t += ((x shr i) and 1) shl (n - 1 - i)
+                t
+            }
         }
 
-        fun round2(x: Long, n: Int): Long = if (n == 0) x else (x + (1L shl (n - 1))) shr n
+        private fun brev(numBits: Int, x: Int): Int = BREV[numBits][x]
+
+        private fun round2(x: Long, n: Int): Long = if (n == 0) x else (x + (1L shl (n - 1))) shr n
+
+        /** dc_q( b ) and ac_q( b ) for [bitDepth]. */
+        fun dcQ(bitDepth: Int, b: Int): Int = Av1Tables.dcQlookup[((bitDepth - 8) shr 1) * 256 + b.coerceIn(0, 255)]
+        fun acQ(bitDepth: Int, b: Int): Int = Av1Tables.acQlookup[((bitDepth - 8) shr 1) * 256 + b.coerceIn(0, 255)]
+
+        /** The divisor of dequantization for [txSz]: 2 for 32-point and 4 for 64-point sizes. */
+        fun dqDenom(txSz: Int): Int = when (txSz) {
+            Av1.TX_32X32, Av1.TX_16X32, Av1.TX_32X16, Av1.TX_16X64, Av1.TX_64X16 -> 2
+            Av1.TX_64X64, Av1.TX_32X64, Av1.TX_64X32 -> 4
+            else -> 1
+        }
+
+        /** Whether the rows of [type] use the DCT, the ADST (or its flip), or else the identity. */
+        fun rowIsDct(type: Int) = type == Av1.DCT_DCT || type == Av1.ADST_DCT || type == Av1.FLIPADST_DCT || type == Av1.H_DCT
+
+        fun rowIsAdst(type: Int) = when (type) {
+            Av1.DCT_ADST, Av1.ADST_ADST, Av1.DCT_FLIPADST, Av1.FLIPADST_FLIPADST,
+            Av1.ADST_FLIPADST, Av1.FLIPADST_ADST, Av1.H_ADST, Av1.H_FLIPADST -> true
+            else -> false
+        }
+
+        /** Whether the columns of [type] use the DCT, the ADST (or its flip), or else the identity. */
+        fun colIsDct(type: Int) = type == Av1.DCT_DCT || type == Av1.DCT_ADST || type == Av1.DCT_FLIPADST || type == Av1.V_DCT
+
+        fun colIsAdst(type: Int) = when (type) {
+            Av1.ADST_DCT, Av1.ADST_ADST, Av1.FLIPADST_DCT, Av1.FLIPADST_FLIPADST,
+            Av1.ADST_FLIPADST, Av1.FLIPADST_ADST, Av1.V_ADST, Av1.V_FLIPADST -> true
+            else -> false
+        }
+
+        /** Whether [type] flips its residual upside down (FLIPADST in the columns). */
+        fun flipsRows(type: Int): Boolean =
+            type == Av1.FLIPADST_DCT || type == Av1.FLIPADST_ADST || type == Av1.V_FLIPADST || type == Av1.FLIPADST_FLIPADST
+
+        /** Whether [type] flips its residual left to right (FLIPADST in the rows). */
+        fun flipsColumns(type: Int): Boolean =
+            type == Av1.DCT_FLIPADST || type == Av1.ADST_FLIPADST || type == Av1.H_FLIPADST || type == Av1.FLIPADST_FLIPADST
     }
 
     /** The working state of one 1D transform: the array T and the clamping range r. */
@@ -216,39 +260,39 @@ internal class Av1Transform {
         t[3] = d
     }
 
-    private fun rowIsDct(type: Int) = type == Av1.DCT_DCT || type == Av1.ADST_DCT || type == Av1.FLIPADST_DCT || type == Av1.H_DCT
-
-    private fun rowIsAdst(type: Int) = when (type) {
-        Av1.DCT_ADST, Av1.ADST_ADST, Av1.DCT_FLIPADST, Av1.FLIPADST_FLIPADST,
-        Av1.ADST_FLIPADST, Av1.FLIPADST_ADST, Av1.H_ADST, Av1.H_FLIPADST -> true
-        else -> false
-    }
-
-    private fun colIsDct(type: Int) = type == Av1.DCT_DCT || type == Av1.DCT_ADST || type == Av1.DCT_FLIPADST || type == Av1.V_DCT
-
-    private fun colIsAdst(type: Int) = when (type) {
-        Av1.ADST_DCT, Av1.ADST_ADST, Av1.FLIPADST_DCT, Av1.FLIPADST_FLIPADST,
-        Av1.ADST_FLIPADST, Av1.FLIPADST_ADST, Av1.V_ADST, Av1.V_FLIPADST -> true
-        else -> false
-    }
-
     private val work = Work()
     private val residualBuf = LongArray(64 * 64)
     private val dequantBuf = LongArray(32 * 32)
 
-    /** dc_q( b ) and ac_q( b ) for [bitDepth]. */
-    private fun dcQ(bitDepth: Int, b: Int): Int = Av1Tables.dcQlookup[((bitDepth - 8) shr 1) * 256 + b.coerceIn(0, 255)]
-    private fun acQ(bitDepth: Int, b: Int): Int = Av1Tables.acQlookup[((bitDepth - 8) shr 1) * 256 + b.coerceIn(0, 255)]
 
     /** The reconstruct process: dequantize Quant, inverse transform it and add it to the prediction. */
     fun reconstruct(d: Av1FrameDecoder, plane: Int, x: Int, y: Int, txSz: Int) {
+        val residual = residual(d, plane, txSz)
+        val w = 1 shl Av1.txWidthLog2[txSz]
+        val h = 1 shl Av1.txHeightLog2[txSz]
+        val type = d.planeTxType
+        val flipUD = flipsRows(type)
+        val flipLR = flipsColumns(type)
+        val buf = d.frame[plane]
+        val stride = d.planeWidth[plane]
+        val max = (1 shl d.bitDepth) - 1
+        for (i in 0 until h) for (j in 0 until w) {
+            val xx = if (flipLR) w - j - 1 else j
+            val yy = if (flipUD) h - i - 1 else i
+            val at = (y + yy) * stride + x + xx
+            buf[at] = (buf[at] + residual[i * w + j]).coerceIn(0, max.toLong()).toInt().toShort()
+        }
+    }
+
+    /**
+     * The residual of the reconstruct process for the levels in [Av1FrameDecoder.quant], `w` by `h` before the
+     * flips of the transform type: dequantized and inverse transformed. The array is this instance's and is
+     * overwritten by the next call. The encoder reads it to measure a candidate's distortion (#176).
+     */
+    fun residual(d: Av1FrameDecoder, plane: Int, txSz: Int): LongArray {
         val fh = d.fh
         val bitDepth = d.bitDepth
-        val dqDenom = when (txSz) {
-            Av1.TX_32X32, Av1.TX_16X32, Av1.TX_32X16, Av1.TX_16X64, Av1.TX_64X16 -> 2
-            Av1.TX_64X64, Av1.TX_32X64, Av1.TX_64X32 -> 4
-            else -> 1
-        }
+        val dqDenom = dqDenom(txSz)
         val log2W = Av1.txWidthLog2[txSz]
         val log2H = Av1.txHeightLog2[txSz]
         val w = 1 shl log2W
@@ -256,8 +300,6 @@ internal class Av1Transform {
         val tw = minOf(32, w)
         val th = minOf(32, h)
         val type = d.planeTxType
-        val flipUD = type == Av1.FLIPADST_DCT || type == Av1.FLIPADST_ADST || type == Av1.V_FLIPADST || type == Av1.FLIPADST_FLIPADST
-        val flipLR = type == Av1.DCT_FLIPADST || type == Av1.ADST_FLIPADST || type == Av1.H_FLIPADST || type == Av1.FLIPADST_FLIPADST
         val qIndex = fh.qIndex(false, d.segmentId, d.currentQIndex)
         val dcQ = when (plane) {
             0 -> dcQ(bitDepth, qIndex + fh.deltaQYDc)
@@ -275,12 +317,14 @@ internal class Av1Transform {
         val clampLo = -(1L shl (7 + bitDepth))
         val clampHi = (1L shl (7 + bitDepth)) - 1
         val quant = d.quant
+        var lastRow = -1
         for (i in 0 until th) for (j in 0 until tw) {
             val qv = quant[i * tw + j]
             if (qv == 0) {
                 dequantBuf[i * 32 + j] = 0
                 continue
             }
+            lastRow = i
             val q = if (i == 0 && j == 0) dcQ else acQ
             val q2 = if (useQm) Av1.round2(q * Av1Tables.quantizerMatrix[qmBase + i * tw + j], 5) else q
             val dq = qv.toLong() * q2
@@ -288,19 +332,40 @@ internal class Av1Transform {
             val dq2 = sign * ((kotlin.math.abs(dq) and 0xFFFFFF) / dqDenom)
             dequantBuf[i * 32 + j] = dq2.coerceIn(clampLo, clampHi)
         }
-        inverseTransform2d(d, txSz, log2W, log2H, w, h)
-        val buf = d.frame[plane]
-        val stride = d.planeWidth[plane]
-        val max = (1 shl bitDepth) - 1
-        for (i in 0 until h) for (j in 0 until w) {
-            val xx = if (flipLR) w - j - 1 else j
-            val yy = if (flipUD) h - i - 1 else i
-            val at = (y + yy) * stride + x + xx
-            buf[at] = (buf[at] + residualBuf[i * w + j]).coerceIn(0, max.toLong()).toInt().toShort()
-        }
+        inverseTransform2d(d, txSz, log2W, log2H, w, h, lastRow)
+        return residualBuf
     }
 
-    private fun inverseTransform2d(d: Av1FrameDecoder, txSz: Int, log2W: Int, log2H: Int, w: Int, h: Int) {
+    /**
+     * The one-dimensional inverse transform of [kind] (0 DCT, 1 ADST, 2 identity) of 2^[log2n] points as a matrix:
+     * entry `k * n + j` is output `j` for an input of 1 at `k` alone, in units of 1/4096. The encoder's forward
+     * transform is its transpose (#176), so the two share the butterflies of section 7.13.2 and cannot disagree on
+     * a basis. Each impulse runs at 2^20 with no clamping and is rounded back, so the rounding inside the
+     * butterflies stays below a unit.
+     */
+    fun basis(kind: Int, log2n: Int): IntArray {
+        val n = 1 shl log2n
+        val out = IntArray(n * n)
+        val wk = Work()
+        for (k in 0 until n) {
+            wk.t.fill(0L)
+            wk.t[k] = 1L shl 20
+            wk.r = 48
+            when (kind) {
+                0 -> inverseDct(wk, log2n)
+                1 -> inverseAdst(wk, log2n)
+                else -> inverseIdentity(wk, log2n)
+            }
+            for (j in 0 until n) out[k * n + j] = round2(wk.t[j], 8).toInt()
+        }
+        return out
+    }
+
+    /**
+     * The 2D inverse transform of [dequantBuf] into [residualBuf]. Rows after [lastRow] hold only zeros, and every
+     * one-dimensional transform takes zeros to zeros, so their row pass is skipped.
+     */
+    private fun inverseTransform2d(d: Av1FrameDecoder, txSz: Int, log2W: Int, log2H: Int, w: Int, h: Int, lastRow: Int) {
         val lossless = d.lossless
         val type = d.planeTxType
         val bitDepth = d.bitDepth
@@ -311,6 +376,10 @@ internal class Av1Transform {
         val wk = work
         val t = wk.t
         for (i in 0 until h) {
+            if (i > lastRow) {
+                residualBuf.fill(0L, i * w, (i + 1) * w)
+                continue
+            }
             for (j in 0 until w) t[j] = if (i < 32 && j < 32) dequantBuf[i * 32 + j] else 0L
             if (kotlin.math.abs(log2W - log2H) == 1) for (j in 0 until w) t[j] = round2(t[j] * 2896, 12)
             wk.r = rowClampRange

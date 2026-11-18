@@ -232,10 +232,10 @@ internal object JxrCodestream {
     }
 
     /** idxCC of strcodec.c: where sample (row, column) of a macroblock sits among its 16 blocks of 16. */
-    private val IDX_CC = IntArray(256) { at -> blockOrder(at shr 4, at and 15, 6) }
+    val IDX_CC = IntArray(256) { at -> blockOrder(at shr 4, at and 15, 6) }
 
     /** idxCC_420: the same for the 8 by 8 chroma of a 4:2:0 macroblock. */
-    private val IDX_CC_420 = IntArray(64) { at -> blockOrder(at shr 3, at and 7, 5) }
+    val IDX_CC_420 = IntArray(64) { at -> blockOrder(at shr 3, at and 7, 5) }
 
     private fun blockOrder(r: Int, c: Int, columnShift: Int): Int {
         val inBlock = ((c xor (c shr 1)) and 1) or ((c shr 1 and 1) shl 2) or

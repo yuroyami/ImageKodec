@@ -83,7 +83,7 @@ class AvifDecoderTest {
     fun aProfileIsReportedFromTheSequenceHeaderWithoutColr() {
         // avifenc writes an nclx box: BT.601 matrix, sRGB transfer, BT.709 primaries, full range.
         assertEquals(listOf(1, 13, 6, 1), ImageKodec.probe(AvifFixtures.plain).colorProfile?.cicp?.toList())
-        val bare = Heif().apply { add(1, "av01", plainData, listOf(av1C(plainConfig) to true, ispe(24, 16))) }.build()
+        val bare = HeifBuilder().apply { add(1, "av01", plainData, listOf(av1C(plainConfig) to true, ispe(24, 16))) }.build()
         // libavif's encoder writes the same code points into the sequence header.
         assertEquals(listOf(1, 13, 6, 1), ImageKodec.probe(bare).colorProfile?.cicp?.toList())
         assertEquals(fnv(ImageKodec.decode(AvifFixtures.plain)), fnv(ImageKodec.decode(bare)))
@@ -92,13 +92,13 @@ class AvifDecoderTest {
     @Test
     fun anIspeThatDisagreesWithTheFrameIsNotWhatProbeReports() {
         // The 24 by 16 frame with an ispe of 65536 by 65536: probe and decode agree on the frame (#124).
-        val lying = Heif().apply { add(1, "av01", plainData, listOf(av1C(plainConfig) to true, ispe(65536, 65536))) }.build()
+        val lying = HeifBuilder().apply { add(1, "av01", plainData, listOf(av1C(plainConfig) to true, ispe(65536, 65536))) }.build()
         val info = ImageKodec.probe(lying)
         val bitmap = ImageKodec.decode(lying)
         assertEquals(24 to 16, info.width to info.height)
         assertEquals(bitmap.width to bitmap.height, info.width to info.height)
         // 400 megapixels passes the pixel ceiling, even where the data is not there to check.
-        val huge = Heif().apply { add(1, "av01", ByteArray(0), listOf(av1C(plainConfig) to true, ispe(20000, 20000))) }.build()
+        val huge = HeifBuilder().apply { add(1, "av01", ByteArray(0), listOf(av1C(plainConfig) to true, ispe(20000, 20000))) }.build()
         val probed = runCatching { ImageKodec.probe(huge) }
         assertTrue(probed.exceptionOrNull() is ImageDecodeException || probed.getOrNull()?.isDecodable == false, "$probed")
     }
@@ -116,19 +116,19 @@ class AvifDecoderTest {
         assertFailsWith<ImageDecodeException> { ImageKodec.decode(cut) }
         // Twelve bytes name the major brand; a compatible brand needs the whole ftyp.
         assertEquals(ImageFormat.AVIF, ImageFormat.sniff(AvifFixtures.plain.copyOf(12)))
-        val compatible = Heif(major = "mif1", brands = listOf("mif1", "miaf", "avif")).apply {
+        val compatible = HeifBuilder(major = "mif1", brands = listOf("mif1", "miaf", "avif")).apply {
             add(1, "av01", plainData, listOf(av1C(plainConfig) to true, ispe(24, 16)))
         }.build()
         assertEquals(ImageFormat.AVIF, ImageFormat.sniff(compatible))
-        assertNull(ImageFormat.sniff(Heif(major = "heic", brands = listOf("mif1", "heic")).build()))
+        assertEquals(ImageFormat.HEIC, ImageFormat.sniff(HeifBuilder(major = "heic", brands = listOf("mif1", "heic")).build()))
     }
 
     @Test
     fun itemDataInIdatOrInScatteredExtentsReadsTheSame() {
         val want = fnv(ImageKodec.decode(AvifFixtures.plain))
-        val inIdat = Heif().apply { add(1, "av01", plainData, plainProperties(), idat = true) }.build()
+        val inIdat = HeifBuilder().apply { add(1, "av01", plainData, plainProperties(), idat = true) }.build()
         assertEquals(want, fnv(ImageKodec.decode(inIdat)))
-        val scattered = Heif().apply { add(1, "av01", plainData, plainProperties(), extents = 3) }.build()
+        val scattered = HeifBuilder().apply { add(1, "av01", plainData, plainProperties(), extents = 3) }.build()
         assertEquals(want, fnv(ImageKodec.decode(scattered)))
     }
 
@@ -136,14 +136,14 @@ class AvifDecoderTest {
     fun anAltrGroupFallsBackToAnItemThisReaderShows() {
         val want = fnv(ImageKodec.decode(AvifFixtures.plain))
         val hevc = box("hvcC", ByteArray(23))
-        val fallback = Heif().apply {
+        val fallback = HeifBuilder().apply {
             add(1, "hvc1", ByteArray(16), listOf(hevc to true, ispe(24, 16)))
             add(2, "av01", plainData, plainProperties())
             groups += "altr" to longArrayOf(1, 2)
         }.build()
         assertTrue(ImageKodec.probe(fallback).isDecodable)
         assertEquals(want, fnv(ImageKodec.decode(fallback)))
-        val alone = Heif().apply { add(1, "hvc1", ByteArray(16), listOf(hevc to true, ispe(24, 16))) }.build()
+        val alone = HeifBuilder().apply { add(1, "hvc1", ByteArray(16), listOf(hevc to true, ispe(24, 16))) }.build()
         val info = ImageKodec.probe(alone)
         assertFalse(info.isDecodable)
         assertTrue(info.unsupportedReason!!.contains("hvc1"), info.unsupportedReason)
@@ -153,12 +153,12 @@ class AvifDecoderTest {
     @Test
     fun onlyAnUnknownEssentialPropertyRefusesAnItem() {
         val unknown = box("xyzw", byteArrayOf(1, 2, 3))
-        val essential = Heif().apply { add(1, "av01", plainData, plainProperties() + (unknown to true)) }.build()
+        val essential = HeifBuilder().apply { add(1, "av01", plainData, plainProperties() + (unknown to true)) }.build()
         val info = ImageKodec.probe(essential)
         assertFalse(info.isDecodable)
         assertTrue(info.unsupportedReason!!.contains("xyzw"), info.unsupportedReason)
         assertFailsWith<UnsupportedImageException> { ImageKodec.decode(essential) }
-        val optional = Heif().apply { add(1, "av01", plainData, plainProperties() + (unknown to false)) }.build()
+        val optional = HeifBuilder().apply { add(1, "av01", plainData, plainProperties() + (unknown to false)) }.build()
         assertEquals(fnv(ImageKodec.decode(AvifFixtures.plain)), fnv(ImageKodec.decode(optional)))
     }
 
@@ -166,7 +166,7 @@ class AvifDecoderTest {
     fun aSampleTransformComputesFromItsInputs() {
         // (a + b) / 2 of two copies of the card is the card.
         val expression = byteArrayOf(0x02, 5, 1, 2, 128.toByte(), 0) + be32(2) + byteArrayOf(131.toByte())
-        val file = Heif().apply {
+        val file = HeifBuilder().apply {
             add(1, "sato", expression, listOf(ispe(24, 16), pixi(8, 8, 8), nclx(1, 13, 6, true)))
             add(2, "av01", plainData, plainProperties(), hidden = true)
             add(3, "av01", plainData, plainProperties(), hidden = true)
@@ -215,7 +215,7 @@ class AvifDecoderTest {
 
     @Test
     fun aToneMappedImageShowsItsBaseImage() {
-        val file = Heif().apply {
+        val file = HeifBuilder().apply {
             add(1, "tmap", byteArrayOf(0, 0, 0, 0), listOf(ispe(24, 16)))
             add(2, "av01", plainData, plainProperties(), hidden = true)
             add(3, "av01", monoData, listOf(av1C(monoConfig) to true, ispe(24, 16)), hidden = true)
@@ -226,7 +226,7 @@ class AvifDecoderTest {
 
     @Test
     fun aHandMadeGridJoinsItsTilesAndCrops() {
-        val file = Heif().apply {
+        val file = HeifBuilder().apply {
             add(1, "grid", byteArrayOf(0, 0, 1, 1, 0, 46, 0, 30), listOf(ispe(46, 30)))
             for (id in 2..5) add(id, "av01", plainData, plainProperties(), hidden = true)
             references += Triple("dimg", 1L, longArrayOf(2, 3, 4, 5))
@@ -246,7 +246,7 @@ class AvifDecoderTest {
 
     @Test
     fun anOverlayDrawsItsInputsOverItsFill() {
-        val file = Heif().apply {
+        val file = HeifBuilder().apply {
             // Opaque red, 40 by 30, then the card at (2, 3) and the card with alpha at (20, 10), partly outside.
             val data = byteArrayOf(0, 0, -1, -1, 0, 0, 0, 0, -1, -1, 0, 40, 0, 30, 0, 2, 0, 3, 0, 20, 0, 10)
             add(1, "iovl", data, listOf(ispe(40, 30)))
@@ -281,18 +281,18 @@ class AvifDecoderTest {
     @Test
     fun aCleanApertureThatNamesNoWholeRectangleIsLeftOut() {
         val half = box("clap", be32(41) + be32(2) + be32(16) + be32(1) + be32(0) + be32(1) + be32(0) + be32(1))
-        val file = Heif().apply { add(1, "av01", plainData, plainProperties() + (half to true)) }.build()
+        val file = HeifBuilder().apply { add(1, "av01", plainData, plainProperties() + (half to true)) }.build()
         assertEquals(24 to 16, ImageKodec.probe(file).let { it.width to it.height })
         assertEquals(fnv(ImageKodec.decode(AvifFixtures.plain)), fnv(ImageKodec.decode(file)))
     }
 
     @Test
     fun brokenStructuresFailAsDecodeErrors() {
-        assertFailsWith<ImageDecodeException> { ImageKodec.decode(Heif().apply { primary = null; add(1, "av01", plainData, plainProperties()) }.build()) }
-        assertFailsWith<ImageDecodeException> { ImageKodec.decode(Heif().apply { primary = 9 }.build()) }
-        val noConfig = Heif().apply { add(1, "av01", plainData, listOf(ispe(24, 16))) }.build()
+        assertFailsWith<ImageDecodeException> { ImageKodec.decode(HeifBuilder().apply { primary = null; add(1, "av01", plainData, plainProperties()) }.build()) }
+        assertFailsWith<ImageDecodeException> { ImageKodec.decode(HeifBuilder().apply { primary = 9 }.build()) }
+        val noConfig = HeifBuilder().apply { add(1, "av01", plainData, listOf(ispe(24, 16))) }.build()
         assertFalse(ImageKodec.probe(noConfig).isDecodable)
-        val badGrid = Heif().apply {
+        val badGrid = HeifBuilder().apply {
             add(1, "grid", byteArrayOf(0, 0, 1, 1, 0, 100, 0, 30), listOf(ispe(100, 30)))
             for (id in 2..5) add(id, "av01", plainData, plainProperties(), hidden = true)
             references += Triple("dimg", 1L, longArrayOf(2, 3, 4, 5))
@@ -341,109 +341,5 @@ class AvifDecoderTest {
         val flags = (if (c.highBitdepth) 0x40 else 0) or (if (c.twelveBit) 0x20 else 0) or (if (c.monochrome) 0x10 else 0) or
             (c.subX shl 3) or (c.subY shl 2)
         return box("av1C", byteArrayOf(0x81.toByte(), (c.profile shl 5).toByte(), flags.toByte(), 0) + c.configObus)
-    }
-
-    /** A HEIF file of items, with each item's properties, references and an `altr` group. */
-    private class Heif(val major: String = "avif", val brands: List<String> = listOf("avif", "mif1", "miaf")) {
-        class Item(
-            val id: Int, val type: String, val data: ByteArray, val properties: List<Pair<ByteArray, Boolean>>,
-            val hidden: Boolean, val idat: Boolean, val extents: Int,
-        )
-
-        val items = ArrayList<Item>()
-        val references = ArrayList<Triple<String, Long, LongArray>>()
-        val groups = ArrayList<Pair<String, LongArray>>()
-        var primary: Int? = 1
-
-        fun add(
-            id: Int, type: String, data: ByteArray, properties: List<Pair<ByteArray, Boolean>>,
-            hidden: Boolean = false, idat: Boolean = false, extents: Int = 1,
-        ) {
-            items += Item(id, type, data, properties, hidden, idat, extents)
-        }
-
-        private fun be32(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
-        private fun be16(v: Int) = byteArrayOf((v ushr 8).toByte(), v.toByte())
-        private fun box(type: String, payload: ByteArray) = be32(8 + payload.size) + type.encodeToByteArray() + payload
-        private fun fullBox(type: String, version: Int, flags: Int, payload: ByteArray) =
-            box(type, byteArrayOf(version.toByte(), (flags ushr 16).toByte(), (flags ushr 8).toByte(), flags.toByte()) + payload)
-
-        fun build(): ByteArray {
-            val ftyp = box("ftyp", major.encodeToByteArray() + be32(0) + brands.joinToString("").encodeToByteArray())
-            // Each item's data in its extents; the extents go into mdat last first, so only iloc puts them in order.
-            val pieces = items.map { item ->
-                val n = item.extents
-                List(n) { k -> item.data.copyOfRange(item.data.size * k / n, item.data.size * (k + 1) / n) }
-            }
-            fun meta(mdatStart: Int): ByteArray {
-                var idat = ByteArray(0)
-                var mdatAt = mdatStart + 8
-                val extentsOf = HashMap<Int, List<Pair<Int, Int>>>()
-                val idatOf = HashMap<Int, Int>()
-                for ((i, item) in items.withIndex()) {
-                    if (item.idat) {
-                        idatOf[item.id] = idat.size
-                        idat += item.data
-                    }
-                }
-                val order = items.indices.filter { !items[it].idat }
-                val offsets = HashMap<Pair<Int, Int>, Int>()
-                for (i in order) for (k in pieces[i].indices.reversed()) {
-                    offsets[i to k] = mdatAt
-                    mdatAt += pieces[i][k].size
-                }
-                for (i in order) extentsOf[items[i].id] = pieces[i].indices.map { k -> offsets.getValue(i to k) to pieces[i][k].size }
-                var iloc = be16(0x4400) + be16(items.size)
-                for (item in items) {
-                    iloc += be16(item.id) + be16(if (item.idat) 1 else 0) + be16(0)
-                    if (item.idat) {
-                        iloc += be16(1) + be32(idatOf.getValue(item.id)) + be32(item.data.size)
-                    } else {
-                        val e = extentsOf.getValue(item.id)
-                        iloc += be16(e.size)
-                        for ((o, l) in e) iloc += be32(o) + be32(l)
-                    }
-                }
-                var iinf = be16(items.size)
-                for (item in items) {
-                    iinf += fullBox("infe", 2, if (item.hidden) 1 else 0, be16(item.id) + be16(0) + item.type.encodeToByteArray() + byteArrayOf(0))
-                }
-                var ipco = ByteArray(0)
-                var ipma = be32(items.size)
-                var index = 0
-                for (item in items) {
-                    ipma += be16(item.id) + byteArrayOf(item.properties.size.toByte())
-                    for ((p, essential) in item.properties) {
-                        ipco += p
-                        index++
-                        ipma += byteArrayOf(((if (essential) 0x80 else 0) or index).toByte())
-                    }
-                }
-                var iref = ByteArray(0)
-                for ((type, from, to) in references) {
-                    iref += box(type, be16(from.toInt()) + be16(to.size) + to.fold(ByteArray(0)) { a, t -> a + be16(t.toInt()) })
-                }
-                var children = fullBox("hdlr", 0, 0, be32(0) + "pict".encodeToByteArray() + ByteArray(12) + byteArrayOf(0))
-                primary?.let { children += fullBox("pitm", 0, 0, be16(it)) }
-                children += fullBox("iloc", 1, 0, iloc)
-                children += fullBox("iinf", 0, 0, iinf)
-                if (references.isNotEmpty()) children += fullBox("iref", 0, 0, iref)
-                children += box("iprp", box("ipco", ipco) + fullBox("ipma", 0, 0, ipma))
-                if (idat.isNotEmpty()) children += box("idat", idat)
-                if (groups.isNotEmpty()) {
-                    var grpl = ByteArray(0)
-                    for ((n, g) in groups.withIndex()) {
-                        grpl += fullBox(g.first, 0, 0, be32(100 + n) + be32(g.second.size) + g.second.fold(ByteArray(0)) { a, t -> a + be32(t.toInt()) })
-                    }
-                    children += box("grpl", grpl)
-                }
-                return fullBox("meta", 0, 0, children)
-            }
-            val size = meta(0).size
-            val meta = meta(ftyp.size + size)
-            var mdat = ByteArray(0)
-            for (i in items.indices.filter { !items[it].idat }) for (k in pieces[i].indices.reversed()) mdat += pieces[i][k]
-            return ftyp + meta + box("mdat", mdat)
-        }
     }
 }

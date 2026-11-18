@@ -128,7 +128,19 @@ internal object Inflate {
         sizeHint: Int = 0,
         maxOutput: Long = Long.MAX_VALUE,
         cancel: (() -> Unit)? = null,
-    ): ByteArray {
+    ): ByteArray = inflateWithEnd(input, offset, sizeHint, maxOutput, cancel).data
+
+    /** The output of a DEFLATE stream, and the index of the first input byte after its last block. */
+    class Inflated(val data: ByteArray, val end: Int)
+
+    /** [inflate], also giving where the stream ends, so a framer can read its trailer. */
+    fun inflateWithEnd(
+        input: ByteArray,
+        offset: Int = 0,
+        sizeHint: Int = 0,
+        maxOutput: Long = Long.MAX_VALUE,
+        cancel: (() -> Unit)? = null,
+    ): Inflated {
         val s = State(input, offset, sizeHint, maxOutput)
         try {
             var last: Int
@@ -147,7 +159,7 @@ internal object Inflate {
         } catch (_: OutOfInput) {
             throw InflateException(InflateError.DATA_DID_NOT_TERMINATE)
         }
-        return s.output()
+        return Inflated(s.output(), s.end())
     }
 
     /** Non-local "out of input" signal, replacing puff's setjmp/longjmp. */
@@ -178,6 +190,9 @@ internal object Inflate {
             private set
 
         val inAvailable: Int get() = inBuf.size - incnt
+
+        /** The first input byte past the bits used: whole bytes the bit buffer read ahead go back. */
+        fun end(): Int = incnt - (bitcnt ushr 3)
 
         /** No copy when the size hint was exact: the common PNG/TIFF path. */
         fun output(): ByteArray = if (outcnt == out.size) out else out.copyOf(outcnt)
@@ -212,10 +227,10 @@ internal object Inflate {
             // Long arithmetic throughout: an Int capacity doubled past 2^30 wraps to
             // Int.MIN_VALUE and then 0, and the loop below never ends (#127).
             val needed = outcnt.toLong() + extra
+            // The limit first: the first buffer may be larger than it (#161).
+            if (needed > maxOutput) throw InflateException(InflateError.INFLATED_DATA_TOO_LARGE)
             if (needed > out.size) {
-                if (needed > maxOutput || needed > MAX_ARRAY) {
-                    throw InflateException(InflateError.INFLATED_DATA_TOO_LARGE)
-                }
+                if (needed > MAX_ARRAY) throw InflateException(InflateError.INFLATED_DATA_TOO_LARGE)
                 var cap = if (out.size == 0) 256L else out.size.toLong()
                 while (cap < needed) cap = cap shl 1
                 out = out.copyOf(minOf(cap, maxOutput, MAX_ARRAY).coerceAtLeast(needed).toInt())
@@ -430,7 +445,13 @@ internal object Inflate {
         return 0
     }
 
-    private fun fixed(s: State): Int {
+    private fun fixed(s: State): Int = codes(s, FIXED_CODES.first, FIXED_CODES.second)
+
+    /**
+     * The fixed codes of RFC 1951 3.2.6, built once: a stream of empty fixed blocks rebuilt them
+     * for every block, 280 times slower than zlib (#162). Decoding only reads them.
+     */
+    private val FIXED_CODES: Pair<Huffman, Huffman> by lazy {
         val lengths = ShortArray(FIXLCODES)
         var symbol = 0
         while (symbol < 144) { lengths[symbol] = 8; symbol++ }
@@ -443,8 +464,7 @@ internal object Inflate {
         for (i in 0 until MAXDCODES) lengths[i] = 5
         val distcode = Huffman(MAXDCODES)
         construct(distcode, lengths, MAXDCODES)
-
-        return codes(s, lencode, distcode)
+        lencode to distcode
     }
 
     private fun dynamic(s: State): Int {

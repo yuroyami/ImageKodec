@@ -6,10 +6,27 @@
 // - Show declarations: true
 
 // Library unique name: <io.github.yuroyami:imagekodec>
+open annotation class io.github.yuroyami.imagekodec/ExperimentalHeifCodecApi : kotlin/Annotation { // io.github.yuroyami.imagekodec/ExperimentalHeifCodecApi|null[0]
+    constructor <init>() // io.github.yuroyami.imagekodec/ExperimentalHeifCodecApi.<init>|<init>(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/HeifChroma : kotlin/Enum<io.github.yuroyami.imagekodec/HeifChroma> { // io.github.yuroyami.imagekodec/HeifChroma|null[0]
+    enum entry Yuv420 // io.github.yuroyami.imagekodec/HeifChroma.Yuv420|null[0]
+    enum entry Yuv422 // io.github.yuroyami.imagekodec/HeifChroma.Yuv422|null[0]
+    enum entry Yuv444 // io.github.yuroyami.imagekodec/HeifChroma.Yuv444|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/HeifChroma.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/HeifChroma> // io.github.yuroyami.imagekodec/HeifChroma.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/HeifChroma // io.github.yuroyami.imagekodec/HeifChroma.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/HeifChroma> // io.github.yuroyami.imagekodec/HeifChroma.values|values#static(){}[0]
+}
+
 final enum class io.github.yuroyami.imagekodec/ImageFormat : kotlin/Enum<io.github.yuroyami.imagekodec/ImageFormat> { // io.github.yuroyami.imagekodec/ImageFormat|null[0]
     enum entry AVIF // io.github.yuroyami.imagekodec/ImageFormat.AVIF|null[0]
     enum entry BMP // io.github.yuroyami.imagekodec/ImageFormat.BMP|null[0]
     enum entry GIF // io.github.yuroyami.imagekodec/ImageFormat.GIF|null[0]
+    enum entry HEIC // io.github.yuroyami.imagekodec/ImageFormat.HEIC|null[0]
     enum entry JP2 // io.github.yuroyami.imagekodec/ImageFormat.JP2|null[0]
     enum entry JPEG // io.github.yuroyami.imagekodec/ImageFormat.JPEG|null[0]
     enum entry JXL // io.github.yuroyami.imagekodec/ImageFormat.JXL|null[0]
@@ -29,6 +46,20 @@ final enum class io.github.yuroyami.imagekodec/ImageFormat : kotlin/Enum<io.gith
     }
 }
 
+final enum class io.github.yuroyami.imagekodec/Jp2Progression : kotlin/Enum<io.github.yuroyami.imagekodec/Jp2Progression> { // io.github.yuroyami.imagekodec/Jp2Progression|null[0]
+    enum entry CPRL // io.github.yuroyami.imagekodec/Jp2Progression.CPRL|null[0]
+    enum entry LRCP // io.github.yuroyami.imagekodec/Jp2Progression.LRCP|null[0]
+    enum entry PCRL // io.github.yuroyami.imagekodec/Jp2Progression.PCRL|null[0]
+    enum entry RLCP // io.github.yuroyami.imagekodec/Jp2Progression.RLCP|null[0]
+    enum entry RPCL // io.github.yuroyami.imagekodec/Jp2Progression.RPCL|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/Jp2Progression.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/Jp2Progression> // io.github.yuroyami.imagekodec/Jp2Progression.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/Jp2Progression // io.github.yuroyami.imagekodec/Jp2Progression.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/Jp2Progression> // io.github.yuroyami.imagekodec/Jp2Progression.values|values#static(){}[0]
+}
+
 final enum class io.github.yuroyami.imagekodec/JpegEncoderKind : kotlin/Enum<io.github.yuroyami.imagekodec/JpegEncoderKind> { // io.github.yuroyami.imagekodec/JpegEncoderKind|null[0]
     enum entry Fast // io.github.yuroyami.imagekodec/JpegEncoderKind.Fast|null[0]
     enum entry Jpegli // io.github.yuroyami.imagekodec/JpegEncoderKind.Jpegli|null[0]
@@ -38,6 +69,43 @@ final enum class io.github.yuroyami.imagekodec/JpegEncoderKind : kotlin/Enum<io.
 
     final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/JpegEncoderKind // io.github.yuroyami.imagekodec/JpegEncoderKind.valueOf|valueOf#static(kotlin.String){}[0]
     final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/JpegEncoderKind> // io.github.yuroyami.imagekodec/JpegEncoderKind.values|values#static(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/JpegGrayscale : kotlin/Enum<io.github.yuroyami.imagekodec/JpegGrayscale> { // io.github.yuroyami.imagekodec/JpegGrayscale|null[0]
+    enum entry Always // io.github.yuroyami.imagekodec/JpegGrayscale.Always|null[0]
+    enum entry Auto // io.github.yuroyami.imagekodec/JpegGrayscale.Auto|null[0]
+    enum entry Never // io.github.yuroyami.imagekodec/JpegGrayscale.Never|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/JpegGrayscale.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/JpegGrayscale> // io.github.yuroyami.imagekodec/JpegGrayscale.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/JpegGrayscale // io.github.yuroyami.imagekodec/JpegGrayscale.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/JpegGrayscale> // io.github.yuroyami.imagekodec/JpegGrayscale.values|values#static(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/JpegSubsampling : kotlin/Enum<io.github.yuroyami.imagekodec/JpegSubsampling> { // io.github.yuroyami.imagekodec/JpegSubsampling|null[0]
+    enum entry Auto // io.github.yuroyami.imagekodec/JpegSubsampling.Auto|null[0]
+    enum entry S420 // io.github.yuroyami.imagekodec/JpegSubsampling.S420|null[0]
+    enum entry S422 // io.github.yuroyami.imagekodec/JpegSubsampling.S422|null[0]
+    enum entry S444 // io.github.yuroyami.imagekodec/JpegSubsampling.S444|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/JpegSubsampling.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/JpegSubsampling> // io.github.yuroyami.imagekodec/JpegSubsampling.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/JpegSubsampling // io.github.yuroyami.imagekodec/JpegSubsampling.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/JpegSubsampling> // io.github.yuroyami.imagekodec/JpegSubsampling.values|values#static(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/JxrChroma : kotlin/Enum<io.github.yuroyami.imagekodec/JxrChroma> { // io.github.yuroyami.imagekodec/JxrChroma|null[0]
+    enum entry Auto // io.github.yuroyami.imagekodec/JxrChroma.Auto|null[0]
+    enum entry Full // io.github.yuroyami.imagekodec/JxrChroma.Full|null[0]
+    enum entry Half // io.github.yuroyami.imagekodec/JxrChroma.Half|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/JxrChroma.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/JxrChroma> // io.github.yuroyami.imagekodec/JxrChroma.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/JxrChroma // io.github.yuroyami.imagekodec/JxrChroma.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/JxrChroma> // io.github.yuroyami.imagekodec/JxrChroma.values|values#static(){}[0]
 }
 
 final enum class io.github.yuroyami.imagekodec/Orientation : kotlin/Enum<io.github.yuroyami.imagekodec/Orientation> { // io.github.yuroyami.imagekodec/Orientation|null[0]
@@ -65,6 +133,21 @@ final enum class io.github.yuroyami.imagekodec/Orientation : kotlin/Enum<io.gith
     }
 }
 
+final enum class io.github.yuroyami.imagekodec/PngColorType : kotlin/Enum<io.github.yuroyami.imagekodec/PngColorType> { // io.github.yuroyami.imagekodec/PngColorType|null[0]
+    enum entry Auto // io.github.yuroyami.imagekodec/PngColorType.Auto|null[0]
+    enum entry Gray // io.github.yuroyami.imagekodec/PngColorType.Gray|null[0]
+    enum entry GrayAlpha // io.github.yuroyami.imagekodec/PngColorType.GrayAlpha|null[0]
+    enum entry Palette // io.github.yuroyami.imagekodec/PngColorType.Palette|null[0]
+    enum entry Rgb // io.github.yuroyami.imagekodec/PngColorType.Rgb|null[0]
+    enum entry Rgba // io.github.yuroyami.imagekodec/PngColorType.Rgba|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/PngColorType.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/PngColorType> // io.github.yuroyami.imagekodec/PngColorType.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/PngColorType // io.github.yuroyami.imagekodec/PngColorType.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/PngColorType> // io.github.yuroyami.imagekodec/PngColorType.values|values#static(){}[0]
+}
+
 final enum class io.github.yuroyami.imagekodec/RenderingIntent : kotlin/Enum<io.github.yuroyami.imagekodec/RenderingIntent> { // io.github.yuroyami.imagekodec/RenderingIntent|null[0]
     enum entry AbsoluteColorimetric // io.github.yuroyami.imagekodec/RenderingIntent.AbsoluteColorimetric|null[0]
     enum entry Perceptual // io.github.yuroyami.imagekodec/RenderingIntent.Perceptual|null[0]
@@ -76,6 +159,90 @@ final enum class io.github.yuroyami.imagekodec/RenderingIntent : kotlin/Enum<io.
 
     final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/RenderingIntent // io.github.yuroyami.imagekodec/RenderingIntent.valueOf|valueOf#static(kotlin.String){}[0]
     final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/RenderingIntent> // io.github.yuroyami.imagekodec/RenderingIntent.values|values#static(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/TiffCompression : kotlin/Enum<io.github.yuroyami.imagekodec/TiffCompression> { // io.github.yuroyami.imagekodec/TiffCompression|null[0]
+    enum entry CcittG3 // io.github.yuroyami.imagekodec/TiffCompression.CcittG3|null[0]
+    enum entry CcittG4 // io.github.yuroyami.imagekodec/TiffCompression.CcittG4|null[0]
+    enum entry Deflate // io.github.yuroyami.imagekodec/TiffCompression.Deflate|null[0]
+    enum entry Jpeg // io.github.yuroyami.imagekodec/TiffCompression.Jpeg|null[0]
+    enum entry Lzw // io.github.yuroyami.imagekodec/TiffCompression.Lzw|null[0]
+    enum entry None // io.github.yuroyami.imagekodec/TiffCompression.None|null[0]
+    enum entry PackBits // io.github.yuroyami.imagekodec/TiffCompression.PackBits|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/TiffCompression.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/TiffCompression> // io.github.yuroyami.imagekodec/TiffCompression.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/TiffCompression // io.github.yuroyami.imagekodec/TiffCompression.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/TiffCompression> // io.github.yuroyami.imagekodec/TiffCompression.values|values#static(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/TiffPhotometric : kotlin/Enum<io.github.yuroyami.imagekodec/TiffPhotometric> { // io.github.yuroyami.imagekodec/TiffPhotometric|null[0]
+    enum entry Auto // io.github.yuroyami.imagekodec/TiffPhotometric.Auto|null[0]
+    enum entry BiLevel // io.github.yuroyami.imagekodec/TiffPhotometric.BiLevel|null[0]
+    enum entry Gray // io.github.yuroyami.imagekodec/TiffPhotometric.Gray|null[0]
+    enum entry Palette // io.github.yuroyami.imagekodec/TiffPhotometric.Palette|null[0]
+    enum entry Rgb // io.github.yuroyami.imagekodec/TiffPhotometric.Rgb|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/TiffPhotometric.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/TiffPhotometric> // io.github.yuroyami.imagekodec/TiffPhotometric.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/TiffPhotometric // io.github.yuroyami.imagekodec/TiffPhotometric.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/TiffPhotometric> // io.github.yuroyami.imagekodec/TiffPhotometric.values|values#static(){}[0]
+}
+
+final enum class io.github.yuroyami.imagekodec/WebpAlphaFilter : kotlin/Enum<io.github.yuroyami.imagekodec/WebpAlphaFilter> { // io.github.yuroyami.imagekodec/WebpAlphaFilter|null[0]
+    enum entry Best // io.github.yuroyami.imagekodec/WebpAlphaFilter.Best|null[0]
+    enum entry Fast // io.github.yuroyami.imagekodec/WebpAlphaFilter.Fast|null[0]
+    enum entry None // io.github.yuroyami.imagekodec/WebpAlphaFilter.None|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/WebpAlphaFilter.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/WebpAlphaFilter> // io.github.yuroyami.imagekodec/WebpAlphaFilter.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/WebpAlphaFilter // io.github.yuroyami.imagekodec/WebpAlphaFilter.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/WebpAlphaFilter> // io.github.yuroyami.imagekodec/WebpAlphaFilter.values|values#static(){}[0]
+}
+
+abstract fun interface io.github.yuroyami.imagekodec/TileJob { // io.github.yuroyami.imagekodec/TileJob|null[0]
+    abstract fun run() // io.github.yuroyami.imagekodec/TileJob.run|run(){}[0]
+}
+
+abstract fun interface io.github.yuroyami.imagekodec/TileRunner { // io.github.yuroyami.imagekodec/TileRunner|null[0]
+    abstract fun run(kotlin.collections/List<io.github.yuroyami.imagekodec/TileJob>) // io.github.yuroyami.imagekodec/TileRunner.run|run(kotlin.collections.List<io.github.yuroyami.imagekodec.TileJob>){}[0]
+
+    final object Companion { // io.github.yuroyami.imagekodec/TileRunner.Companion|null[0]
+        final val Serial // io.github.yuroyami.imagekodec/TileRunner.Companion.Serial|{}Serial[0]
+            final fun <get-Serial>(): io.github.yuroyami.imagekodec/TileRunner // io.github.yuroyami.imagekodec/TileRunner.Companion.Serial.<get-Serial>|<get-Serial>(){}[0]
+    }
+}
+
+abstract interface io.github.yuroyami.imagekodec/HeifCodec { // io.github.yuroyami.imagekodec/HeifCodec|null[0]
+    abstract val configurationType // io.github.yuroyami.imagekodec/HeifCodec.configurationType|{}configurationType[0]
+        abstract fun <get-configurationType>(): kotlin/String // io.github.yuroyami.imagekodec/HeifCodec.configurationType.<get-configurationType>|<get-configurationType>(){}[0]
+    abstract val itemType // io.github.yuroyami.imagekodec/HeifCodec.itemType|{}itemType[0]
+        abstract fun <get-itemType>(): kotlin/String // io.github.yuroyami.imagekodec/HeifCodec.itemType.<get-itemType>|<get-itemType>(){}[0]
+    abstract val sampleEntryTypes // io.github.yuroyami.imagekodec/HeifCodec.sampleEntryTypes|{}sampleEntryTypes[0]
+        abstract fun <get-sampleEntryTypes>(): kotlin.collections/Set<kotlin/String> // io.github.yuroyami.imagekodec/HeifCodec.sampleEntryTypes.<get-sampleEntryTypes>|<get-sampleEntryTypes>(){}[0]
+
+    abstract fun inspect(kotlin/ByteArray?, kotlin/ByteArray?): io.github.yuroyami.imagekodec/HeifCodecInfo // io.github.yuroyami.imagekodec/HeifCodec.inspect|inspect(kotlin.ByteArray?;kotlin.ByteArray?){}[0]
+    abstract fun open(kotlin/ByteArray?): io.github.yuroyami.imagekodec/HeifCodecSession // io.github.yuroyami.imagekodec/HeifCodec.open|open(kotlin.ByteArray?){}[0]
+}
+
+abstract interface io.github.yuroyami.imagekodec/HeifCodecSession { // io.github.yuroyami.imagekodec/HeifCodecSession|null[0]
+    abstract fun decode(kotlin/ByteArray, kotlin/Function0<kotlin/Unit>?): io.github.yuroyami.imagekodec/HeifPlanes? // io.github.yuroyami.imagekodec/HeifCodecSession.decode|decode(kotlin.ByteArray;kotlin.Function0<kotlin.Unit>?){}[0]
+    open fun decodeInOutputOrder(kotlin/ByteArray, kotlin/Function0<kotlin/Unit>?): kotlin.collections/List<io.github.yuroyami.imagekodec/HeifPlanes> // io.github.yuroyami.imagekodec/HeifCodecSession.decodeInOutputOrder|decodeInOutputOrder(kotlin.ByteArray;kotlin.Function0<kotlin.Unit>?){}[0]
+    open fun flush(): kotlin.collections/List<io.github.yuroyami.imagekodec/HeifPlanes> // io.github.yuroyami.imagekodec/HeifCodecSession.flush|flush(){}[0]
+}
+
+abstract interface io.github.yuroyami.imagekodec/HeifEncoder { // io.github.yuroyami.imagekodec/HeifEncoder|null[0]
+    abstract val alphaUrn // io.github.yuroyami.imagekodec/HeifEncoder.alphaUrn|{}alphaUrn[0]
+        abstract fun <get-alphaUrn>(): kotlin/String // io.github.yuroyami.imagekodec/HeifEncoder.alphaUrn.<get-alphaUrn>|<get-alphaUrn>(){}[0]
+    abstract val configurationType // io.github.yuroyami.imagekodec/HeifEncoder.configurationType|{}configurationType[0]
+        abstract fun <get-configurationType>(): kotlin/String // io.github.yuroyami.imagekodec/HeifEncoder.configurationType.<get-configurationType>|<get-configurationType>(){}[0]
+    abstract val itemType // io.github.yuroyami.imagekodec/HeifEncoder.itemType|{}itemType[0]
+        abstract fun <get-itemType>(): kotlin/String // io.github.yuroyami.imagekodec/HeifEncoder.itemType.<get-itemType>|<get-itemType>(){}[0]
+
+    abstract fun encode(io.github.yuroyami.imagekodec/HeifPlanes, io.github.yuroyami.imagekodec/HeifEncodeParameters, kotlin/Function0<kotlin/Unit>?): io.github.yuroyami.imagekodec/HeifCodedPicture // io.github.yuroyami.imagekodec/HeifEncoder.encode|encode(io.github.yuroyami.imagekodec.HeifPlanes;io.github.yuroyami.imagekodec.HeifEncodeParameters;kotlin.Function0<kotlin.Unit>?){}[0]
 }
 
 final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuroyami.imagekodec.codec/CcittOptions|null[0]
@@ -104,6 +271,49 @@ final class io.github.yuroyami.imagekodec.codec/CcittOptions { // io.github.yuro
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.yuroyami.imagekodec.codec/CcittOptions.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.yuroyami.imagekodec.codec/CcittOptions.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec.codec/CcittOptions.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/AuxiliaryImage { // io.github.yuroyami.imagekodec/AuxiliaryImage|null[0]
+    final val bitDepth // io.github.yuroyami.imagekodec/AuxiliaryImage.bitDepth|{}bitDepth[0]
+        final fun <get-bitDepth>(): kotlin/Int // io.github.yuroyami.imagekodec/AuxiliaryImage.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
+    final val height // io.github.yuroyami.imagekodec/AuxiliaryImage.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/AuxiliaryImage.height.<get-height>|<get-height>(){}[0]
+    final val subtype // io.github.yuroyami.imagekodec/AuxiliaryImage.subtype|{}subtype[0]
+        final fun <get-subtype>(): kotlin/ByteArray // io.github.yuroyami.imagekodec/AuxiliaryImage.subtype.<get-subtype>|<get-subtype>(){}[0]
+    final val urn // io.github.yuroyami.imagekodec/AuxiliaryImage.urn|{}urn[0]
+        final fun <get-urn>(): kotlin/String // io.github.yuroyami.imagekodec/AuxiliaryImage.urn.<get-urn>|<get-urn>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/AuxiliaryImage.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/AuxiliaryImage.width.<get-width>|<get-width>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/AuxiliaryImage.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/BmpEncodeOptions { // io.github.yuroyami.imagekodec/BmpEncodeOptions|null[0]
+    constructor <init>(kotlin/Int? = ..., kotlin/Boolean = ...) // io.github.yuroyami.imagekodec/BmpEncodeOptions.<init>|<init>(kotlin.Int?;kotlin.Boolean){}[0]
+
+    final val bitsPerPixel // io.github.yuroyami.imagekodec/BmpEncodeOptions.bitsPerPixel|{}bitsPerPixel[0]
+        final fun <get-bitsPerPixel>(): kotlin/Int? // io.github.yuroyami.imagekodec/BmpEncodeOptions.bitsPerPixel.<get-bitsPerPixel>|<get-bitsPerPixel>(){}[0]
+    final val rle // io.github.yuroyami.imagekodec/BmpEncodeOptions.rle|{}rle[0]
+        final fun <get-rle>(): kotlin/Boolean // io.github.yuroyami.imagekodec/BmpEncodeOptions.rle.<get-rle>|<get-rle>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/BmpEncodeOptions.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/CcittEncodeOptions { // io.github.yuroyami.imagekodec/CcittEncodeOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ...) // io.github.yuroyami.imagekodec/CcittEncodeOptions.<init>|<init>(kotlin.Int;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean){}[0]
+
+    final val blackIs1 // io.github.yuroyami.imagekodec/CcittEncodeOptions.blackIs1|{}blackIs1[0]
+        final fun <get-blackIs1>(): kotlin/Boolean // io.github.yuroyami.imagekodec/CcittEncodeOptions.blackIs1.<get-blackIs1>|<get-blackIs1>(){}[0]
+    final val encodedByteAlign // io.github.yuroyami.imagekodec/CcittEncodeOptions.encodedByteAlign|{}encodedByteAlign[0]
+        final fun <get-encodedByteAlign>(): kotlin/Boolean // io.github.yuroyami.imagekodec/CcittEncodeOptions.encodedByteAlign.<get-encodedByteAlign>|<get-encodedByteAlign>(){}[0]
+    final val endOfBlock // io.github.yuroyami.imagekodec/CcittEncodeOptions.endOfBlock|{}endOfBlock[0]
+        final fun <get-endOfBlock>(): kotlin/Boolean // io.github.yuroyami.imagekodec/CcittEncodeOptions.endOfBlock.<get-endOfBlock>|<get-endOfBlock>(){}[0]
+    final val endOfLine // io.github.yuroyami.imagekodec/CcittEncodeOptions.endOfLine|{}endOfLine[0]
+        final fun <get-endOfLine>(): kotlin/Boolean // io.github.yuroyami.imagekodec/CcittEncodeOptions.endOfLine.<get-endOfLine>|<get-endOfLine>(){}[0]
+    final val k // io.github.yuroyami.imagekodec/CcittEncodeOptions.k|{}k[0]
+        final fun <get-k>(): kotlin/Int // io.github.yuroyami.imagekodec/CcittEncodeOptions.k.<get-k>|<get-k>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/CcittEncodeOptions.toString|toString(){}[0]
 }
 
 final class io.github.yuroyami.imagekodec/ColorProfile { // io.github.yuroyami.imagekodec/ColorProfile|null[0]
@@ -148,6 +358,168 @@ final class io.github.yuroyami.imagekodec/GainMap { // io.github.yuroyami.imagek
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/GainMap.toString|toString(){}[0]
 }
 
+final class io.github.yuroyami.imagekodec/GainMapMetadata { // io.github.yuroyami.imagekodec/GainMapMetadata|null[0]
+    final val alternateHdrHeadroom // io.github.yuroyami.imagekodec/GainMapMetadata.alternateHdrHeadroom|{}alternateHdrHeadroom[0]
+        final fun <get-alternateHdrHeadroom>(): kotlin/Double // io.github.yuroyami.imagekodec/GainMapMetadata.alternateHdrHeadroom.<get-alternateHdrHeadroom>|<get-alternateHdrHeadroom>(){}[0]
+    final val alternateOffset // io.github.yuroyami.imagekodec/GainMapMetadata.alternateOffset|{}alternateOffset[0]
+        final fun <get-alternateOffset>(): kotlin/DoubleArray // io.github.yuroyami.imagekodec/GainMapMetadata.alternateOffset.<get-alternateOffset>|<get-alternateOffset>(){}[0]
+    final val baseHdrHeadroom // io.github.yuroyami.imagekodec/GainMapMetadata.baseHdrHeadroom|{}baseHdrHeadroom[0]
+        final fun <get-baseHdrHeadroom>(): kotlin/Double // io.github.yuroyami.imagekodec/GainMapMetadata.baseHdrHeadroom.<get-baseHdrHeadroom>|<get-baseHdrHeadroom>(){}[0]
+    final val baseOffset // io.github.yuroyami.imagekodec/GainMapMetadata.baseOffset|{}baseOffset[0]
+        final fun <get-baseOffset>(): kotlin/DoubleArray // io.github.yuroyami.imagekodec/GainMapMetadata.baseOffset.<get-baseOffset>|<get-baseOffset>(){}[0]
+    final val channelCount // io.github.yuroyami.imagekodec/GainMapMetadata.channelCount|{}channelCount[0]
+        final fun <get-channelCount>(): kotlin/Int // io.github.yuroyami.imagekodec/GainMapMetadata.channelCount.<get-channelCount>|<get-channelCount>(){}[0]
+    final val gainMapMax // io.github.yuroyami.imagekodec/GainMapMetadata.gainMapMax|{}gainMapMax[0]
+        final fun <get-gainMapMax>(): kotlin/DoubleArray // io.github.yuroyami.imagekodec/GainMapMetadata.gainMapMax.<get-gainMapMax>|<get-gainMapMax>(){}[0]
+    final val gainMapMin // io.github.yuroyami.imagekodec/GainMapMetadata.gainMapMin|{}gainMapMin[0]
+        final fun <get-gainMapMin>(): kotlin/DoubleArray // io.github.yuroyami.imagekodec/GainMapMetadata.gainMapMin.<get-gainMapMin>|<get-gainMapMin>(){}[0]
+    final val gamma // io.github.yuroyami.imagekodec/GainMapMetadata.gamma|{}gamma[0]
+        final fun <get-gamma>(): kotlin/DoubleArray // io.github.yuroyami.imagekodec/GainMapMetadata.gamma.<get-gamma>|<get-gamma>(){}[0]
+    final val minimumVersion // io.github.yuroyami.imagekodec/GainMapMetadata.minimumVersion|{}minimumVersion[0]
+        final fun <get-minimumVersion>(): kotlin/Int // io.github.yuroyami.imagekodec/GainMapMetadata.minimumVersion.<get-minimumVersion>|<get-minimumVersion>(){}[0]
+    final val raw // io.github.yuroyami.imagekodec/GainMapMetadata.raw|{}raw[0]
+        final fun <get-raw>(): kotlin/ByteArray // io.github.yuroyami.imagekodec/GainMapMetadata.raw.<get-raw>|<get-raw>(){}[0]
+    final val useBaseColorSpace // io.github.yuroyami.imagekodec/GainMapMetadata.useBaseColorSpace|{}useBaseColorSpace[0]
+        final fun <get-useBaseColorSpace>(): kotlin/Boolean // io.github.yuroyami.imagekodec/GainMapMetadata.useBaseColorSpace.<get-useBaseColorSpace>|<get-useBaseColorSpace>(){}[0]
+    final val version // io.github.yuroyami.imagekodec/GainMapMetadata.version|{}version[0]
+        final fun <get-version>(): kotlin/Int // io.github.yuroyami.imagekodec/GainMapMetadata.version.<get-version>|<get-version>(){}[0]
+    final val writerVersion // io.github.yuroyami.imagekodec/GainMapMetadata.writerVersion|{}writerVersion[0]
+        final fun <get-writerVersion>(): kotlin/Int // io.github.yuroyami.imagekodec/GainMapMetadata.writerVersion.<get-writerVersion>|<get-writerVersion>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/GainMapMetadata.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/HeifCodecInfo { // io.github.yuroyami.imagekodec/HeifCodecInfo|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean? = ..., kotlin/String? = ...) // io.github.yuroyami.imagekodec/HeifCodecInfo.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean?;kotlin.String?){}[0]
+
+    final val bitDepthChroma // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthChroma|{}bitDepthChroma[0]
+        final fun <get-bitDepthChroma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthChroma.<get-bitDepthChroma>|<get-bitDepthChroma>(){}[0]
+    final val bitDepthLuma // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthLuma|{}bitDepthLuma[0]
+        final fun <get-bitDepthLuma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.bitDepthLuma.<get-bitDepthLuma>|<get-bitDepthLuma>(){}[0]
+    final val chromaFormat // io.github.yuroyami.imagekodec/HeifCodecInfo.chromaFormat|{}chromaFormat[0]
+        final fun <get-chromaFormat>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.chromaFormat.<get-chromaFormat>|<get-chromaFormat>(){}[0]
+    final val colorPrimaries // io.github.yuroyami.imagekodec/HeifCodecInfo.colorPrimaries|{}colorPrimaries[0]
+        final fun <get-colorPrimaries>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifCodecInfo.colorPrimaries.<get-colorPrimaries>|<get-colorPrimaries>(){}[0]
+    final val fullRange // io.github.yuroyami.imagekodec/HeifCodecInfo.fullRange|{}fullRange[0]
+        final fun <get-fullRange>(): kotlin/Boolean? // io.github.yuroyami.imagekodec/HeifCodecInfo.fullRange.<get-fullRange>|<get-fullRange>(){}[0]
+    final val height // io.github.yuroyami.imagekodec/HeifCodecInfo.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.height.<get-height>|<get-height>(){}[0]
+    final val matrixCoefficients // io.github.yuroyami.imagekodec/HeifCodecInfo.matrixCoefficients|{}matrixCoefficients[0]
+        final fun <get-matrixCoefficients>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifCodecInfo.matrixCoefficients.<get-matrixCoefficients>|<get-matrixCoefficients>(){}[0]
+    final val transferCharacteristics // io.github.yuroyami.imagekodec/HeifCodecInfo.transferCharacteristics|{}transferCharacteristics[0]
+        final fun <get-transferCharacteristics>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifCodecInfo.transferCharacteristics.<get-transferCharacteristics>|<get-transferCharacteristics>(){}[0]
+    final val unsupportedReason // io.github.yuroyami.imagekodec/HeifCodecInfo.unsupportedReason|{}unsupportedReason[0]
+        final fun <get-unsupportedReason>(): kotlin/String? // io.github.yuroyami.imagekodec/HeifCodecInfo.unsupportedReason.<get-unsupportedReason>|<get-unsupportedReason>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/HeifCodecInfo.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodecInfo.width.<get-width>|<get-width>(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/HeifCodedPicture { // io.github.yuroyami.imagekodec/HeifCodedPicture|null[0]
+    constructor <init>(kotlin/ByteArray, kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/String) // io.github.yuroyami.imagekodec/HeifCodedPicture.<init>|<init>(kotlin.ByteArray;kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.String){}[0]
+
+    final val brand // io.github.yuroyami.imagekodec/HeifCodedPicture.brand|{}brand[0]
+        final fun <get-brand>(): kotlin/String // io.github.yuroyami.imagekodec/HeifCodedPicture.brand.<get-brand>|<get-brand>(){}[0]
+    final val configuration // io.github.yuroyami.imagekodec/HeifCodedPicture.configuration|{}configuration[0]
+        final fun <get-configuration>(): kotlin/ByteArray // io.github.yuroyami.imagekodec/HeifCodedPicture.configuration.<get-configuration>|<get-configuration>(){}[0]
+    final val data // io.github.yuroyami.imagekodec/HeifCodedPicture.data|{}data[0]
+        final fun <get-data>(): kotlin/ByteArray // io.github.yuroyami.imagekodec/HeifCodedPicture.data.<get-data>|<get-data>(){}[0]
+    final val height // io.github.yuroyami.imagekodec/HeifCodedPicture.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodedPicture.height.<get-height>|<get-height>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/HeifCodedPicture.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifCodedPicture.width.<get-width>|<get-width>(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/HeifEncodeOptions { // io.github.yuroyami.imagekodec/HeifEncodeOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Boolean = ..., io.github.yuroyami.imagekodec/HeifChroma = ..., kotlin/Int? = ..., kotlin/Int = ..., kotlin/Int? = ..., kotlin/Int? = ..., io.github.yuroyami.imagekodec/Orientation = ...) // io.github.yuroyami.imagekodec/HeifEncodeOptions.<init>|<init>(kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.HeifChroma;kotlin.Int?;kotlin.Int;kotlin.Int?;kotlin.Int?;io.github.yuroyami.imagekodec.Orientation){}[0]
+
+    final val bitDepth // io.github.yuroyami.imagekodec/HeifEncodeOptions.bitDepth|{}bitDepth[0]
+        final fun <get-bitDepth>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifEncodeOptions.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
+    final val chroma // io.github.yuroyami.imagekodec/HeifEncodeOptions.chroma|{}chroma[0]
+        final fun <get-chroma>(): io.github.yuroyami.imagekodec/HeifChroma // io.github.yuroyami.imagekodec/HeifEncodeOptions.chroma.<get-chroma>|<get-chroma>(){}[0]
+    final val effort // io.github.yuroyami.imagekodec/HeifEncodeOptions.effort|{}effort[0]
+        final fun <get-effort>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifEncodeOptions.effort.<get-effort>|<get-effort>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/HeifEncodeOptions.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/HeifEncodeOptions.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val orientation // io.github.yuroyami.imagekodec/HeifEncodeOptions.orientation|{}orientation[0]
+        final fun <get-orientation>(): io.github.yuroyami.imagekodec/Orientation // io.github.yuroyami.imagekodec/HeifEncodeOptions.orientation.<get-orientation>|<get-orientation>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/HeifEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val thumbnailSize // io.github.yuroyami.imagekodec/HeifEncodeOptions.thumbnailSize|{}thumbnailSize[0]
+        final fun <get-thumbnailSize>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifEncodeOptions.thumbnailSize.<get-thumbnailSize>|<get-thumbnailSize>(){}[0]
+    final val tileSize // io.github.yuroyami.imagekodec/HeifEncodeOptions.tileSize|{}tileSize[0]
+        final fun <get-tileSize>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifEncodeOptions.tileSize.<get-tileSize>|<get-tileSize>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/HeifEncodeOptions.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/HeifEncodeParameters { // io.github.yuroyami.imagekodec/HeifEncodeParameters|null[0]
+    constructor <init>(kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ...) // io.github.yuroyami.imagekodec/HeifEncodeParameters.<init>|<init>(kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Int?;kotlin.Int?;kotlin.Int?){}[0]
+
+    final val colorPrimaries // io.github.yuroyami.imagekodec/HeifEncodeParameters.colorPrimaries|{}colorPrimaries[0]
+        final fun <get-colorPrimaries>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifEncodeParameters.colorPrimaries.<get-colorPrimaries>|<get-colorPrimaries>(){}[0]
+    final val effort // io.github.yuroyami.imagekodec/HeifEncodeParameters.effort|{}effort[0]
+        final fun <get-effort>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifEncodeParameters.effort.<get-effort>|<get-effort>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/HeifEncodeParameters.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/HeifEncodeParameters.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val matrixCoefficients // io.github.yuroyami.imagekodec/HeifEncodeParameters.matrixCoefficients|{}matrixCoefficients[0]
+        final fun <get-matrixCoefficients>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifEncodeParameters.matrixCoefficients.<get-matrixCoefficients>|<get-matrixCoefficients>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/HeifEncodeParameters.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifEncodeParameters.quality.<get-quality>|<get-quality>(){}[0]
+    final val transferCharacteristics // io.github.yuroyami.imagekodec/HeifEncodeParameters.transferCharacteristics|{}transferCharacteristics[0]
+        final fun <get-transferCharacteristics>(): kotlin/Int? // io.github.yuroyami.imagekodec/HeifEncodeParameters.transferCharacteristics.<get-transferCharacteristics>|<get-transferCharacteristics>(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/HeifGainMap { // io.github.yuroyami.imagekodec/HeifGainMap|null[0]
+    final val appleHeadroom // io.github.yuroyami.imagekodec/HeifGainMap.appleHeadroom|{}appleHeadroom[0]
+        final fun <get-appleHeadroom>(): kotlin/Double? // io.github.yuroyami.imagekodec/HeifGainMap.appleHeadroom.<get-appleHeadroom>|<get-appleHeadroom>(){}[0]
+    final val appleMakerNote33 // io.github.yuroyami.imagekodec/HeifGainMap.appleMakerNote33|{}appleMakerNote33[0]
+        final fun <get-appleMakerNote33>(): kotlin/Double? // io.github.yuroyami.imagekodec/HeifGainMap.appleMakerNote33.<get-appleMakerNote33>|<get-appleMakerNote33>(){}[0]
+    final val appleMakerNote48 // io.github.yuroyami.imagekodec/HeifGainMap.appleMakerNote48|{}appleMakerNote48[0]
+        final fun <get-appleMakerNote48>(): kotlin/Double? // io.github.yuroyami.imagekodec/HeifGainMap.appleMakerNote48.<get-appleMakerNote48>|<get-appleMakerNote48>(){}[0]
+    final val bitmap // io.github.yuroyami.imagekodec/HeifGainMap.bitmap|{}bitmap[0]
+        final fun <get-bitmap>(): io.github.yuroyami.imagekodec/KiteBitmap16 // io.github.yuroyami.imagekodec/HeifGainMap.bitmap.<get-bitmap>|<get-bitmap>(){}[0]
+    final val form // io.github.yuroyami.imagekodec/HeifGainMap.form|{}form[0]
+        final fun <get-form>(): io.github.yuroyami.imagekodec/HeifGainMap.Form // io.github.yuroyami.imagekodec/HeifGainMap.form.<get-form>|<get-form>(){}[0]
+    final val metadata // io.github.yuroyami.imagekodec/HeifGainMap.metadata|{}metadata[0]
+        final fun <get-metadata>(): io.github.yuroyami.imagekodec/GainMapMetadata? // io.github.yuroyami.imagekodec/HeifGainMap.metadata.<get-metadata>|<get-metadata>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/HeifGainMap.toString|toString(){}[0]
+
+    final enum class Form : kotlin/Enum<io.github.yuroyami.imagekodec/HeifGainMap.Form> { // io.github.yuroyami.imagekodec/HeifGainMap.Form|null[0]
+        enum entry Apple // io.github.yuroyami.imagekodec/HeifGainMap.Form.Apple|null[0]
+        enum entry Iso21496 // io.github.yuroyami.imagekodec/HeifGainMap.Form.Iso21496|null[0]
+
+        final val entries // io.github.yuroyami.imagekodec/HeifGainMap.Form.entries|#static{}entries[0]
+            final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/HeifGainMap.Form> // io.github.yuroyami.imagekodec/HeifGainMap.Form.entries.<get-entries>|<get-entries>#static(){}[0]
+
+        final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/HeifGainMap.Form // io.github.yuroyami.imagekodec/HeifGainMap.Form.valueOf|valueOf#static(kotlin.String){}[0]
+        final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/HeifGainMap.Form> // io.github.yuroyami.imagekodec/HeifGainMap.Form.values|values#static(){}[0]
+    }
+}
+
+final class io.github.yuroyami.imagekodec/HeifPlanes { // io.github.yuroyami.imagekodec/HeifPlanes|null[0]
+    constructor <init>(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Array<kotlin/ShortArray>, kotlin/IntArray, kotlin/Boolean) // io.github.yuroyami.imagekodec/HeifPlanes.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Array<kotlin.ShortArray>;kotlin.IntArray;kotlin.Boolean){}[0]
+
+    final val bitDepthChroma // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthChroma|{}bitDepthChroma[0]
+        final fun <get-bitDepthChroma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthChroma.<get-bitDepthChroma>|<get-bitDepthChroma>(){}[0]
+    final val bitDepthLuma // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthLuma|{}bitDepthLuma[0]
+        final fun <get-bitDepthLuma>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.bitDepthLuma.<get-bitDepthLuma>|<get-bitDepthLuma>(){}[0]
+    final val fullRange // io.github.yuroyami.imagekodec/HeifPlanes.fullRange|{}fullRange[0]
+        final fun <get-fullRange>(): kotlin/Boolean // io.github.yuroyami.imagekodec/HeifPlanes.fullRange.<get-fullRange>|<get-fullRange>(){}[0]
+    final val height // io.github.yuroyami.imagekodec/HeifPlanes.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.height.<get-height>|<get-height>(){}[0]
+    final val planes // io.github.yuroyami.imagekodec/HeifPlanes.planes|{}planes[0]
+        final fun <get-planes>(): kotlin/Array<kotlin/ShortArray> // io.github.yuroyami.imagekodec/HeifPlanes.planes.<get-planes>|<get-planes>(){}[0]
+    final val strides // io.github.yuroyami.imagekodec/HeifPlanes.strides|{}strides[0]
+        final fun <get-strides>(): kotlin/IntArray // io.github.yuroyami.imagekodec/HeifPlanes.strides.<get-strides>|<get-strides>(){}[0]
+    final val subX // io.github.yuroyami.imagekodec/HeifPlanes.subX|{}subX[0]
+        final fun <get-subX>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.subX.<get-subX>|<get-subX>(){}[0]
+    final val subY // io.github.yuroyami.imagekodec/HeifPlanes.subY|{}subY[0]
+        final fun <get-subY>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.subY.<get-subY>|<get-subY>(){}[0]
+    final val width // io.github.yuroyami.imagekodec/HeifPlanes.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.yuroyami.imagekodec/HeifPlanes.width.<get-width>|<get-width>(){}[0]
+}
+
 final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imagekodec/ImageInfo|null[0]
     constructor <init>(io.github.yuroyami.imagekodec/ImageFormat, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/Boolean, kotlin/Int, kotlin/Long, io.github.yuroyami.imagekodec/Orientation, kotlin/Boolean, kotlin/String? = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/ColorProfile? = ...) // io.github.yuroyami.imagekodec/ImageInfo.<init>|<init>(io.github.yuroyami.imagekodec.ImageFormat;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Long;io.github.yuroyami.imagekodec.Orientation;kotlin.Boolean;kotlin.String?;kotlin.Int;io.github.yuroyami.imagekodec.ColorProfile?){}[0]
 
@@ -184,6 +556,14 @@ final class io.github.yuroyami.imagekodec/ImageInfo { // io.github.yuroyami.imag
 
     final var colorChannels // io.github.yuroyami.imagekodec/ImageInfo.colorChannels|{}colorChannels[0]
         final fun <get-colorChannels>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.colorChannels.<get-colorChannels>|<get-colorChannels>(){}[0]
+    final var stereoLeftPage // io.github.yuroyami.imagekodec/ImageInfo.stereoLeftPage|{}stereoLeftPage[0]
+        final fun <get-stereoLeftPage>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.stereoLeftPage.<get-stereoLeftPage>|<get-stereoLeftPage>(){}[0]
+    final var stereoRightPage // io.github.yuroyami.imagekodec/ImageInfo.stereoRightPage|{}stereoRightPage[0]
+        final fun <get-stereoRightPage>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.stereoRightPage.<get-stereoRightPage>|<get-stereoRightPage>(){}[0]
+    final var thumbnailHeight // io.github.yuroyami.imagekodec/ImageInfo.thumbnailHeight|{}thumbnailHeight[0]
+        final fun <get-thumbnailHeight>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.thumbnailHeight.<get-thumbnailHeight>|<get-thumbnailHeight>(){}[0]
+    final var thumbnailWidth // io.github.yuroyami.imagekodec/ImageInfo.thumbnailWidth|{}thumbnailWidth[0]
+        final fun <get-thumbnailWidth>(): kotlin/Int // io.github.yuroyami.imagekodec/ImageInfo.thumbnailWidth.<get-thumbnailWidth>|<get-thumbnailWidth>(){}[0]
 
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/ImageInfo.toString|toString(){}[0]
 }
@@ -206,6 +586,72 @@ final class io.github.yuroyami.imagekodec/ImageMetadata { // io.github.yuroyami.
     final fun upright(): io.github.yuroyami.imagekodec/ImageMetadata // io.github.yuroyami.imagekodec/ImageMetadata.upright|upright(){}[0]
 }
 
+final class io.github.yuroyami.imagekodec/Jbig2EncodeOptions { // io.github.yuroyami.imagekodec/Jbig2EncodeOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ...) // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.<init>|<init>(kotlin.Int;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean){}[0]
+
+    final val mmr // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.mmr|{}mmr[0]
+        final fun <get-mmr>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.mmr.<get-mmr>|<get-mmr>(){}[0]
+    final val standalone // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.standalone|{}standalone[0]
+        final fun <get-standalone>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.standalone.<get-standalone>|<get-standalone>(){}[0]
+    final val template // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.template|{}template[0]
+        final fun <get-template>(): kotlin/Int // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.template.<get-template>|<get-template>(){}[0]
+    final val typicalPrediction // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.typicalPrediction|{}typicalPrediction[0]
+        final fun <get-typicalPrediction>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.typicalPrediction.<get-typicalPrediction>|<get-typicalPrediction>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/Jbig2EncodeOptions.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/Jp2EncodeOptions { // io.github.yuroyami.imagekodec/Jp2EncodeOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Boolean = ..., kotlin.collections/List<kotlin/Double> = ..., kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/Jp2Progression = ..., kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Boolean = ...) // io.github.yuroyami.imagekodec/Jp2EncodeOptions.<init>|<init>(kotlin.Int;kotlin.Boolean;kotlin.collections.List<kotlin.Double>;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;io.github.yuroyami.imagekodec.Jp2Progression;kotlin.Int;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Int;kotlin.Boolean){}[0]
+
+    final val bitsPerSample // io.github.yuroyami.imagekodec/Jp2EncodeOptions.bitsPerSample|{}bitsPerSample[0]
+        final fun <get-bitsPerSample>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.bitsPerSample.<get-bitsPerSample>|<get-bitsPerSample>(){}[0]
+    final val bypass // io.github.yuroyami.imagekodec/Jp2EncodeOptions.bypass|{}bypass[0]
+        final fun <get-bypass>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.bypass.<get-bypass>|<get-bypass>(){}[0]
+    final val codeBlockHeight // io.github.yuroyami.imagekodec/Jp2EncodeOptions.codeBlockHeight|{}codeBlockHeight[0]
+        final fun <get-codeBlockHeight>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.codeBlockHeight.<get-codeBlockHeight>|<get-codeBlockHeight>(){}[0]
+    final val codeBlockWidth // io.github.yuroyami.imagekodec/Jp2EncodeOptions.codeBlockWidth|{}codeBlockWidth[0]
+        final fun <get-codeBlockWidth>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.codeBlockWidth.<get-codeBlockWidth>|<get-codeBlockWidth>(){}[0]
+    final val codestreamOnly // io.github.yuroyami.imagekodec/Jp2EncodeOptions.codestreamOnly|{}codestreamOnly[0]
+        final fun <get-codestreamOnly>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.codestreamOnly.<get-codestreamOnly>|<get-codestreamOnly>(){}[0]
+    final val effort // io.github.yuroyami.imagekodec/Jp2EncodeOptions.effort|{}effort[0]
+        final fun <get-effort>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.effort.<get-effort>|<get-effort>(){}[0]
+    final val ephMarkers // io.github.yuroyami.imagekodec/Jp2EncodeOptions.ephMarkers|{}ephMarkers[0]
+        final fun <get-ephMarkers>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.ephMarkers.<get-ephMarkers>|<get-ephMarkers>(){}[0]
+    final val highThroughput // io.github.yuroyami.imagekodec/Jp2EncodeOptions.highThroughput|{}highThroughput[0]
+        final fun <get-highThroughput>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.highThroughput.<get-highThroughput>|<get-highThroughput>(){}[0]
+    final val layers // io.github.yuroyami.imagekodec/Jp2EncodeOptions.layers|{}layers[0]
+        final fun <get-layers>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.layers.<get-layers>|<get-layers>(){}[0]
+    final val levels // io.github.yuroyami.imagekodec/Jp2EncodeOptions.levels|{}levels[0]
+        final fun <get-levels>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.levels.<get-levels>|<get-levels>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/Jp2EncodeOptions.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val precinctSize // io.github.yuroyami.imagekodec/Jp2EncodeOptions.precinctSize|{}precinctSize[0]
+        final fun <get-precinctSize>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.precinctSize.<get-precinctSize>|<get-precinctSize>(){}[0]
+    final val progression // io.github.yuroyami.imagekodec/Jp2EncodeOptions.progression|{}progression[0]
+        final fun <get-progression>(): io.github.yuroyami.imagekodec/Jp2Progression // io.github.yuroyami.imagekodec/Jp2EncodeOptions.progression.<get-progression>|<get-progression>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/Jp2EncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val ratios // io.github.yuroyami.imagekodec/Jp2EncodeOptions.ratios|{}ratios[0]
+        final fun <get-ratios>(): kotlin.collections/List<kotlin/Double> // io.github.yuroyami.imagekodec/Jp2EncodeOptions.ratios.<get-ratios>|<get-ratios>(){}[0]
+    final val resetContexts // io.github.yuroyami.imagekodec/Jp2EncodeOptions.resetContexts|{}resetContexts[0]
+        final fun <get-resetContexts>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.resetContexts.<get-resetContexts>|<get-resetContexts>(){}[0]
+    final val segmentationSymbols // io.github.yuroyami.imagekodec/Jp2EncodeOptions.segmentationSymbols|{}segmentationSymbols[0]
+        final fun <get-segmentationSymbols>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.segmentationSymbols.<get-segmentationSymbols>|<get-segmentationSymbols>(){}[0]
+    final val sopMarkers // io.github.yuroyami.imagekodec/Jp2EncodeOptions.sopMarkers|{}sopMarkers[0]
+        final fun <get-sopMarkers>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.sopMarkers.<get-sopMarkers>|<get-sopMarkers>(){}[0]
+    final val terminateEachPass // io.github.yuroyami.imagekodec/Jp2EncodeOptions.terminateEachPass|{}terminateEachPass[0]
+        final fun <get-terminateEachPass>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.terminateEachPass.<get-terminateEachPass>|<get-terminateEachPass>(){}[0]
+    final val tileHeight // io.github.yuroyami.imagekodec/Jp2EncodeOptions.tileHeight|{}tileHeight[0]
+        final fun <get-tileHeight>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.tileHeight.<get-tileHeight>|<get-tileHeight>(){}[0]
+    final val tileWidth // io.github.yuroyami.imagekodec/Jp2EncodeOptions.tileWidth|{}tileWidth[0]
+        final fun <get-tileWidth>(): kotlin/Int // io.github.yuroyami.imagekodec/Jp2EncodeOptions.tileWidth.<get-tileWidth>|<get-tileWidth>(){}[0]
+    final val verticalCausal // io.github.yuroyami.imagekodec/Jp2EncodeOptions.verticalCausal|{}verticalCausal[0]
+        final fun <get-verticalCausal>(): kotlin/Boolean // io.github.yuroyami.imagekodec/Jp2EncodeOptions.verticalCausal.<get-verticalCausal>|<get-verticalCausal>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/Jp2EncodeOptions.toString|toString(){}[0]
+}
+
 final class io.github.yuroyami.imagekodec/JpegComponents { // io.github.yuroyami.imagekodec/JpegComponents|null[0]
     constructor <init>(kotlin/Int, kotlin/Int, kotlin/Int, kotlin/ByteArray, kotlin/Int) // io.github.yuroyami.imagekodec/JpegComponents.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.ByteArray;kotlin.Int){}[0]
 
@@ -222,6 +668,43 @@ final class io.github.yuroyami.imagekodec/JpegComponents { // io.github.yuroyami
 
     final fun get(kotlin/Int, kotlin/Int, kotlin/Int): kotlin/Int // io.github.yuroyami.imagekodec/JpegComponents.get|get(kotlin.Int;kotlin.Int;kotlin.Int){}[0]
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/JpegComponents.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/JpegEncodeOptions { // io.github.yuroyami.imagekodec/JpegEncodeOptions|null[0]
+    constructor <init>(kotlin/Int = ..., io.github.yuroyami.imagekodec/JpegSubsampling = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/JpegGrayscale = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/JpegEncoderKind = ..., kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/JpegEncodeOptions.<init>|<init>(kotlin.Int;io.github.yuroyami.imagekodec.JpegSubsampling;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Int;kotlin.Int;kotlin.Int;io.github.yuroyami.imagekodec.JpegGrayscale;kotlin.Int;io.github.yuroyami.imagekodec.JpegEncoderKind;kotlin.Int;kotlin.Boolean;kotlin.Int;kotlin.Int){}[0]
+
+    final val arithmetic // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmetic|{}arithmetic[0]
+        final fun <get-arithmetic>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmetic.<get-arithmetic>|<get-arithmetic>(){}[0]
+    final val arithmeticAcThreshold // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmeticAcThreshold|{}arithmeticAcThreshold[0]
+        final fun <get-arithmeticAcThreshold>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmeticAcThreshold.<get-arithmeticAcThreshold>|<get-arithmeticAcThreshold>(){}[0]
+    final val arithmeticDcLower // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmeticDcLower|{}arithmeticDcLower[0]
+        final fun <get-arithmeticDcLower>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmeticDcLower.<get-arithmeticDcLower>|<get-arithmeticDcLower>(){}[0]
+    final val arithmeticDcUpper // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmeticDcUpper|{}arithmeticDcUpper[0]
+        final fun <get-arithmeticDcUpper>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.arithmeticDcUpper.<get-arithmeticDcUpper>|<get-arithmeticDcUpper>(){}[0]
+    final val encoder // io.github.yuroyami.imagekodec/JpegEncodeOptions.encoder|{}encoder[0]
+        final fun <get-encoder>(): io.github.yuroyami.imagekodec/JpegEncoderKind // io.github.yuroyami.imagekodec/JpegEncodeOptions.encoder.<get-encoder>|<get-encoder>(){}[0]
+    final val grayscale // io.github.yuroyami.imagekodec/JpegEncodeOptions.grayscale|{}grayscale[0]
+        final fun <get-grayscale>(): io.github.yuroyami.imagekodec/JpegGrayscale // io.github.yuroyami.imagekodec/JpegEncodeOptions.grayscale.<get-grayscale>|<get-grayscale>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/JpegEncodeOptions.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JpegEncodeOptions.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val optimizeHuffman // io.github.yuroyami.imagekodec/JpegEncodeOptions.optimizeHuffman|{}optimizeHuffman[0]
+        final fun <get-optimizeHuffman>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JpegEncodeOptions.optimizeHuffman.<get-optimizeHuffman>|<get-optimizeHuffman>(){}[0]
+    final val pointTransform // io.github.yuroyami.imagekodec/JpegEncodeOptions.pointTransform|{}pointTransform[0]
+        final fun <get-pointTransform>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.pointTransform.<get-pointTransform>|<get-pointTransform>(){}[0]
+    final val precision // io.github.yuroyami.imagekodec/JpegEncodeOptions.precision|{}precision[0]
+        final fun <get-precision>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.precision.<get-precision>|<get-precision>(){}[0]
+    final val predictor // io.github.yuroyami.imagekodec/JpegEncodeOptions.predictor|{}predictor[0]
+        final fun <get-predictor>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.predictor.<get-predictor>|<get-predictor>(){}[0]
+    final val progressive // io.github.yuroyami.imagekodec/JpegEncodeOptions.progressive|{}progressive[0]
+        final fun <get-progressive>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JpegEncodeOptions.progressive.<get-progressive>|<get-progressive>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/JpegEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val restartInterval // io.github.yuroyami.imagekodec/JpegEncodeOptions.restartInterval|{}restartInterval[0]
+        final fun <get-restartInterval>(): kotlin/Int // io.github.yuroyami.imagekodec/JpegEncodeOptions.restartInterval.<get-restartInterval>|<get-restartInterval>(){}[0]
+    final val subsampling // io.github.yuroyami.imagekodec/JpegEncodeOptions.subsampling|{}subsampling[0]
+        final fun <get-subsampling>(): io.github.yuroyami.imagekodec/JpegSubsampling // io.github.yuroyami.imagekodec/JpegEncodeOptions.subsampling.<get-subsampling>|<get-subsampling>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/JpegEncodeOptions.toString|toString(){}[0]
 }
 
 final class io.github.yuroyami.imagekodec/JpxColorSpecification { // io.github.yuroyami.imagekodec/JpxColorSpecification|null[0]
@@ -255,6 +738,52 @@ final class io.github.yuroyami.imagekodec/JpxComponents { // io.github.yuroyami.
 
     final fun get(kotlin/Int, kotlin/Int, kotlin/Int): kotlin/Int // io.github.yuroyami.imagekodec/JpxComponents.get|get(kotlin.Int;kotlin.Int;kotlin.Int){}[0]
     final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/JpxComponents.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/JxlEncodeOptions { // io.github.yuroyami.imagekodec/JxlEncodeOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Double? = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Boolean = ...) // io.github.yuroyami.imagekodec/JxlEncodeOptions.<init>|<init>(kotlin.Int;kotlin.Double?;kotlin.Boolean;kotlin.Int;kotlin.Boolean){}[0]
+
+    final val container // io.github.yuroyami.imagekodec/JxlEncodeOptions.container|{}container[0]
+        final fun <get-container>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JxlEncodeOptions.container.<get-container>|<get-container>(){}[0]
+    final val distance // io.github.yuroyami.imagekodec/JxlEncodeOptions.distance|{}distance[0]
+        final fun <get-distance>(): kotlin/Double? // io.github.yuroyami.imagekodec/JxlEncodeOptions.distance.<get-distance>|<get-distance>(){}[0]
+    final val effectiveDistance // io.github.yuroyami.imagekodec/JxlEncodeOptions.effectiveDistance|{}effectiveDistance[0]
+        final fun <get-effectiveDistance>(): kotlin/Double // io.github.yuroyami.imagekodec/JxlEncodeOptions.effectiveDistance.<get-effectiveDistance>|<get-effectiveDistance>(){}[0]
+    final val effort // io.github.yuroyami.imagekodec/JxlEncodeOptions.effort|{}effort[0]
+        final fun <get-effort>(): kotlin/Int // io.github.yuroyami.imagekodec/JxlEncodeOptions.effort.<get-effort>|<get-effort>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/JxlEncodeOptions.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JxlEncodeOptions.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/JxlEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/JxlEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/JxlEncodeOptions.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/JxrEncodeOptions { // io.github.yuroyami.imagekodec/JxrEncodeOptions|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Boolean = ..., io.github.yuroyami.imagekodec/JxrChroma = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin.collections/List<kotlin/Int>? = ..., kotlin/Boolean = ...) // io.github.yuroyami.imagekodec/JxrEncodeOptions.<init>|<init>(kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.JxrChroma;kotlin.Int?;kotlin.Int?;kotlin.Boolean;kotlin.Boolean;kotlin.Int;kotlin.Int;kotlin.collections.List<kotlin.Int>?;kotlin.Boolean){}[0]
+
+    final val alphaLossless // io.github.yuroyami.imagekodec/JxrEncodeOptions.alphaLossless|{}alphaLossless[0]
+        final fun <get-alphaLossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JxrEncodeOptions.alphaLossless.<get-alphaLossless>|<get-alphaLossless>(){}[0]
+    final val alphaQuality // io.github.yuroyami.imagekodec/JxrEncodeOptions.alphaQuality|{}alphaQuality[0]
+        final fun <get-alphaQuality>(): kotlin/Int // io.github.yuroyami.imagekodec/JxrEncodeOptions.alphaQuality.<get-alphaQuality>|<get-alphaQuality>(){}[0]
+    final val chroma // io.github.yuroyami.imagekodec/JxrEncodeOptions.chroma|{}chroma[0]
+        final fun <get-chroma>(): io.github.yuroyami.imagekodec/JxrChroma // io.github.yuroyami.imagekodec/JxrEncodeOptions.chroma.<get-chroma>|<get-chroma>(){}[0]
+    final val chromaQuality // io.github.yuroyami.imagekodec/JxrEncodeOptions.chromaQuality|{}chromaQuality[0]
+        final fun <get-chromaQuality>(): kotlin/Int? // io.github.yuroyami.imagekodec/JxrEncodeOptions.chromaQuality.<get-chromaQuality>|<get-chromaQuality>(){}[0]
+    final val frequencyOrder // io.github.yuroyami.imagekodec/JxrEncodeOptions.frequencyOrder|{}frequencyOrder[0]
+        final fun <get-frequencyOrder>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JxrEncodeOptions.frequencyOrder.<get-frequencyOrder>|<get-frequencyOrder>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/JxrEncodeOptions.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JxrEncodeOptions.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val overlap // io.github.yuroyami.imagekodec/JxrEncodeOptions.overlap|{}overlap[0]
+        final fun <get-overlap>(): kotlin/Int? // io.github.yuroyami.imagekodec/JxrEncodeOptions.overlap.<get-overlap>|<get-overlap>(){}[0]
+    final val planarAlpha // io.github.yuroyami.imagekodec/JxrEncodeOptions.planarAlpha|{}planarAlpha[0]
+        final fun <get-planarAlpha>(): kotlin/Boolean // io.github.yuroyami.imagekodec/JxrEncodeOptions.planarAlpha.<get-planarAlpha>|<get-planarAlpha>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/JxrEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/JxrEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val tileQualities // io.github.yuroyami.imagekodec/JxrEncodeOptions.tileQualities|{}tileQualities[0]
+        final fun <get-tileQualities>(): kotlin.collections/List<kotlin/Int>? // io.github.yuroyami.imagekodec/JxrEncodeOptions.tileQualities.<get-tileQualities>|<get-tileQualities>(){}[0]
+    final val tileSize // io.github.yuroyami.imagekodec/JxrEncodeOptions.tileSize|{}tileSize[0]
+        final fun <get-tileSize>(): kotlin/Int // io.github.yuroyami.imagekodec/JxrEncodeOptions.tileSize.<get-tileSize>|<get-tileSize>(){}[0]
 }
 
 final class io.github.yuroyami.imagekodec/KiteAnimation { // io.github.yuroyami.imagekodec/KiteAnimation|null[0]
@@ -345,8 +874,67 @@ final class io.github.yuroyami.imagekodec/MotionPhotoInfo { // io.github.yuroyam
     }
 }
 
+final class io.github.yuroyami.imagekodec/PngEncodeOptions { // io.github.yuroyami.imagekodec/PngEncodeOptions|null[0]
+    constructor <init>(io.github.yuroyami.imagekodec/PngColorType = ..., kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/PngEncodeOptions.<init>|<init>(io.github.yuroyami.imagekodec.PngColorType;kotlin.Int?;kotlin.Boolean;kotlin.Int){}[0]
+
+    final val bitDepth // io.github.yuroyami.imagekodec/PngEncodeOptions.bitDepth|{}bitDepth[0]
+        final fun <get-bitDepth>(): kotlin/Int? // io.github.yuroyami.imagekodec/PngEncodeOptions.bitDepth.<get-bitDepth>|<get-bitDepth>(){}[0]
+    final val colorType // io.github.yuroyami.imagekodec/PngEncodeOptions.colorType|{}colorType[0]
+        final fun <get-colorType>(): io.github.yuroyami.imagekodec/PngColorType // io.github.yuroyami.imagekodec/PngEncodeOptions.colorType.<get-colorType>|<get-colorType>(){}[0]
+    final val effort // io.github.yuroyami.imagekodec/PngEncodeOptions.effort|{}effort[0]
+        final fun <get-effort>(): kotlin/Int // io.github.yuroyami.imagekodec/PngEncodeOptions.effort.<get-effort>|<get-effort>(){}[0]
+    final val interlace // io.github.yuroyami.imagekodec/PngEncodeOptions.interlace|{}interlace[0]
+        final fun <get-interlace>(): kotlin/Boolean // io.github.yuroyami.imagekodec/PngEncodeOptions.interlace.<get-interlace>|<get-interlace>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/PngEncodeOptions.toString|toString(){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/TiffEncodeOptions { // io.github.yuroyami.imagekodec/TiffEncodeOptions|null[0]
+    constructor <init>(io.github.yuroyami.imagekodec/TiffCompression = ..., io.github.yuroyami.imagekodec/TiffPhotometric = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/TiffEncodeOptions.<init>|<init>(io.github.yuroyami.imagekodec.TiffCompression;io.github.yuroyami.imagekodec.TiffPhotometric;kotlin.Boolean;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int){}[0]
+
+    final val compression // io.github.yuroyami.imagekodec/TiffEncodeOptions.compression|{}compression[0]
+        final fun <get-compression>(): io.github.yuroyami.imagekodec/TiffCompression // io.github.yuroyami.imagekodec/TiffEncodeOptions.compression.<get-compression>|<get-compression>(){}[0]
+    final val photometric // io.github.yuroyami.imagekodec/TiffEncodeOptions.photometric|{}photometric[0]
+        final fun <get-photometric>(): io.github.yuroyami.imagekodec/TiffPhotometric // io.github.yuroyami.imagekodec/TiffEncodeOptions.photometric.<get-photometric>|<get-photometric>(){}[0]
+    final val predictor // io.github.yuroyami.imagekodec/TiffEncodeOptions.predictor|{}predictor[0]
+        final fun <get-predictor>(): kotlin/Boolean // io.github.yuroyami.imagekodec/TiffEncodeOptions.predictor.<get-predictor>|<get-predictor>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/TiffEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val rowsPerStrip // io.github.yuroyami.imagekodec/TiffEncodeOptions.rowsPerStrip|{}rowsPerStrip[0]
+        final fun <get-rowsPerStrip>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.rowsPerStrip.<get-rowsPerStrip>|<get-rowsPerStrip>(){}[0]
+    final val tileLength // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileLength|{}tileLength[0]
+        final fun <get-tileLength>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileLength.<get-tileLength>|<get-tileLength>(){}[0]
+    final val tileWidth // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileWidth|{}tileWidth[0]
+        final fun <get-tileWidth>(): kotlin/Int // io.github.yuroyami.imagekodec/TiffEncodeOptions.tileWidth.<get-tileWidth>|<get-tileWidth>(){}[0]
+    final val tiled // io.github.yuroyami.imagekodec/TiffEncodeOptions.tiled|{}tiled[0]
+        final fun <get-tiled>(): kotlin/Boolean // io.github.yuroyami.imagekodec/TiffEncodeOptions.tiled.<get-tiled>|<get-tiled>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/TiffEncodeOptions.toString|toString(){}[0]
+}
+
 final class io.github.yuroyami.imagekodec/UnsupportedImageException : io.github.yuroyami.imagekodec/ImageDecodeException { // io.github.yuroyami.imagekodec/UnsupportedImageException|null[0]
     constructor <init>(kotlin/String, kotlin/Throwable? = ...) // io.github.yuroyami.imagekodec/UnsupportedImageException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
+}
+
+final class io.github.yuroyami.imagekodec/WebpEncodeOptions { // io.github.yuroyami.imagekodec/WebpEncodeOptions|null[0]
+    constructor <init>(kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/WebpAlphaFilter = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/WebpEncodeOptions.<init>|<init>(kotlin.Boolean;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;io.github.yuroyami.imagekodec.WebpAlphaFilter;kotlin.Int){}[0]
+
+    final val alphaFilter // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaFilter|{}alphaFilter[0]
+        final fun <get-alphaFilter>(): io.github.yuroyami.imagekodec/WebpAlphaFilter // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaFilter.<get-alphaFilter>|<get-alphaFilter>(){}[0]
+    final val alphaQuality // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaQuality|{}alphaQuality[0]
+        final fun <get-alphaQuality>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaQuality.<get-alphaQuality>|<get-alphaQuality>(){}[0]
+    final val background // io.github.yuroyami.imagekodec/WebpEncodeOptions.background|{}background[0]
+        final fun <get-background>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.background.<get-background>|<get-background>(){}[0]
+    final val effort // io.github.yuroyami.imagekodec/WebpEncodeOptions.effort|{}effort[0]
+        final fun <get-effort>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.effort.<get-effort>|<get-effort>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/WebpEncodeOptions.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/WebpEncodeOptions.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/WebpEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val sharpYuv // io.github.yuroyami.imagekodec/WebpEncodeOptions.sharpYuv|{}sharpYuv[0]
+        final fun <get-sharpYuv>(): kotlin/Boolean // io.github.yuroyami.imagekodec/WebpEncodeOptions.sharpYuv.<get-sharpYuv>|<get-sharpYuv>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/WebpEncodeOptions.toString|toString(){}[0]
 }
 
 open class io.github.yuroyami.imagekodec/ImageDecodeException : kotlin/Exception { // io.github.yuroyami.imagekodec/ImageDecodeException|null[0]
@@ -374,6 +962,7 @@ sealed class io.github.yuroyami.imagekodec/ColorTarget { // io.github.yuroyami.i
 
 final object io.github.yuroyami.imagekodec.codec/CcittFax { // io.github.yuroyami.imagekodec.codec/CcittFax|null[0]
     final fun decode(kotlin/ByteArray, kotlin/Int, io.github.yuroyami.imagekodec.codec/CcittOptions): kotlin/ByteArray // io.github.yuroyami.imagekodec.codec/CcittFax.decode|decode(kotlin.ByteArray;kotlin.Int;io.github.yuroyami.imagekodec.codec.CcittOptions){}[0]
+    final fun encode(kotlin/ByteArray, kotlin/Int, io.github.yuroyami.imagekodec.codec/CcittOptions): kotlin/ByteArray // io.github.yuroyami.imagekodec.codec/CcittFax.encode|encode(kotlin.ByteArray;kotlin.Int;io.github.yuroyami.imagekodec.codec.CcittOptions){}[0]
 }
 
 final object io.github.yuroyami.imagekodec.codec/Jbig2Decoder { // io.github.yuroyami.imagekodec.codec/Jbig2Decoder|null[0]
@@ -402,6 +991,7 @@ final object io.github.yuroyami.imagekodec.codec/JpxDecoder { // io.github.yuroy
 }
 
 final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.imagekodec/ImageKodec|null[0]
+    final fun auxiliaryImages(kotlin/ByteArray): kotlin.collections/List<io.github.yuroyami.imagekodec/AuxiliaryImage> // io.github.yuroyami.imagekodec/ImageKodec.auxiliaryImages|auxiliaryImages(kotlin.ByteArray){}[0]
     final fun convertCmykToSrgb(kotlin/Int, kotlin/Int, kotlin/ByteArray, io.github.yuroyami.imagekodec/ColorProfile, io.github.yuroyami.imagekodec/RenderingIntent = ...): io.github.yuroyami.imagekodec/KiteBitmap? // io.github.yuroyami.imagekodec/ImageKodec.convertCmykToSrgb|convertCmykToSrgb(kotlin.Int;kotlin.Int;kotlin.ByteArray;io.github.yuroyami.imagekodec.ColorProfile;io.github.yuroyami.imagekodec.RenderingIntent){}[0]
     final fun convertCmykToSrgb(kotlin/Int, kotlin/Int, kotlin/ShortArray, io.github.yuroyami.imagekodec/ColorProfile, io.github.yuroyami.imagekodec/RenderingIntent = ...): io.github.yuroyami.imagekodec/KiteBitmap16? // io.github.yuroyami.imagekodec/ImageKodec.convertCmykToSrgb|convertCmykToSrgb(kotlin.Int;kotlin.Int;kotlin.ShortArray;io.github.yuroyami.imagekodec.ColorProfile;io.github.yuroyami.imagekodec.RenderingIntent){}[0]
     final fun convertToSrgb(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/ColorProfile, io.github.yuroyami.imagekodec/RenderingIntent = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.convertToSrgb|convertToSrgb(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.ColorProfile;io.github.yuroyami.imagekodec.RenderingIntent){}[0]
@@ -409,36 +999,80 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun decode(kotlin/ByteArray, kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decode|decode(kotlin.ByteArray;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decode16(kotlin/ByteArray, kotlin/Int = ..., kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap16 // io.github.yuroyami.imagekodec/ImageKodec.decode16|decode16(kotlin.ByteArray;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeAnimation(kotlin/ByteArray, kotlin/Boolean = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteAnimation // io.github.yuroyami.imagekodec/ImageKodec.decodeAnimation|decodeAnimation(kotlin.ByteArray;kotlin.Boolean;kotlin.Int;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun decodeAuxiliaryImage(kotlin/ByteArray, kotlin/Int, kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap16 // io.github.yuroyami.imagekodec/ImageKodec.decodeAuxiliaryImage|decodeAuxiliaryImage(kotlin.ByteArray;kotlin.Int;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeDownscaledTo(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeDownscaledTo|decodeDownscaledTo(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun decodeGainMap(kotlin/ByteArray, kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/HeifGainMap? // io.github.yuroyami.imagekodec/ImageKodec.decodeGainMap|decodeGainMap(kotlin.ByteArray;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeJpegComponents(kotlin/ByteArray, kotlin/Int = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/JpegComponents // io.github.yuroyami.imagekodec/ImageKodec.decodeJpegComponents|decodeJpegComponents(kotlin.ByteArray;kotlin.Int;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeJpxComponents(kotlin/ByteArray, kotlin/Int = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/JpxComponents // io.github.yuroyami.imagekodec/ImageKodec.decodeJpxComponents|decodeJpxComponents(kotlin.ByteArray;kotlin.Int;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodePage(kotlin/ByteArray, kotlin/Int, kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodePage|decodePage(kotlin.ByteArray;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeReduced(kotlin/ByteArray, kotlin/Int, io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeReduced|decodeReduced(kotlin.ByteArray;kotlin.Int;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun decodeScaled(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap // io.github.yuroyami.imagekodec/ImageKodec.decodeScaled|decodeScaled(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun decodeThumbnail(kotlin/ByteArray, kotlin/Int = ..., kotlin/Int = ..., kotlin/Boolean = ..., io.github.yuroyami.imagekodec/ColorTarget = ..., kotlin/Function0<kotlin/Unit>? = ...): io.github.yuroyami.imagekodec/KiteBitmap? // io.github.yuroyami.imagekodec/ImageKodec.decodeThumbnail|decodeThumbnail(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.Boolean;io.github.yuroyami.imagekodec.ColorTarget;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun detect(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageFormat? // io.github.yuroyami.imagekodec/ImageKodec.detect|detect(kotlin.ByteArray){}[0]
+    final fun encodeAvif(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/HeifEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeAvif|encodeAvif(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.HeifEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeAvif(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeAvif|encodeAvif(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
+    final fun encodeAvif16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/HeifEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeAvif16|encodeAvif16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.HeifEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeBmp(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeBmp|encodeBmp(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
+    final fun encodeBmp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/BmpEncodeOptions): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeBmp|encodeBmp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.BmpEncodeOptions){}[0]
+    final fun encodeBmp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/BmpEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeBmp|encodeBmp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.BmpEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata){}[0]
+    final fun encodeCcitt(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeCcitt|encodeCcitt(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
+    final fun encodeCcitt(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/CcittEncodeOptions, kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeCcitt|encodeCcitt(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.CcittEncodeOptions;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeGif(io.github.yuroyami.imagekodec/KiteAnimation, io.github.yuroyami.imagekodec/ImageMetadata, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteAnimation;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Boolean){}[0]
     final fun encodeGif(io.github.yuroyami.imagekodec/KiteAnimation, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteAnimation;kotlin.Boolean){}[0]
+    final fun encodeGif(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/ImageMetadata, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Boolean){}[0]
     final fun encodeGif(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeGif|encodeGif(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Boolean){}[0]
+    final fun encodeHeic(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/HeifEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeHeic|encodeHeic(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.HeifEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeHeic(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeHeic|encodeHeic(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
+    final fun encodeHeic16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/HeifEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeHeic16|encodeHeic16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.HeifEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJbig2(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJbig2|encodeJbig2(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
+    final fun encodeJbig2(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/Jbig2EncodeOptions, kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJbig2|encodeJbig2(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.Jbig2EncodeOptions;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJp2(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/Jp2EncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJp2|encodeJp2(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.Jp2EncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJp2(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJp2|encodeJp2(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
+    final fun encodeJp2Wide(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/Jp2EncodeOptions = ..., io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJp2Wide|encodeJp2Wide(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.Jp2EncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/JpegEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.JpegEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
     final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int;io.github.yuroyami.imagekodec.ImageMetadata){}[0]
     final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int, io.github.yuroyami.imagekodec/ImageMetadata, io.github.yuroyami.imagekodec/JpegEncoderKind): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int;io.github.yuroyami.imagekodec.ImageMetadata;io.github.yuroyami.imagekodec.JpegEncoderKind){}[0]
     final fun encodeJpeg(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int, io.github.yuroyami.imagekodec/JpegEncoderKind): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg|encodeJpeg(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int;io.github.yuroyami.imagekodec.JpegEncoderKind){}[0]
+    final fun encodeJpeg16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/JpegEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJpeg16|encodeJpeg16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.JpegEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJxl(io.github.yuroyami.imagekodec/KiteAnimation, io.github.yuroyami.imagekodec/JxlEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJxl|encodeJxl(io.github.yuroyami.imagekodec.KiteAnimation;io.github.yuroyami.imagekodec.JxlEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJxl(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/JxlEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJxl|encodeJxl(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.JxlEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJxl(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJxl|encodeJxl(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
+    final fun encodeJxl16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/JxlEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJxl16|encodeJxl16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.JxlEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJxr(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/JxrEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJxr|encodeJxr(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.JxrEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeJxr(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJxr|encodeJxr(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
+    final fun encodeJxr16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/JxrEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeJxr16|encodeJxr16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.JxrEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodePng(io.github.yuroyami.imagekodec/KiteAnimation): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteAnimation){}[0]
+    final fun encodePng(io.github.yuroyami.imagekodec/KiteAnimation, io.github.yuroyami.imagekodec/PngEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteAnimation;io.github.yuroyami.imagekodec.PngEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.ImageMetadata){}[0]
+    final fun encodePng(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/PngEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng|encodePng(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.PngEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodePng16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/PngEncodeOptions = ..., io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodePng16|encodePng16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.PngEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
+    final fun encodeTiff(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap>){}[0]
+    final fun encodeTiff(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap>, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap>;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff16(io.github.yuroyami.imagekodec/KiteBitmap16): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(io.github.yuroyami.imagekodec.KiteBitmap16){}[0]
+    final fun encodeTiff16(io.github.yuroyami.imagekodec/KiteBitmap16, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(io.github.yuroyami.imagekodec.KiteBitmap16;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeTiff16(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap16>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap16>){}[0]
+    final fun encodeTiff16(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap16>, io.github.yuroyami.imagekodec/TiffEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap16>;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeTiffCmyk(kotlin/Int, kotlin/Int, kotlin/ByteArray, io.github.yuroyami.imagekodec/TiffEncodeOptions = ..., io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiffCmyk|encodeTiffCmyk(kotlin.Int;kotlin.Int;kotlin.ByteArray;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeTiffCmyk(kotlin/Int, kotlin/Int, kotlin/ShortArray, io.github.yuroyami.imagekodec/TiffEncodeOptions = ..., io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiffCmyk|encodeTiffCmyk(kotlin.Int;kotlin.Int;kotlin.ShortArray;io.github.yuroyami.imagekodec.TiffEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeWebp(io.github.yuroyami.imagekodec/KiteAnimation, io.github.yuroyami.imagekodec/WebpEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteAnimation;io.github.yuroyami.imagekodec.WebpEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.ImageMetadata){}[0]
+    final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/WebpEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.WebpEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
     final fun motionPhoto(kotlin/ByteArray): io.github.yuroyami.imagekodec/MotionPhotoInfo? // io.github.yuroyami.imagekodec/ImageKodec.motionPhoto|motionPhoto(kotlin.ByteArray){}[0]
     final fun probe(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probe|probe(kotlin.ByteArray){}[0]
     final fun probeOrNull(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo? // io.github.yuroyami.imagekodec/ImageKodec.probeOrNull|probeOrNull(kotlin.ByteArray){}[0]
     final fun probePage(kotlin/ByteArray, kotlin/Int): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probePage|probePage(kotlin.ByteArray;kotlin.Int){}[0]
     final fun readMetadata(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageMetadata // io.github.yuroyami.imagekodec/ImageKodec.readMetadata|readMetadata(kotlin.ByteArray){}[0]
+    final fun registerHeifCodec(io.github.yuroyami.imagekodec/HeifCodec) // io.github.yuroyami.imagekodec/ImageKodec.registerHeifCodec|registerHeifCodec(io.github.yuroyami.imagekodec.HeifCodec){}[0]
+    final fun registerHeifEncoder(io.github.yuroyami.imagekodec/HeifEncoder) // io.github.yuroyami.imagekodec/ImageKodec.registerHeifEncoder|registerHeifEncoder(io.github.yuroyami.imagekodec.HeifEncoder){}[0]
     final fun removeMotion(kotlin/ByteArray): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.removeMotion|removeMotion(kotlin.ByteArray){}[0]
     final fun repackJpeg(kotlin/ByteArray, kotlin/Boolean = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.repackJpeg|repackJpeg(kotlin.ByteArray;kotlin.Boolean){}[0]
+    final fun setTileRunner(io.github.yuroyami.imagekodec/TileRunner) // io.github.yuroyami.imagekodec/ImageKodec.setTileRunner|setTileRunner(io.github.yuroyami.imagekodec.TileRunner){}[0]
     final fun ssimulacra2(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/KiteBitmap): kotlin/Double // io.github.yuroyami.imagekodec/ImageKodec.ssimulacra2|ssimulacra2(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.KiteBitmap){}[0]
 }
 

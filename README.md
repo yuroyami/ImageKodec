@@ -2,7 +2,7 @@
 
 Image codecs written in Kotlin for Kotlin Multiplatform: decode PNG, JPEG, GIF,
 BMP, TIFF, JPEG 2000, WebP, AVIF, JPEG XL and JPEG XR from a `ByteArray`, with the same code
-on every target.
+on every target. HEIC decodes and encodes with the separate `imagekodec-heic` module.
 
 <sub>AI tools wrote much of the code, tests and documentation in this project, under the
 direction and review of its author.</sub>
@@ -90,7 +90,7 @@ every bit of a sample deeper than 8 bits, and `decodePage` reads the other pages
 
 ### Play an animation
 
-GIF, APNG, animated WebP, animated AVIF and animated JPEG XL all come back as one type. Every frame
+GIF, APNG, animated WebP, animated AVIF, HEIC image sequences and animated JPEG XL all come back as one type. Every frame
 is already composited, so playback is "draw frame N, wait delay N".
 
 ```kotlin
@@ -132,7 +132,8 @@ val jpeg: ByteArray = ImageKodec.encodeJpeg(bitmap, quality = 85)
 ```
 
 There are encoders for PNG and APNG, JPEG (stb_image_write's, or a port of Jpegli for smaller
-files), GIF, BMP, TIFF and lossless WebP. See
+files), GIF, BMP, TIFF, WebP (lossy and lossless, still and animated), AVIF, JPEG XR and, with the
+`imagekodec-heic` module, HEIC. See
 [Writing images](docs/encoding.md).
 
 ### Show an image in Compose
@@ -153,19 +154,27 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 
 | Format | Decodes | Encodes |
 | --- | --- | --- |
-| PNG and APNG | every color type and depth, interlace, animation | 8-bit RGB or RGBA, and APNG |
-| JPEG | baseline, progressive, arithmetic, lossless and hierarchical, at 8 or 12 bits and lossless up to 16 | baseline |
+| PNG and APNG | every color type and depth, interlace, animation, Apple's CgBI | every color type and depth, palette, interlace, and APNG |
+| JPEG | baseline, progressive, arithmetic, lossless and hierarchical, at 8 or 12 bits and lossless up to 16 | baseline, progressive and arithmetic at 8 or 12 bits, lossless at 2 to 16 bits |
 | GIF | still and animated | still and animated |
-| BMP | every header version and depth, RLE, embedded JPEG and PNG | 24-bit, or 32-bit with alpha |
-| TIFF | strips and tiles, the common compressions, every page, up to 16 bits | 8 or 16 bits, many pages |
-| WebP | lossy and lossless, still and animated | lossless |
-| JPEG 2000 | all of Part 1, JP2 and raw codestream | no |
-| AVIF | stills and image sequences, 8 to 12 bits | no |
-| JPEG XL | both coding modes, layers and animation | no |
-| JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | no |
+| BMP | every header version and depth, RLE, embedded JPEG and PNG | 1, 4 and 8-bit palettes with RLE, 16, 24, and 32-bit with alpha |
+| TIFF | strips and tiles, the common compressions, every page, integer samples of 1 to 32 bits and floats | none, PackBits, LZW, Deflate, CCITT G3 and G4, JPEG; strips or tiles; bi-level, gray, palette, RGB and CMYK; 8 or 16 bits, many pages |
+| WebP | lossy and lossless, still and animated | lossy and lossless, still and animated |
+| JPEG 2000 | all of Part 1 and HTJ2K, JP2, JPH and raw codestream | Part 1 and HTJ2K, lossy and lossless, 1 to 16 bits, JP2, JPH or raw codestream |
+| AVIF | stills and image sequences, 8 to 12 bits | intra stills and grids, 8 to 12 bits, alpha, lossless |
+| JPEG XL | both coding modes, layers and animation | lossy VarDCT and lossless Modular, 8 or 16 bits, alpha, animation |
+| JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half, float and RGBE, alpha | lossy and lossless, 8 and 16 bits, alpha, tiles |
+| HEIC | stills, grids, alpha, depth and gain maps, and image sequences, 8 to 16 bits, with the `imagekodec-heic` module | intra stills and grids, 8 to 12 bits, alpha, lossless, with the `imagekodec-heic` module |
 
-`Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
-carries a header of its own, so both take their parameters explicitly. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
+`readMetadata` reads the EXIF block, XMP packet and ICC profile of every format above that carries
+them, and each encoder writes those its format has a place for: GIF keeps XMP and ICC, BMP only ICC.
+See [Keeping a photo's metadata](docs/encoding.md#keeping-a-photos-metadata).
+
+`Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it, and `encodeJbig2`
+(generic regions) and `encodeCcitt` (Group 3 and Group 4) write it. Neither format carries a header
+of its own, so both take their parameters explicitly. HEIC decodes and encodes only
+with the separate `imagekodec-heic` module, which is not published yet. [HEIC](docs/heic.md) explains why and
+how to install it. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
 format.
 
 ## Platforms
@@ -187,7 +196,6 @@ in a browser on the web, so those two modules are for browser apps.
 
 - Every entry point takes the complete file as a `ByteArray`. There is no streaming decode.
 - `decode` returns 8 bits a channel. Use `decode16` for deeper samples.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR.
 - A decode refuses an image of more than 2^28 pixels (about 1 GiB of ARGB).
 
 [Limits](docs/limits.md) has the full list, format by format.

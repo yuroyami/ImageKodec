@@ -8,6 +8,8 @@ internal object Av1 {
     // Block sizes (subSize).
     const val BLOCK_4X4 = 0
     const val BLOCK_8X8 = 3
+    const val BLOCK_16X16 = 6
+    const val BLOCK_32X32 = 9
     const val BLOCK_64X64 = 12
     const val BLOCK_128X128 = 15
     const val BLOCK_INVALID = 22

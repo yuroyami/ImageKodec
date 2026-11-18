@@ -1,0 +1,5 @@
+public final class io/github/yuroyami/imagekodec/heic/ImageKodecHeic {
+	public static final field INSTANCE Lio/github/yuroyami/imagekodec/heic/ImageKodecHeic;
+	public final fun install ()V
+}
+

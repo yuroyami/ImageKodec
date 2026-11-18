@@ -1,16 +1,21 @@
 // Altered Kotlin port of the encoder of google/jpegli at commit
 // 031a0077f5799a6041004267fc12b956c1f52a20: lib/jpegli/encode.cc, quant.cc,
 // adaptive_quantization.cc, color_transform.cc, downsample.cc, dct-inl.h,
-// encode_streaming.cc, bitstream.cc and bit_writer.cc, for the settings of
-// jpegli_set_defaults followed by jpegli_set_quality.
+// and encode_streaming.cc, for the settings of jpegli_set_defaults followed
+// by jpegli_set_quality.
 // Copyright (c) the JPEG XL Project Authors. All rights reserved.
 // Use of the original source is governed by a BSD-style license; see NOTICE.
 
 package io.github.yuroyami.imagekodec.codec.jpegli
 
 import io.github.yuroyami.imagekodec.KiteBitmap
+import io.github.yuroyami.imagekodec.codec.JpegCodingPlan
+import io.github.yuroyami.imagekodec.codec.JpegComponentPlan
 import io.github.yuroyami.imagekodec.codec.JpegEncoder
-import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
+import io.github.yuroyami.imagekodec.codec.JpegFramePlan
+import io.github.yuroyami.imagekodec.codec.JpegHeaderPlan
+import io.github.yuroyami.imagekodec.codec.JpegWriter
+import io.github.yuroyami.imagekodec.internal.flate.MAX_ARRAY
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
@@ -32,6 +37,9 @@ import kotlin.math.sqrt
  * values derived from them are computed in float32, step by step through [f32], so the DQT
  * segment is jpegli's to the bit. `FastLog2f` and `FastPow2f` keep jpegli's rational
  * approximations, with their range reduction done on Double bits.
+ *
+ * This makes the quantized coefficients, and [JpegWriter] writes them: as jpegli's baseline
+ * file for [encode], or in the other processes of T.81 for the options of #183.
  */
 internal object JpegliEncoder {
 
@@ -365,88 +373,25 @@ internal object JpegliEncoder {
         for (i in 0 until 64) block[i] *= 0.125
     }
 
-    // ---- bit_writer.cc ----
-
-    private class BitWriter(val out: ByteArrayBuilder) {
-        private var buffer = 0L
-        private var count = 0
-
-        fun write(nbits: Int, bits: Int) {
-            if (nbits == 0) return
-            buffer = (buffer shl nbits) or (bits.toLong() and ((1L shl nbits) - 1))
-            count += nbits
-            while (count >= 8) {
-                count -= 8
-                val c = ((buffer ushr count) and 0xFF).toInt()
-                out.append(c.toByte())
-                if (c == 0xFF) out.append(0)
-            }
-            buffer = buffer and ((1L shl count) - 1)
-        }
-
-        /** `JumpToByteBoundary`: pad with one bits. */
-        fun flush() {
-            if (count > 0) write(8 - count, (1 shl (8 - count)) - 1)
-        }
-    }
-
-    private class Huffman(counts: IntArray, values: IntArray) {
-        val code = IntArray(256)
-        val size = IntArray(256)
-
-        init {
-            var c = 0
-            var k = 0
-            for (len in 1..16) {
-                repeat(counts[len]) {
-                    code[values[k]] = c
-                    size[values[k]] = len
-                    c++
-                    k++
-                }
-                c = c shl 1
-            }
-        }
-    }
-
-    private fun category(v: Int): Int {
-        var a = if (v < 0) -v else v
-        var n = 0
-        while (a != 0) { a = a shr 1; n++ }
-        return n
-    }
-
-    private fun writeBlock(bw: BitWriter, zz: IntArray, dcDiff: Int, dc: Huffman, ac: Huffman) {
-        val dn = category(dcDiff)
-        bw.write(dc.size[dn], dc.code[dn])
-        bw.write(dn, if (dcDiff < 0) dcDiff - 1 else dcDiff)
-        var run = 0
-        for (k in 1 until 64) {
-            val v = zz[k]
-            if (v == 0) { run++; continue }
-            while (run >= 16) {
-                bw.write(ac.size[0xF0], ac.code[0xF0])
-                run -= 16
-            }
-            val n = category(v)
-            val sym = (run shl 4) or n
-            bw.write(ac.size[sym], ac.code[sym])
-            bw.write(n, if (v < 0) v - 1 else v)
-            run = 0
-        }
-        if (run > 0) bw.write(ac.size[0], ac.code[0])
-    }
-
     // ---- encode.cc, encode_streaming.cc ----
 
     /** jpegli's encode of [bitmap] at [quality] 1..100, with the raw APPn [segments] after SOI. */
     fun encode(bitmap: KiteBitmap, quality: Int, segments: ByteArray?): ByteArray {
         require(quality in 1..100) { "JPEG quality must be 1..100, was $quality" }
-        val width = bitmap.width
-        val height = bitmap.height
-        require(width <= MAX_SIDE && height <= MAX_SIDE) {
-            "JPEG stores each side in 16 bits, so ${width}x$height is larger than $MAX_SIDE"
-        }
+        JpegEncoder.checkSides(bitmap.width, bitmap.height)
+        val frame = frame(JpegEncoder.Source.of(bitmap), quality, gray = false, cancel = null)
+        return JpegWriter.writeDct(frame, JpegHeaderPlan(false, -1, segments), JpegCodingPlan(false, false, false, 0), null)
+    }
+
+    /**
+     * The quantized coefficients jpegli makes of [source], 8-bit, at [quality] 1..100: Y at 2x2,
+     * Cb and Cr at 1x1. A block of the iMCU past the luma's edge, which jpegli codes as a zero DC
+     * difference and an end of block, holds the DC before it and no AC, so that a sequential scan
+     * codes it the same way. A [gray] frame keeps the luma component alone, with its table.
+     */
+    fun frame(source: JpegEncoder.Source, quality: Int, gray: Boolean, cancel: (() -> Unit)?): JpegFramePlan {
+        val width = source.width
+        val height = source.height
         val tables = quantTables(qualityToDistance(quality))
         val (zbMul, zbOffset) = zeroBias(tables)
         val quantMul = Array(3) { c -> DoubleArray(64) { k -> f32(8.0 / tables[if (c == 0) 0 else 1][k]) } }
@@ -460,24 +405,33 @@ internal object JpegliEncoder {
         val lumaHib = (height + 7) / 8
         val cw = padW / 2
         val ch = padH / 2
+        // A gray frame has one block an MCU, on the grid of jpegli's 2x2 luma.
+        val lumaPlan = if (!gray) JpegEncoder.blocks(1, 2, 2, 0, mcusX, mcusY) else {
+            require(mcusX.toLong() * mcusY * 256 <= MAX_ARRAY) { "the picture is too large to encode" }
+            JpegComponentPlan(1, 1, 1, 0, mcusX * 2, mcusY * 2)
+        }
+        val cbPlan = if (gray) null else JpegEncoder.blocks(2, 1, 1, 1, mcusX, mcusY)
+        val crPlan = if (gray) null else JpegEncoder.blocks(3, 1, 1, 1, mcusX, mcusY)
         val y = Plane(padW, padH)
         val cb = FloatArray(cw * ch)
         val cr = FloatArray(cw * ch)
 
         // ReadInputRow, the color transform and PadInputBuffer: a row is padded to the iMCU width
         // and one sample past it with its last sample, and the rows past the image repeat its last.
-        val argb = bitmap.argb
         val rowCb = Array(2) { FloatArray(padW + 1) }
         val rowCr = Array(2) { FloatArray(padW + 1) }
+        val rr = IntArray(width)
+        val gg = IntArray(width)
+        val bb = IntArray(width)
         for (row in 0 until padH) {
-            val src = min(row, height - 1)
+            if (row % 16 == 0) cancel?.invoke()
+            source.row(min(row, height - 1), rr, gg, bb)
             val pair = row and 1
-            val base = src * width
             for (x in 0..padW) {
-                val p = argb[base + min(x, width - 1)]
-                val r = ((p ushr 16) and 0xFF).toDouble()
-                val g = ((p ushr 8) and 0xFF).toDouble()
-                val b = (p and 0xFF).toDouble()
+                val sx = min(x, width - 1)
+                val r = rr[sx].toDouble()
+                val g = gg[sx].toDouble()
+                val b = bb[sx].toDouble()
                 val yv = r * KR + (g * KG + b * KB)
                 y.data[y.at(x, row)] = yv.toFloat()
                 rowCb[pair][x] = ((b * DIFF_B - yv) * NORM_B + 128.0).toFloat()
@@ -498,23 +452,12 @@ internal object JpegliEncoder {
 
         val field = quantField(y, lumaWib, lumaHib, mcusY, tables[0][1])
 
-        val out = ByteArrayBuilder(width * height / 4 + 1024)
-        out.append(0xFF.toByte()); out.append(0xD8.toByte())
-        if (segments != null) out.append(segments)
-        writeHeaders(out, width, height, tables)
-
-        val dcY = Huffman(JpegEncoder.STD_DC_LUM_NRCODES, JpegEncoder.STD_DC_LUM_VALUES)
-        val acY = Huffman(JpegEncoder.STD_AC_LUM_NRCODES, JpegEncoder.STD_AC_LUM_VALUES)
-        val dcC = Huffman(JpegEncoder.STD_DC_CHR_NRCODES, JpegEncoder.STD_DC_CHR_VALUES)
-        val acC = Huffman(JpegEncoder.STD_AC_CHR_NRCODES, JpegEncoder.STD_AC_CHR_VALUES)
-        val bw = BitWriter(out)
         val lastDc = IntArray(3)
         val block = DoubleArray(64)
         val tmp = DoubleArray(32)
         val coeffs = IntArray(64)
-        val zz = IntArray(64)
 
-        fun codeBlock(c: Int, aq: Double, load: (DoubleArray) -> Unit) {
+        fun codeBlock(c: Int, aq: Double, plan: JpegComponentPlan, at: Int, load: (DoubleArray) -> Unit) {
             load(block)
             dct(block, tmp)
             val qmc = quantMul[c]
@@ -526,41 +469,41 @@ internal object JpegliEncoder {
             }
             val dc = (block[0] - 128.0) * qmc[0]
             coeffs[0] = if (abs(dc - lastDc[c]) < zbo[0] + aq * zbm[0]) lastDc[c] else roundAway(dc)
-            for (k in 0 until 64) zz[k] = coeffs[ZIGZAG_NATURAL[k]]
-            val diff = coeffs[0] - lastDc[c]
             lastDc[c] = coeffs[0]
-            if (c == 0) writeBlock(bw, zz, diff, dcY, acY) else writeBlock(bw, zz, diff, dcC, acC)
+            val out = plan.coefficients
+            for (k in 0 until 64) out[at + k] = coeffs[ZIGZAG_NATURAL[k]].toShort()
         }
 
         for (my in 0 until mcusY) {
+            cancel?.invoke()
             for (mx in 0 until mcusX) {
                 for (iy in 0 until 2) {
                     for (ix in 0 until 2) {
                         val bx = mx * 2 + ix
                         val by = my * 2 + iy
+                        val at = (by * lumaPlan.blocksWide + bx) * 64
                         if (bx >= lumaWib || by >= lumaHib) {
-                            // A block past the component's edge: a zero DC difference and an end of block.
-                            bw.write(dcY.size[0], dcY.code[0])
-                            bw.write(acY.size[0], acY.code[0])
+                            lumaPlan.coefficients[at] = lastDc[0].toShort()
                             continue
                         }
-                        codeBlock(0, field[by][bx]) { b ->
+                        codeBlock(0, field[by][bx], lumaPlan, at) { b ->
                             for (r in 0 until 8) for (x in 0 until 8) b[r * 8 + x] = y.get(bx * 8 + x, by * 8 + r)
                         }
                     }
                 }
+                if (gray) continue
                 val aq = field[my * 2][mx * 2]
                 for (c in 1..2) {
                     val plane = if (c == 1) cb else cr
-                    codeBlock(c, aq) { b ->
+                    val plan = if (c == 1) cbPlan!! else crPlan!!
+                    codeBlock(c, aq, plan, (my * plan.blocksWide + mx) * 64) { b ->
                         for (r in 0 until 8) for (x in 0 until 8) b[r * 8 + x] = plane[(my * 8 + r) * cw + mx * 8 + x].toDouble()
                     }
                 }
             }
         }
-        bw.flush()
-        out.append(0xFF.toByte()); out.append(0xD9.toByte())
-        return out.toByteArray()
+        val zigzag = List(if (gray) 1 else 2) { t -> IntArray(64) { tables[t][ZIGZAG_NATURAL[it]] } }
+        return JpegFramePlan(8, width, height, if (gray) listOf(lumaPlan) else listOf(lumaPlan, cbPlan!!, crPlan!!), zigzag)
     }
 
     /** `Downsample2x2` of column pair [x] of the two rows in [rows]. */
@@ -574,30 +517,5 @@ internal object JpegliEncoder {
             val range = if (s % 2 == 0) (min(s, 7) downTo max(0, s - 7)) else (max(0, s - 7)..min(s, 7))
             for (row in range) order[i++] = row * 8 + (s - row)
         }
-    }
-
-    /** `EncodeDQT`, `EncodeSOF` and `EncodeDHT` and the scan header, as jpegli lays them out for this frame. */
-    private fun writeHeaders(out: ByteArrayBuilder, width: Int, height: Int, tables: Array<IntArray>) {
-        fun b(vararg v: Int) { for (x in v) out.append(x.toByte()) }
-        b(0xFF, 0xDB, 0, 2 + 2 * 65)
-        for (t in 0 until 2) {
-            b(t)
-            for (j in 0 until 64) b(tables[t][ZIGZAG_NATURAL[j]])
-        }
-        b(0xFF, 0xC0, 0, 17, 8, height ushr 8, height, width ushr 8, width, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1)
-        val dht = listOf(
-            Triple(0x00, JpegEncoder.STD_DC_LUM_NRCODES, JpegEncoder.STD_DC_LUM_VALUES),
-            Triple(0x10, JpegEncoder.STD_AC_LUM_NRCODES, JpegEncoder.STD_AC_LUM_VALUES),
-            Triple(0x01, JpegEncoder.STD_DC_CHR_NRCODES, JpegEncoder.STD_DC_CHR_VALUES),
-            Triple(0x11, JpegEncoder.STD_AC_CHR_NRCODES, JpegEncoder.STD_AC_CHR_VALUES),
-        )
-        val length = 2 + dht.sumOf { 17 + it.third.size }
-        b(0xFF, 0xC4, length ushr 8, length)
-        for ((id, counts, values) in dht) {
-            b(id)
-            for (i in 1..16) b(counts[i])
-            for (v in values) b(v)
-        }
-        b(0xFF, 0xDA, 0, 12, 3, 1, 0x00, 2, 0x11, 3, 0x11, 0, 63, 0)
     }
 }

@@ -93,7 +93,8 @@ class Jp2DiagnosticsTest {
         error(data.copyOf().also { it[cod + 9] = 33 }, "COD", "decomposition", "33")
         error(data.copyOf().also { it[cod + 6] = 0; it[cod + 7] = 0 }, "COD", "layers", "0")
         error(data.copyOf().also { it[cod + 10] = 10 }, "COD", "code-block")
-        val style = data.copyOf().also { it[cod + 12] = 0x40 }
+        // HT code-blocks decode (#187); a mix of HT and Part 1 code-blocks does not.
+        val style = data.copyOf().also { it[cod + 12] = 0xC0.toByte() }
         val ex = assertFailsWith<UnsupportedImageException> { ImageKodec.decode(style) }
         assertTrue(ex.message.orEmpty().startsWith(assertNotNull(ImageKodec.probe(style).unsupportedReason)), ex.message)
     }

@@ -59,6 +59,12 @@ internal enum class InflateError(val code: Int, val message: String) {
     /** wrapper-level: inflated output would exceed the caller-supplied maximum. */
     INFLATED_DATA_TOO_LARGE(101, "inflated data too large"),
 
+    /** wrapper-level: the Adler-32 after the last block differs from the output's (RFC 1950 2.3). */
+    INCORRECT_DATA_CHECK(102, "incorrect data check"),
+
+    /** wrapper-level: the stream ends before the four bytes of its Adler-32. */
+    MISSING_DATA_CHECK(103, "the zlib stream ends before its Adler-32"),
+
     /** Catch-all. */
     UNKNOWN(999, "unknown inflate error"),
     ;

@@ -51,11 +51,32 @@ internal object Deflate {
 
     /** Compress [data] to a bare DEFLATE stream (no zlib/gzip wrapper). */
     fun encode(data: ByteArray): ByteArray = Deflater(data).encode()
+
+    /**
+     * [encode] with its match search set: [maxChain] candidates a position at most, none for
+     * Huffman coding alone; with [lazy], a match is put off by one byte when the next byte starts
+     * a longer one; and a match shorter than [minMatch] is written as literals, which suits
+     * filtered image rows, as zlib's Z_FILTERED strategy does. [cancel] runs every 64 KiB of
+     * input and may throw to stop the work.
+     */
+    fun encode(data: ByteArray, maxChain: Int, lazy: Boolean, minMatch: Int = 3, cancel: (() -> Unit)? = null): ByteArray =
+        Deflater(data, maxChain, lazy, minMatch, cancel).encode()
 }
 
-internal class Deflater(private val data: ByteArray) {
+/**
+ * The deflater of [data]. The defaults, a greedy search of 128 candidates, give the output
+ * every caller had before the search could be set; a change to them moves the bytes of every
+ * PNG and TIFF written without options.
+ */
+internal class Deflater(
+    private val data: ByteArray,
+    private val maxChain: Int = MAX_CHAIN,
+    private val lazy: Boolean = false,
+    private val minMatch: Int = MIN_MATCH,
+    private val cancel: (() -> Unit)? = null,
+) {
 
-    private val out = ByteArrayBuilder(maxOf(64, data.size / 3))
+    private val out = ByteArrayBuilder(maxOf(64, minOf(data.size / 3, 1 shl 20)))
     private var bitBuf = 0
     private var bitCount = 0
 
@@ -114,12 +135,25 @@ internal class Deflater(private val data: ByteArray) {
     }
 
     fun encode(): ByteArray {
-        lz77()
+        // The tokens of at most [SEGMENT_SYMBOLS] symbols at a time, so memory follows that and the
+        // 32 KiB window, not the input (#163). Input that fits one segment encodes as one.
+        do {
+            val start = lzPos
+            tokenCount = 0
+            lz77(SEGMENT_SYMBOLS)
+            writeBlocks(start, final = lzPos >= data.size)
+        } while (lzPos < data.size)
+        flushToByte()
+        return out.toByteArray()
+    }
+
+    /** Writes the tokens gathered, which encode the input from byte [start], as blocks. */
+    private fun writeBlocks(start: Int, final: Boolean) {
         // Chunks of [BLOCK_SYMBOLS] symbols, as zlib flushes a block, then joined while one block
         // of two costs less than the pair: never more blocks than the statistics pay for.
         val blocks = ArrayList<Pair<Chunk, Tables>>()
         var first = 0
-        var at = 0
+        var at = start
         var group: Chunk? = null
         var groupTables: Tables? = null
         do {
@@ -153,12 +187,12 @@ internal class Deflater(private val data: ByteArray) {
                 // Neighbouring stored blocks join into stored blocks of up to 65535 bytes.
                 var j = i
                 while (j + 1 < blocks.size && blocks[j + 1].second.stored) j++
-                writeStored(chunk.start, blocks[j].first.end, final = j == blocks.size - 1)
+                writeStored(chunk.start, blocks[j].first.end, final = final && j == blocks.size - 1)
                 i = j + 1
                 continue
             }
-            val final = i == blocks.size - 1
-            writeBits(if (final) 1 else 0, 1)
+            val last = final && i == blocks.size - 1
+            writeBits(if (last) 1 else 0, 1)
             if (tables.dynamicBits < tables.fixedBits) {
                 writeBits(0b10, 2)
                 writeDynamicHeader(tables.hlit, tables.hdist, tables.numCl, tables.clSeq, tables.clLen)
@@ -169,8 +203,6 @@ internal class Deflater(private val data: ByteArray) {
             }
             i++
         }
-        flushToByte()
-        return out.toByteArray()
     }
 
     /** The frequencies of tokens [first] until [last], which encode the input from byte [at] on. */
@@ -232,11 +264,18 @@ internal class Deflater(private val data: ByteArray) {
 
     /* ─── LZ77 (greedy, hash-chained): gathers the tokens ──────────────────── */
 
-    private fun lz77() {
+    // The match finder's state, kept from one segment to the next. [prev] is a ring of the window,
+    // as zlib keeps it: every candidate a search follows lies inside the window, so no slot it
+    // reads has been written over.
+    private val head = IntArray(HASH_SIZE) { -1 }
+    private val prev = IntArray(WINDOW_SIZE)
+    private var lzPos = 0
+    private var nextCheck = CANCEL_STEP
+
+    /** Gathers tokens from [lzPos] until the input ends or [limit] tokens are gathered. */
+    private fun lz77(limit: Int) {
         val n = data.size
         if (n == 0) return
-        val head = IntArray(HASH_SIZE) { -1 }
-        val prev = IntArray(n)
 
         fun hash(i: Int): Int {
             val a = data[i].toInt() and 0xFF
@@ -247,40 +286,86 @@ internal class Deflater(private val data: ByteArray) {
         fun insert(i: Int) {
             if (i > n - MIN_MATCH) return
             val h = hash(i)
-            prev[i] = head[h]
+            prev[i and (WINDOW_SIZE - 1)] = head[h]
             head[h] = i
         }
 
-        var pos = 0
-        while (pos < n) {
-            var bestLen = 0
-            var bestDist = 0
-            if (pos <= n - MIN_MATCH) {
-                val maxLen = minOf(MAX_MATCH, n - pos)
-                val minPos = maxOf(0, pos - WINDOW_SIZE)
-                var cand = head[hash(pos)]
-                var chain = MAX_CHAIN
-                while (cand >= minPos && chain-- > 0) {
-                    var l = 0
-                    while (l < maxLen && data[cand + l] == data[pos + l]) l++
-                    if (l > bestLen) {
-                        bestLen = l
-                        bestDist = pos - cand
-                        if (l >= maxLen) break
-                    }
-                    cand = prev[cand]
+        var bestLen = 0
+        var bestDist = 0
+        // The longest match at [pos] into bestLen and bestDist, or a length of 0.
+        fun search(pos: Int) {
+            bestLen = 0
+            bestDist = 0
+            if (pos > n - MIN_MATCH) return
+            val maxLen = minOf(MAX_MATCH, n - pos)
+            val minPos = maxOf(0, pos - WINDOW_SIZE)
+            var cand = head[hash(pos)]
+            var chain = maxChain
+            while (cand >= minPos && chain-- > 0) {
+                var l = 0
+                while (l < maxLen && data[cand + l] == data[pos + l]) l++
+                if (l > bestLen) {
+                    bestLen = l
+                    bestDist = pos - cand
+                    if (l >= maxLen) break
                 }
-            }
-            if (bestLen >= MIN_MATCH) {
-                addMatch(bestLen, bestDist)
-                val end = pos + bestLen
-                while (pos < end) { insert(pos); pos++ }
-            } else {
-                addLiteral(data[pos].toInt() and 0xFF)
-                insert(pos)
-                pos++
+                cand = prev[cand and (WINDOW_SIZE - 1)]
             }
         }
+
+        var pos = lzPos
+        if (!lazy) {
+            while (pos < n && tokenCount < limit) {
+                if (cancel != null && pos >= nextCheck) { cancel.invoke(); nextCheck = pos + CANCEL_STEP }
+                search(pos)
+                if (bestLen >= minMatch) {
+                    addMatch(bestLen, bestDist)
+                    val end = pos + bestLen
+                    while (pos < end) { insert(pos); pos++ }
+                } else {
+                    addLiteral(data[pos].toInt() and 0xFF)
+                    insert(pos)
+                    pos++
+                }
+            }
+            lzPos = pos
+            return
+        }
+        // Lazy evaluation (RFC 1951, section 4): a match found at pos is held while the match at
+        // pos + 1 is looked up, and gives way to it, as a literal, when that one is longer. A
+        // segment ends with nothing held, so its tokens cover exactly the bytes up to [lzPos].
+        var heldLen = 0
+        var heldDist = 0
+        while (pos < n && tokenCount < limit) {
+            if (cancel != null && pos >= nextCheck) { cancel.invoke(); nextCheck = pos + CANCEL_STEP }
+            if (heldLen >= LAZY_ENOUGH) {
+                bestLen = 0
+            } else {
+                search(pos)
+            }
+            if (heldLen >= minMatch && heldLen >= bestLen) {
+                // The match held from pos - 1 wins; pos - 1 is already in the hash chains.
+                addMatch(heldLen, heldDist)
+                val end = pos - 1 + heldLen
+                while (pos < end) { insert(pos); pos++ }
+                heldLen = 0
+                continue
+            }
+            if (heldLen > 0) addLiteral(data[pos - 1].toInt() and 0xFF)
+            heldLen = if (bestLen >= minMatch) bestLen else 1
+            heldDist = bestDist
+            insert(pos)
+            pos++
+        }
+        // What is still held goes out now: a match as it stands, a lone byte as a literal.
+        if (heldLen >= minMatch) {
+            addMatch(heldLen, heldDist)
+            val end = pos - 1 + heldLen
+            while (pos < end) { insert(pos); pos++ }
+        } else if (heldLen > 0) {
+            addLiteral(data[pos - 1].toInt() and 0xFF)
+        }
+        lzPos = pos
     }
 
     private fun addLiteral(v: Int) = appendToken(v)
@@ -444,6 +529,15 @@ internal class Deflater(private val data: ByteArray) {
 
         /** Symbols per block: zlib's lit_bufsize at its default memLevel of 8. */
         private const val BLOCK_SYMBOLS = 1 shl 14
+
+        /** Tokens gathered before their blocks are written: 64 blocks' worth, 4 MiB of tokens. */
+        private const val SEGMENT_SYMBOLS = BLOCK_SYMBOLS * 64
+
+        /** A held match this long is taken without a look one byte further, where a longer one gains little. */
+        private const val LAZY_ENOUGH = 128
+
+        /** Input bytes between two calls of the cancel check. */
+        private const val CANCEL_STEP = 1 shl 16
 
         /** The most a stored block holds: LEN is 16 bits. */
         private const val MAX_STORED = 65_535

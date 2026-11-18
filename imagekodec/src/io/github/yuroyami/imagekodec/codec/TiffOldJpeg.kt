@@ -20,6 +20,11 @@ import io.github.yuroyami.imagekodec.UnsupportedImageException
  * libtiff hands the samples on without upsampling or color conversion, so the TIFF
  * YCbCr path converts them with the file's own ReferenceBlackWhite, which these files
  * often set to the studio range; [decode] returns the planes for that.
+ *
+ * Tiles in more than one column are one JPEG frame a tile wide, the tiles stacked in
+ * their order, each a restart interval, as libtiff reads them; [decode] puts them back
+ * side by side. Separate planes are one frame with a scan for each component, each
+ * plane's striles holding its scan, as libtiff's OJPEGReadSecondarySos expects.
  */
 internal object TiffOldJpeg {
 
@@ -33,6 +38,7 @@ internal object TiffOldJpeg {
         val strileWidth: Int,
         val strileLength: Int,
         val samples: Int,
+        val separate: Boolean,
         val ycbcr: Boolean,
         val tagSubH: Int,
         val tagSubV: Int,
@@ -85,8 +91,16 @@ internal object TiffOldJpeg {
         if (s.samples != 1 && s.samples != 3) {
             throw UnsupportedImageException("TIFF: old-style JPEG with ${s.samples} samples per pixel (1 or 3)")
         }
-        if (s.tiled && (s.width + s.strileWidth - 1) / s.strileWidth > 1) {
-            throw UnsupportedImageException("TIFF: old-style JPEG in more than one column of tiles")
+        val across = if (s.tiled) (s.width + s.strileWidth - 1) / s.strileWidth else 1
+        val down = if (s.tiled) (s.height + s.strileLength - 1) / s.strileLength else 1
+        // A plane's striles: those of separate planes come one plane after another.
+        val scans = if (s.separate) s.samples else 1
+        val perPlane = s.strileOffsets.size / scans
+        val scanComponents = if (s.separate) 1 else s.samples
+        // libtiff's RGBA reader takes separate YCbCr planes unsubsampled alone, so neither the tag
+        // nor the stream may ask for more.
+        if (s.separate && s.ycbcr && (s.tagSubH != 1 || s.tagSubV != 1)) {
+            throw UnsupportedImageException("TIFF: old-style JPEG in separate planes with subsampled samples")
         }
         val size = data.size.toLong()
         val segments = ArrayList<Segment>()
@@ -190,9 +204,9 @@ internal object TiffOldJpeg {
                 }
                 0xDA -> {
                     if (sofMarker < 0) err("scan header before the frame header")
-                    if (cursor.word() != 6 + s.samples * 2) err("corrupt SOS marker")
-                    if (cursor.byte() != s.samples) err("corrupt SOS marker")
-                    for (q in 0 until s.samples) {
+                    if (cursor.word() != 6 + scanComponents * 2) err("corrupt SOS marker")
+                    if (cursor.byte() != scanComponents) err("corrupt SOS marker")
+                    for (q in 0 until scanComponents) {
                         sosCs[q] = cursor.byte()
                         sosTda[q] = cursor.byte()
                     }
@@ -241,19 +255,29 @@ internal object TiffOldJpeg {
             }
             sofMarker = 0xC0
             sofX = s.strileWidth
-            sofY = if (s.tiled) (s.height + s.strileLength - 1) / s.strileLength * s.strileLength else s.height
+            sofY = if (s.tiled) across * down * s.strileLength else s.height
         } else if (!sawSos) {
             for (m in 0 until s.samples) {
                 sosCs[m] = sofC[m]
                 sosTda[m] = (m shl 4) or m
             }
         }
-        if (sofX < s.width || sofY < s.height) err("the JPEG frame is ${sofX}x$sofY for a ${s.width}x${s.height} image")
+        if (s.separate && (subH != 1 || subV != 1 || upsample)) {
+            throw UnsupportedImageException("TIFF: old-style JPEG in separate planes with subsampled samples")
+        }
+        if (perPlane == 0) err("no strips or tiles")
+        if (across > 1) {
+            if (sofX < s.strileWidth || sofY.toLong() < across.toLong() * down * s.strileLength) {
+                err("the JPEG frame is ${sofX}x$sofY for $across by $down tiles of ${s.strileWidth}x${s.strileLength}")
+            }
+        } else if (sofX < s.width || sofY < s.height) {
+            err("the JPEG frame is ${sofX}x$sofY for a ${s.width}x${s.height} image")
+        }
         if (sofMarker == 0xC3) throw UnsupportedImageException("TIFF: old-style lossless JPEG is not supported")
 
         // --- a restart interval of one strip when there are several, as OJPEGReadHeaderInfo sets it ---
         var restart = s.restartIntervalTag
-        if (s.strileLength < s.height) {
+        if (perPlane > 1) {
             if (subH !in LEGAL || subV !in LEGAL) err("invalid subsampling ${subH}x$subV")
             if (s.strileLength % (subV * 8) != 0) err("strips of ${s.strileLength} rows do not hold whole MCU rows")
             val interval = (s.strileWidth + subH * 8 - 1) / (subH * 8).toLong() * (s.strileLength / (subV * 8))
@@ -271,23 +295,34 @@ internal object TiffOldJpeg {
         if (restart != 0) out.add(0xFF, 0xDD, 0, 4, restart shr 8, restart and 0xFF)
         out.add(0xFF, sofMarker, 0, 8 + s.samples * 3, 8, sofY shr 8, sofY and 0xFF, sofX shr 8, sofX and 0xFF, s.samples)
         for (m in 0 until s.samples) out.add(sofC[m], sofHv[m], sofTq[m])
-        out.add(0xFF, 0xDA, 0, 6 + s.samples * 2, s.samples)
-        for (m in 0 until s.samples) out.add(sosCs[m], sosTda[m])
-        out.add(0, 63, 0)
-        // The scan data: the rest of the segment the headers ended in, then every later one,
-        // with a restart marker after each strip or tile that is not the last.
-        val stripCount = segments.count { it.strile }
-        var striles = segments.take(cursor.seg).count { it.strile }
-        var rst = 0
-        for (i in cursor.seg until segments.size) {
-            val segment = segments[i]
-            val from = if (i == cursor.seg) cursor.pos else segment.start
-            if (segment.strile) striles++
-            if (from >= segment.end) continue
-            out.add(data, from, segment.end)
-            if (segment.strile && striles < stripCount) {
-                out.add(0xFF, 0xD0 + rst)
-                rst = (rst + 1) and 7
+        // The scan data: the rest of the segment the headers ended in, then every later strile
+        // of the plane, with a restart marker after each one that is not the plane's last. A
+        // later plane's scan header is the decoder's own; one at the head of its first strile
+        // is passed over, as OJPEGReadSecondarySos reads it.
+        val first = if (segments.isNotEmpty() && !segments[0].strile) 1 else 0
+        for (plane in 0 until scans) {
+            val components = if (s.separate) listOf(plane) else (0 until s.samples).toList()
+            var from = first + plane * perPlane
+            var pos = segments.getOrNull(from)?.start ?: 0
+            if (plane == 0) {
+                from = cursor.seg
+                pos = cursor.pos
+            } else if (from < segments.size) {
+                secondarySos(data, segments[from], sosCs, sosTda, plane)?.let { pos = it }
+            }
+            out.add(0xFF, 0xDA, 0, 6 + components.size * 2, components.size)
+            for (m in components) out.add(sosCs[m], sosTda[m])
+            out.add(0, 63, 0)
+            val last = first + (plane + 1) * perPlane
+            var rst = 0
+            for (i in from until minOf(last, segments.size)) {
+                val segment = segments[i]
+                val start = if (i == from) pos else segment.start
+                if (start < segment.end) out.add(data, start, segment.end)
+                if (segment.strile && i < last - 1) {
+                    out.add(0xFF, 0xD0 + rst)
+                    rst = (rst + 1) and 7
+                }
             }
         }
         out.add(0xFF, 0xD9)
@@ -295,9 +330,11 @@ internal object TiffOldJpeg {
         val stream = out.toByteArray()
         return try {
             if (upsample) {
-                Image(1, 1, null, JpegDecoder.decodeComponents(stream).components)
+                val c = JpegDecoder.decodeComponents(stream).components
+                Image(1, 1, null, if (across > 1) sideBySide(c, across, down, s.strileWidth, s.strileLength) else c)
             } else {
-                Image(subH, subV, JpegDecoder.decodePlanes(stream), null)
+                val planes = JpegDecoder.decodePlanes(stream)
+                Image(subH, subV, if (across > 1) sideBySide(planes, across, down, s.strileWidth, s.strileLength) else planes, null)
             }
         } catch (e: UnsupportedImageException) {
             throw UnsupportedImageException("TIFF: old-style JPEG: ${e.message}", e)
@@ -307,6 +344,57 @@ internal object TiffOldJpeg {
     }
 
     private val LEGAL = intArrayOf(1, 2, 4)
+
+    /**
+     * Reads the scan header at the head of a later plane's first strile [segment], if one is there,
+     * into the component and tables of [plane], and returns where the scan data starts; null when
+     * the strile starts with data.
+     */
+    private fun secondarySos(data: ByteArray, segment: Segment, cs: IntArray, tda: IntArray, plane: Int): Int? {
+        var at = segment.start
+        fun byte(): Int {
+            if (at >= segment.end) err("a plane's scan header runs past its strip")
+            return data[at++].toInt() and 0xFF
+        }
+        if (segment.end - at < 2 || (data[at].toInt() and 0xFF) != 0xFF || (data[at + 1].toInt() and 0xFF) != 0xDA) return null
+        at += 2
+        val length = (byte() shl 8) or byte()
+        if (length != 8 || byte() != 1) err("a plane's scan header is not of one component")
+        cs[plane] = byte()
+        tda[plane] = byte()
+        repeat(3) { byte() }
+        return at
+    }
+
+    /** The [planes] of a frame of [across] by [down] tiles stacked one above the next, put side by side. */
+    private fun sideBySide(planes: JpegDecoder.Planes, across: Int, down: Int, tileWidth: Int, tileLength: Int): JpegDecoder.Planes {
+        val moved = planes.planes.map { p ->
+            val w = tileWidth * p.h / planes.hMax
+            val l = tileLength * p.v / planes.vMax
+            val stride = across * w
+            val out = ByteArray(stride * down * l)
+            for (t in 0 until across * down) for (row in 0 until l) {
+                val src = (t * l + row) * p.stride
+                if (src + w > p.samples.size) err("the JPEG frame does not hold tile $t")
+                p.samples.copyInto(out, ((t / across) * l + row) * stride + (t % across) * w, src, src + w)
+            }
+            JpegDecoder.Plane(out, stride, stride, down * l, p.h, p.v)
+        }
+        return JpegDecoder.Planes(across * tileWidth, down * tileLength, planes.hMax, planes.vMax, moved)
+    }
+
+    /** [sideBySide] for components upsampled to full size and interleaved. */
+    private fun sideBySide(c: JpegComponents, across: Int, down: Int, tileWidth: Int, tileLength: Int): JpegComponents {
+        val n = c.componentCount
+        val stride = across * tileWidth * n
+        val out = ByteArray(stride * down * tileLength)
+        for (t in 0 until across * down) for (row in 0 until tileLength) {
+            val src = (t * tileLength + row) * c.width * n
+            if (c.width < tileWidth || src + tileWidth * n > c.samples.size) err("the JPEG frame does not hold tile $t")
+            c.samples.copyInto(out, ((t / across) * tileLength + row) * stride + (t % across) * tileWidth * n, src, src + tileWidth * n)
+        }
+        return JpegComponents(across * tileWidth, down * tileLength, n, out, c.adobeTransform)
+    }
 
     /**
      * The table id component [m] uses: its own, read with [read] when its offset is new,

@@ -24,6 +24,7 @@ import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteFrame
 import io.github.yuroyami.imagekodec.ImageKodec
 import io.github.yuroyami.imagekodec.compose.KiteImage
+import io.github.yuroyami.imagekodec.heic.ImageKodecHeic
 
 private class Tile(val title: String, val bytes: ByteArray)
 
@@ -66,6 +67,7 @@ private fun tiles(): List<Tile> {
         Tile("BMP: OUR encoder, 32-bit\nwith alpha", ImageKodec.encodeBmp(card(96, 96, alpha = true))),
         Tile("JPEG 2000", SAMPLE_JP2),
         Tile("TIFF deflate (ffmpeg-encoded)", SAMPLE_TIFF),
+        Tile("HEIC: 2x2 grid, alpha, irot\n(imagekodec-heic)", SAMPLE_HEIC),
     )
 }
 
@@ -89,6 +91,8 @@ private fun caption(bytes: ByteArray): String {
 }
 
 fun main() = application {
+    // HEIC needs the HEVC codec of imagekodec-heic, installed once before the first decode.
+    ImageKodecHeic.install()
     Window(onCloseRequest = ::exitApplication, title = "ImageKodec sample: every pixel pure Kotlin") {
         Surface(color = MaterialTheme.colorScheme.background) {
             val all = tiles()

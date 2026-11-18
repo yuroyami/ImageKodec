@@ -207,6 +207,14 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
             if (fh.tileCols * fh.tileRows > 1) use.add("tiles")
             if (fh.filmGrain.applyGrain && !fh.frameIsIntra) use.add("film grain inter frame")
             if (!fh.showFrame) use.add("hidden frame")
+            if (fh.allowIntrabc) use.add("intra block copy allowed")
+            for (plane in 0 until s.numPlanes) {
+                when (fh.frameRestorationType[plane]) {
+                    Av1FrameHeader.RESTORE_WIENER -> use.add("wiener restoration frame")
+                    Av1FrameHeader.RESTORE_SGRPROJ -> use.add("self-guided restoration frame")
+                    Av1FrameHeader.RESTORE_SWITCHABLE -> use.add("switchable restoration frame")
+                }
+            }
         }
     }
 

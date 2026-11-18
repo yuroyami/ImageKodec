@@ -100,6 +100,7 @@ class FuzzTest {
         // fields to agree, so a random edit of a plain file stops at the first check.
         "apng" to apngSeed(),
         "png-palette" to paletteSeed(),
+        "png-cgbi" to PngCgbiTest().seed(),
         "gif-subrect" to hex(GIF_SUBRECT),
         "tiff-deflate" to hex(buildTiff(compression = 8)),
         "tiff-tiled" to hex(buildTiff(tiled = true)),
@@ -129,6 +130,10 @@ class FuzzTest {
         "tiff-reference-rgb" to withReferences(referenceTiff(ycbcr = false),
             longArrayOf(255,1,0,1,0,1,255,1,0,1,255,1)),
         "tiff-ccitt-mixed" to faxTiff(CcittMixedTest().stream(fill = 3), 3, height = 6, t4Options = 5),
+        // Samples of other depths and formats, both predictors over them, 12-bit and separate-plane JPEG,
+        // and CCITT's uncompressed mode (#189).
+        *TiffSamplesTest().seeds().toTypedArray(),
+        "tiff-ccitt-uncompressed" to CcittUncompressedTest().seed(),
         "jp2-small-irreversible" to Jp2SingletonTest().encoded("corner"),
         "jp2-partial-reversible" to Jp2ReconstructionTest().encoded(),
         "jp2-derived-quantization" to Jp2DerivedQuantTest().encoded(),
@@ -161,14 +166,45 @@ class FuzzTest {
         "jp2-roi" to Jp2FeatureFixtures.roi,
         "jp2-poc-ppt" to Jp2FeatureFixtures.pocPpt,
         "jp2-ppm" to Jp2FeatureFixtures.ppm,
+        // The encoder's own output: two layers, SOP and EPH, a pass a segment, and a cdef opacity channel (#180).
+        "jp2-encoded" to ImageKodec.encodeJp2(
+            KiteBitmap(9, 7, IntArray(63) { (((it * 37) and 0xFF) shl 24) or (it * 0x030507) }),
+            Jp2EncodeOptions(layers = 2, levels = 2, sopMarkers = true, ephMarkers = true, terminateEachPass = true),
+        ),
+        // HTJ2K from the encoder: lossy with SigProp and MagRef passes, and lossless with alpha and stripe-causal blocks (#187).
+        "jp2-ht" to ImageKodec.encodeJp2(
+            KiteBitmap(11, 9, IntArray(99) { 0xFF000000.toInt() or (it * 0x0A0503) }),
+            Jp2EncodeOptions(levels = 1, quality = 85, codeBlockWidth = 8, codeBlockHeight = 8, highThroughput = true),
+        ),
+        "jp2-ht-lossless" to ImageKodec.encodeJp2(
+            KiteBitmap(7, 6, IntArray(42) { (((it * 41) and 0xFF) shl 24) or (it * 0x050307) }),
+            Jp2EncodeOptions(lossless = true, levels = 1, verticalCausal = true, codestreamOnly = true, highThroughput = true),
+        ),
         // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
         *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
+        // Constant luminance and ICtCp, which convert through light (#189).
+        "avif-constant-luminance" to AvifMatrixFixtures.m10t14,
+        "avif-ictcp-hlg" to AvifMatrixFixtures.m14t18,
+        // An AVIF the core's own encoder writes: 4:4:4 with alpha, palette blocks among intra ones, CDEF and restoration (#176).
+        "avif-encoded" to ImageKodec.encodeAvif(
+            KiteBitmap(24, 16, IntArray(24 * 16) { i -> (((i % 24) * 9 + (i / 24) * 40) shl 24) or (if ((i % 24) / 6 % 2 == 0) 0x1080E0 else 0xF0F020) or ((i % 7) * 3) }),
+            HeifEncodeOptions(quality = 60, chroma = HeifChroma.Yuv444),
+        ),
+        // A tmap with its gain map, and alpha and depth auxiliary images (#153, #154).
+        "heif-aux-tmap" to AuxiliaryFiles.everything(),
         // JPEG XL from libjxl: both coding modes, the container, an ICC profile, passes, an LF frame, patches,
         // splines, noise, upsampling, a recompressed JPEG, float samples and a blended animation (#42).
         *JxlFixtures.all.map { (name, data) -> "jxl-$name" to data }.toTypedArray(),
+        // ImageKodec's own JPEG XL encoder: a small lossy VarDCT frame with Modular alpha beside it (#179).
+        "jxl-encoder" to ImageKodec.encodeJxl(
+            KiteBitmap(16, 12, IntArray(192) { ((it * 21) and 0xFF shl 24) or (it * 1311 and 0xFFFFFF) }),
+            JxlEncodeOptions(quality = 80, effort = 1),
+        ),
         // JPEG XR from jxrlib: both bitstream orders, every subsampling, tiles soft and hard, planar and
         // interleaved alpha, 16-bit, half and packed samples, and HD Photo's codec subversion (#125).
         *JxrFixtures.all.map { (name, data) -> "jxr-$name" to data }.toTypedArray(),
+        // JPEG XR's 32bppRGBE (#189).
+        "jxr-rgbe" to JxrFixtures.rgbe,
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(
@@ -176,7 +212,24 @@ class FuzzTest {
         "jp2-oversize-siz" to jp2OversizeSeed(),
         // A BMP that declares BI_PNG and holds another BMP must be refused, not read recursively (#17).
         "bmp-nested" to embeddedBmp(5, ImageKodec.encodeBmp(sample(6, 4))),
+        // Grids that name one grid 256 times, three deep: 16.7 million visits without a memo (#166).
+        "heif-nested-grids" to nestedGridSeed(),
     )
+
+    private fun nestedGridSeed(): ByteArray = HeifBuilder().apply {
+        fun be32(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
+        fun ispe(w: Int) = (be32(20) + "ispe".encodeToByteArray() + ByteArray(4) + be32(w) + be32(w)) to false
+        add(100, "av01", ByteArray(4), listOf(ispe(1)), hidden = true)
+        var below = 100L
+        var size = 1
+        for (level in 1..3) {
+            size *= 16
+            add(level, "grid", byteArrayOf(0, 0, 15, 15, (size ushr 8).toByte(), size.toByte(), (size ushr 8).toByte(), size.toByte()), listOf(ispe(size)), hidden = level < 3)
+            references += Triple("dimg", level.toLong(), LongArray(256) { below })
+            below = level.toLong()
+        }
+        primary = 3
+    }.build()
 
     private fun corpus(): List<Pair<String, ByteArray>> = validCorpus() + malformedCorpus()
 
@@ -325,9 +378,11 @@ class FuzzTest {
         if (variant == 0) mustFailCleanly("$label decodeScaled") { ImageKodec.decodeScaled(bytes, 7, 5, applyOrientation = true) }
         mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes, applyOrientation = true) }
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
+        // Metadata is read apart from the pixels, and a damaged block is left out, never an error (#186).
+        mustFailCleanly("$label readMetadata") { ImageKodec.readMetadata(bytes) }
         // The 16-bit paths read their own samples; the others widen what decode gives.
         val format = ImageFormat.sniff(bytes)
-        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.JXL || format == ImageFormat.JXR) {
+        if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.HEIC || format == ImageFormat.JXL || format == ImageFormat.JXR) {
             mustFailCleanly("$label decode16") { ImageKodec.decode16(bytes, applyOrientation = true) }
         }
         // A file that declares its colour converts through it when asked, so a profile's tables
@@ -337,6 +392,17 @@ class FuzzTest {
             if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.JPEG) {
                 mustFailCleanly("$label decode16 to sRGB") { ImageKodec.decode16(bytes, colorTarget = ColorTarget.Srgb()) }
             }
+        }
+        // The auxiliary images and the gain map of a HEIF file read their own items (#153, #154).
+        if (format == ImageFormat.AVIF || format == ImageFormat.HEIC) {
+            mustFailCleanly("$label auxiliaryImages") { ImageKodec.auxiliaryImages(bytes) }
+            val auxiliary = try {
+                ImageKodec.auxiliaryImages(bytes).size
+            } catch (_: ImageDecodeException) {
+                0
+            }
+            for (i in 0 until minOf(auxiliary, 2)) mustFailCleanly("$label decodeAuxiliaryImage $i") { ImageKodec.decodeAuxiliaryImage(bytes, i) }
+            mustFailCleanly("$label decodeGainMap") { ImageKodec.decodeGainMap(bytes) }
         }
         // A damaged chain of TIFF pages: the last page the probe counts must be reachable.
         val pages = ImageKodec.probeOrNull(bytes)?.pageCount ?: 1
@@ -364,9 +430,17 @@ class FuzzTest {
             Triple("jbig2-generic-tpgd", hex(GENERIC_TPGD), null),
             Triple("jbig2-text", hex(TEXT_PAGE), hex(SYMBOL_DICT)),
             Triple("jbig2-mmr", hex(JBIG2_MMR), null),
+            // A dictionary that refines and aggregates, and a region of unknown length (#189).
+            Triple("jbig2-aggregate", Jbig2AggregateTest().aggregates(2).stream, null),
+            Triple("jbig2-unknown-length", Jbig2AggregateTest().unknownLength(mmr = false, unknownHeight = true).stream, null),
         )
         for ((name, data, globals) in streams) {
-            val (width, height) = if (name == "jbig2-mmr") 64 to 24 else Jbig2Page.WIDTH to Jbig2Page.HEIGHT
+            val (width, height) = when (name) {
+                "jbig2-mmr" -> 64 to 24
+                "jbig2-aggregate" -> 64 to 40
+                "jbig2-unknown-length" -> 37 to 23
+                else -> Jbig2Page.WIDTH to Jbig2Page.HEIGHT
+            }
             fun run(label: String, stream: ByteArray, dictionary: ByteArray?) {
                 if (!shard.takesNext()) return
                 withDeadline(label + FuzzSettings.replay, DEADLINE_MILLIS) {

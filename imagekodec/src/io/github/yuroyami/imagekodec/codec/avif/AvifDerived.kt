@@ -3,6 +3,7 @@ package io.github.yuroyami.imagekodec.codec.avif
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
+import io.github.yuroyami.imagekodec.internal.Tiles
 
 /** A `grid` derived image (ISO/IEC 23008-12 section 6.6.2.3): tiles in rows, cropped to the output size. */
 internal class AvifGrid(val rows: Int, val columns: Int, val width: Int, val height: Int) {
@@ -27,62 +28,177 @@ internal class AvifGrid(val rows: Int, val columns: Int, val width: Int, val hei
         /**
          * The tiles [tile] gives, joined row by row, as libavif checks them: every tile the
          * same size, depth, subsampling and range, the tiles together covering the output and
-         * none lying wholly outside it, and in subsampled chroma an even tile size.
+         * none lying wholly outside it, and in subsampled chroma an even tile size. The first
+         * tile, which sets the canvas, decodes on this thread; the others go to the tile runner
+         * when [parallel], and each is copied into the canvas as soon as it is decoded (#152).
          */
-        fun assemble(grid: AvifGrid, count: Int, tile: (Int) -> AvifPlanes): AvifPlanes {
+        fun assemble(grid: AvifGrid, count: Int, parallel: Boolean = false, tile: (Int) -> AvifPlanes): AvifPlanes {
+            checkCount(grid, count)
+            val first = tile(0)
+            checkFirst(grid, first)
+            val canvas = AvifPlanes(
+                grid.width, grid.height, first.depth, first.subX, first.subY,
+                Array(first.planes.size) { p ->
+                    ShortArray(planeWidth(grid.width, if (p > 0) first.subX else 0) * planeWidth(grid.height, if (p > 0) first.subY else 0))
+                },
+                IntArray(first.planes.size) { p -> planeWidth(grid.width, if (p > 0) first.subX else 0) },
+                first.fullRange,
+            )
+            place(first, 0, 0, canvas.planes, canvas.strides, grid.height, 0, first.planes.size)
+            val f = shape(first)
+            Tiles.run(count - 1, parallel) { k ->
+                val i = k + 1
+                val t = tile(i)
+                checkTile(i, t, f)
+                place(t, (i % grid.columns) * f.width, (i / grid.columns) * f.height, canvas.planes, canvas.strides, grid.height, 0, t.planes.size)
+            }
+            return canvas
+        }
+
+        /** What [checkTile] compares of [t], without its samples, so a job does not keep the first tile alive. */
+        fun shape(t: AvifPlanes): AvifPlanes =
+            AvifPlanes(t.width, t.height, t.depth, t.subX, t.subY, Array(t.planes.size) { ShortArray(0) }, IntArray(t.planes.size), t.fullRange)
+
+        fun checkCount(grid: AvifGrid, count: Int) {
             if (count != grid.rows * grid.columns) {
                 throw ImageDecodeException("AVIF: a grid of ${grid.rows} by ${grid.columns} with $count tiles")
             }
-            var out: AvifPlanes? = null
-            var first: AvifPlanes? = null
-            for (i in 0 until count) {
-                val t = tile(i)
-                val f = first ?: t.also {
-                    first = it
-                    val tw = it.width
-                    val th = it.height
-                    if (tw * grid.columns < grid.width || th * grid.rows < grid.height ||
-                        tw * (grid.columns - 1) >= grid.width || th * (grid.rows - 1) >= grid.height
-                    ) {
-                        throw ImageDecodeException("AVIF: grid tiles of $tw by $th do not fit a ${grid.width} by ${grid.height} grid")
-                    }
-                    if ((it.subX != 0 && tw % 2 != 0) || (it.subY != 0 && th % 2 != 0)) {
-                        throw ImageDecodeException("AVIF: grid tiles of $tw by $th with subsampled chroma")
-                    }
-                }
-                if (t.width != f.width || t.height != f.height || t.depth != f.depth || t.subX != f.subX ||
-                    t.subY != f.subY || t.planes.size != f.planes.size || t.fullRange != f.fullRange
-                ) {
-                    throw ImageDecodeException("AVIF: grid tile $i differs from the first")
-                }
-                val canvas = out ?: AvifPlanes(
-                    grid.width, grid.height, f.depth, f.subX, f.subY,
-                    Array(f.planes.size) { p ->
-                        ShortArray(planeWidth(grid.width, if (p > 0) f.subX else 0) * planeWidth(grid.height, if (p > 0) f.subY else 0))
-                    },
-                    IntArray(f.planes.size) { p -> planeWidth(grid.width, if (p > 0) f.subX else 0) },
-                    f.fullRange,
-                ).also { out = it }
-                val x0 = (i % grid.columns) * f.width
-                val y0 = (i / grid.columns) * f.height
-                for (p in t.planes.indices) {
-                    val sx = if (p > 0) t.subX else 0
-                    val sy = if (p > 0) t.subY else 0
-                    val px = x0 shr sx
-                    val py = y0 shr sy
-                    val cw = canvas.strides[p]
-                    val ch = planeWidth(grid.height, sy)
-                    val w = minOf(planeWidth(t.width, sx), cw - px)
-                    val h = minOf(planeWidth(t.height, sy), ch - py)
-                    for (y in 0 until h) {
-                        t.planes[p].copyInto(canvas.planes[p], (py + y) * cw + px, y * t.strides[p], y * t.strides[p] + w)
-                    }
-                }
-            }
-            return out!!
         }
 
-        private fun planeWidth(size: Int, sub: Int): Int = (size + sub) shr sub
+        /** The checks of the first tile [t]: its size covers the grid, and is even where chroma is subsampled. */
+        fun checkFirst(grid: AvifGrid, t: AvifPlanes) {
+            val tw = t.width
+            val th = t.height
+            if (tw * grid.columns < grid.width || th * grid.rows < grid.height ||
+                tw * (grid.columns - 1) >= grid.width || th * (grid.rows - 1) >= grid.height
+            ) {
+                throw ImageDecodeException("AVIF: grid tiles of $tw by $th do not fit a ${grid.width} by ${grid.height} grid")
+            }
+            if ((t.subX != 0 && tw % 2 != 0) || (t.subY != 0 && th % 2 != 0)) {
+                throw ImageDecodeException("AVIF: grid tiles of $tw by $th with subsampled chroma")
+            }
+        }
+
+        /** Tile [i], [t], must match the first tile [f] in everything but its samples. */
+        fun checkTile(i: Int, t: AvifPlanes, f: AvifPlanes) {
+            if (t.width != f.width || t.height != f.height || t.depth != f.depth || t.subX != f.subX ||
+                t.subY != f.subY || t.planes.size != f.planes.size || t.fullRange != f.fullRange
+            ) {
+                throw ImageDecodeException("AVIF: grid tile $i differs from the first")
+            }
+        }
+
+        /**
+         * Copies the first [planeCount] planes of tile [t], whose top left corner is luma sample
+         * ([x0], [y0]) of a picture [height] rows high, into [planes], whose row 0 is luma row [top]
+         * of the picture. What lies past the picture's right or bottom edge is left out.
+         */
+        fun place(t: AvifPlanes, x0: Int, y0: Int, planes: Array<ShortArray>, strides: IntArray, height: Int, top: Int, planeCount: Int) {
+            for (p in 0 until planeCount) {
+                val sx = if (p > 0) t.subX else 0
+                val sy = if (p > 0) t.subY else 0
+                val px = x0 shr sx
+                val py = y0 shr sy
+                val cw = strides[p]
+                val ch = planeWidth(height, sy)
+                val w = minOf(planeWidth(t.width, sx), cw - px)
+                val h = minOf(planeWidth(t.height, sy), ch - py)
+                val rowOffset = top shr sy
+                for (y in 0 until h) {
+                    t.planes[p].copyInto(planes[p], (py + y - rowOffset) * cw + px, y * t.strides[p], y * t.strides[p] + w)
+                }
+            }
+        }
+
+        fun planeWidth(size: Int, sub: Int): Int = (size + sub) shr sub
+    }
+}
+
+/**
+ * The planes of a [grid] one row of tiles at a time, for a decode that converts and scales a band
+ * of rows and then drops it (#151). It holds at most two rows of tiles: the one [load] read last,
+ * and the one before it, whose last chroma row the bilinear upsampling of the next row's first
+ * luma row reads. [planes] hold luma rows from [top] to [loaded], at full width. The tiles are
+ * checked as [AvifGrid.assemble] checks them, in the same order. Only the first [maxPlanes]
+ * planes are kept, and [prepare] turns each checked tile into the samples to keep. With [parallel],
+ * the tiles of a row go to the tile runner.
+ */
+internal class AvifGridWindow(
+    private val grid: AvifGrid,
+    private val count: Int,
+    private val maxPlanes: Int,
+    private val tile: (Int) -> AvifPlanes,
+    private val prepare: (AvifPlanes) -> AvifPlanes = { it },
+    private val parallel: Boolean = false,
+) {
+    init {
+        AvifGrid.checkCount(grid, count)
+    }
+
+    /** The shape of the first tile, once [load] has read it: the size, depth and subsampling of every tile. */
+    var first: AvifPlanes? = null
+        private set
+    lateinit var planes: Array<ShortArray>
+        private set
+    lateinit var strides: IntArray
+        private set
+    var top: Int = 0
+        private set
+    var loaded: Int = 0
+        private set
+    private var fullRange = false
+    private var planeCount = 0
+
+    /**
+     * Reads row [row] of tiles, the row after the last one read, and drops the row before the last.
+     * The first tile of the picture decodes on this thread and sets the window up; the other tiles
+     * of the row go to the tile runner when [parallel], each placed as soon as it is decoded, so the
+     * window holds two rows of tiles and one more tile for each job running (#152).
+     */
+    fun load(row: Int) {
+        var from = 0
+        if (first == null) {
+            val raw = tile(0)
+            AvifGrid.checkFirst(grid, raw)
+            first = AvifGrid.shape(raw)
+            val t = prepare(raw)
+            // Two rows of tiles a plane, at the picture's width.
+            planeCount = minOf(maxPlanes, t.planes.size)
+            strides = IntArray(planeCount) { p -> AvifGrid.planeWidth(grid.width, if (p > 0) t.subX else 0) }
+            planes = Array(planeCount) { p -> ShortArray(strides[p] * 2 * slotRows(p, t)) }
+            fullRange = t.fullRange
+            AvifGrid.place(t, 0, 0, planes, strides, grid.height, top, planeCount)
+            from = 1
+        }
+        val f = first!!
+        if (row >= 2) {
+            // The row before the last moves to the first slot, and this row goes in the second.
+            for (p in 0 until planeCount) {
+                val slot = strides[p] * slotRows(p, f)
+                planes[p].copyInto(planes[p], 0, slot, 2 * slot)
+            }
+            top = (row - 1) * f.height
+        }
+        Tiles.run(grid.columns - from, parallel) { k ->
+            val column = from + k
+            val i = row * grid.columns + column
+            val raw = tile(i)
+            AvifGrid.checkTile(i, raw, f)
+            AvifGrid.place(prepare(raw), column * f.width, row * f.height, planes, strides, grid.height, top, planeCount)
+        }
+        loaded = minOf((row + 1) * f.height, grid.height)
+    }
+
+    /**
+     * The rows of plane [p] a row of tiles fills. A grid of one row may have tiles taller than the
+     * picture, so this is cut to the picture's height, as [AvifGrid.assemble]'s canvas is.
+     */
+    private fun slotRows(p: Int, t: AvifPlanes): Int = AvifGrid.planeWidth(minOf(t.height, grid.height), if (p > 0) t.subY else 0)
+
+    /** The window as planes of the whole picture's size, whose rows start at luma row [top]. */
+    fun view(): AvifPlanes {
+        val f = first!!
+        return AvifPlanes(grid.width, grid.height, f.depth, f.subX, f.subY, planes, strides, fullRange)
     }
 }
 

@@ -7,8 +7,8 @@ The Kotlin Toolchain runs tests on JDK 17 or later only. This script runs the te
 
   tools/java11_tests.py --java "$JAVA_HOME_11_X64/bin/java" [module...]
 
-Without modules it runs imagekodec, imagekodec-compose and imagekodec-coil. It exits with an
-error when a test fails.
+Without modules it runs imagekodec, imagekodec-compose, imagekodec-coil and imagekodec-heic. It exits
+with an error when a test fails.
 """
 import argparse
 from pathlib import Path
@@ -19,9 +19,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = Path.home() / ("Library/Caches/JetBrains/Kotlin" if sys.platform == "darwin" else ".cache/JetBrains/Kotlin")
 CLASSES = ROOT / "build/artifacts/CompiledJvmArtifact"
-MODULES = ["imagekodec", "imagekodec-compose", "imagekodec-coil"]
+MODULES = ["imagekodec", "imagekodec-compose", "imagekodec-coil", "imagekodec-heic"]
 # JVM arguments of each module's tests, as test-settings@jvm sets them in its module.yaml.
-JVM_ARGS = {"imagekodec": ["-Xmx3g"]}
+JVM_ARGS = {"imagekodec": ["-Xmx3g"], "imagekodec-heic": ["-Xmx3g"]}
 COORDINATE = re.compile(r"^([\w.\-]+):([\w.\-]+):([\w.\-]+)(?: -> ([\w.\-]+))?(?=$| )")
 
 

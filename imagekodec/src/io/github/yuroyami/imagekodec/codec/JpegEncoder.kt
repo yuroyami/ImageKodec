@@ -1,9 +1,15 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.imagekodec.ImageMetadata
+import io.github.yuroyami.imagekodec.JpegEncodeOptions
 import io.github.yuroyami.imagekodec.JpegEncoderKind
+import io.github.yuroyami.imagekodec.JpegGrayscale
+import io.github.yuroyami.imagekodec.JpegSubsampling
 import io.github.yuroyami.imagekodec.KiteBitmap
+import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.codec.jpegli.JpegliEncoder
-import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
+import io.github.yuroyami.imagekodec.internal.cancellable
+import io.github.yuroyami.imagekodec.internal.flate.MAX_ARRAY
 
 /**
  * Baseline JPEG encoder: a faithful port of `stb_image_write.h`'s
@@ -17,6 +23,10 @@ import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
  * everywhere. Output therefore may differ from C stbiw by a coefficient here
  * and there, so validity and quality are pinned by tests instead: a decode
  * round-trip PSNR check, and ImageIO reading the files back.
+ *
+ * Since #183 this makes the quantized coefficients, at 8 or 12 bits and with the subsampling
+ * asked for, and [JpegWriter] writes them in any process of T.81; the calls without options
+ * write stbiw's file, byte for byte. The lossless samples go to [JpegWriter] too.
  */
 internal object JpegEncoder {
 
@@ -65,53 +75,58 @@ internal object JpegEncoder {
         0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA,
     )
 
-    // Fixed code tables (code, size): stbiw's YDC_HT/UVDC_HT/YAC_HT/UVAC_HT,
-    // generated from the standard tables above at first use.
-    private val YDC_HT = buildHuffTable(STD_DC_LUM_NRCODES, STD_DC_LUM_VALUES)
-    private val UVDC_HT = buildHuffTable(STD_DC_CHR_NRCODES, STD_DC_CHR_VALUES)
-    private val YAC_HT = buildHuffTable(STD_AC_LUM_NRCODES, STD_AC_LUM_VALUES)
-    private val UVAC_HT = buildHuffTable(STD_AC_CHR_NRCODES, STD_AC_CHR_VALUES)
-
-    /** codes[value] = (code shl 5) or size: packed like stbiw's [256][2] tables. */
-    private fun buildHuffTable(nrcodes: IntArray, values: IntArray): IntArray {
-        val out = IntArray(256)
-        var code = 0
-        var k = 0
-        for (len in 1..16) {
-            repeat(nrcodes[len]) {
-                out[values[k]] = (code shl 5) or len
-                code++
-                k++
+    /** A picture's samples a row at a time: red, green and blue of [bits] bits each, equal for a gray source. */
+    internal class Source(val width: Int, val height: Int, val bits: Int, val gray: Boolean, val row: (y: Int, r: IntArray, g: IntArray, b: IntArray) -> Unit) {
+        /** True when every pixel is gray. */
+        fun allGray(): Boolean {
+            if (gray) return true
+            val r = IntArray(width)
+            val g = IntArray(width)
+            val b = IntArray(width)
+            for (y in 0 until height) {
+                row(y, r, g, b)
+                for (x in 0 until width) if (r[x] != g[x] || g[x] != b[x]) return false
             }
-            code = code shl 1
-        }
-        return out
-    }
-
-    private class BitWriter(val out: ByteArrayBuilder) {
-        var bitBuf = 0
-        var bitCnt = 0
-
-        // stbiw__jpg_writeBits
-        fun write(code: Int, size: Int) {
-            bitCnt += size
-            bitBuf = bitBuf or (code shl (24 - bitCnt))
-            while (bitCnt >= 8) {
-                val c = (bitBuf shr 16) and 0xFF
-                out.append(c.toByte())
-                if (c == 0xFF) out.append(0.toByte())
-                bitBuf = bitBuf shl 8
-                bitCnt -= 8
-            }
+            return true
         }
 
-        fun writeEntry(packed: Int) = write(packed ushr 5, packed and 31)
+        companion object {
+            fun of(bitmap: KiteBitmap): Source = Source(bitmap.width, bitmap.height, 8, false) { y, r, g, b ->
+                val argb = bitmap.argb
+                val base = y * bitmap.width
+                for (x in 0 until bitmap.width) {
+                    val p = argb[base + x]
+                    r[x] = (p ushr 16) and 0xFF
+                    g[x] = (p ushr 8) and 0xFF
+                    b[x] = p and 0xFF
+                }
+            }
+
+            fun of(bitmap: KiteBitmap16): Source = Source(bitmap.width, bitmap.height, 16, bitmap.channels <= 2) { y, r, g, b ->
+                val s = bitmap.samples
+                val n = bitmap.channels
+                var at = y * bitmap.width * n
+                for (x in 0 until bitmap.width) {
+                    if (n <= 2) {
+                        val v = s[at].toInt() and 0xFFFF
+                        r[x] = v
+                        g[x] = v
+                        b[x] = v
+                    } else {
+                        r[x] = s[at].toInt() and 0xFFFF
+                        g[x] = s[at + 1].toInt() and 0xFFFF
+                        b[x] = s[at + 2].toInt() and 0xFFFF
+                    }
+                    at += n
+                }
+            }
+        }
     }
 
     fun encode(
         bitmap: KiteBitmap,
         quality: Int,
-        metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null,
+        metadata: ImageMetadata? = null,
         kind: JpegEncoderKind = JpegEncoderKind.Fast,
     ): ByteArray = when {
         metadata != null && !metadata.isEmpty -> UltraHdr.encode(bitmap, quality, metadata, kind)
@@ -136,183 +151,247 @@ internal object JpegEncoder {
      */
     fun encode(bitmap: KiteBitmap, quality: Int, segments: ByteArray?, gray: Boolean): ByteArray {
         require(quality in 1..100) { "JPEG quality must be 1..100, was $quality" }
-        val width = bitmap.width
-        val height = bitmap.height
+        checkSides(bitmap.width, bitmap.height)
+        val frame = dctFrame(Source.of(bitmap), quality, if (quality <= 90) SUB_420 else SUB_444, gray, 8, null)
+        return JpegWriter.writeDct(frame, JpegHeaderPlan(true, -1, segments), JpegCodingPlan(false, false, false, 0), null)
+    }
+
+    internal fun checkSides(width: Int, height: Int) {
         require(width <= MAX_SIDE && height <= MAX_SIDE) {
             "JPEG stores each side in 16 bits, so ${width}x$height is larger than $MAX_SIDE"
         }
+    }
 
-        val subsample = quality <= 90
-        val q = if (quality < 50) 5000 / quality else 200 - quality * 2
+    // ---- with options (#183) ----
 
-        val yTable = ByteArray(64)
-        val uvTable = ByteArray(64)
-        for (i in 0 until 64) {
-            val yti = ((YQT[i] * q + 50) / 100).coerceIn(1, 255)
-            yTable[ZIGZAG[i]] = yti.toByte()
-            val uvti = ((UVQT[i] * q + 50) / 100).coerceIn(1, 255)
-            uvTable[ZIGZAG[i]] = uvti.toByte()
+    /** [bitmap] as [options] ask, with [metadata]. */
+    fun encode(bitmap: KiteBitmap, options: JpegEncodeOptions, metadata: ImageMetadata, check: (() -> Unit)?): ByteArray {
+        require(options.precision == 8) {
+            "encodeJpeg writes 8-bit samples, so precision must be 8, was ${options.precision}; encodeJpeg16 writes the others"
         }
+        return encode(Source.of(bitmap), options, metadata, check)
+    }
 
+    /** [bitmap] as [options] ask, with [metadata]: each sample the top [JpegEncodeOptions.precision] bits of its 16. */
+    fun encode16(bitmap: KiteBitmap16, options: JpegEncodeOptions, metadata: ImageMetadata, check: (() -> Unit)?): ByteArray =
+        encode(Source.of(bitmap), options, metadata, check)
+
+    private fun encode(source: Source, options: JpegEncodeOptions, metadata: ImageMetadata, check: (() -> Unit)?): ByteArray {
+        checkSides(source.width, source.height)
+        if (options.lossless && options.restartInterval != 0) {
+            require(options.restartInterval % source.width == 0) {
+                "a lossless restart interval must hold whole rows of ${source.width} MCUs, was ${options.restartInterval}"
+            }
+        }
+        return cancellable(check) { cancel ->
+            cancel?.invoke()
+            val gray = when (options.grayscale) {
+                JpegGrayscale.Always -> true
+                JpegGrayscale.Never -> false
+                JpegGrayscale.Auto -> source.allGray()
+            }
+            val header = when {
+                options.lossless && !gray -> JpegHeaderPlan(false, 0, null)
+                options.encoder == JpegEncoderKind.Jpegli -> JpegHeaderPlan(false, -1, null)
+                else -> JpegHeaderPlan(true, -1, null)
+            }
+            val write = { segments: ByteArray? -> write(source, options, gray, JpegHeaderPlan(header.jfif, header.adobeTransform, segments), cancel) }
+            if (metadata.isEmpty) write(null) else UltraHdr.encode(source.width, source.height, metadata, header.segmentsAt, write)
+        }
+    }
+
+    private fun write(source: Source, options: JpegEncodeOptions, gray: Boolean, header: JpegHeaderPlan, cancel: (() -> Unit)?): ByteArray {
+        val coding = JpegCodingPlan(
+            arithmetic = options.arithmetic,
+            progressive = options.progressive,
+            optimize = options.optimizeHuffman || options.precision > 8 || options.lossless,
+            restartInterval = options.restartInterval,
+            dcLower = options.arithmeticDcLower,
+            dcUpper = options.arithmeticDcUpper,
+            acThreshold = options.arithmeticAcThreshold,
+        )
+        if (options.lossless) return lossless(source, options, gray, header, coding, cancel)
+        val quality = options.quality.coerceAtLeast(1)
+        val frame = when (options.encoder) {
+            JpegEncoderKind.Jpegli -> JpegliEncoder.frame(source, quality, gray, cancel)
+            JpegEncoderKind.Fast -> {
+                val sub = when (options.subsampling) {
+                    JpegSubsampling.Auto -> if (quality <= 90) SUB_420 else SUB_444
+                    JpegSubsampling.S444 -> SUB_444
+                    JpegSubsampling.S422 -> SUB_422
+                    JpegSubsampling.S420 -> SUB_420
+                }
+                dctFrame(source, quality, sub, gray, options.precision, cancel)
+            }
+        }
+        return JpegWriter.writeDct(frame, header, coding, cancel)
+    }
+
+    /**
+     * A lossless file: the top [JpegEncodeOptions.precision] bits of each sample, less the point
+     * transform's, as one gray component or as R, G and B. A colour pixel made gray takes the
+     * luma of JFIF's weights in 16-bit fixed point, rounded.
+     */
+    private fun lossless(source: Source, options: JpegEncodeOptions, gray: Boolean, header: JpegHeaderPlan, coding: JpegCodingPlan, cancel: (() -> Unit)?): ByteArray {
+        val w = source.width
+        val h = source.height
+        val shift = source.bits - options.precision + options.pointTransform
+        val n = if (gray) 1 else 3
+        require(w.toLong() * h <= MAX_ARRAY) { "${w}x$h is too large to encode" }
+        val planes = List(n) { IntArray(w * h) }
+        val r = IntArray(w)
+        val g = IntArray(w)
+        val b = IntArray(w)
+        for (y in 0 until h) {
+            cancel?.invoke()
+            source.row(y, r, g, b)
+            val base = y * w
+            for (x in 0 until w) {
+                if (gray) {
+                    val luma = if (r[x] == g[x] && g[x] == b[x]) r[x] else ((19595L * r[x] + 38470L * g[x] + 7471L * b[x] + 32768) shr 16).toInt()
+                    planes[0][base + x] = luma ushr shift
+                } else {
+                    planes[0][base + x] = r[x] ushr shift
+                    planes[1][base + x] = g[x] ushr shift
+                    planes[2][base + x] = b[x] ushr shift
+                }
+            }
+        }
+        val ids = if (gray) intArrayOf(1) else intArrayOf('R'.code, 'G'.code, 'B'.code)
+        return JpegWriter.writeLossless(planes, ids, w, h, options.precision, options.predictor, options.pointTransform, header, coding, cancel)
+    }
+
+    internal const val SUB_444 = 0
+    internal const val SUB_422 = 1
+    internal const val SUB_420 = 2
+
+    /**
+     * The quantized coefficients of [source] as stbiw makes them: the standard tables scaled by
+     * [quality] the IJG way, the luma and chroma of JFIF, chroma averaged over 2 by 2 or 2 by 1
+     * pixels by [sub], and edges replicated to whole MCUs. A [gray] frame is the luma alone, and a
+     * [precision] of 12 centres the samples on 2048 instead of 128.
+     */
+    fun dctFrame(source: Source, quality: Int, sub: Int, gray: Boolean, precision: Int, cancel: (() -> Unit)?): JpegFramePlan {
+        val width = source.width
+        val height = source.height
+        val q = if (quality < 50) 5000 / quality else 200 - quality * 2
+        val yTable = IntArray(64)
+        val uvTable = IntArray(64)
+        for (i in 0 until 64) {
+            yTable[ZIGZAG[i]] = ((YQT[i] * q + 50) / 100).coerceIn(1, 255)
+            uvTable[ZIGZAG[i]] = ((UVQT[i] * q + 50) / 100).coerceIn(1, 255)
+        }
         val fdY = DoubleArray(64)
         val fdUV = DoubleArray(64)
         var k = 0
         for (row in 0 until 8) {
             for (col in 0 until 8) {
-                fdY[k] = 1.0 / ((yTable[ZIGZAG[k]].toInt() and 0xFF) * AASF[row] * AASF[col])
-                fdUV[k] = 1.0 / ((uvTable[ZIGZAG[k]].toInt() and 0xFF) * AASF[row] * AASF[col])
+                fdY[k] = 1.0 / (yTable[ZIGZAG[k]] * AASF[row] * AASF[col])
+                fdUV[k] = 1.0 / (uvTable[ZIGZAG[k]] * AASF[row] * AASF[col])
                 k++
             }
         }
+        val hY = if (gray || sub == SUB_444) 1 else 2
+        val vY = if (gray || sub != SUB_420) 1 else 2
+        val mcusX = (width + 8 * hY - 1) / (8 * hY)
+        val mcusY = (height + 8 * vY - 1) / (8 * vY)
+        val luma = blocks(1, hY, vY, 0, mcusX, mcusY)
+        val comps = if (gray) listOf(luma) else listOf(luma, blocks(2, 1, 1, 1, mcusX, mcusY), blocks(3, 1, 1, 1, mcusX, mcusY))
+        val frame = JpegFramePlan(precision, width, height, comps, if (gray) listOf(yTable) else listOf(yTable, uvTable))
 
-        val out = ByteArrayBuilder(width * height / 2 + 1024)
-
-        // Headers (verbatim stbiw layout): SOI and the JFIF APP0, the metadata segments after it (#129), then the tables.
-        out.append(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0x10, 'J'.code.toByte(), 'F'.code.toByte(), 'I'.code.toByte(), 'F'.code.toByte(), 0, 1, 1, 0, 0, 1, 0, 1, 0, 0))
-        if (segments != null) out.append(segments)
-        if (gray) {
-            out.append(byteArrayOf(0xFF.toByte(), 0xDB.toByte(), 0, 0x43, 0))
-            out.append(yTable)
-            out.append(byteArrayOf(0xFF.toByte(), 0xC0.toByte(), 0, 0x0B, 8, (height shr 8).toByte(), height.toByte(), (width shr 8).toByte(), width.toByte(), 1, 1, 0x11, 0))
-            out.append(byteArrayOf(0xFF.toByte(), 0xC4.toByte(), 0, 0xD2.toByte(), 0))
-            for (i in 1..16) out.append(STD_DC_LUM_NRCODES[i].toByte())
-            for (v in STD_DC_LUM_VALUES) out.append(v.toByte())
-            out.append(0x10.toByte())
-            for (i in 1..16) out.append(STD_AC_LUM_NRCODES[i].toByte())
-            for (v in STD_AC_LUM_VALUES) out.append(v.toByte())
-            out.append(byteArrayOf(0xFF.toByte(), 0xDA.toByte(), 0, 8, 1, 1, 0, 0, 0x3F, 0))
-            val bw = BitWriter(out)
-            var dc = 0
-            val buf = DoubleArray(64)
-            val argb = bitmap.argb
-            var y = 0
-            while (y < height) {
-                var x = 0
-                while (x < width) {
-                    var pos = 0
-                    for (row in y until y + 8) {
-                        val cy = if (row < height) row else height - 1
-                        for (col in x until x + 8) {
-                            val p = argb[cy * width + (if (col < width) col else width - 1)]
-                            buf[pos++] = +0.29900 * ((p ushr 16) and 0xFF) + 0.58700 * ((p ushr 8) and 0xFF) + 0.11400 * (p and 0xFF) - 128
+        val center = if (precision == 8) 128.0 else 2048.0
+        val shift = source.bits - precision
+        val padW = mcusX * 8 * hY
+        val rows = 8 * vY
+        val yPlane = DoubleArray(padW * rows)
+        val uPlane = if (gray) DoubleArray(0) else DoubleArray(padW * rows)
+        val vPlane = if (gray) DoubleArray(0) else DoubleArray(padW * rows)
+        val cw = padW / hY
+        val uSub = if (gray) DoubleArray(0) else DoubleArray(cw * 8)
+        val vSub = if (gray) DoubleArray(0) else DoubleArray(cw * 8)
+        val r = IntArray(width)
+        val g = IntArray(width)
+        val b = IntArray(width)
+        val block = DoubleArray(64)
+        for (my in 0 until mcusY) {
+            cancel?.invoke()
+            for (ry in 0 until rows) {
+                source.row(minOf(my * rows + ry, height - 1), r, g, b)
+                val base = ry * padW
+                for (x in 0 until padW) {
+                    if (x >= width) {
+                        yPlane[base + x] = yPlane[base + width - 1]
+                        if (!gray) {
+                            uPlane[base + x] = uPlane[base + width - 1]
+                            vPlane[base + x] = vPlane[base + width - 1]
                         }
+                        continue
                     }
-                    dc = processDU(bw, buf, 0, 8, fdY, dc, YDC_HT, YAC_HT)
-                    x += 8
+                    val rd = (r[x] ushr shift).toDouble()
+                    val gd = (g[x] ushr shift).toDouble()
+                    val bd = (b[x] ushr shift).toDouble()
+                    yPlane[base + x] = +0.29900 * rd + 0.58700 * gd + 0.11400 * bd - center
+                    if (!gray) {
+                        uPlane[base + x] = -0.16874 * rd - 0.33126 * gd + 0.50000 * bd
+                        vPlane[base + x] = +0.50000 * rd - 0.41869 * gd - 0.08131 * bd
+                    }
                 }
-                y += 8
             }
-            bw.write(0x7F, 7)
-            out.append(0xFF.toByte())
-            out.append(0xD9.toByte())
-            return out.toByteArray()
-        }
-        out.append(byteArrayOf(0xFF.toByte(), 0xDB.toByte(), 0, 0x84.toByte(), 0))
-        out.append(yTable)
-        out.append(1.toByte())
-        out.append(uvTable)
-        out.append(
-            byteArrayOf(
-                0xFF.toByte(), 0xC0.toByte(), 0, 0x11, 8, (height shr 8).toByte(), height.toByte(), (width shr 8).toByte(), width.toByte(),
-                3, 1, (if (subsample) 0x22 else 0x11).toByte(), 0, 2, 0x11, 1, 3, 0x11, 1, 0xFF.toByte(), 0xC4.toByte(), 0x01, 0xA2.toByte(), 0,
-            ),
-        )
-        for (i in 1..16) out.append(STD_DC_LUM_NRCODES[i].toByte())
-        for (v in STD_DC_LUM_VALUES) out.append(v.toByte())
-        out.append(0x10.toByte())
-        for (i in 1..16) out.append(STD_AC_LUM_NRCODES[i].toByte())
-        for (v in STD_AC_LUM_VALUES) out.append(v.toByte())
-        out.append(1.toByte())
-        for (i in 1..16) out.append(STD_DC_CHR_NRCODES[i].toByte())
-        for (v in STD_DC_CHR_VALUES) out.append(v.toByte())
-        out.append(0x11.toByte())
-        for (i in 1..16) out.append(STD_AC_CHR_NRCODES[i].toByte())
-        for (v in STD_AC_CHR_VALUES) out.append(v.toByte())
-        out.append(byteArrayOf(0xFF.toByte(), 0xDA.toByte(), 0, 0xC, 3, 1, 0, 2, 0x11, 3, 0x11, 0, 0x3F, 0))
-
-        val bw = BitWriter(out)
-        var dcY = 0
-        var dcU = 0
-        var dcV = 0
-        val argb = bitmap.argb
-
-        fun ycc(x: Int, y: Int, dst: Int, yArr: DoubleArray, uArr: DoubleArray, vArr: DoubleArray) {
-            val cx = if (x < width) x else width - 1
-            val cy = if (y < height) y else height - 1
-            val p = argb[cy * width + cx]
-            val r = ((p ushr 16) and 0xFF).toDouble()
-            val g = ((p ushr 8) and 0xFF).toDouble()
-            val b = (p and 0xFF).toDouble()
-            yArr[dst] = +0.29900 * r + 0.58700 * g + 0.11400 * b - 128
-            uArr[dst] = -0.16874 * r - 0.33126 * g + 0.50000 * b
-            vArr[dst] = +0.50000 * r - 0.41869 * g - 0.08131 * b
-        }
-
-        if (subsample) {
-            val yBuf = DoubleArray(256)
-            val uBuf = DoubleArray(256)
-            val vBuf = DoubleArray(256)
-            val subU = DoubleArray(64)
-            val subV = DoubleArray(64)
-            var y = 0
-            while (y < height) {
-                var x = 0
-                while (x < width) {
-                    var pos = 0
-                    for (row in y until y + 16) {
-                        for (col in x until x + 16) {
-                            ycc(col, row, pos, yBuf, uBuf, vBuf)
-                            pos++
-                        }
-                    }
-                    dcY = processDU(bw, yBuf, 0, 16, fdY, dcY, YDC_HT, YAC_HT)
-                    dcY = processDU(bw, yBuf, 8, 16, fdY, dcY, YDC_HT, YAC_HT)
-                    dcY = processDU(bw, yBuf, 128, 16, fdY, dcY, YDC_HT, YAC_HT)
-                    dcY = processDU(bw, yBuf, 136, 16, fdY, dcY, YDC_HT, YAC_HT)
-                    var sp = 0
-                    for (yy in 0 until 8) {
-                        for (xx in 0 until 8) {
-                            val j = yy * 32 + xx * 2
-                            subU[sp] = (uBuf[j] + uBuf[j + 1] + uBuf[j + 16] + uBuf[j + 17]) * 0.25
-                            subV[sp] = (vBuf[j] + vBuf[j + 1] + vBuf[j + 16] + vBuf[j + 17]) * 0.25
-                            sp++
-                        }
-                    }
-                    dcU = processDU(bw, subU, 0, 8, fdUV, dcU, UVDC_HT, UVAC_HT)
-                    dcV = processDU(bw, subV, 0, 8, fdUV, dcV, UVDC_HT, UVAC_HT)
-                    x += 16
-                }
-                y += 16
+            for (by in 0 until vY) for (bx in 0 until mcusX * hY) {
+                for (yy in 0 until 8) for (xx in 0 until 8) block[yy * 8 + xx] = yPlane[(by * 8 + yy) * padW + bx * 8 + xx]
+                quantize(block, fdY, luma, ((my * vY + by) * luma.blocksWide + bx) * 64)
             }
-        } else {
-            val yBuf = DoubleArray(64)
-            val uBuf = DoubleArray(64)
-            val vBuf = DoubleArray(64)
-            var y = 0
-            while (y < height) {
-                var x = 0
-                while (x < width) {
-                    var pos = 0
-                    for (row in y until y + 8) {
-                        for (col in x until x + 8) {
-                            ycc(col, row, pos, yBuf, uBuf, vBuf)
-                            pos++
-                        }
+            if (gray) continue
+            for (yy in 0 until 8) for (xx in 0 until cw) {
+                val o = yy * cw + xx
+                when (sub) {
+                    SUB_444 -> {
+                        uSub[o] = uPlane[yy * padW + xx]
+                        vSub[o] = vPlane[yy * padW + xx]
                     }
-                    dcY = processDU(bw, yBuf, 0, 8, fdY, dcY, YDC_HT, YAC_HT)
-                    dcU = processDU(bw, uBuf, 0, 8, fdUV, dcU, UVDC_HT, UVAC_HT)
-                    dcV = processDU(bw, vBuf, 0, 8, fdUV, dcV, UVDC_HT, UVAC_HT)
-                    x += 8
+                    SUB_422 -> {
+                        val j = yy * padW + xx * 2
+                        uSub[o] = (uPlane[j] + uPlane[j + 1]) * 0.5
+                        vSub[o] = (vPlane[j] + vPlane[j + 1]) * 0.5
+                    }
+                    else -> {
+                        val j = yy * 2 * padW + xx * 2
+                        uSub[o] = (uPlane[j] + uPlane[j + 1] + uPlane[j + padW] + uPlane[j + padW + 1]) * 0.25
+                        vSub[o] = (vPlane[j] + vPlane[j + 1] + vPlane[j + padW] + vPlane[j + padW + 1]) * 0.25
+                    }
                 }
-                y += 8
+            }
+            for (c in 1..2) {
+                val plane = if (c == 1) uSub else vSub
+                val comp = comps[c]
+                for (bx in 0 until mcusX) {
+                    for (yy in 0 until 8) for (xx in 0 until 8) block[yy * 8 + xx] = plane[yy * cw + bx * 8 + xx]
+                    quantize(block, fdUV, comp, (my * comp.blocksWide + bx) * 64)
+                }
             }
         }
+        return frame
+    }
 
-        // Bit-align for EOI (stbiw fillBits = 0x7F, 7 bits).
-        bw.write(0x7F, 7)
-        out.append(0xFF.toByte())
-        out.append(0xD9.toByte())
-        return out.toByteArray()
+    /** A component of [mcusX] by [mcusY] MCUs, its size checked before the allocation. */
+    internal fun blocks(id: Int, h: Int, v: Int, tq: Int, mcusX: Int, mcusY: Int): JpegComponentPlan {
+        val count = mcusX.toLong() * h * mcusY * v * 64
+        require(count <= MAX_ARRAY) { "the picture is too large to encode: $count coefficients in one component" }
+        return JpegComponentPlan(id, h, v, tq, mcusX * h, mcusY * v)
+    }
+
+    // stbiw__jpg_processDU, its first half: the forward DCT of [block], quantized by [fdtbl] into [comp] at [at], zigzag order.
+    private fun quantize(block: DoubleArray, fdtbl: DoubleArray, comp: JpegComponentPlan, at: Int) {
+        for (row in 0 until 8) {
+            val o = row * 8
+            dct1d(block, o, o + 1, o + 2, o + 3, o + 4, o + 5, o + 6, o + 7)
+        }
+        for (c in 0 until 8) dct1d(block, c, c + 8, c + 16, c + 24, c + 32, c + 40, c + 48, c + 56)
+        val out = comp.coefficients
+        for (j in 0 until 64) {
+            val v = block[j] * fdtbl[j]
+            out[at + ZIGZAG[j]] = (if (v < 0) v - 0.5 else v + 0.5).toInt().toShort()
+        }
     }
 
     // stbiw__jpg_DCT: AAN forward DCT on one 8-element span.
@@ -353,79 +432,5 @@ internal object JpegEncoder {
         d[o3] = z13 - z2
         d[o1] = z11 + z4
         d[o7] = z11 - z4
-    }
-
-    // stbiw__jpg_calcBits: (mask, size) for a coefficient value.
-    private fun calcBits(value: Int): Int {
-        var tmp = if (value < 0) -value else value
-        val v = if (value < 0) value - 1 else value
-        var size = 1
-        while (true) {
-            tmp = tmp shr 1
-            if (tmp == 0) break
-            size++
-        }
-        return ((v and ((1 shl size) - 1)) shl 5) or size
-    }
-
-    // stbiw__jpg_processDU
-    private fun processDU(bw: BitWriter, cdu: DoubleArray, ofs: Int, stride: Int, fdtbl: DoubleArray, dcPrev: Int, htdc: IntArray, htac: IntArray): Int {
-        val eob = htac[0x00]
-        val m16 = htac[0xF0]
-        val du = IntArray(64)
-
-        var dataOff = ofs
-        val n = ofs + stride * 8
-        while (dataOff < n) {
-            dct1d(cdu, dataOff, dataOff + 1, dataOff + 2, dataOff + 3, dataOff + 4, dataOff + 5, dataOff + 6, dataOff + 7)
-            dataOff += stride
-        }
-        for (c in 0 until 8) {
-            dct1d(
-                cdu, ofs + c, ofs + c + stride, ofs + c + stride * 2, ofs + c + stride * 3,
-                ofs + c + stride * 4, ofs + c + stride * 5, ofs + c + stride * 6, ofs + c + stride * 7,
-            )
-        }
-
-        var j = 0
-        for (y in 0 until 8) {
-            for (x in 0 until 8) {
-                val v = cdu[ofs + y * stride + x] * fdtbl[j]
-                du[ZIGZAG[j]] = (if (v < 0) v - 0.5 else v + 0.5).toInt()
-                j++
-            }
-        }
-
-        val diff = du[0] - dcPrev
-        if (diff == 0) {
-            bw.writeEntry(htdc[0])
-        } else {
-            val bits = calcBits(diff)
-            bw.writeEntry(htdc[bits and 31])
-            bw.writeEntry(bits)
-        }
-
-        var end0pos = 63
-        while (end0pos > 0 && du[end0pos] == 0) end0pos--
-        if (end0pos == 0) {
-            bw.writeEntry(eob)
-            return du[0]
-        }
-        var i = 1
-        while (i <= end0pos) {
-            val startpos = i
-            while (du[i] == 0 && i <= end0pos) i++
-            var nrzeroes = i - startpos
-            if (nrzeroes >= 16) {
-                repeat(nrzeroes shr 4) { bw.writeEntry(m16) }
-                nrzeroes = nrzeroes and 15
-            }
-            val bits = calcBits(du[i])
-            bw.writeEntry(htac[(nrzeroes shl 4) + (bits and 31)])
-            bw.writeEntry(bits)
-            i++
-        }
-        if (end0pos != 63) bw.writeEntry(eob)
-        return du[0]
     }
 }

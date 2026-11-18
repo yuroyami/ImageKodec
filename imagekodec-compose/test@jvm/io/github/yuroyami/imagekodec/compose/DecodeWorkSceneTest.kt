@@ -86,9 +86,9 @@ class DecodeWorkSceneTest {
         val removed = CountDownLatch(1)
         val ended = CountDownLatch(1)
         var outcome: Throwable? = null
-        val decode: AnimationDecoder = { bytes, maxFrames, check ->
+        val decode: AnimationDecoder = { bytes, maxFrames, bounds, check ->
             try {
-                decodeForDisplay(bytes, maxFrames) {
+                decodeForDisplay(bytes, maxFrames, bounds) {
                     if (++checks == 3) {
                         atThird.countDown()
                         removed.await(10, TimeUnit.SECONDS)
@@ -125,9 +125,9 @@ class DecodeWorkSceneTest {
     fun aPinnedImageDecodesOneFrameAndKeepsItWhileTheRestDecode() {
         val data = gif(2)
         val asked = Collections.synchronizedList(ArrayList<Int>())
-        val decode: AnimationDecoder = { bytes, maxFrames, check ->
+        val decode: AnimationDecoder = { bytes, maxFrames, bounds, check ->
             asked += maxFrames
-            decodeForDisplay(bytes, maxFrames, check)
+            decodeForDisplay(bytes, maxFrames, bounds, check)
         }
         var animate by mutableStateOf(false)
         ImageComposeScene(width = 64, height = 64) {
@@ -155,9 +155,9 @@ class DecodeWorkSceneTest {
     fun aLaterFrameThatFailsLeavesThePinnedFrameUp() {
         val data = gif(2)
         val errors = Collections.synchronizedList(ArrayList<ImageDecodeException>())
-        val decode: AnimationDecoder = { bytes, maxFrames, check ->
+        val decode: AnimationDecoder = { bytes, maxFrames, bounds, check ->
             if (maxFrames > 1) throw ImageDecodeException("the second frame is damaged")
-            decodeForDisplay(bytes, maxFrames, check)
+            decodeForDisplay(bytes, maxFrames, bounds, check)
         }
         var animate by mutableStateOf(false)
         ImageComposeScene(width = 64, height = 64) {

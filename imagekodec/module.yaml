@@ -35,9 +35,13 @@ aliases:
 apply:
   - //library.module-template.yaml
 
+# Deadlines, fuzz shards and the HEIF builder, shared with the tests of the other modules.
+test-dependencies:
+  - //imagekodec-testkit
+
 settings:
   kotlin:
-    optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi ]
+    optIns: [ kotlin.RequiresOptIn, kotlin.experimental.ExperimentalNativeApi, io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi ]
   android:
     namespace: io.github.yuroyami.imagekodec
     compileSdk:
@@ -241,5 +245,5 @@ plugins:
     sourceLinkUrl: https://github.com/yuroyami/ImageKodec/blob/main/imagekodec/src
     # The merged site at build/dokka/html. `./kotlin do dokka`, then `./kotlin do dokkaSite`.
     siteName: ImageKodec
-    siteModules: [ imagekodec, imagekodec-compose, imagekodec-coil ]
-    siteIncludes: [ ../imagekodec-compose/Module.md, ../imagekodec-coil/Module.md ]
+    siteModules: [ imagekodec, imagekodec-compose, imagekodec-coil, imagekodec-heic ]
+    siteIncludes: [ ../imagekodec-compose/Module.md, ../imagekodec-coil/Module.md, ../imagekodec-heic/Module.md ]
