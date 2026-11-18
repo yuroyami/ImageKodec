@@ -23,13 +23,14 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * frame allows screen content tools, a block whose colours are few also tries a palette.
  *
  * Efforts 1 and 2 take cheaper estimates first (#176): they rank only the three directional modes whose lines the
- * block's source gradients follow most ([strongestDirections]) and, for chroma, those and the luma's mode; they code
- * only the transform type whose coefficients have the least sum of magnitudes, the one that gathers the residual
- * into fewest; and effort 2 does not split a block of a still picture that its whole codes at the largest transform
+ * block's source gradients follow most ([strongestDirections]) and, for chroma, those and the luma's mode; effort 2
+ * codes only the transform type whose coefficients have the least sum of magnitudes, the one that gathers the
+ * residual into fewest, and does not split a block of a still picture that its whole codes at the largest transform
  * when its source varies by less than lambda a sample. Measured on the photo scenes as the size at equal SSIMULACRA 2
  * score over qualities 30 to 90, each cost under a percent, and each took 5 to 15 percent off the time of the efforts
  * it runs at. The split pruning cost 0.7 percent at effort 1, and in a sequence it made the inter frames that predict
- * from the key frame larger and slower, so it stays out of both.
+ * from the key frame larger and slower, so it stays out of both. Effort 1 prices both of its types: one alone made
+ * the night scene's file at avifenc's `-q 50` score 9 percent larger.
  *
  * Effort 2 was set by measuring, on the photo scenes of the tests, what each step of effort 3 brought against its
  * time, as the size at equal SSIMULACRA 2 score (#176). Kept: 4 by 4 blocks (4.6 percent smaller for 9 percent more
@@ -1547,10 +1548,10 @@ internal class Av1BlockSearch(
         val n = tw * th
         var typeCount = 0
         while (types[typeCount] >= 0) typeCount++
-        // At efforts 1 and 2, of several types only the one whose coefficients have the least sum of magnitudes, which
+        // At effort 2, of several types only the one whose coefficients have the least sum of magnitudes, which
         // gathers the residual into the fewest, is quantized and priced (#176).
         var only = -1
-        if (effort <= 2 && typeCount > 1) {
+        if (effort == 2 && typeCount > 1) {
             var least = Long.MAX_VALUE
             for (i in 0 until typeCount) {
                 val tc = typeCoef[i]
