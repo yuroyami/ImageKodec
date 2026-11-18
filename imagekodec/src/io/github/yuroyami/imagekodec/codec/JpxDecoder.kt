@@ -6,6 +6,7 @@ import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.JpxColorSpecification
 import io.github.yuroyami.imagekodec.JpxComponents
 import io.github.yuroyami.imagekodec.KiteBitmap16
+import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Reader as R
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Coding as Cod
 import io.github.yuroyami.imagekodec.codec.Jp2Headers.Poc
@@ -266,13 +267,15 @@ public object JpxDecoder {
 
         /**
          * Opens the next segment with as many passes as [style] lets it hold, as OpenJPEG's
-         * `opj_t2_init_seg` sizes it: one with termination on each pass; with the bypass, the
+         * `opj_t2_init_seg` sizes it: for the HT block coder, one, then two; one with termination on each pass; with the bypass, the
          * ten passes of the first four bitplanes, then the two raw passes and the one MQ pass
          * of each later plane in turn; otherwise all of them.
          */
         fun newSegment(style: Int): Segment {
             val previous = segments.lastOrNull()?.maxPasses
             val max = when {
+                // An HT set (T.814): the cleanup pass alone, then SigProp and MagRef together.
+                style and Jp2Headers.STYLE_HT != 0 -> if (previous == null) 1 else 2
                 style and Jp2Headers.STYLE_TERMALL != 0 -> 1
                 style and Jp2Headers.STYLE_BYPASS != 0 -> when (previous) {
                     null -> 10
@@ -494,6 +497,8 @@ public object JpxDecoder {
                     }
                     siz = Siz(xsiz, ysiz, xo, yo, xt, yt, xto, yto, nc, prec, signed, dx, dy)
                 }
+                0xFF50 -> Jp2Headers.readCap(r)
+                0xFF59 -> Jp2Headers.readCpf(r)
                 0xFF52 -> {
                     val cod = Jp2Headers.readCod(r)
                     if (inTile >= 0) tileCod[inTile] = cod else mainCod = cod
@@ -1140,10 +1145,31 @@ public object JpxDecoder {
         // OpenJPEG's numbps and bpno_plus_one: the block's magnitude bitplanes, and one more than
         // the plane the next pass codes, which an ROI shift (H.1) raises by the shift.
         val numbps = mb - cb.zeroBitplanes
-        var plane = roiShift + numbps
+        val plane = roiShift + numbps
         // A magnitude of that many bits, doubled for the half step, must fit an Int. No sample of
         // 16 bits or fewer needs more, so a block that claims more is damaged.
         if (plane > MAX_MAGNITUDE_PLANE + 1) throw ImageDecodeException("JPEG 2000: a code-block with $plane magnitude bitplanes")
+        if (style and Jp2Headers.STYLE_HT != 0) {
+            val passes = cb.segments.sumOf { it.passes }
+            // Placeholder passes and later HT sets (T.814) move the cleanup pass below the plane the
+            // zero bit planes give. OpenJPEG 2.5 refuses them and ffmpeg 6.1 reads them otherwise, so
+            // no reading of them could be checked here.
+            if (passes > 3 || cb.segments.size > 2) {
+                throw UnsupportedImageException("JPEG 2000 HT code-block with $passes coding passes (more than one HT set)")
+            }
+            HtBlockDecoder.decode(
+                cb.segments[0].bytes(), cb.segments.getOrNull(1)?.bytes(), passes, w, h, plane - 1,
+                style and Jp2Headers.STYLE_VSC != 0, t1.mag, t1.sign, t1.lastPlane,
+            )
+        } else {
+            decodePasses(cb, t1, cx, zc, style, plane, numbps)
+        }
+        finishCodeBlock(cb, band, cod, roiShift, t1, w, h)
+    }
+
+    /** The Part 1 coding passes of [cb] from the plane below [start] down (Annex D). */
+    private fun decodePasses(cb: CodeBlock, t1: T1, cx: IntArray, zc: IntArray, style: Int, start: Int, numbps: Int) {
+        var plane = start
         var passType = 2 // start with cleanup
         val bypass = style and Jp2Headers.STYLE_BYPASS != 0
         val reset = style and Jp2Headers.STYLE_RESET != 0
@@ -1175,6 +1201,10 @@ public object JpxDecoder {
                 if (++passType == 3) { passType = 0; plane-- }
             }
         }
+    }
+
+    /** [t1]'s magnitudes with their half steps and ROI shift, into [band]'s coefficients. */
+    private fun finishCodeBlock(cb: CodeBlock, band: Band, cod: Cod, roiShift: Int, t1: T1, w: Int, h: Int) {
         // T.800 E.1.1/E.1.2 apply the half step at each coefficient's last decoded plane: a block
         // can stop partway through a plane. As OpenJPEG does, the magnitude is first formed doubled
         // with the half step in its low bits, where an ROI shift (H.1) moves a coefficient at or

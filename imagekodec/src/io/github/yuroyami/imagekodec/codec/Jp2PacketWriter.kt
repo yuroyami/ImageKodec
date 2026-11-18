@@ -129,9 +129,18 @@ internal class Jp2PacketWriter(private val tile: Jp2Encoder.Tile, private val la
 
     private val bypass = style and STYLE_BYPASS != 0
     private val termAll = style and STYLE_TERMALL != 0
+    private val ht = style and Jp2Headers.STYLE_HT != 0
 
-    /** Whether pass [k] of a block of [total] passes ends a codeword segment, as JpxDecoder sizes the segments. */
-    private fun endsSegment(k: Int, total: Int): Boolean = k == total - 1 || termAll || (bypass && k >= 9 && (k - 9) % 3 != 1)
+    /**
+     * Whether pass [k] of [b] ends a codeword segment, as JpxDecoder sizes the segments: an HT set's
+     * cleanup pass ends one. HT truncation points not yet chosen count as one segment, for the rate
+     * control's estimates.
+     */
+    private fun endsSegment(k: Int, b: Jp2Encoder.Block): Boolean {
+        val total = b.coded.passes
+        if (ht) return k == total - 1 || (k == 0 && b.coded.htPlane >= 0)
+        return k == total - 1 || termAll || (bypass && k >= 9 && (k - 9) % 3 != 1)
+    }
 
     /** The bytes of the tile's packets of layers up to [lastLayer], written to [out] when it is given. */
     fun write(out: Jp2ByteBuffer?, lastLayer: Int): Int {
@@ -151,7 +160,13 @@ internal class Jp2PacketWriter(private val tile: Jp2Encoder.Tile, private val la
                 val gy = i / precinct.cbW
                 val first = b.layerEnd.indexOfFirst { it > 0 }
                 precinct.inclusion.set(gx, gy, if (first < 0) layers else first)
-                precinct.zeros.set(gx, gy, if (b.coded.passes == 0) MAX_ZEROS else band.magnitudePlanes - b.coded.planes)
+                // An HT set's cleanup pass codes the plane the zero bit planes point at (T.814), not the block's top one.
+                val zeros = when {
+                    b.coded.passes == 0 -> MAX_ZEROS
+                    b.coded.htPlane >= 0 -> band.magnitudePlanes - 1 - b.coded.htPlane
+                    else -> band.magnitudePlanes - b.coded.planes
+                }
+                precinct.zeros.set(gx, gy, zeros)
             }
         }
         var total = 0
@@ -227,7 +242,6 @@ internal class Jp2PacketWriter(private val tile: Jp2Encoder.Tile, private val la
             n <= 36 -> { bits.bits(0b1111, 4); bits.bits(n - 6, 5) }
             else -> { bits.bits(0b1111, 4); bits.bits(0b11111, 5); bits.bits(n - 37, 7) }
         }
-        val total = b.coded.passes
         // The pieces: runs of new passes, each ending at a segment end or at the last new pass.
         var start = b.sent
         val end = b.sent + n
@@ -235,7 +249,7 @@ internal class Jp2PacketWriter(private val tile: Jp2Encoder.Tile, private val la
         var need = b.lBlock
         while (start < end) {
             var stop = start
-            while (stop < end - 1 && !endsSegment(stop, total)) stop++
+            while (stop < end - 1 && !endsSegment(stop, b)) stop++
             val take = stop - start + 1
             val length = b.byteAt(stop + 1) - b.byteAt(start)
             val bitsFor = 32 - length.countLeadingZeroBits()

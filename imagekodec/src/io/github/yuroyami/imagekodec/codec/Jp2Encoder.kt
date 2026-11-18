@@ -36,6 +36,8 @@ internal object Jp2Encoder {
         var hullGains = DoubleArray(0)
         /** The passes a decoder has of the block after each layer. */
         var layerEnd = IntArray(0)
+        /** The quantization indices of a lossy HT block, kept until the rate control picks its HT set. */
+        var htValues: IntArray? = null
 
         var lBlock = 3
         var sent = 0
@@ -169,7 +171,7 @@ internal object Jp2Encoder {
         var levels = o.levels
         while (levels > 0 && minOf(tileW, tileH) < (1 shl levels)) levels--
         val reversible = o.lossless
-        var style = 0
+        var style = if (o.highThroughput) Jp2Headers.STYLE_HT else 0
         if (o.bypass) style = style or Jp2Headers.STYLE_BYPASS
         if (o.resetContexts) style = style or Jp2Headers.STYLE_RESET
         if (o.terminateEachPass) style = style or Jp2Headers.STYLE_TERMALL
@@ -217,8 +219,12 @@ internal object Jp2Encoder {
         val layers = o.layerCount
         for (tile in tiles) tile.order = packetOrder(tile, layers, o.progression)
         rateControl(setup, tiles, layers, metadata)
+        if (o.highThroughput && !reversible) codeChosenHtSets(setup, tiles, layers, cancel)
         val codestream = codestream(setup, tiles, layers, metadata)
-        return if (o.codestreamOnly) codestream else Jp2Boxes.file(image.width, image.height, image.components, image.precision, image.gray, image.alpha, metadata, codestream)
+        return if (o.codestreamOnly) codestream else Jp2Boxes.file(
+            image.width, image.height, image.components, image.precision, image.gray, image.alpha, metadata, codestream,
+            brand = if (o.highThroughput) "jph " else "jp2 ",
+        )
     }
 
     /** T.800 E-3's exponent and mantissa of the step nearest [step] for a band of nominal range [range] bits. */
@@ -387,7 +393,7 @@ internal object Jp2Encoder {
 
     private fun codeReversible(s: Setup, comp: Comp, samples: IntArray, x0: Int, y0: Int, x1: Int, y1: Int, c: Int, mct: Boolean, cancel: (() -> Unit)?) {
         val coefficients = Jp2Wavelet.forward53(samples, x0, y0, x1, y1, s.levels)
-        val coder = Jp2BlockEncoder(s.style, reversible = true)
+        val coder = blockCoder(s, reversible = true)
         val weight = componentWeight(s, c, mct)
         forEachBand(comp) { band, rr ->
             val data = coefficients[bandSlot(rr, band.orient)]
@@ -397,7 +403,7 @@ internal object Jp2Encoder {
 
     private fun codeIrreversible(s: Setup, comp: Comp, samples: DoubleArray, x0: Int, y0: Int, x1: Int, y1: Int, c: Int, cancel: (() -> Unit)?) {
         val coefficients = Jp2Wavelet.forward97(samples, x0, y0, x1, y1, s.levels)
-        val coder = Jp2BlockEncoder(s.style, reversible = false)
+        val coder = blockCoder(s, reversible = false)
         val weight = componentWeight(s, c, s.mct)
         forEachBand(comp) { band, rr ->
             val real = coefficients[bandSlot(rr, band.orient)]
@@ -415,6 +421,11 @@ internal object Jp2Encoder {
         }
     }
 
+    /** The block coder of [s]'s code-block style: Part 1's EBCOT, or the HT block coder of Part 15. */
+    private fun blockCoder(s: Setup, reversible: Boolean): Any =
+        if (s.style and Jp2Headers.STYLE_HT != 0) HtBlockEncoder(s.style and Jp2Headers.STYLE_VSC != 0)
+        else Jp2BlockEncoder(s.style, reversible)
+
     /** The slot of band [orient] of resolution [rr] in what Jp2Wavelet returns. */
     private fun bandSlot(rr: Int, orient: Int): Int = if (rr == 0) 0 else 3 * (rr - 1) + orient
 
@@ -422,13 +433,29 @@ internal object Jp2Encoder {
         for ((rr, res) in comp.resolutions.withIndex()) for (band in res.bands) action(band, rr)
     }
 
-    private fun codeBlocks(s: Setup, band: Band, values: IntArray, magnitudes: DoubleArray?, weight: Double, coder: Jp2BlockEncoder, cancel: (() -> Unit)?) {
+    private fun codeBlocks(s: Setup, band: Band, values: IntArray, magnitudes: DoubleArray?, weight: Double, coder: Any, cancel: (() -> Unit)?) {
         val bw = band.width
         for (precinct in band.precincts) for (b in precinct.blocks) {
             if (b == null) continue
             cancel?.invoke()
             val offset = (b.y0 - band.y0) * bw + (b.x0 - band.x0)
-            b.coded = coder.encode(values, offset, bw, b.x1 - b.x0, b.y1 - b.y0, band.orient, magnitudes)
+            val cw = b.x1 - b.x0
+            val ch = b.y1 - b.y0
+            b.coded = when {
+                coder is Jp2BlockEncoder -> coder.encode(values, offset, bw, cw, ch, band.orient, magnitudes)
+                // Lossless HT: one HT set, its cleanup pass coding every plane.
+                s.reversible -> (coder as HtBlockEncoder).encode(values, offset, bw, cw, ch, 0, 1)?.let { set ->
+                    var exact = 0.0
+                    for (y in 0 until ch) for (x in 0 until cw) {
+                        val v = values[offset + y * bw + x].toDouble()
+                        exact += v * v
+                    }
+                    CodedBlock(set.cleanup, 1, set.planes, intArrayOf(set.cleanup.size), doubleArrayOf(exact), htPlane = 0)
+                } ?: CodedBlock.EMPTY
+                else -> (coder as HtBlockEncoder).measure(values, offset, bw, cw, ch, magnitudes, reversible = false).also {
+                    if (it.passes > 0) b.htValues = IntArray(cw * ch) { i -> values[offset + (i / cw) * bw + i % cw] }
+                }
+            }
             var energy = 0.0
             for (y in 0 until b.y1 - b.y0) for (x in 0 until b.x1 - b.x0) {
                 val i = offset + y * bw + x
@@ -499,6 +526,42 @@ internal object Jp2Encoder {
             s.guardBits = g
         }
         for (tile in tiles) for (comp in tile.comps) forEachBand(comp) { band, _ -> band.magnitudePlanes = s.guardBits + s.exponents[band.index] - 1 }
+    }
+
+    /**
+     * Codes the HT set the rate control chose for each lossy HT block: the truncation point of its
+     * last layer, in Part 1's pass numbering, gives the cleanup pass's plane and the refinement
+     * passes after it (see [HtBlockEncoder.measure]). Each layer that has the block then has all of
+     * the set.
+     */
+    private fun codeChosenHtSets(s: Setup, tiles: List<Tile>, layers: Int, cancel: (() -> Unit)?) {
+        val coder = HtBlockEncoder(s.style and Jp2Headers.STYLE_VSC != 0)
+        for (tile in tiles) for (comp in tile.comps) forEachBand(comp) { band, _ ->
+            for (p in band.precincts) for (b in p.blocks) {
+                val values = b?.htValues ?: continue
+                b.htValues = null
+                val k = b.layerEnd[layers - 1]
+                if (k == 0) continue
+                cancel?.invoke()
+                val planes = b.coded.planes
+                // Part 1 runs cleanup, SigProp, MagRef from its second pass on: step 0 and 1 end the
+                // refinement passes of a set, step 2 is the next set's cleanup pass.
+                val step = (k - 2) % 3
+                val plane: Int
+                val passes: Int
+                when {
+                    k == 1 -> { plane = planes - 1; passes = 1 }
+                    step == 2 -> { plane = planes - 2 - (k - 2) / 3; passes = 1 }
+                    else -> { plane = planes - 1 - (k - 2) / 3; passes = 2 + step }
+                }
+                val w = b.x1 - b.x0
+                val set = coder.encode(values, 0, w, w, b.y1 - b.y0, plane, passes)!!
+                val cleanup = set.cleanup.size
+                val rates = intArrayOf(cleanup, cleanup + set.sigProp.size, cleanup + set.sigProp.size + set.magRef.size)
+                b.coded = CodedBlock(set.cleanup + set.sigProp + set.magRef, passes, planes, rates.copyOf(passes), DoubleArray(passes), htPlane = plane)
+                for (l in 0 until layers) if (b.layerEnd[l] > 0) b.layerEnd[l] = passes
+            }
+        }
     }
 
     // ---- packet order ---------------------------------------------------------------------------
@@ -683,13 +746,30 @@ internal object Jp2Encoder {
         val n = image.components
         out.u16(0xFF51)
         out.u16(38 + 3 * n)
-        out.u16(0)
+        // Rsiz bit 14 says a CAP segment lists the parts the codestream needs (T.814).
+        out.u16(if (s.o.highThroughput) 0x4000 else 0)
         out.u32(image.width.toLong()); out.u32(image.height.toLong())
         out.u32(0); out.u32(0)
         out.u32(s.tileW.toLong()); out.u32(s.tileH.toLong())
         out.u32(0); out.u32(0)
         out.u16(n)
         repeat(n) { out.add(image.precision - 1); out.add(1); out.add(1) }
+        if (s.o.highThroughput) {
+            // CAP: Part 15, with a Ccap15 of HTONLY, SINGLEHT, RGNFREE and HOMOGENEOUS (all zero bits),
+            // the irreversible flag, and MAGB, the coded form of the most magnitude bit planes a band has.
+            out.u16(0xFF50)
+            out.u16(8)
+            out.u32(Jp2Headers.PCAP_PART15)
+            var most = 0
+            for (e in s.exponents) most = maxOf(most, s.guardBits + e - 1)
+            val magb = when {
+                most <= 8 -> 0
+                most < 28 -> most - 8
+                most < 48 -> 13 + (most shr 2)
+                else -> 31
+            }
+            out.u16((if (s.reversible) 0 else 0x20) or magb)
+        }
         out.add(cod(s, layers, s.mct))
         // QCD (A.6.4): no quantization for the 5/3 path, expounded steps for the 9/7 path.
         val bands = s.exponents.size

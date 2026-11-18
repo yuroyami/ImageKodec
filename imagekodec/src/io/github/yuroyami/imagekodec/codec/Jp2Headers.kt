@@ -49,16 +49,42 @@ internal object Jp2Headers {
     /**
      * Code-block style flags (A.6.1, Table A.19). Part 1 defines the low six, and the decoder reads
      * all of them; 0x10, predictable termination, changes only how an encoder ends a segment. Part
-     * 15 gives 0x40 and 0x80 to the high-throughput block coder, a different decoder altogether.
+     * 15 (T.814) gives 0x40 to the high-throughput block coder, under which only 0x08, the stripe
+     * causal context, still applies, and 0x80 to a mix of the two coders, block by block.
      */
     const val STYLE_BYPASS = 0x01
     const val STYLE_RESET = 0x02
     const val STYLE_TERMALL = 0x04
     const val STYLE_VSC = 0x08
     const val STYLE_SEGSYM = 0x20
+    const val STYLE_HT = 0x40
+    const val STYLE_MIXED = 0x80
 
     private fun checkStyle(r: Reader, style: Int) {
-        if (style and 0xC0 != 0) r.unsupported("with high-throughput code-blocks (HTJ2K, code-block style 0x${style.toString(16)})")
+        // OpenJPEG 2.5 refuses the mixed style too, so no file of it could be checked against a decoder.
+        if (style and STYLE_MIXED != 0) r.unsupported("with mixed HT and Part 1 code-blocks (HTJ2K MIXED, code-block style 0x${style.toString(16)})")
+    }
+
+    /** The Part 15 bit of a CAP segment's Pcap: Part i sets bit 32 - i, counting from the least significant. */
+    const val PCAP_PART15 = 0x00020000L
+
+    /**
+     * A CAP segment (A.5.2 as Part 15 extends it): Pcap, then one 16-bit Ccap for each part it sets.
+     * Only the Part 15 one says anything to this decoder, and nothing it needs: the code-block styles
+     * decide which coder a block uses.
+     */
+    fun readCap(r: Reader) {
+        val pcap = r.u32long()
+        val parts = pcap.countOneBits()
+        if (r.end - r.pos != 2 * parts) r.invalid("gives ${r.end - r.pos} bytes of Ccap for $parts parts")
+        repeat(parts) { r.u16() }
+        r.finish()
+    }
+
+    /** A CPF segment (T.814): the corresponding profile, 16 bits at a time; nothing the decoder needs. */
+    fun readCpf(r: Reader) {
+        if ((r.end - r.pos) % 2 != 0 || r.end == r.pos) r.invalid("has a length that is not a whole number of 16-bit fields")
+        r.pos = r.end
     }
 
     /** One progression order change (A.6.6): packets of these ranges in this order. */
@@ -120,12 +146,14 @@ internal object Jp2Headers {
     }
 
     fun markerName(marker: Int): String = when (marker) {
+        0xFF50 -> "CAP"
         0xFF51 -> "SIZ"
         0xFF52 -> "COD"
         0xFF53 -> "COC"
         0xFF5C -> "QCD"
         0xFF5D -> "QCC"
         0xFF5E -> "RGN"
+        0xFF59 -> "CPF"
         0xFF5F -> "POC"
         0xFF60 -> "PPM"
         0xFF61 -> "PPT"

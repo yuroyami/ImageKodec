@@ -26,10 +26,10 @@ internal object Jp2Boxes {
 
     fun file(
         width: Int, height: Int, components: Int, precision: Int, gray: Boolean, alpha: Boolean,
-        metadata: ImageMetadata, codestream: ByteArray,
+        metadata: ImageMetadata, codestream: ByteArray, brand: String = "jp2 ",
     ): ByteArray {
         val out = Jp2ByteBuffer(codestream.size + 256)
-        header(out, width, height, components, precision, gray, alpha, metadata)
+        header(out, width, height, components, precision, gray, alpha, metadata, brand)
         out.u32(8L + codestream.size)
         out.add(type("jp2c"))
         out.add(codestream)
@@ -39,16 +39,18 @@ internal object Jp2Boxes {
     /** The bytes [file] adds to a codestream. */
     fun overhead(components: Int, alpha: Boolean, metadata: ImageMetadata): Int {
         val out = Jp2ByteBuffer(256)
-        header(out, 1, 1, components, 8, components <= 2, alpha, metadata)
+        header(out, 1, 1, components, 8, components <= 2, alpha, metadata, "jp2 ")
         return out.size + 8
     }
 
     private fun header(
         out: Jp2ByteBuffer, width: Int, height: Int, components: Int, precision: Int, gray: Boolean, alpha: Boolean,
-        metadata: ImageMetadata,
+        metadata: ImageMetadata, brand: String,
     ) {
         out.u32(12); out.add(type("jP  ")); out.u32(0x0D0A870AL)
-        out.u32(20); out.add(type("ftyp")); out.add(type("jp2 ")); out.u32(0); out.add(type("jp2 "))
+        // The file type box names the brand and lists it as the one compatible: `jph ` for an HTJ2K
+        // codestream (T.814), which a Part 1 reader cannot decode.
+        out.u32(20); out.add(type("ftyp")); out.add(type(brand)); out.u32(0); out.add(type(brand))
 
         val jp2h = Jp2ByteBuffer(128)
         // ihdr (I.5.3.1): compression type 7, the colour space known, no intellectual property box.

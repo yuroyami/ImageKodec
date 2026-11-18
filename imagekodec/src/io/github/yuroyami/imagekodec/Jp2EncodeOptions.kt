@@ -71,8 +71,16 @@ public enum class Jp2Progression {
  *   a [KiteBitmap], 16 for a [KiteBitmap16]. A sample is scaled to it and rounded, so a
  *   [KiteBitmap16] that [ImageKodec.decode16] read from a 12-bit file encodes losslessly at 12 bits.
  *   At most 8 for a [KiteBitmap].
- * @throws IllegalArgumentException if a parameter is out of the range given here, or [ratios] and a
- *   [layers] other than 1 disagree on the number of layers
+ * @property highThroughput the high-throughput block coder of HTJ2K (ITU-T T.814, code-block style
+ *   0x40) in place of Part 1's arithmetic coder: a file that decodes several times faster, a little
+ *   larger at the same quality. The codestream gets a `CAP` segment, and a JP2 file the `jph ` brand,
+ *   so a reader of Part 1 alone refuses it. Each code-block is one HT set: a cleanup pass and, lossy,
+ *   the SigProp and MagRef passes below it. The file has one quality layer, and [bypass],
+ *   [resetContexts], [terminateEachPass] and [segmentationSymbols], which only the arithmetic coder
+ *   has, stay off; [verticalCausal] still applies.
+ * @throws IllegalArgumentException if a parameter is out of the range given here, [ratios] and a
+ *   [layers] other than 1 disagree on the number of layers, or [highThroughput] meets more than one
+ *   layer or an arithmetic coder style
  */
 public class Jp2EncodeOptions @Throws(IllegalArgumentException::class) public constructor(
     public val quality: Int = 75,
@@ -96,6 +104,7 @@ public class Jp2EncodeOptions @Throws(IllegalArgumentException::class) public co
     public val sopMarkers: Boolean = false,
     public val ephMarkers: Boolean = false,
     public val bitsPerSample: Int = 0,
+    public val highThroughput: Boolean = false,
 ) {
     init {
         require(quality in 0..100) { "quality must be 0 to 100, was $quality" }
@@ -125,6 +134,13 @@ public class Jp2EncodeOptions @Throws(IllegalArgumentException::class) public co
         }
         require(effort in 1..3) { "effort must be 1 to 3, was $effort" }
         require(bitsPerSample in 0..16) { "bitsPerSample must be 0 to 16, was $bitsPerSample" }
+        if (highThroughput) {
+            // An HT set does not nest inside a larger one, so a block cannot grow from layer to layer.
+            require(layerCount == 1) { "highThroughput writes one quality layer, not $layerCount" }
+            require(!bypass && !resetContexts && !terminateEachPass && !segmentationSymbols) {
+                "highThroughput has no arithmetic coder for bypass, resetContexts, terminateEachPass or segmentationSymbols"
+            }
+        }
     }
 
     /** The quality layers the file holds. */
@@ -140,7 +156,7 @@ public class Jp2EncodeOptions @Throws(IllegalArgumentException::class) public co
             "tile=${tileWidth}x$tileHeight, levels=$levels, codeBlock=${codeBlockWidth}x$codeBlockHeight, precinctSize=$precinctSize, " +
             "progression=$progression, effort=$effort, bypass=$bypass, resetContexts=$resetContexts, terminateEachPass=$terminateEachPass, " +
             "verticalCausal=$verticalCausal, segmentationSymbols=$segmentationSymbols, sopMarkers=$sopMarkers, ephMarkers=$ephMarkers, " +
-            "bitsPerSample=$bitsPerSample)"
+            "bitsPerSample=$bitsPerSample, highThroughput=$highThroughput)"
 }
 
 /** OpenJPEG's J2K_MAX_LAYERS: the most layers its encoder writes. */

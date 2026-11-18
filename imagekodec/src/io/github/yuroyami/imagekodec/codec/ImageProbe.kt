@@ -654,6 +654,8 @@ internal object ImageProbe {
                 if (segmentEnd > stream.end || (inTile >= 0 && segmentEnd > tileEnd)) return null
                 r.end = segmentEnd.toInt()
                 when (marker) {
+                    0xFF50 -> Jp2Headers.readCap(r)
+                    0xFF59 -> Jp2Headers.readCpf(r)
                     0xFF52 -> {
                         val cod = Jp2Headers.readCod(r)
                         if (inTile >= 0) tileCod[inTile] = cod else mainCod = cod

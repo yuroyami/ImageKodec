@@ -20,6 +20,11 @@ internal class CodedBlock(
     val planes: Int,
     val rates: IntArray,
     val gains: DoubleArray,
+    /**
+     * For an HT set ([HtBlockEncoder]), the plane its cleanup pass codes, which the zero bit planes of
+     * the packet header give; -1 for Part 1 passes and for HT truncation points not yet chosen.
+     */
+    val htPlane: Int = -1,
 ) {
     companion object {
         val EMPTY = CodedBlock(ByteArray(0), 0, 0, IntArray(0), DoubleArray(0))
