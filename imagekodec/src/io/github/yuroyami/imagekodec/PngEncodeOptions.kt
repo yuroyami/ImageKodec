@@ -42,13 +42,13 @@ public enum class PngColorType {
  * - [effort]: from 1 (fast) to 3 (thorough), default 2. At 1, [PngColorType.Auto] takes the
  *   type of fewest bytes before compression, and the rows are filtered by the rule of PNG, Third
  *   Edition, 12.8 (no filter for a palette or samples under 8 bits, one chosen a row otherwise)
- *   and compressed with a short match search: about twice as fast as 2, and 5 to 10 percent
- *   larger on photographs. At 2, Auto also tries the best type without a palette, and each type
+ *   and compressed with a short match search: two to four times as fast as 2, and 5 to 10
+ *   percent larger on photographs. At 2, Auto also tries the best type without a palette, and each type
  *   is compressed three ways, filtered a row at a time and unfiltered with the usual search, and
  *   filtered with Huffman coding alone, the smallest kept: never larger than the call without
  *   options. At 3, every type that holds the image, both palette orders (by frequency and by
- *   luminance), and six filter choices with three match searches are tried, and the smallest is
- *   compressed again with a long lazy search: 4 to 8 times slower than 2, and about 4 percent
+ *   luminance), and six filter choices with three match searches are tried, and the best three are
+ *   compressed again with a long lazy search: 7 to 24 times slower than 2, and 3 to 9 percent
  *   smaller on photographs. The output is the same on every platform at every effort.
  *
  * @throws IllegalArgumentException if [bitDepth] is not one [colorType] takes, or [effort] is

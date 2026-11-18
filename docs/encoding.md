@@ -8,6 +8,8 @@ file as a `ByteArray`.
 
 ```kotlin
 ImageKodec.encodePng(bitmap)                    // 8-bit RGB, or RGBA when alpha is present
+ImageKodec.encodePng(bitmap, PngEncodeOptions()) // the smallest exact type: gray, palette, RGB or RGBA
+ImageKodec.encodePng16(bitmap16)                // up to 16 bits a sample, read back with decode16
 ImageKodec.encodeJpeg(bitmap, quality = 85)     // baseline; 4:2:0 at quality <= 90, 4:4:4 above
 ImageKodec.encodeJpeg(bitmap, 85, JpegEncoderKind.Jpegli) // smaller files at the same score, slower
 ImageKodec.encodeGif(bitmap, dither = true)     // median cut + Floyd-Steinberg, or exact under 256 colors
@@ -162,6 +164,51 @@ val jb2File = ImageKodec.encodeJbig2(page, Jbig2EncodeOptions(standalone = true)
 | 2480 x 3508 | 323,754 | 353,955 | 152,401 | 151,998 | 323,810 |
 
   Group 4 takes 25 and 55 ms on the JVM for these pages, and JBIG2 60 and 138 ms.
+
+## PNG colour types, bit depths and interlace
+
+`encodePng(bitmap)` writes 8-bit RGB, or RGBA when a pixel has alpha, and keeps writing it byte for byte as before. The overloads that take a `PngEncodeOptions` write every colour type and bit depth of PNG, Third Edition (#182):
+
+```kotlin
+val small = ImageKodec.encodePng(bitmap, PngEncodeOptions())                       // Auto
+val fixed = ImageKodec.encodePng(bitmap, PngEncodeOptions(colorType = PngColorType.Palette, bitDepth = 8))
+val deep = ImageKodec.encodePng16(bitmap16, PngEncodeOptions(interlace = true), metadata)
+val apng = ImageKodec.encodePng(animation, PngEncodeOptions(effort = 3))
+```
+
+- `PngColorType.Auto`, the default, takes the smallest type that holds the pixels exactly: gray at 1, 2, 4, 8 or 16 bits, a palette of up to 256 colours with their alpha in `tRNS`, RGB, or gray or RGB with an alpha channel. Gray and RGB take a `tRNS` colour key in place of an alpha channel when every transparent pixel is one colour that no opaque pixel has.
+- A fixed `colorType`, and a `bitDepth` with it, is written as asked. Every choice is lossless, so a type or depth that cannot hold the pixels throws `IllegalArgumentException` and names why: a colour pixel for gray, more than 256 colours for a palette, partial alpha for a colour key, a sample that needs more bits.
+- `encodePng16` takes a `KiteBitmap16` of 1 to 4 channels. With Auto, `decode16` gives back the same channels and samples: 8 bits where every sample is an 8-bit value widened (`v * 257`), fewer for such gray, and a palette or a colour key where they fit. A fixed type gives the channels it has: a gray file reads back as one channel, or two with a colour key.
+- `interlace = true` writes Adam7 (PNG, Third Edition, 8.2), which a browser draws coarse first. The file is usually a little larger.
+- An ICC profile in the metadata keeps Auto to the profile's colour space, gray or colour, as the specification asks; a fixed type that disagrees with it throws.
+- `effort` runs from 1 to 3 and sets the search for the smallest file; the output is the same on every platform at every effort:
+  - 1 takes the type of fewest bytes before compression, filters by the rule of PNG, Third Edition, 12.8 (no filter for a palette or samples under 8 bits, one chosen a row otherwise), and compresses with a short match search. It is two to four times as fast as 2, and 5 to 10 percent larger on the photographs.
+  - 2, the default, also tries the best type without a palette, and compresses each type with row filters and without, and with Huffman coding alone, keeping the smallest. It is never larger than `encodePng(bitmap)`.
+  - 3 tries every type, both palette orders (by frequency and by luminance), six filter choices and three match searches, then compresses the best three again with a long lazy search. It is 7 to 24 times slower than 2.
+- An animation takes one colour type for every frame, chosen by Auto's rule over all of them. Gray and palette frames take 8 bits unless `bitDepth` asks for fewer, as ffmpeg 6 reads the frames after the first wrong at fewer. Frames drawn over the canvas need an alpha channel or a palette.
+
+On the photo-like scenes of the tests, and on some pictures of few colours, the sizes are as follows. "Today" is `encodePng(bitmap)`; optipng 0.7.8 ran with `-o2` on that file. Times are from the JVM on one core of the test machine.
+
+| Picture | Colours | Today | Auto, effort 1 | Auto, effort 2 | Auto, effort 3 | optipng -o2 | Type at effort 2 | ms: today, 1, 2, 3 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | >256 | 190864 | 204044 | 190864 | 174318 | 184451 | RGB 8 | 84, 93, 157, 1522 |
+| portrait | >256 | 174100 | 191505 | 174100 | 165428 | 164011 | RGB 8 | 176, 63, 158, 2228 |
+| foliage | >256 | 188940 | 199166 | 188940 | 180498 | 180755 | RGB 8 | 73, 34, 113, 960 |
+| city | >256 | 121505 | 131683 | 121505 | 117851 | 116346 | RGB 8 | 84, 26, 116, 1218 |
+| night | >256 | 208859 | 224422 | 208859 | 201365 | 206289 | RGB 8 | 61, 33, 114, 1034 |
+| bokeh | >256 | 92183 | 97074 | 92183 | 85130 | 84959 | RGB 8 | 51, 21, 90, 871 |
+| landscape 6 levels | 9 | 30161 | 18465 | 17442 | 16860 | 16972 | palette 4 | 33, 6, 123, 1368 |
+| portrait 6 levels | 11 | 24793 | 18145 | 16683 | 15520 | 15538 | palette 4 | 50, 8, 93, 1074 |
+| foliage 6 levels | 7 | 29062 | 19473 | 17115 | 16636 | 17073 | palette 4 | 65, 14, 96, 930 |
+| landscape gray | 98 | 122350 | 98370 | 83343 | 83343 | 83551 | gray 8 | 59, 35, 49, 1049 |
+| portrait gray | 125 | 111672 | 88952 | 73168 | 73063 | 73313 | gray 8 | 97, 19, 67, 1597 |
+| chart | 10 | 1630 | 680 | 519 | 440 | 479 | palette 4 | 13, 10, 39, 284 |
+| text | 2 | 4157 | 954 | 925 | 893 | 925 | gray 1 | 10, 2, 3, 46 |
+| icon | 249 | 1304 | 1764 | 1304 | 1184 | 1304 | RGBA 8 | 7, 2, 11, 137 |
+| ramp 200 | 200 | 740 | 1493 | 740 | 739 | 740 | RGB 8 | 5, 6, 46, 339 |
+| total | | 1302320 | | 1187690 | 1133268 | 1146706 | | |
+
+At effort 2 the six photographs come out byte for byte as today, since RGB with the same filters and search is still the smallest choice; the pictures that a palette or gray holds are 32 to 78 percent smaller, and the icon and the ramp, whose palettes cost more than they save, stay RGBA and RGB. Effort 3 is 3 to 9 percent smaller than effort 2 on the photographs, and 1.2 percent smaller than optipng -o2 over the whole set.
 
 ## Keeping a photo's metadata
 
@@ -371,8 +418,9 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   only on text and which encoders that merge look-alike glyphs make lossy, are not written, and
   neither are refinement, halftone or striped pages. The CCITT encoder writes no uncompressed mode.
 - `encodeTiff` does not write fax compression; a TIFF of a fax page is built around `encodeCcitt`.
-- The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit
-  output. It picks a filter for each row, which is a compression choice and not a format
-  capability. Use `encodeTiff16` for 16-bit output.
+- The PNG encoder does not quantize: a palette is written only for a picture of 256 colours or
+  fewer, and `encodeGif` is the encoder that reduces colours. It writes no `sBIT`, `gAMA`, `cHRM`,
+  `sRGB`, `cICP`, `pHYs` or text chunks other than XMP. APNG is written at 8 bits a sample at
+  most, since a `KiteAnimation` holds 8-bit frames.
 - The GIF writer accepts a play count in 0..65536 and refuses a larger one. See
   [Animation](animation.md#play-counts).

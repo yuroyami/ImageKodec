@@ -135,7 +135,7 @@ Every codec's tests compare its output against an independent implementation:
 
 | Codec | Reference used as the oracle |
 |---|---|
-| PNG, BMP, GIF, JPEG encode | ImageIO reads our output back |
+| PNG, BMP, GIF, JPEG encode | ImageIO reads our output back. PNG with options: `pngcheck` passes every file, and ImageIO, Pillow and ImageMagick read every colour type, depth and interlace to the samples written |
 | JPEG encode with `JpegEncoderKind.Jpegli` | pyjpegli 0.3.2 (`pyjpegli.encode`, a build of google/jpegli), on photo-like scenes: the same segments and quantization tables, the size within 1 percent and the SSIMULACRA 2 score within 0.5, with libjpeg-turbo's `djpeg` opening every file. Three of its files are carried to every platform, byte for byte |
 | JPEG decode | `stb_image`, bit-identical, through committed vectors that `tools/stb_dump.c` produced. Its header gives the commands, including the one-line correction of stb's 4:2:2 right-edge weight |
 | JPEG 2000 | OpenJPEG (`opj_compress` and `opj_decompress`) |
@@ -163,8 +163,8 @@ skipped test reports as a pass. If you touch those codecs, install the tools and
 check the skip count, not only whether the run passed:
 
 ```sh
-brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif libde265 x265 exiftool pillow little-cms2 jpeg-xl     # macOS
-sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples libheif-plugin-x265 libheif-plugin-libde265 libde265-examples x265 hm hm-highbitdepth libimage-exiftool-perl python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools   # Debian/Ubuntu
+brew install pngcheck webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif libde265 x265 exiftool pillow little-cms2 jpeg-xl     # macOS
+sudo apt-get install pngcheck webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples libheif-plugin-x265 libheif-plugin-libde265 libde265-examples x265 hm hm-highbitdepth libimage-exiftool-perl python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools   # Debian/Ubuntu
 ```
 
 The HEIC suites also need their test data, which is fetched and checked, never committed:

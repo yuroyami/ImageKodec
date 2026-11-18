@@ -154,7 +154,7 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 
 | Format | Decodes | Encodes |
 | --- | --- | --- |
-| PNG and APNG | every color type and depth, interlace, animation | 8-bit RGB or RGBA, and APNG |
+| PNG and APNG | every color type and depth, interlace, animation | every color type and depth, palette, interlace, and APNG |
 | JPEG | baseline, progressive, arithmetic, lossless and hierarchical, at 8 or 12 bits and lossless up to 16 | baseline |
 | GIF | still and animated | still and animated |
 | BMP | every header version and depth, RLE, embedded JPEG and PNG | 24-bit, or 32-bit with alpha |

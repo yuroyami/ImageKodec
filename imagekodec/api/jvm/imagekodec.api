@@ -341,8 +341,14 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeJxr16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeJxr16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteAnimation;)[B
+	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ImageMetadata;)[B
+	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodePng$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public static synthetic fun encodePng$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodePng16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodePng16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeTiff (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeTiff (Ljava/util/List;)[B
 	public final fun encodeTiff16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;)[B
@@ -585,6 +591,29 @@ public final class io/github/yuroyami/imagekodec/Orientation : java/lang/Enum {
 
 public final class io/github/yuroyami/imagekodec/Orientation$Companion {
 	public final fun fromExif (I)Lio/github/yuroyami/imagekodec/Orientation;
+}
+
+public final class io/github/yuroyami/imagekodec/PngColorType : java/lang/Enum {
+	public static final field Auto Lio/github/yuroyami/imagekodec/PngColorType;
+	public static final field Gray Lio/github/yuroyami/imagekodec/PngColorType;
+	public static final field GrayAlpha Lio/github/yuroyami/imagekodec/PngColorType;
+	public static final field Palette Lio/github/yuroyami/imagekodec/PngColorType;
+	public static final field Rgb Lio/github/yuroyami/imagekodec/PngColorType;
+	public static final field Rgba Lio/github/yuroyami/imagekodec/PngColorType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/PngColorType;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/PngColorType;
+}
+
+public final class io/github/yuroyami/imagekodec/PngEncodeOptions {
+	public fun <init> ()V
+	public fun <init> (Lio/github/yuroyami/imagekodec/PngColorType;Ljava/lang/Integer;ZI)V
+	public synthetic fun <init> (Lio/github/yuroyami/imagekodec/PngColorType;Ljava/lang/Integer;ZIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBitDepth ()Ljava/lang/Integer;
+	public final fun getColorType ()Lio/github/yuroyami/imagekodec/PngColorType;
+	public final fun getEffort ()I
+	public final fun getInterlace ()Z
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/yuroyami/imagekodec/RenderingIntent : java/lang/Enum {

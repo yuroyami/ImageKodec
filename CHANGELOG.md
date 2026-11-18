@@ -14,6 +14,18 @@ reviewable in the diff.
 
 ### Added
 
+- PNG writes every colour type and bit depth, a palette, colour keys and Adam7 interlace (#182).
+  `encodePng(bitmap, PngEncodeOptions(...), metadata, cancellationCheck)` takes `PngColorType.Auto`,
+  the smallest type that holds the pixels exactly (gray at 1 to 16 bits, a palette of up to 256
+  colours with `tRNS`, RGB or RGBA, and a `tRNS` colour key in place of alpha where it fits), or a
+  fixed type and depth, and an `effort` from 1 to 3. `encodePng16(bitmap16, ...)` writes 16 bits a
+  sample for gray, gray and alpha, RGB and RGBA, read back by `decode16`, and `encodePng(animation,
+  options, ...)` writes APNG in the same types. At the default effort a picture that a palette or gray
+  holds is 32 to 78 percent smaller than `encodePng(bitmap)` writes it, and a photograph is no larger; effort 3 is
+  1.2 percent smaller than `optipng -o2` over the test pictures. pngcheck, ImageIO, Pillow and
+  ImageMagick read every type and depth back. `encodePng(bitmap)`, `encodePng(bitmap, metadata)` and
+  `encodePng(animation)` keep their output byte for byte. See [Writing images](docs/encoding.md).
+
 - `encodeCcitt` writes CCITT fax data, Group 4 (T.6) by default and Group 3 one- or two-dimensional
   (T.4) with `CcittEncodeOptions`, which takes the parameters of PDF's `CCITTFaxDecode`: K, the byte
   alignment, the polarity, EOL and EOFB or RTC. `CcittFax.encode` takes a packed page as

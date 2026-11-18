@@ -26,6 +26,9 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 - `encodeCcitt` and `CcittFax.encode` write rows of up to 65536 pixels and refuse a wider page
   with `IllegalArgumentException`; T.4 pages are 1728 to 4864 wide. `encodeJbig2` writes one generic
   region a page, with no symbol coding.
+- The PNG encoder writes a palette only for 256 colours or fewer, and APNG at 8 bits a sample at
+  most. Its rows must fit one array: a file whose filtered rows pass 2 GB, such as a
+  16-bit RGBA picture of more than 268 million pixels, throws `IllegalArgumentException`.
 
 ## Size ceilings
 
