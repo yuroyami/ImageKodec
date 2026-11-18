@@ -27,7 +27,14 @@ internal class Deblocker(private val d: PictureDecoder) {
     private val maxC = (1 shl bitDepthC) - 1
 
     /** 8.7.2.5.7 and 8.7.2.5.8: the units whose samples both filters leave as they are. */
-    private val keepMask = PictureDecoder.FLAG_BYPASS or (if (sps.pcmLoopFilterDisabled) PictureDecoder.FLAG_PCM else 0)
+    private val keepMask = PictureDecoder.FLAG_BYPASS or (if (sps.pcmLoopFilterDisabled) PictureDecoder.FLAG_PCM else 0) or PALETTE
+    private val palette = d.paletteUnits
+
+    /**
+     * The flags [f] of unit [u] as the unsigned byte they are (FLAG_CODED makes the Byte negative), with [PALETTE]
+     * for a unit of a coding unit in palette mode.
+     */
+    private fun kept(u: Int, f: Int): Int = (f and 0xFF) or (if (palette != null && palette[u]) PALETTE else 0)
 
     private val beta = HevcTables.BETA_PRIME
     private val tcTable = HevcTables.TC_PRIME
@@ -112,7 +119,7 @@ internal class Deblocker(private val d: PictureDecoder) {
                 if (fq and PictureDecoder.FLAG_EDGE_LEFT != 0) {
                     val fp = flags[uq - 1].toInt()
                     val bs = strength(uq - 1, uq, fp, fq, PictureDecoder.FLAG_TRANSFORM_LEFT)
-                    if (bs > 0) filterLuma(luma, y * stride + x, 1, stride, bs, qpY[uq - 1].toInt(), qpY[uq].toInt(), betaOffset, tcOffset, fp, fq)
+                    if (bs > 0) filterLuma(luma, y * stride + x, 1, stride, bs, qpY[uq - 1].toInt(), qpY[uq].toInt(), betaOffset, tcOffset, kept(uq - 1, fp), kept(uq, fq))
                 }
                 y += 4
             }
@@ -135,8 +142,8 @@ internal class Deblocker(private val d: PictureDecoder) {
                         val at = yc * d.strides[1] + (x shr subW)
                         val qpP = qpY[uq - 1].toInt()
                         val qpQ = qpY[uq].toInt()
-                        filterChroma(d.planes[1], at, 1, d.strides[1], qpP, qpQ, pps.cbQpOffset, tcOffset, fp, fq)
-                        filterChroma(d.planes[2], at, 1, d.strides[2], qpP, qpQ, pps.crQpOffset, tcOffset, fp, fq)
+                        filterChroma(d.planes[1], at, 1, d.strides[1], qpP, qpQ, pps.cbQpOffset, tcOffset, kept(uq - 1, fp), kept(uq, fq))
+                        filterChroma(d.planes[2], at, 1, d.strides[2], qpP, qpQ, pps.crQpOffset, tcOffset, kept(uq - 1, fp), kept(uq, fq))
                     }
                 }
                 yc += 4
@@ -164,7 +171,7 @@ internal class Deblocker(private val d: PictureDecoder) {
                 if (fq and PictureDecoder.FLAG_EDGE_TOP != 0) {
                     val fp = flags[uq - w4].toInt()
                     val bs = strength(uq - w4, uq, fp, fq, PictureDecoder.FLAG_TRANSFORM_TOP)
-                    if (bs > 0) filterLuma(luma, y * stride + x, stride, 1, bs, qpY[uq - w4].toInt(), qpY[uq].toInt(), betaOffset, tcOffset, fp, fq)
+                    if (bs > 0) filterLuma(luma, y * stride + x, stride, 1, bs, qpY[uq - w4].toInt(), qpY[uq].toInt(), betaOffset, tcOffset, kept(uq - w4, fp), kept(uq, fq))
                 }
                 x += 4
             }
@@ -188,8 +195,8 @@ internal class Deblocker(private val d: PictureDecoder) {
                         val at = (y shr subH) * d.strides[1] + xc
                         val qpP = qpY[uq - w4].toInt()
                         val qpQ = qpY[uq].toInt()
-                        filterChroma(d.planes[1], at, d.strides[1], 1, qpP, qpQ, pps.cbQpOffset, tcOffset, fp, fq)
-                        filterChroma(d.planes[2], at, d.strides[2], 1, qpP, qpQ, pps.crQpOffset, tcOffset, fp, fq)
+                        filterChroma(d.planes[1], at, d.strides[1], 1, qpP, qpQ, pps.cbQpOffset, tcOffset, kept(uq - w4, fp), kept(uq, fq))
+                        filterChroma(d.planes[2], at, d.strides[2], 1, qpP, qpQ, pps.crQpOffset, tcOffset, kept(uq - w4, fp), kept(uq, fq))
                     }
                 }
                 xc += 4
@@ -301,6 +308,9 @@ internal class Deblocker(private val d: PictureDecoder) {
     }
 
     private companion object {
+        /** A bit past the unit flags that marks a unit in palette mode, which the filters keep as it is. */
+        const val PALETTE = 256
+
         fun clip(lo: Int, hi: Int, v: Int): Int = if (v < lo) lo else if (v > hi) hi else v
         fun abs(v: Int): Int = if (v < 0) -v else v
 

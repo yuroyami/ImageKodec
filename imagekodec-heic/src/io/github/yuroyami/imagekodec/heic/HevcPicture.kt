@@ -23,8 +23,11 @@ internal class DecodedPicture(val sps: Sps, val planes: Array<ShortArray>, val s
     var neededForOutput: Boolean = false
     /** PicLatencyCount (C.5.2.3). */
     var latency: Int = 0
-    /** The motion for temporal candidates, or null when every block is coded in intra mode. */
-    var motion: CollocatedMotion? = null
+    /**
+     * The motion for temporal candidates of each colour plane that is decoded on its own: one entry, or three
+     * under separate_colour_plane_flag. An entry is null when every block of its plane is coded in intra mode.
+     */
+    var motion: Array<CollocatedMotion?> = arrayOfNulls(1)
 
     companion object {
         const val UNUSED = 0
@@ -52,7 +55,7 @@ internal class DecodedPicture(val sps: Sps, val planes: Array<ShortArray>, val s
         }
         val strides = IntArray(planes.size) { c -> if (c == 0) w else w shr subW }
         val fullRange = s.vui?.let { it.videoSignalTypePresent && it.fullRange } ?: false
-        return HeifPlanes(w, h, s.bitDepthY, s.bitDepthC, subW, subH, out, strides, fullRange)
+        return HeifPlanes(w, h, s.bitDepthY, s.planeBitDepth(1), subW, subH, out, strides, fullRange)
     }
 }
 
@@ -68,7 +71,8 @@ internal class DecodedPicture(val sps: Sps, val planes: Array<ShortArray>, val s
 internal class HevcDecoder(keepOutput: Boolean = false) {
     private val store = ParameterSetStore()
     private val buffer = PictureBuffer(keepOutput)
-    private var picture: PictureDecoder? = null
+    /** The picture being decoded: one decoder, or one for each colour plane under separate_colour_plane_flag. */
+    private var picture: Array<PictureDecoder>? = null
     private var current: DecodedPicture? = null
     private var previous: SliceHeader? = null
     /** PicOrderCntVal of the picture being decoded. */
@@ -93,9 +97,12 @@ internal class HevcDecoder(keepOutput: Boolean = false) {
                     skipping = pictureOrder == null
                     if (pictureOrder == null) return
                     poc = pictureOrder
-                    val p = PictureDecoder(h.sps, h.pps)
-                    picture = p
-                    current = DecodedPicture(h.sps, p.planes, p.strides).also {
+                    // 8.1.3: three separate colour planes are three monochrome pictures, each decoded alone.
+                    val decoders = Array(if (h.sps.separateColourPlane) 3 else 1) { k -> PictureDecoder(h.sps, h.pps, k) }
+                    picture = decoders
+                    val planes = if (decoders.size == 1) decoders[0].planes else Array(3) { k -> decoders[k].planes[0] }
+                    val strides = if (decoders.size == 1) decoders[0].strides else IntArray(3) { k -> decoders[k].strides[0] }
+                    current = DecodedPicture(h.sps, planes, strides).also {
                         it.poc = pictureOrder
                         it.outputFlag = h.picOutput
                     }
@@ -103,11 +110,13 @@ internal class HevcDecoder(keepOutput: Boolean = false) {
                     return
                 }
                 previous = h
-                val p = picture ?: hevcError("a slice segment has no first_slice_segment_in_pic_flag before it")
+                val decoders = picture ?: hevcError("a slice segment has no first_slice_segment_in_pic_flag before it")
+                // colour_plane_id is 0 without separate colour planes, and is read only with them.
+                val p = decoders.getOrNull(h.colourPlaneId) ?: hevcError("colour_plane_id ${h.colourPlaneId} in a picture without separate colour planes")
                 // 7.4.7.1: the slice segments of a picture share one PPS.
-                if (h.pps !== p.pps) hevcError("the slice segments of a picture name different PPSs")
+                if (h.pps !== p.pps || h.sps !== p.sps) hevcError("the slice segments of a picture name different PPSs")
                 HevcSupport.sliceReason(h)?.let { throw UnsupportedImageException(it) }
-                if (h.sliceType != SliceType.I) h.refs = if (h.dependentSliceSegment) h.refs else buffer.refLists(h, poc)
+                if (h.sliceType != SliceType.I) h.refs = if (h.dependentSliceSegment) h.refs else buffer.refLists(h, poc, current!!)
                 p.decodeSliceSegment(h, rbsp, emulationPreventionBytes(bytes, from, to), cancel)
             }
             nal.type == NalType.SUFFIX_SEI -> current?.let { readSei(r, it) }
@@ -138,12 +147,15 @@ internal class HevcDecoder(keepOutput: Boolean = false) {
     }
 
     private fun finishPicture() {
-        val p = picture ?: return
-        val total = p.sps.picSizeInCtbs
-        if (p.decodedCtbs != total) hevcError("the slice segments of a picture hold ${p.decodedCtbs} of its $total CTBs")
-        p.finishLoopFilters()
+        val decoders = picture ?: return
+        for (p in decoders) {
+            val total = p.sps.picSizeInCtbs
+            val plane = if (decoders.size > 1) " of colour plane ${p.colourPlane}" else ""
+            if (p.decodedCtbs != total) hevcError("the slice segments of a picture hold ${p.decodedCtbs} of its $total CTBs$plane")
+        }
+        for (p in decoders) p.finishLoopFilters()
         val c = current!!
-        c.motion = p.collocatedMotion()
+        c.motion = Array(decoders.size) { k -> decoders[k].collocatedMotion() }
         buffer.endPicture(c)
         done += c
         picture = null

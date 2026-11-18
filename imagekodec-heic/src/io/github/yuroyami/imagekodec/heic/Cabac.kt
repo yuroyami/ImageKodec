@@ -43,11 +43,19 @@ internal object Ctx {
     /** explicit_rdpcm_flag and explicit_rdpcm_dir_flag: one context for luma, then one for both chroma components. */
     const val EXPLICIT_RDPCM = 169
     const val EXPLICIT_RDPCM_DIR = 171
+    // The screen content coding elements (Tables 9-38 to 9-42), each with initValue 154 at every initType.
+    const val PALETTE_MODE = 173
+    const val TU_RESIDUAL_ACT = 174
+    /** palette_run_prefix: ctxInc 0 to 7 of 9.3.4.2.8. */
+    const val PALETTE_RUN_PREFIX = 175
+    /** copy_above_palette_indices_flag and copy_above_indices_for_final_run_flag, which share one context (Table 9-4). */
+    const val COPY_ABOVE = 183
+    const val PALETTE_TRANSPOSE = 184
     /** The number of context variables. */
-    const val CONTEXTS = 173
+    const val CONTEXTS = 185
     /** StatCoeff[ 0..3 ], each 0 to about 90 (9-23 stops it near the largest level), so a byte holds it. */
-    const val STAT_COEFF = 173
-    const val COUNT = 177
+    const val STAT_COEFF = 185
+    const val COUNT = 189
 
     /** The initValue of every entry for initType 0, 1 and 2. */
     private val initValues: Array<IntArray> = Array(3) { t -> layout(t) }
@@ -59,7 +67,8 @@ internal object Ctx {
 
     private fun layout(t: Int): IntArray {
         val T = HevcTables
-        // 154 gives m = 0 and n = 64 in 9-5, an even state: the one of an element unused at this initType.
+        // 154 gives m = 0 and n = 64 in 9-5, an even state: the one of an element unused at this initType, and
+        // the one Tables 9-38 to 9-42 give every screen content coding element.
         val v = IntArray(CONTEXTS) { 154 }
         v.put(T.INIT_SAO_MERGE, SAO_MERGE, t, 1)
         v.put(T.INIT_SAO_TYPE, SAO_TYPE, t, 1)

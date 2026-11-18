@@ -150,7 +150,7 @@ class HevcDecodeOracleTest {
             for (c in p.planes.indices) {
                 val w = if (c == 0) p.sps.width else p.sps.width / p.sps.subWidthC
                 val h = if (c == 0) p.sps.height else p.sps.height / p.sps.subHeightC
-                val depth = if (c == 0) p.sps.bitDepthY else p.sps.bitDepthC
+                val depth = p.sps.planeBitDepth(c)
                 val md5 = PictureHash.md5(PictureHash.pictureData(p.planes[c], 0, p.strides[c], w, h, depth))
                 assertEquals(hex(hash.values[c]), hex(md5), "$what: picture $i, plane $c")
                 planes++
@@ -162,7 +162,7 @@ class HevcDecodeOracleTest {
     private fun matchesHash(p: DecodedPicture, hash: PictureHashSei): Boolean = p.planes.indices.all { c ->
         val w = if (c == 0) p.sps.width else p.sps.width / p.sps.subWidthC
         val h = if (c == 0) p.sps.height else p.sps.height / p.sps.subHeightC
-        val depth = if (c == 0) p.sps.bitDepthY else p.sps.bitDepthC
+        val depth = p.sps.planeBitDepth(c)
         val data = PictureHash.pictureData(p.planes[c], 0, p.strides[c], w, h, depth)
         val v = hash.values[c].fold(0) { acc, b -> (acc shl 8) or (b.toInt() and 0xFF) }
         when (hash.hashType) {
@@ -558,6 +558,9 @@ class HevcDecodeOracleTest {
         val units = AnnexB.split(file.readBytes())
         val d = HevcDecoder(keepOutput = true)
         val md5 = java.security.MessageDigest.getInstance("MD5")
+        // A package may hold the MD5 of an .rgb file instead, which HM writes from a stream coded as GBR with
+        // --OutputColourSpaceConvert=GBRtoRGB: the same 4:4:4 planes in the order R, G, B.
+        val rgbMd5 = java.security.MessageDigest.getInstance("MD5")
         var pictures = 0
         var hashed = 0
         var output = 0
@@ -583,6 +586,11 @@ class HevcDecodeOracleTest {
                 val bytes = yuvBytes(planes)
                 if (p === firstBad && badAt == null) badAt = outputBytes to planes
                 md5.update(bytes)
+                if (planes.planes.size == 3 && planes.subX == 0 && planes.subY == 0) {
+                    val third = bytes.size / 3
+                    rgbMd5.update(bytes, 2 * third, third)
+                    rgbMd5.update(bytes, 0, 2 * third)
+                }
                 outputBytes += bytes.size
                 output++
             }
@@ -606,11 +614,14 @@ class HevcDecodeOracleTest {
             return "DIFFERS from the hash SEI of ${bad.size} of $pictures pictures, the first of PicOrderCntVal ${bad.first()}" +
                 (where?.let { "; $it" } ?: "")
         }
-        val expected = file.parentFile.listFiles().orEmpty().filter { "md5" in it.name.lowercase() }
-            .flatMap { it.readLines() }.flatMap { line -> Regex("[0-9a-fA-F]{32}").findAll(line).map { it.value.lowercase() }.toList() }
+        val lines = file.parentFile.listFiles().orEmpty().filter { "md5" in it.name.lowercase() }.flatMap { it.readLines() }
+        fun hashesOf(lines: List<String>) = lines.flatMap { line -> Regex("[0-9a-fA-F]{32}").findAll(line).map { it.value.lowercase() }.toList() }
+        val expected = hashesOf(lines)
+        val expectedRgb = hashesOf(lines.filter { it.trim().endsWith(".rgb") })
         val mine = hex(md5.digest())
         val hashes = if (hashed == pictures) "the hash SEI of all $pictures pictures" else "the hash SEI of $hashed of $pictures pictures"
         if (mine in expected) return "MATCHES $hashes and the MD5 of its $output output pictures"
+        if (hex(rgbMd5.digest()) in expectedRgb) return "MATCHES $hashes and the MD5 of its $output output pictures as RGB"
         if (expected.isNotEmpty()) return "DIFFERS from the MD5 of its $output output pictures ($mine)" + (firstDifferingOutput(file, units)?.let { "; $it" } ?: "")
         if (hashed == pictures && pictures > 0) return "MATCHES $hashes; the package has no MD5 of its output"
         return "decoded $pictures pictures, $hashed with a hash SEI, and the package has no MD5 of its output"
@@ -721,22 +732,30 @@ class HevcDecodeOracleTest {
         assertEquals("CTB 1 at (1, 0) first differs, plane 2 sample (3, 0): 70, libde265 71", firstDifferingCtb(planes, raw, 4, 16, 0, 3))
     }
 
-    /**
-     * Every picture of the HEVC_v1 and SCC packages. Every HEVC_v1 stream matches; the SCC streams all use
-     * palette mode, which is not supported, and are listed as such.
-     */
+    /** Every picture of the HEVC_v1 package; the whole package matches. */
     @Test
     fun conformanceStreams() {
         val failures = ArrayList<String>()
         val v1 = conformanceRoot("HEVC_v1")
         val matching = conformance(v1, failures)
-        val scc = File(v1.parentFile, "SCC")
-        val sccMatching = if (scc.isDirectory) conformance(scc, failures) else emptyList()
-        println("HEVC conformance: ${matching.size} HEVC_v1 streams and ${sccMatching.size} SCC streams match in every picture")
+        println("HEVC conformance: ${matching.size} HEVC_v1 streams match in every picture")
         assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
         val expected = v1.listFiles { f -> f.isDirectory }.orEmpty().map { it.name }
         assertEquals(expected.sorted(), matching.sorted(), "the HEVC_v1 streams that match in every picture")
-        assertEquals(emptyList(), sccMatching, "the SCC streams, all with palette mode")
+    }
+
+    /**
+     * Every picture of each screen content coding stream (#188): palette mode with its predictor initializers,
+     * current picture referencing, the adaptive colour transform, motion vector resolution control and disabled
+     * intra boundary filtering, over wavefronts, tiles and 4:2:0 and 4:4:4. The whole package matches.
+     */
+    @Test
+    fun screenContentStreams() {
+        val failures = ArrayList<String>()
+        val matching = conformance(conformanceRoot("SCC"), failures)
+        println("HEVC screen content conformance: ${matching.size} streams match in every picture")
+        assertTrue(failures.isEmpty(), "${failures.size} streams failed:\n${failures.joinToString("\n")}")
+        assertEquals(MATCHING_SCC_STREAMS.sorted(), matching.sorted(), "the screen content streams that match in every picture")
     }
 
     /** Every picture of each range extension stream; the whole package matches. */
@@ -751,6 +770,25 @@ class HevcDecodeOracleTest {
 
     private companion object {
         const val DEC265_FAILED = "libde265 cannot decode it"
+
+        /** The screen content coding package of H.265.1: every stream. */
+        val MATCHING_SCC_STREAMS = setOf(
+            "Bipred_8by8_A_Qualcomm_2",
+            "DPB_Loop_Filters_A_MediaTek_2",
+            "Delta_QP_Chroma_QP_Offsets_A_Qualcomm_2",
+            "HT_A_SCC_Apple_2",
+            "HT_B_SCC_Apple_3",
+            "HT_C_SCC_Apple_3",
+            "IBF_Disabled_A_MediaTek_2",
+            "IBF_Disabled_B_MediaTek_2",
+            "MVRESIDC_A_MS_2",
+            "MVRESIDC_B_MS_2",
+            "MVRESIDC_C_MS_3",
+            "PPI_A_InterDigital_2",
+            "PPI_B_InterDigital_2",
+            "Slice_ACT_QP_Offsets_A_Qualcomm_2",
+            "Zero_and_One_Palette_Size_A_Canon_2",
+        )
 
         /** The range extension package: every stream, inter pictures included. */
         val MATCHING_REXT_STREAMS = setOf(

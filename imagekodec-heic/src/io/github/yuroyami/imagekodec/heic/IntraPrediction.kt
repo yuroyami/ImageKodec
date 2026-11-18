@@ -9,6 +9,8 @@ package io.github.yuroyami.imagekodec.heic
 internal class IntraPredictor(private val d: PictureDecoder) {
     /** 8.4.4.2.1, step 1: intra_smoothing_disabled_flag turns the filter of 8.4.4.2.3 off. */
     private val smoothing = !d.sps.intraSmoothingDisabled
+    /** intra_boundary_filtering_disabled_flag turns off the edge filters of the DC, vertical and horizontal modes (8.4.4.2.5, 8.4.4.2.6). */
+    private val boundaryFilter = !d.sps.intraBoundaryFilteringDisabled
     private val line = IntArray(4 * 32 + 1)
     private val filtered = IntArray(4 * 32 + 1)
     private val ok = BooleanArray(4 * 32 + 1)
@@ -85,13 +87,13 @@ internal class IntraPredictor(private val d: PictureDecoder) {
                     val row = base + y * stride
                     for (x in 0 until n) plane[row + x] = dc.toShort()
                 }
-                if (cIdx == 0 && n < 32) {
+                if (cIdx == 0 && n < 32 && boundaryFilter) {
                     plane[base] = ((p[corner - 1] + 2 * dc + p[corner + 1] + 2) shr 2).toShort()
                     for (x in 1 until n) plane[base + x] = ((p[corner + 1 + x] + 3 * dc + 2) shr 2).toShort()
                     for (y in 1 until n) plane[base + y * stride] = ((p[corner - 1 - y] + 3 * dc + 2) shr 2).toShort()
                 }
             }
-            else -> angular(plane, stride, base, p, n, mode, cIdx == 0 && n < 32 && !bypassRdpcm, max)
+            else -> angular(plane, stride, base, p, n, mode, cIdx == 0 && n < 32 && !bypassRdpcm && boundaryFilter, max)
         }
     }
 

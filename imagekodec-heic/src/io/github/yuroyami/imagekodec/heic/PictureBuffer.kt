@@ -11,6 +11,11 @@ internal class RefLists(
     val currentPoc: Int,
     val colPic: DecodedPicture?,
     val noBackwardPred: Boolean,
+    /**
+     * Whether each entry is the current picture itself, which pps_curr_pic_ref_enabled_flag lets a list hold
+     * (8.3.4): a prediction from it takes whole-sample vectors (8-98 to 8-101, 8-124 and 8-125).
+     */
+    val isCurrent: Array<BooleanArray>,
 ) {
     /** PicOrderCntVal of RefPicListX[ [idx] ] for X = [list]. */
     fun poc(list: Int, idx: Int): Int = pictures[list][idx].poc
@@ -176,9 +181,8 @@ internal class PictureBuffer(private val keepOutput: Boolean) {
         val n = sps.width * sps.height
         val cw = sps.width / sps.subWidthC
         val ch = sps.height / sps.subHeightC
-        val planes = if (sps.chromaArrayType == 0) arrayOf(ShortArray(n)) else arrayOf(ShortArray(n), ShortArray(cw * ch), ShortArray(cw * ch))
-        planes[0].fill((1 shl (sps.bitDepthY - 1)).toShort())
-        for (c in 1 until planes.size) planes[c].fill((1 shl (sps.bitDepthC - 1)).toShort())
+        val planes = if (sps.chromaFormatIdc == 0) arrayOf(ShortArray(n)) else arrayOf(ShortArray(n), ShortArray(cw * ch), ShortArray(cw * ch))
+        for (c in planes.indices) planes[c].fill((1 shl (sps.planeBitDepth(c) - 1)).toShort())
         val strides = if (planes.size == 1) intArrayOf(sps.width) else intArrayOf(sps.width, cw, cw)
         val p = DecodedPicture(sps, planes, strides)
         p.poc = poc
@@ -209,7 +213,9 @@ internal class PictureBuffer(private val keepOutput: Boolean) {
             return
         }
         pictures.removeAll { !it.neededForOutput && it.reference == DecodedPicture.UNUSED }
-        val maxBuffering = sps.maxDecPicBufferingMinus1[highest] + 1
+        // C.5.2.2: the version of the current picture before the loop filters, which TwoVersionsOfCurrDecPicFlag
+        // keeps for the picture's own prediction, takes a buffer of its own.
+        val maxBuffering = maxOf(1, sps.maxDecPicBufferingMinus1[highest] + 1 - (if (h.pps.twoVersionsOfCurrDecPic(sps)) 1 else 0))
         while (needsBumping(sps) || pictures.size >= maxBuffering) {
             if (pictures.none { it.neededForOutput }) {
                 // Every picture is a reference: the stream holds more than its sps_max_dec_pic_buffering_minus1.
@@ -250,28 +256,36 @@ internal class PictureBuffer(private val keepOutput: Boolean) {
      * with ColPic and NoBackwardPredFlag (8.3.5). Every reference must have the current picture's size
      * and format, which a new SPS in the middle of a sequence could otherwise break.
      */
-    fun refLists(h: SliceHeader, poc: Int): RefLists {
+    fun refLists(h: SliceHeader, poc: Int, current: DecodedPicture): RefLists {
         val sps = h.sps
-        val total = stCurrBefore.size + stCurrAfter.size + ltCurr.size
+        val curr = h.pps.currPicRefEnabled
+        val total = stCurrBefore.size + stCurrAfter.size + ltCurr.size + (if (curr) 1 else 0)
         if (total == 0) hevcError("a ${if (h.sliceType == SliceType.B) "B" else "P"} slice has no reference picture (NumPicTotalCurr is 0)")
         for (p in stCurrBefore + stCurrAfter + ltCurr) {
             val s = p.sps
             if (s.width != sps.width || s.height != sps.height || s.chromaFormatIdc != sps.chromaFormatIdc ||
-                s.bitDepthY != sps.bitDepthY || s.bitDepthC != sps.bitDepthC
+                s.bitDepthY != sps.bitDepthY || s.bitDepthC != sps.bitDepthC || s.separateColourPlane != sps.separateColourPlane
             ) hevcError("a reference picture of ${s.width} by ${s.height} differs from the current picture's format")
         }
         val lists = if (h.sliceType == SliceType.B) 2 else 1
         val pics = Array(lists) { x ->
             val active = (if (x == 0) h.numRefIdxL0ActiveMinus1 else h.numRefIdxL1ActiveMinus1) + 1
-            // 8-8 and 8-10: the temporary list repeats the set, so entry k of it is entry k % NumPicTotalCurr of the set.
-            val order = if (x == 0) stCurrBefore + stCurrAfter + ltCurr else stCurrAfter + stCurrBefore + ltCurr
+            // 8-8 and 8-10: the temporary list repeats the set and then the current picture, so entry k of it is
+            // entry k % NumPicTotalCurr of that cycle.
+            val order = (if (x == 0) stCurrBefore + stCurrAfter + ltCurr else stCurrAfter + stCurrBefore + ltCurr) +
+                (if (curr) listOf(current) else emptyList())
             val entries = if (x == 0) h.listEntryL0 else h.listEntryL1
-            Array(active) { i -> order[(entries?.get(i) ?: i) % order.size] }
+            val list = Array(active) { i -> order[(entries?.get(i) ?: i) % order.size] }
+            // 8-9: a list 0 that is not modified and is cut short of NumRpsCurrTempList0 ends with the current picture.
+            if (x == 0 && curr && entries == null && total > active) list[active - 1] = current
+            list
         }
-        val lt = Array(lists) { x -> BooleanArray(pics[x].size) { i -> pics[x][i] in ltCurr } }
+        // The current picture is marked "used for long-term reference" while it is decoded (8.1.3).
+        val lt = Array(lists) { x -> BooleanArray(pics[x].size) { i -> pics[x][i] in ltCurr || pics[x][i] === current } }
         val col = if (!h.temporalMvpEnabled) null else if (h.sliceType == SliceType.B && !h.collocatedFromL0) pics[1][h.collocatedRefIdx] else pics[0][h.collocatedRefIdx]
         val noBackward = pics.all { list -> list.all { it.poc <= poc } }
-        return RefLists(pics, lt, poc, col, noBackward)
+        val isCurrent = Array(lists) { x -> BooleanArray(pics[x].size) { i -> pics[x][i] === current } }
+        return RefLists(pics, lt, poc, col, noBackward, isCurrent)
     }
 
     /**

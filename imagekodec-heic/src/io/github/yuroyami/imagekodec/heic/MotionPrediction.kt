@@ -169,9 +169,11 @@ internal class MotionPredictor(private val d: PictureDecoder) {
         ref1 = candRef[2 * mergeIdx + 1]
         mv0 = candMv[2 * mergeIdx]
         mv1 = candMv[2 * mergeIdx + 1]
-        if (slice.useIntegerMv) {
-            // 8-124 and 8-125.
+        // 8-124 and 8-125: whole samples under use_integer_mv_flag, or from the current picture.
+        if (slice.useIntegerMv || (ref0 >= 0 && refs.isCurrent[0][ref0])) {
             mv0 = MotionField.pack((MotionField.x(mv0) shr 2) shl 2, (MotionField.y(mv0) shr 2) shl 2)
+        }
+        if (slice.useIntegerMv || (ref1 >= 0 && refs.isCurrent[1][ref1])) {
             mv1 = MotionField.pack((MotionField.x(mv1) shr 2) shl 2, (MotionField.y(mv1) shr 2) shl 2)
         }
         // 8-126 and 8-127: an 8x4 or 4x8 block predicts from one list only.
@@ -331,7 +333,7 @@ internal class MotionPredictor(private val d: PictureDecoder) {
      */
     private fun temporal(xPb: Int, yPb: Int, nPbW: Int, nPbH: Int, refIdx: Int, x: Int): Boolean {
         val col = refs.colPic ?: return false
-        val motion = col.motion ?: return false
+        val motion = col.motion.getOrNull(d.colourPlane) ?: return false
         val xBr = xPb + nPbW
         val yBr = yPb + nPbH
         if ((yPb shr ctbLog2) == (yBr shr ctbLog2) && yBr < d.height && xBr < d.width) {

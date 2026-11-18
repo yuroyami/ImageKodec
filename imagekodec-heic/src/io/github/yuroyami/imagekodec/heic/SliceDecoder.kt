@@ -5,9 +5,10 @@ package io.github.yuroyami.imagekodec.heic
  * reconstructs it at once (8.4, 8.5, 8.6). The picture keeps, in units of 4x4 luma samples, only what a
  * later stage needs: the prediction mode, QpY, the PCM and bypass flags, the transform and prediction
  * edges, and for a picture with P or B slices the motion of [MotionField].
- * [sps] and [pps] must have passed [Pps.checkAgainst].
+ * [sps] and [pps] must have passed [Pps.checkAgainst]. Under separate_colour_plane_flag each of the three
+ * colour planes has a decoder of its own, a monochrome picture of [colourPlane] (8.1.3).
  */
-internal class PictureDecoder(val sps: Sps, val pps: Pps) {
+internal class PictureDecoder(val sps: Sps, val pps: Pps, val colourPlane: Int = 0) {
     val width: Int = sps.width
     val height: Int = sps.height
     val chromaArrayType: Int = sps.chromaArrayType
@@ -44,6 +45,8 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     val qpY: ByteArray = ByteArray(w4 * (height shr 2))
     /** The FLAG_ bits of each unit. */
     val flags: ByteArray = ByteArray(w4 * (height shr 2))
+    /** palette_mode_flag of the coding unit of each unit, whose samples the deblocking filter keeps (8.7.2.5.7). */
+    val paletteUnits: BooleanArray? = if (sps.paletteMode) BooleanArray(w4 * (height shr 2)) else null
 
     /** The tiles and the tile scan of 6.5.1. */
     val layout: CtbLayout = CtbLayout(sps, pps)
@@ -71,6 +74,20 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     }
 
     private val cabac = Cabac()
+    /** Palette mode, with the predictor palette that runs through the slice. */
+    private val palette: PaletteDecoder? = if (sps.paletteMode) PaletteDecoder(this, cabac) else null
+    /** TwoVersionsOfCurrDecPicFlag, 7-40. */
+    private val twoVersions = pps.twoVersionsOfCurrDecPic(sps)
+    /**
+     * A picture that refers to itself predicts from its samples before the loop filters (8.1.3), anywhere above
+     * or left of the block, so its loop filters wait for the whole picture.
+     */
+    private val deferLoopFilters = pps.currPicRefEnabled
+    private val act = pps.residualAdaptiveColourTransform
+    /** tu_residual_act_flag of the transform unit being decoded. */
+    private var tuAct = false
+    /** The residuals of the three components of a transform unit under the adaptive colour transform (8.6.8). */
+    private val actResidual = if (act) Array(3) { IntArray(32 * 32) } else emptyArray()
 
     // The range extension tools (7.4.3.2.2, 7.4.3.3.2), read once per picture so the common path tests a field.
     private val extendedPrecision = sps.extendedPrecision
@@ -218,8 +235,12 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             ctbHeader[ctbAddr] = h
             codingTreeUnit()
             decodedCtbs++
-            // 9.3.1: under WPP the contexts after the second CTB of a row of a tile seed the row below.
-            if (wpp && (x == 1 || (ctbAddr > 1 && tileIdRs[ctbAddr] != tileIdRs[ctbAddr - 2]))) cabac.states.copyInto(wppStates)
+            // 9.3.1: under WPP the contexts after the second CTB of a row of a tile seed the row below, and so
+            // does the predictor palette (9.3.2.4).
+            if (wpp && (x == 1 || (ctbAddr > 1 && tileIdRs[ctbAddr] != tileIdRs[ctbAddr - 2]))) {
+                cabac.states.copyInto(wppStates)
+                palette?.store(PaletteDecoder.WPP)
+            }
             val end = cabac.terminate()
             ctbTs++
             ctbDecoded(ctbAddr)
@@ -230,7 +251,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
                     hevcError("num_entry_point_offsets ${starts.size - 1} but the slice segment has ${substream + 1} subsets")
                 }
                 // 9.3.2.4: kept for a dependent slice segment that may follow.
-                if (pps.dependentSliceSegmentsEnabled) cabac.states.copyInto(dsStates)
+                if (pps.dependentSliceSegmentsEnabled) {
+                    cabac.states.copyInto(dsStates)
+                    palette?.store(PaletteDecoder.DEPENDENT)
+                }
                 nextCtbTs = ctbTs
                 return
             }
@@ -299,21 +323,27 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private fun startContexts(dependent: Boolean) {
         val firstInTile = ctbTs == 0 || layout.tileId[ctbTs] != layout.tileId[ctbTs - 1]
         val rowStart = wpp && rowStartInTile()
+        // 9.3.2.1: the predictor palette starts, or is taken over, wherever the contexts are.
         if (firstInTile) {
             Ctx.init(cabac.states, initType, sliceQpY)
+            palette?.initialise()
         } else if (rowStart) {
             val above = ctbAddr - widthInCtbs + 1
             // (xNbT, yNbT) of 9-3, available by 6.4.1: inside the picture, decoded, in the slice and the tile.
             val x = ctbAddr % widthInCtbs
             if (ctbAddr >= widthInCtbs && x + 1 < widthInCtbs && ctbSlice[above] == sliceAddrRs && tileIdRs[above] == tileIdRs[ctbAddr]) {
                 wppStates.copyInto(cabac.states)
+                palette?.restore(PaletteDecoder.WPP)
             } else {
                 Ctx.init(cabac.states, initType, sliceQpY)
+                palette?.initialise()
             }
         } else if (dependent) {
             dsStates.copyInto(cabac.states)
+            palette?.restore(PaletteDecoder.DEPENDENT)
         } else {
             Ctx.init(cabac.states, initType, sliceQpY)
+            palette?.initialise()
         }
         // 8.6.1: qPY_PREV is SliceQpY in the first quantization group of a slice, a tile, or a CTB row of a tile under WPP.
         if (firstInTile || rowStart || !dependent) lastQpY = sliceQpY
@@ -327,7 +357,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private fun ctbDecoded(rs: Int) {
         if (++rowCtbs[rs / widthInCtbs] != widthInCtbs) return
         while (completeRows < heightInCtbs && rowCtbs[completeRows] == widthInCtbs) completeRows++
-        runLoopFilters(completeRows - 1)
+        if (!deferLoopFilters) runLoopFilters(completeRows - 1)
     }
 
     private val rowCtbs = IntArray(heightInCtbs)
@@ -541,6 +571,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         cuInter = !isIntra
         intraSplit = false
         partMode = PartMode.PART_2Nx2N
+        if (isIntra && palette != null && log2 <= sps.maxTbLog2 && cabac.decode(Ctx.PALETTE_MODE) == 1) {
+            paletteUnit(x0, y0, log2, depth)
+            return
+        }
         if (isIntra) {
             // part_mode of an intra unit is coded only at the smallest size: 1 is PART_2Nx2N, 0 PART_NxN.
             intraSplit = log2 == minCbLog2 && cabac.decode(Ctx.PART_MODE) == 0
@@ -578,6 +612,40 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         fillUnits(qpY, x0, y0, size, size, cuQpY)
         lastQpY = cuQpY
     }
+
+    /**
+     * A coding unit in palette mode (7.3.8.13, 8.4.1): coded in intra mode, its luma intra prediction mode
+     * taken as INTRA_DC by its neighbours as a PCM unit's is, as no mode is derived for it.
+     */
+    private fun paletteUnit(x0: Int, y0: Int, log2: Int, depth: Int) {
+        val size = 1 shl log2
+        cuQpY = currentQpY()
+        // tu_residual_act_flag is inferred 0, so escape samples take the chroma QPs of 8-285 and 8-286.
+        tuAct = false
+        val unitFlags = FLAG_INTRA or (if (cuBypass) FLAG_BYPASS else 0)
+        for (y in (y0 shr 2) until ((y0 + size) shr 2)) {
+            val row = y * w4
+            for (x in (x0 shr 2) until ((x0 + size) shr 2)) {
+                ctDepth[row + x] = depth.toByte()
+                flags[row + x] = unitFlags.toByte()
+                paletteUnits!![row + x] = true
+            }
+        }
+        fillUnits(predModeY, x0, y0, size, size, IntraPredictor.INTRA_DC)
+        palette!!.codingUnit(x0, y0, log2, cuBypass)
+        markEdges(x0, y0, size)
+        fillUnits(qpY, x0, y0, size, size, cuQpY)
+        lastQpY = cuQpY
+    }
+
+    /** delta_qp( ) and chroma_qp_offset( ) of a palette unit with escape samples (7.3.8.13). */
+    internal fun paletteQp(bypass: Boolean) {
+        deltaQp()
+        if (!bypass) chromaQpOffset()
+    }
+
+    /** Qp′Y of the current coding unit (8-284). */
+    internal val lumaQpPrime: Int get() = cuQpY + sps.qpBdOffsetY
 
     /** part_mode of an inter unit, with the binarization of Table 9-45 and the contexts of Table 9-48. */
     private fun interPartMode(log2: Int): Int {
@@ -678,23 +746,39 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
                 mvd1 = if (slice.mvdL1Zero && idc == 2) 0 else mvdCoding()
                 flag1 = c.decode(Ctx.MVP_FLAG)
             }
-            if (r0 >= 0) m0 = addMvd(mp.predictor(0, r0, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag0), mvd0)
-            if (r1 >= 0) m1 = addMvd(mp.predictor(1, r1, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag1), mvd1)
+            if (r0 >= 0) m0 = addMvd(mp.predictor(0, r0, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag0), mvd0, refs.isCurrent[0][r0])
+            if (r1 >= 0) m1 = addMvd(mp.predictor(1, r1, xCb, yCb, nCbS, xPb, yPb, w, h, partIdx, flag1), mvd1, refs.isCurrent[1][r1])
+        }
+        // 8.5.3.2.1: under TwoVersionsOfCurrDecPicFlag, a bi-predicted block of 8x8 whose two vectors are both
+        // fractional (8-102) and not the same motion (8-103) predicts from list 0 alone. The size is the
+        // prediction block's own: nPbSw and nPbSh of 8-86 and 8-87 would also take in the 16x4 and 16x12 blocks
+        // of a 16x16 AMP unit, and the conformance streams Bipred_8by8_A, MVRESIDC_A and HT_A then fail.
+        if (twoVersions && r0 >= 0 && r1 >= 0 && w == 8 && h == 8 && !wholeSample(m0) && !wholeSample(m1)) {
+            if (m0 != m1 || refs.poc(0, r0) != refs.poc(1, r1)) {
+                r1 = -1
+                m1 = 0
+            }
         }
         mp.store(xPb, yPb, w, h, r0, m0, r1, m1)
         interPredictor!!.predict(slice, refs, xPb, yPb, w, h, r0, m0, r1, m1)
         return merge
     }
 
-    /** 8-94 to 8-101: mvpLX + mvdLX wrapped to 16 bits, or in whole samples under use_integer_mv_flag. */
-    private fun addMvd(mvp: Int, mvd: Int): Int {
+    /**
+     * 8-94 to 8-101: mvpLX + mvdLX wrapped to 16 bits, or in whole samples under use_integer_mv_flag or for a
+     * reference that is the current picture ([current]).
+     */
+    private fun addMvd(mvp: Int, mvd: Int, current: Boolean): Int {
         val px = MotionField.x(mvp)
         val py = MotionField.y(mvp)
         val dx = MotionField.x(mvd)
         val dy = MotionField.y(mvd)
-        if (slice.useIntegerMv) return MotionField.pack(((px shr 2) + dx) shl 2, ((py shr 2) + dy) shl 2)
+        if (slice.useIntegerMv || current) return MotionField.pack(((px shr 2) + dx) shl 2, ((py shr 2) + dy) shl 2)
         return MotionField.pack(px + dx, py + dy)
     }
+
+    /** noIntegerMvFlag of 8-102 is 0 for this vector: both its components are whole samples. */
+    private fun wholeSample(mv: Int): Boolean = MotionField.x(mv) and 3 == 0 && MotionField.y(mv) and 3 == 0
 
     /** ref_idx_l0 or ref_idx_l1: TR with cMax [max], two bins in contexts and the rest bypass. */
     private fun refIdx(max: Int): Int {
@@ -899,7 +983,12 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
 
     /** transform_unit( ), 7.3.8.10, each block reconstructed as soon as it is parsed. */
     private fun transformUnit(x0: Int, y0: Int, xBase: Int, yBase: Int, log2: Int, blkIdx: Int, cbfLuma: Int, cb: Int, cr: Int) {
+        tuAct = false
         if (cbfLuma != 0 || cb != 0 || cr != 0) {
+            // tu_residual_act_flag: an inter unit, or an intra one whose chroma takes the luma mode (mode 4) in every block.
+            if (act && (cuInter || (if (intraSplit) (0..3).all { chromaSyntax[it] == 4 } else chromaSyntax[0] == 4))) {
+                tuAct = cabac.decode(Ctx.TU_RESIDUAL_ACT) == 1
+            }
             deltaQp()
             if ((cb != 0 || cr != 0) && !cuBypass) chromaQpOffset()
         }
@@ -913,6 +1002,10 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         }
         // An inter block has no intra prediction mode; -1 picks the diagonal scan and no implicit DPCM.
         val lumaMode = if (cuInter) -1 else predModeY[(y0 shr 2) * w4 + (x0 shr 2)].toInt()
+        if (tuAct) {
+            actTransformUnit(x0, y0, log2, lumaMode, cbfLuma, cb, cr)
+            return
+        }
         block(0, x0, y0, log2, lumaMode, cbfLuma != 0)
         if (chromaArrayType == 0) return
         val log2C: Int
@@ -942,6 +1035,74 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
             for (t in 0 until blocks) {
                 block(c, xC shr subWShift, (yC shr subHShift) + (t shl log2C), log2C, mode, (cbf shr t) and 1 != 0)
             }
+        }
+    }
+
+    /**
+     * A transform unit with tu_residual_act_flag (4:4:4 only, so every block is the luma block's size): the three
+     * residuals of 8.6.2, the chroma ones with cross-component prediction, go through the adaptive colour
+     * transform of 8.6.8 before each is added to its prediction (8.4.1 and 8.5.4 with controlParaAct).
+     */
+    private fun actTransformUnit(x0: Int, y0: Int, log2: Int, lumaMode: Int, cbfLuma: Int, cb: Int, cr: Int) {
+        val n = 1 shl log2
+        // The prediction block that holds the transform block, as in [transformUnit].
+        val half = (1 shl log2Cu) shr 1
+        val k = if (intraSplit) (if (y0 - yCu >= half) 2 else 0) + (if (x0 - xCu >= half) 1 else 0) else 0
+        val chromaModeK = if (cuInter) -1 else chromaMode[k]
+        val ccp = crossComponent && cbfLuma != 0 && (cuInter || chromaSyntax[k] == 4)
+        resScaleCb = 0
+        resScaleCr = 0
+        for (c in 0..2) {
+            if (c > 0 && ccp) crossComponentPrediction(c)
+            val coded = if (c == 0) cbfLuma != 0 else ((if (c == 1) cb else cr) and 1) != 0
+            val r = blockResidual(c, log2, if (c == 0) lumaMode else chromaModeK, coded)
+            if (r == null) actResidual[c].fill(0, 0, n * n) else r.copyInto(actResidual[c], 0, 0, n * n)
+        }
+        adaptiveColourTransform(n)
+        for (c in 0..2) {
+            val mode = if (c == 0) lumaMode else chromaModeK
+            if (!cuInter) intra.predict(c, x0, y0, log2, mode, cuBypass && implicitRdpcm, false)
+            addResidual(c, x0, y0, n, actResidual[c], sps.planeBitDepth(c))
+        }
+    }
+
+    /** 8.6.8.2 over the n by n residuals of [actResidual]: YCgCo back to the coded colour components. */
+    private fun adaptiveColourTransform(n: Int) {
+        val rY = actResidual[0]
+        val rCb = actResidual[1]
+        val rCr = actResidual[2]
+        val minY = -coeffMaxY - 1
+        val minC = -coeffMaxC - 1
+        // 8-329 to 8-332.
+        val deltaY = maxOf(sps.bitDepthY, sps.bitDepthC) - sps.bitDepthY
+        val deltaC = maxOf(sps.bitDepthY, sps.bitDepthC) - sps.bitDepthC
+        val offsetY = if (deltaY > 0) 1 shl (deltaY - 1) else 0
+        val offsetC = if (deltaC > 0) 1 shl (deltaC - 1) else 0
+        val lossy = !cuBypass
+        for (i in 0 until n * n) {
+            // 8-326 to 8-328, then 8-333 to 8-335 for a unit that is not bypassed.
+            var y = rY[i].coerceIn(minY, coeffMaxY)
+            var cg = rCb[i].coerceIn(minC, coeffMaxC)
+            var co = rCr[i].coerceIn(minC, coeffMaxC)
+            if (lossy) {
+                y = y shl deltaY
+                cg = cg shl (deltaC + 1)
+                co = co shl (deltaC + 1)
+            }
+            // 8-336 to 8-339: the lifting steps of YCgCo-R.
+            val tmp = y - (cg shr 1)
+            y = tmp + cg
+            cg = tmp - (co shr 1)
+            co += cg
+            if (lossy) {
+                // 8-340 to 8-342.
+                y = (y + offsetY) shr deltaY
+                cg = (cg + offsetC) shr deltaC
+                co = (co + offsetC) shr deltaC
+            }
+            rY[i] = y
+            rCb[i] = cg
+            rCr[i] = co
         }
     }
 
@@ -975,15 +1136,31 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
     private fun block(cIdx: Int, x0: Int, y0: Int, log2: Int, mode: Int, coded: Boolean) {
         // An inter unit's prediction is already in the picture (8.5.1).
         if (!cuInter) intra.predict(cIdx, x0, y0, log2, mode, cuBypass && implicitRdpcm, false)
+        val r = blockResidual(cIdx, log2, mode, coded) ?: return
+        addResidual(cIdx, x0, y0, 1 shl log2, r, if (cIdx == 0) sps.bitDepthY else sps.bitDepthC)
+    }
+
+    /**
+     * The residual of one transform block of [cIdx] (8.6.2), with residual DPCM (8.6.5) and cross-component
+     * prediction (8.6.6), in a buffer that the next block reuses; null for a block without one.
+     */
+    private fun blockResidual(cIdx: Int, log2: Int, mode: Int, coded: Boolean): IntArray? {
         // 8.4.4.1, step 8: a chroma block takes a share of the luma residual even with no residual of its own.
         val resScale = if (cIdx == 0) 0 else if (cIdx == 1) resScaleCb else resScaleCr
-        if (!coded && resScale == 0) return
+        if (!coded && resScale == 0) return null
         val n = 1 shl log2
         val bitDepth = if (cIdx == 0) sps.bitDepthY else sps.bitDepthC
         val r: IntArray
         if (coded) {
-            val qp = if (cIdx == 0) cuQpY + sps.qpBdOffsetY else chromaQp(cIdx)
-            val packed = residualCoding(cIdx, x0, y0, log2, mode, qp, bitDepth)
+            val qp = if (cIdx != 0) {
+                chromaQp(cIdx)
+            } else if (tuAct) {
+                // 8-291.
+                (cuQpY + sps.qpBdOffsetY + pps.actQpOffsetY + slice.actYQpOffset).coerceIn(0, 51 + sps.qpBdOffsetY)
+            } else {
+                cuQpY + sps.qpBdOffsetY
+            }
+            val packed = residualCoding(cIdx, log2, mode, qp, bitDepth)
             r = residualOf(packed, cIdx, log2, mode, bitDepth)
         } else {
             r = residual
@@ -1002,7 +1179,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
                 }
             }
         }
-        addResidual(cIdx, x0, y0, n, r, bitDepth)
+        return r
     }
 
     /** 8.6.7: adds the residual [r] of the n by n block at ([x0], [y0]) of [cIdx] to its prediction, clipped. */
@@ -1094,9 +1271,14 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
         if (cIdx == 1) resScaleCb = v else resScaleCr = v
     }
 
-    /** Qp′Cb or Qp′Cr of 8.6.1 for the current coding unit. */
-    private fun chromaQp(cIdx: Int): Int {
-        val offset = if (cIdx == 1) pps.cbQpOffset + slice.cbQpOffset + cuQpOffsetCb else pps.crQpOffset + slice.crQpOffset + cuQpOffsetCr
+    /** Qp′Cb or Qp′Cr of 8.6.1 for the current coding unit, with the offsets of 8-287 and 8-288 under tu_residual_act_flag. */
+    internal fun chromaQp(cIdx: Int): Int {
+        val offset = when {
+            tuAct && cIdx == 1 -> pps.actQpOffsetCb + slice.actCbQpOffset + cuQpOffsetCb
+            tuAct -> pps.actQpOffsetCr + slice.actCrQpOffset + cuQpOffsetCr
+            cIdx == 1 -> pps.cbQpOffset + slice.cbQpOffset + cuQpOffsetCb
+            else -> pps.crQpOffset + slice.crQpOffset + cuQpOffsetCr
+        }
         val qpi = (cuQpY + offset).coerceIn(-sps.qpBdOffsetC, 57)
         val qpc = if (chromaArrayType == 1) {
             // Table 8-10.
@@ -1111,7 +1293,7 @@ internal class PictureDecoder(val sps: Sps, val pps: Pps) {
      * residual_coding( ), 7.3.8.11, into [coeff] in raster order, scaled by 8.6.3 unless the unit
      * bypasses it. Returns the last column and row that hold a coefficient, and TRANSFORM_SKIPPED.
      */
-    private fun residualCoding(cIdx: Int, x0: Int, y0: Int, log2: Int, predMode: Int, qp: Int, bitDepth: Int): Int {
+    private fun residualCoding(cIdx: Int, log2: Int, predMode: Int, qp: Int, bitDepth: Int): Int {
         val n = 1 shl log2
         coeff.fill(0, 0, n * n)
         val c = cabac

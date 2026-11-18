@@ -57,17 +57,10 @@ internal object HevcSupport {
     /** Why the slice segment [h] cannot be decoded, or null. */
     fun sliceReason(h: SliceHeader): String? = firstUnsupportedField(h.sps, h.pps, h)?.let { "HEVC: $it is not supported yet" }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun firstUnsupportedField(s: Sps, p: Pps?, slice: SliceHeader?): String? = when {
+        // A CTB of 8 samples, which no profile of Annex A allows (CtbLog2SizeY of 4 to 6).
         s.ctbLog2 < 4 -> "a CTB of ${s.ctbSize} samples (log2_diff_max_min_luma_coding_block_size)"
-        s.separateColourPlane -> "separate_colour_plane_flag"
-        // The tools of the screen content coding extension. explicit_rdpcm_enabled_flag of the range
-        // extension needs nothing here, as only an inter unit codes explicit_rdpcm_flag (7.3.8.11).
-        s.paletteMode -> "palette_mode_enabled_flag"
-        // No decoder at hand reads it to check one against (ffmpeg 6.1 ignores it), and every SCC
-        // conformance stream that sets it also turns palette mode on.
-        s.intraBoundaryFilteringDisabled -> "intra_boundary_filtering_disabled_flag"
-        p != null && p.currPicRefEnabled -> "pps_curr_pic_ref_enabled_flag"
-        p != null && p.residualAdaptiveColourTransform -> "residual_adaptive_colour_transform_enabled_flag"
         else -> null
     }
 }

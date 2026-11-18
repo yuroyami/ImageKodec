@@ -248,7 +248,7 @@ private fun readLongTerm(r: BitReader, h: SliceHeader, sps: Sps, pps: Pps) {
     if (numSps > 0) h.numLongTermSps = r.ue("num_long_term_sps", 0, numSps)
     val rps = h.shortTermRps!!
     // TwoVersionsOfCurrDecPicFlag, 7-40.
-    val twoVersions = pps.currPicRefEnabled && (sps.saoEnabled || !pps.deblockingFilterDisabled || pps.deblockingFilterOverrideEnabled)
+    val twoVersions = pps.twoVersionsOfCurrDecPic(sps)
     val max = sps.maxDecPicBufferingMinus1[h.temporalId] - rps.numNegative - rps.numPositive - h.numLongTermSps - (if (twoVersions) 1 else 0)
     h.numLongTermPics = r.ue("num_long_term_pics", 0, maxOf(max, 0))
     val n = h.numLongTermSps + h.numLongTermPics

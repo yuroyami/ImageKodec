@@ -429,6 +429,12 @@ internal class Sps {
 
     /** ChromaArrayType, 7.4.3.2.1. */
     val chromaArrayType: Int get() = if (separateColourPlane) 0 else chromaFormatIdc
+
+    /**
+     * The bit depth of plane [c] of a decoded picture. Three separate colour planes are each decoded as the
+     * luma of a monochrome picture (8.1.3), and 7.4.3.2.1 leaves BitDepthC unused without chroma arrays.
+     */
+    fun planeBitDepth(c: Int): Int = if (c == 0 || separateColourPlane) bitDepthY else bitDepthC
     /** SubWidthC and SubHeightC of Table 6-1. */
     val subWidthC: Int get() = if (chromaFormatIdc == 1 || chromaFormatIdc == 2) 2 else 1
     val subHeightC: Int get() = if (chromaFormatIdc == 1) 2 else 1
@@ -647,6 +653,13 @@ internal class Pps {
 
     var multilayerExtension = false
     var extension3d = false
+
+    /**
+     * TwoVersionsOfCurrDecPicFlag, 7-40: a picture that refers to itself and is loop filtered predicts from its
+     * samples before the loop filters, which the decoded picture buffer keeps as a picture of its own.
+     */
+    fun twoVersionsOfCurrDecPic(s: Sps): Boolean =
+        currPicRefEnabled && (s.saoEnabled || !deblockingFilterDisabled || deblockingFilterOverrideEnabled)
 
     /**
      * Checks the ranges that 7.4.3.3 states in terms of the active SPS [s]. Throws an

@@ -46,8 +46,9 @@ internal class InterPredictor(private val d: PictureDecoder) {
     private fun sample(ref: DecodedPicture, c: Int, x: Int, y: Int, bw: Int, bh: Int, mv: Int, sw: Int, sh: Int, bitDepth: Int, out: IntArray) {
         val mvx = MotionField.x(mv)
         val mvy = MotionField.y(mv)
-        val plane = ref.planes[c]
-        val stride = ref.strides[c]
+        // A decoder of one of three separate colour planes reads the same plane of the reference.
+        val plane = ref.planes[c + d.colourPlane]
+        val stride = ref.strides[c + d.colourPlane]
         val pw = sps.width shr sw
         val ph = sps.height shr sh
         if (c == 0) {
