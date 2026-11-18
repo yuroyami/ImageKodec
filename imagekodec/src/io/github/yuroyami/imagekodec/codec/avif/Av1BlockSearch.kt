@@ -16,19 +16,27 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * Modes are first ranked by the Hadamard cost of their prediction (SATD) and the price of their symbols, and only
  * the best few are coded in full: luma with DC chroma first, then the chroma modes, chroma from luma included, on
  * the chosen luma. Effort widens each step: 1 codes one luma and one chroma mode at the largest transform, square
- * partitions down to 8 by 8, and the DCT or the mode's own transform type with a dead-zone quantizer; 2 also ranks
- * filter intra up to 16 by 16, tries one transform split for the best mode, 4 by 4 blocks, searches the levels
- * ([optimize]), tries the DCT, the identity and the mode's own type while it searches and every type of the set
- * when the superblock is committed; 3 codes five luma and four chroma modes, ranks angle deltas and filter intra up
- * to 32 by 32, tries two splits, horizontal and vertical partitions and every type of the set throughout. Where the
+ * partitions down to 8 by 8, and the DCT or the mode's own transform type with a dead-zone quantizer; 2 also tries
+ * one transform split for the best mode, 4 by 4 blocks, searches the levels ([optimize]), and weighs the DCT, the
+ * identity and the mode's own type; 3 codes five luma and four chroma modes, ranks angle deltas and filter intra up
+ * to 32 by 32, tries two splits, horizontal and vertical partitions and codes every type of the set. Where the
  * frame allows screen content tools, a block whose colours are few also tries a palette.
+ *
+ * Efforts 1 and 2 take cheaper estimates first (#176): they rank only the three directional modes whose lines the
+ * block's source gradients follow most ([strongestDirections]) and, for chroma, those and the luma's mode; they code
+ * only the transform type whose coefficients have the least sum of magnitudes, the one that gathers the residual
+ * into fewest; and they do not split a block that its whole codes at the largest transform when its source varies
+ * by less than lambda a sample. Measured on the photo scenes as the size at equal SSIMULACRA 2 score over
+ * qualities 30 to 90, each cost under a percent and the four together 0.8 percent at effort 1 and nothing at effort
+ * 2, for a quarter and a fifth of the time.
  *
  * Effort 2 was set by measuring, on the photo scenes of the tests, what each step of effort 3 brought against its
  * time, as the size at equal SSIMULACRA 2 score (#176). Kept: 4 by 4 blocks (4.6 percent smaller for 9 percent more
  * time), the identity and the mode's own type while searching and every type at the commit (together about 3.5
  * percent for 6 percent), the level search (5 percent) and the transform split (3 percent). Left to effort 3: a second
- * luma and chroma mode, angle deltas, rectangular partitions and filter intra above 16 by 16, each under a percent for
- * its time or, for the partitions and five modes, 6 to 8 percent for twice the time.
+ * luma and chroma mode, angle deltas, rectangular partitions and filter intra, each under a percent for its time or,
+ * for the partitions and five modes, 6 to 8 percent for twice the time. Filter intra up to 16 by 16 and every type
+ * of the set at the commit were in effort 2 until the cheaper estimates came, and then gained nothing measurable.
  */
 internal class Av1BlockSearch(
     private val d: Av1FrameDecoder,
@@ -188,8 +196,11 @@ internal class Av1BlockSearch(
             when (p) {
                 Av1.PARTITION_NONE -> {
                     j += block(r, c, bSize, depth + 1)
-                    // A block that codes no residual at a small error seldom gains from a split.
-                    noneSkipped = chosen[record.key(r, c, bSize)]!!.skip == 1
+                    // A block that codes no residual at a small error seldom gains from a split, nor at efforts 1 and
+                    // 2 a block up to 32 by 32 that keeps the largest transform and whose source varies by less than
+                    // lambda a sample (#176).
+                    val whole = chosen[record.key(r, c, bSize)]!!
+                    noneSkipped = whole.skip == 1 || (effort <= 2 && bSize <= Av1.BLOCK_32X32 && smooth(r, c, bSize, whole))
                 }
                 Av1.PARTITION_SPLIT -> {
                     for (q in 0 until 4) {
@@ -223,6 +234,40 @@ internal class Av1BlockSearch(
     }
 
     private fun allow4x4(): Boolean = effort >= 2
+
+    /**
+     * Whether the block of [bSize] at ([r], [c]), coded whole as [whole], is not worth splitting: [whole] keeps the
+     * largest transform, and the source luma's squared deviation from its mean, over the part inside the picture, is
+     * under lambda a sample, so a split's own residual could save little.
+     */
+    private fun smooth(r: Int, c: Int, bSize: Int, whole: Av1BlockChoice): Boolean {
+        if (whole.txSize != Av1Tables.maxTxSizeRect[bSize]) return false
+        val x0 = c * 4
+        val y0 = r * 4
+        val w = minOf(Av1.blockWidth[bSize], src.width - x0)
+        val h = minOf(Av1.blockHeight[bSize], src.height - y0)
+        if (w <= 0 || h <= 0) return false
+        val s = src.planes[0]
+        val stride = d.planeWidth[0]
+        var sum = 0L
+        var squares = 0L
+        for (y in y0 until y0 + h) {
+            // A row of at most 32 samples of 12 bits, and their squares, fit an Int.
+            var rowSum = 0
+            var rowSquares = 0
+            val at = y * stride
+            for (x in x0 until x0 + w) {
+                val v = s[at + x].toInt()
+                rowSum += v
+                rowSquares += v * v
+            }
+            sum += rowSum
+            squares += rowSquares
+        }
+        val deviation = squares - sum * sum / (w * h)
+        // deviation / (w h) < lambda, which is lambda256 / 256.
+        return deviation * 256 < lambda256 * w * h
+    }
 
     /** Whether a block of [size] has a chroma block at this subsampling. */
     private fun valid(size: Int): Boolean = d.numPlanes == 1 || Av1.subsampledSize(size, d.subX, d.subY) != Av1.BLOCK_INVALID
@@ -927,12 +972,14 @@ internal class Av1BlockSearch(
     private fun rankLuma(r: Int, c: Int, bSize: Int): Int {
         var n = 0
         val directional = bSize >= Av1.BLOCK_8X8
+        directions = if (lossless || effort >= 3) 0xFF else strongestDirections(r, c, bSize)
         for (m in 0 until 13) {
+            if (Av1.isDirectionalMode(m) && (directions shr (m - Av1.V_PRED)) and 1 == 0) continue
             lumaCand[n] = m or (3 shl 8)
             lumaRank[n] = lumaSatd(r, c, bSize, lumaCand[n])
             n++
         }
-        if (!lossless && effort >= 2 && d.seq.enableFilterIntra && maxOf(Av1.blockWidth[bSize], Av1.blockHeight[bSize]) <= (if (effort == 2) 16 else 32)) {
+        if (!lossless && effort >= 3 && d.seq.enableFilterIntra && maxOf(Av1.blockWidth[bSize], Av1.blockHeight[bSize]) <= 32) {
             for (f in 0 until 5) {
                 lumaCand[n] = Av1.DC_PRED or (3 shl 8) or ((f + 1) shl 16)
                 lumaRank[n] = lumaSatd(r, c, bSize, lumaCand[n])
@@ -958,6 +1005,61 @@ internal class Av1BlockSearch(
             sortCandidates(lumaCand, lumaRank, n)
         }
         return n
+    }
+
+    /** The directional modes the last [rankLuma] ranked, as a mask by mode less V_PRED. */
+    private var directions = 0xFF
+    private val directionEnergy = IntArray(8)
+
+    /**
+     * The [DIRECTIONS] directional modes whose lines the source luma of the block of [bSize] at ([r], [c]) follows most,
+     * as a mask by mode less V_PRED (#176). A line runs across the gradient, so each sample's central differences
+     * (gx, gy) give |gx| + |gy| to the mode whose angle is nearest atan2(gx, gy) modulo 180 degrees: V_PRED for a
+     * horizontal gradient, H_PRED for a vertical one, and the six between at steps of 22.5 degrees, D203_PRED's line
+     * being that of 23 degrees. A mode whose lines the block does not hold seldom predicts it best, and ranking three
+     * of the eight cost nothing measurable on the photo scenes.
+     */
+    private fun strongestDirections(r: Int, c: Int, bSize: Int): Int {
+        val e = directionEnergy
+        e.fill(0)
+        val s = src.planes[0]
+        val stride = d.planeWidth[0]
+        val x0 = maxOf(1, c * 4)
+        val y0 = maxOf(1, r * 4)
+        val x1 = minOf(c * 4 + Av1.blockWidth[bSize], src.width - 1)
+        val y1 = minOf(r * 4 + Av1.blockHeight[bSize], src.height - 1)
+        for (y in y0 until y1) {
+            val at = y * stride
+            for (x in x0 until x1) {
+                var gx = s[at + x + 1] - s[at + x - 1]
+                var gy = s[at + stride + x] - s[at - stride + x]
+                // The same line either way round: gy made positive, or gx when gy is 0.
+                if (gy < 0 || (gy == 0 && gx < 0)) {
+                    gx = -gx
+                    gy = -gy
+                }
+                val t = if (gx < 0) -gx else gx
+                if (t == 0 && gy == 0) continue
+                // The angle from the gy axis against 11.25, 33.75, 56.25 and 78.75 degrees, whose tangents are about
+                // 204, 684, 1533 and 5148 in 1/1024; a negative gx turns it the other way.
+                val mode = when {
+                    t * 1024 < gy * 204 -> Av1.H_PRED
+                    t * 1024 < gy * 684 -> if (gx < 0) Av1.D157_PRED else Av1.D203_PRED
+                    t * 1024 < gy * 1533 -> if (gx < 0) Av1.D135_PRED else Av1.D45_PRED
+                    t * 1024 < gy * 5148 -> if (gx < 0) Av1.D113_PRED else Av1.D67_PRED
+                    else -> Av1.V_PRED
+                }
+                e[mode - Av1.V_PRED] += t + gy
+            }
+        }
+        // The strongest first, the lower mode on a tie.
+        var mask = 0
+        for (k in 0 until DIRECTIONS) {
+            var best = -1
+            for (i in 0 until 8) if ((mask shr i) and 1 == 0 && (best < 0 || e[i] > e[best])) best = i
+            mask = mask or (1 shl best)
+        }
+        return mask
     }
 
     private fun decodeLuma(code: Int, ch: Av1BlockChoice) {
@@ -1036,7 +1138,10 @@ internal class Av1BlockSearch(
         val cdf = d.cdf
         var n = 0
         d.yMode = base.yMode
+        // At efforts 1 and 2, the directions the luma ranked, and the luma's own mode.
+        val uvDirections = if (effort >= 3 || !Av1.isDirectionalMode(base.yMode)) directions else directions or (1 shl (base.yMode - Av1.V_PRED))
         for (m in 0 until 13) {
+            if (Av1.isDirectionalMode(m) && (uvDirections shr (m - Av1.V_PRED)) and 1 == 0) continue
             d.uvMode = m
             d.angleDeltaUV = 0
             var satd = 0L
@@ -1304,9 +1409,35 @@ internal class Av1BlockSearch(
         val dqDenom = Av1Transform.dqDenom(txSz)
         val scale = Av1ForwardTransform.distortionScale(txSz).toLong()
         val n = tw * th
-        for (type in types) {
-            if (type < 0) break
-            fwd.forward(residual, txSz, type, coef)
+        var typeCount = 0
+        while (types[typeCount] >= 0) typeCount++
+        // At efforts 1 and 2, of several types only the one whose coefficients have the least sum of magnitudes, which
+        // gathers the residual into the fewest, is quantized and priced (#176).
+        var only = -1
+        if (effort <= 2 && typeCount > 1) {
+            var least = Long.MAX_VALUE
+            for (i in 0 until typeCount) {
+                val tc = typeCoef[i]
+                fwd.forward(residual, txSz, types[i], tc)
+                var sum = 0L
+                var k = 0
+                while (k < n) {
+                    // A row of at most 32 coefficients in an Int, then into the Long.
+                    var row = 0
+                    for (j in k until k + tw) row += if (tc[j] < 0) -tc[j] else tc[j]
+                    sum += row
+                    k += tw
+                }
+                if (sum < least) {
+                    least = sum
+                    only = i
+                }
+            }
+        }
+        for (i in 0 until typeCount) {
+            if (only >= 0 && i != only) continue
+            val type = types[i]
+            if (only >= 0) typeCoef[i].copyInto(coef, 0, 0, n) else fwd.forward(residual, txSz, type, coef)
             for (k in 0 until n) {
                 val v = coef[k]
                 val q = if (k == 0) dcQ else acQ
@@ -1535,6 +1666,8 @@ internal class Av1BlockSearch(
     }
 
     private val typeList = IntArray(17)
+    /** The coefficients of each type [choose] weighs, while it picks one. */
+    private val typeCoef = Array(16) { IntArray(1024) }
 
     /** The transform types to try for [plane] and [txSz], -1 ended: luma by the set and effort, chroma the one it derives. */
     private fun candidateTypes(plane: Int, txSz: Int, x4: Int, y4: Int): IntArray {
@@ -1563,8 +1696,8 @@ internal class Av1BlockSearch(
                 typeList[n++] = Av1.DCT_DCT
                 if (effort <= 1) {
                     if (implied != Av1.DCT_DCT && implied in inSet) typeList[n++] = implied
-                } else if (effort == 2 && mode != Mode.COMMIT) {
-                    // While searching, the identity for hard edges and the mode's own type beside the DCT.
+                } else if (effort == 2) {
+                    // The identity for hard edges and the mode's own type beside the DCT.
                     if (Av1.IDTX in inSet) typeList[n++] = Av1.IDTX
                     if (implied != Av1.DCT_DCT && implied in inSet) typeList[n++] = implied
                 } else {
@@ -1651,6 +1784,8 @@ internal class Av1BlockSearch(
         /** The eight neighbours of a point, the four nearest first: row and column steps. */
         private val SQUARE = intArrayOf(-1, 0, 0, -1, 0, 1, 1, 0, -1, -1, -1, 1, 1, -1, 1, 1)
         val PRUNE = LongArray(4)
+        /** How many directional modes [strongestDirections] keeps at efforts 1 and 2. */
+        private const val DIRECTIONS = 3
         /** How many results of [choose] are kept for each place and size of transform block. */
         private const val MEMO_WAYS = 4
         /** The floor of the square root of [x], by Newton's method in integers. */
