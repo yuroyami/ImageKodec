@@ -107,6 +107,18 @@ final enum class io.github.yuroyami.imagekodec/RenderingIntent : kotlin/Enum<io.
     final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/RenderingIntent> // io.github.yuroyami.imagekodec/RenderingIntent.values|values#static(){}[0]
 }
 
+final enum class io.github.yuroyami.imagekodec/WebpAlphaFilter : kotlin/Enum<io.github.yuroyami.imagekodec/WebpAlphaFilter> { // io.github.yuroyami.imagekodec/WebpAlphaFilter|null[0]
+    enum entry Best // io.github.yuroyami.imagekodec/WebpAlphaFilter.Best|null[0]
+    enum entry Fast // io.github.yuroyami.imagekodec/WebpAlphaFilter.Fast|null[0]
+    enum entry None // io.github.yuroyami.imagekodec/WebpAlphaFilter.None|null[0]
+
+    final val entries // io.github.yuroyami.imagekodec/WebpAlphaFilter.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.yuroyami.imagekodec/WebpAlphaFilter> // io.github.yuroyami.imagekodec/WebpAlphaFilter.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.yuroyami.imagekodec/WebpAlphaFilter // io.github.yuroyami.imagekodec/WebpAlphaFilter.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.yuroyami.imagekodec/WebpAlphaFilter> // io.github.yuroyami.imagekodec/WebpAlphaFilter.values|values#static(){}[0]
+}
+
 abstract fun interface io.github.yuroyami.imagekodec/TileJob { // io.github.yuroyami.imagekodec/TileJob|null[0]
     abstract fun run() // io.github.yuroyami.imagekodec/TileJob.run|run(){}[0]
 }
@@ -632,6 +644,27 @@ final class io.github.yuroyami.imagekodec/UnsupportedImageException : io.github.
     constructor <init>(kotlin/String, kotlin/Throwable? = ...) // io.github.yuroyami.imagekodec/UnsupportedImageException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
 }
 
+final class io.github.yuroyami.imagekodec/WebpEncodeOptions { // io.github.yuroyami.imagekodec/WebpEncodeOptions|null[0]
+    constructor <init>(kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Boolean = ..., kotlin/Int = ..., io.github.yuroyami.imagekodec/WebpAlphaFilter = ..., kotlin/Int = ...) // io.github.yuroyami.imagekodec/WebpEncodeOptions.<init>|<init>(kotlin.Boolean;kotlin.Int;kotlin.Int;kotlin.Boolean;kotlin.Int;io.github.yuroyami.imagekodec.WebpAlphaFilter;kotlin.Int){}[0]
+
+    final val alphaFilter // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaFilter|{}alphaFilter[0]
+        final fun <get-alphaFilter>(): io.github.yuroyami.imagekodec/WebpAlphaFilter // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaFilter.<get-alphaFilter>|<get-alphaFilter>(){}[0]
+    final val alphaQuality // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaQuality|{}alphaQuality[0]
+        final fun <get-alphaQuality>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.alphaQuality.<get-alphaQuality>|<get-alphaQuality>(){}[0]
+    final val background // io.github.yuroyami.imagekodec/WebpEncodeOptions.background|{}background[0]
+        final fun <get-background>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.background.<get-background>|<get-background>(){}[0]
+    final val effort // io.github.yuroyami.imagekodec/WebpEncodeOptions.effort|{}effort[0]
+        final fun <get-effort>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.effort.<get-effort>|<get-effort>(){}[0]
+    final val lossless // io.github.yuroyami.imagekodec/WebpEncodeOptions.lossless|{}lossless[0]
+        final fun <get-lossless>(): kotlin/Boolean // io.github.yuroyami.imagekodec/WebpEncodeOptions.lossless.<get-lossless>|<get-lossless>(){}[0]
+    final val quality // io.github.yuroyami.imagekodec/WebpEncodeOptions.quality|{}quality[0]
+        final fun <get-quality>(): kotlin/Int // io.github.yuroyami.imagekodec/WebpEncodeOptions.quality.<get-quality>|<get-quality>(){}[0]
+    final val sharpYuv // io.github.yuroyami.imagekodec/WebpEncodeOptions.sharpYuv|{}sharpYuv[0]
+        final fun <get-sharpYuv>(): kotlin/Boolean // io.github.yuroyami.imagekodec/WebpEncodeOptions.sharpYuv.<get-sharpYuv>|<get-sharpYuv>(){}[0]
+
+    final fun toString(): kotlin/String // io.github.yuroyami.imagekodec/WebpEncodeOptions.toString|toString(){}[0]
+}
+
 open class io.github.yuroyami.imagekodec/ImageDecodeException : kotlin/Exception { // io.github.yuroyami.imagekodec/ImageDecodeException|null[0]
     constructor <init>(kotlin/String, kotlin/Throwable? = ...) // io.github.yuroyami.imagekodec/ImageDecodeException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
 }
@@ -726,8 +759,11 @@ final object io.github.yuroyami.imagekodec/ImageKodec { // io.github.yuroyami.im
     final fun encodeTiff(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff|encodeTiff(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap>){}[0]
     final fun encodeTiff16(io.github.yuroyami.imagekodec/KiteBitmap16): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(io.github.yuroyami.imagekodec.KiteBitmap16){}[0]
     final fun encodeTiff16(kotlin.collections/List<io.github.yuroyami.imagekodec/KiteBitmap16>): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeTiff16|encodeTiff16(kotlin.collections.List<io.github.yuroyami.imagekodec.KiteBitmap16>){}[0]
+    final fun encodeWebp(io.github.yuroyami.imagekodec/KiteAnimation, io.github.yuroyami.imagekodec/WebpEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteAnimation;io.github.yuroyami.imagekodec.WebpEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
     final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap){}[0]
     final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/ImageMetadata): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.ImageMetadata){}[0]
+    final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap, io.github.yuroyami.imagekodec/WebpEncodeOptions, io.github.yuroyami.imagekodec/ImageMetadata = ..., kotlin/Function0<kotlin/Unit>? = ...): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap;io.github.yuroyami.imagekodec.WebpEncodeOptions;io.github.yuroyami.imagekodec.ImageMetadata;kotlin.Function0<kotlin.Unit>?){}[0]
+    final fun encodeWebp(io.github.yuroyami.imagekodec/KiteBitmap, kotlin/Int): kotlin/ByteArray // io.github.yuroyami.imagekodec/ImageKodec.encodeWebp|encodeWebp(io.github.yuroyami.imagekodec.KiteBitmap;kotlin.Int){}[0]
     final fun motionPhoto(kotlin/ByteArray): io.github.yuroyami.imagekodec/MotionPhotoInfo? // io.github.yuroyami.imagekodec/ImageKodec.motionPhoto|motionPhoto(kotlin.ByteArray){}[0]
     final fun probe(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo // io.github.yuroyami.imagekodec/ImageKodec.probe|probe(kotlin.ByteArray){}[0]
     final fun probeOrNull(kotlin/ByteArray): io.github.yuroyami.imagekodec/ImageInfo? // io.github.yuroyami.imagekodec/ImageKodec.probeOrNull|probeOrNull(kotlin.ByteArray){}[0]
