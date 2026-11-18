@@ -14,6 +14,17 @@ reviewable in the diff.
 
 ### Added
 
+- Lossy WebP writing, written from RFC 6386 and RFC 9649: `encodeWebp(bitmap, quality)` writes a VP8
+  image at a quality with the meaning of `cwebp -q`, and `encodeWebp(bitmap, options, metadata,
+  cancellationCheck)` takes a `WebpEncodeOptions` with `lossless`, `quality`, `effort` 1 to 3 (in
+  the place of `cwebp -m 2`, `-m 4` and `-m 6`), `sharpYuv`, `alphaQuality` and a `WebpAlphaFilter`.
+  Each macroblock's modes are chosen by distortion plus bits, in four segments, and effort 3 adds a
+  trellis. Alpha goes in an `ALPH` chunk, exact by default. On the photo-like scenes of the tests the
+  files are 8.5 to 11.6 percent smaller than `cwebp -m 4`'s at the same SSIMULACRA 2 score, and
+  `dwebp` reads every file as ImageKodec does. `encodeWebp(animation, options)` writes an animated
+  WebP, lossless or lossy, each frame coded as the rectangle that changed, replaced or blended over
+  the canvas. `encodeWebp(bitmap)` writes the same lossless bytes as before. See
+  [Writing images](docs/encoding.md#lossy-and-animated-webp) (#178).
 - `encodeJxr` and `encodeJxr16` write JPEG XR, written from ITU-T T.832: lossy at a quality that
   means what `JxrEncApp -q` means, or lossless at 8 and 16 bits, in gray, RGB and RGBA, with 4:4:4
   or 4:2:0 chroma, the three overlap modes, planar or interleaved alpha, tiles with quantizers of

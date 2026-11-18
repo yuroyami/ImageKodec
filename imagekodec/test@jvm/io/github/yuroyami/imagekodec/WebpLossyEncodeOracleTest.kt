@@ -4,6 +4,8 @@ import org.junit.Assume.assumeTrue
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
+import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -171,16 +173,18 @@ class WebpLossyEncodeOracleTest {
         }
     }
 
-    /** cwebp's size at [score], between the two points of its curve around it; null off the curve. */
+    /**
+     * The size cwebp needs for [score]: along the front of its points that no smaller file of it
+     * beats in score, interpolated between the two around [score]; null off the front. A quality
+     * whose file scores below a smaller one's never counts against it.
+     */
     private fun sizeAt(curve: List<Point>, score: Double): Double? {
-        val sorted = curve.sortedBy { it.score }
-        for (i in 0 until sorted.size - 1) {
-            val a = sorted[i]
-            val b = sorted[i + 1]
-            if (score >= a.score && score <= b.score) {
-                if (b.score == a.score) return a.size.toDouble()
-                return a.size + (b.size - a.size) * (score - a.score) / (b.score - a.score)
-            }
+        val front = ArrayList<Point>()
+        for (p in curve.sortedBy { it.size }) if (front.isEmpty() || p.score > front.last().score) front += p
+        for (i in 0 until front.size - 1) {
+            val a = front[i]
+            val b = front[i + 1]
+            if (score >= a.score && score <= b.score) return a.size + (b.size - a.size) * (score - a.score) / (b.score - a.score)
         }
         return null
     }
@@ -188,42 +192,58 @@ class WebpLossyEncodeOracleTest {
     @Test
     fun sizeAtEqualScoreAgainstCwebp() {
         assumeTools()
-        val rows = ArrayList<String>()
-        val ratios = ArrayList<Double>()
-        var oursMillis = 0L
-        var theirsMillis = 0L
-        for (scene in PhotoScenes.all()) {
-            val curve = cwebpCurve(scene)
-            val png = File(dir, "${scene.name}.png")
-            for (q in QUALITIES) {
-                ImageKodec.encodeWebp(scene.bitmap, q) // warm up
-                val t0 = System.nanoTime()
-                val ours = ImageKodec.encodeWebp(scene.bitmap, q)
-                val t1 = System.nanoTime()
-                val score = ImageKodec.ssimulacra2(scene.bitmap, ImageKodec.decode(ours))
-                val theirs = sizeAt(curve, score)
-                val c0 = System.nanoTime()
-                run(Tools.require("cwebp").path, "-quiet", "-m", "4", "-q", q.toString(), png.path, "-o", File(dir, "t.webp").path)
-                val c1 = System.nanoTime()
-                oursMillis += (t1 - t0) / 1_000_000
-                theirsMillis += (c1 - c0) / 1_000_000
-                val ratio = theirs?.let { ours.size / it }
-                if (ratio != null) ratios += ratio
-                rows += "%-10s %4d %8d %8.3f %10s %8s %6d %6d".format(
-                    scene.name, q, ours.size, score, theirs?.let { "%.0f".format(it) } ?: "-",
-                    ratio?.let { "%+.1f%%".format(100 * (it - 1)) } ?: "-", (t1 - t0) / 1_000_000, (c1 - c0) / 1_000_000,
-                )
+        val curves = PhotoScenes.all().associate { it.name to cwebpCurve(it) }
+        val summary = ArrayList<String>()
+        for (effort in 1..3) {
+            val rows = ArrayList<String>()
+            var logSum = 0.0
+            var n = 0
+            var oursMillis = 0L
+            var theirsMillis = 0L
+            for (scene in PhotoScenes.all()) {
+                val curve = curves.getValue(scene.name)
+                val png = File(dir, "${scene.name}.png")
+                for (q in QUALITIES) {
+                    val options = WebpEncodeOptions(quality = q, effort = effort)
+                    ImageKodec.encodeWebp(scene.bitmap, options) // warm up
+                    val t0 = System.nanoTime()
+                    val ours = ImageKodec.encodeWebp(scene.bitmap, options)
+                    val t1 = System.nanoTime()
+                    val score = ImageKodec.ssimulacra2(scene.bitmap, ImageKodec.decode(ours))
+                    val theirs = sizeAt(curve, score)
+                    val c0 = System.nanoTime()
+                    run(Tools.require("cwebp").path, "-quiet", "-m", "4", "-q", q.toString(), png.path, "-o", File(dir, "t.webp").path)
+                    val c1 = System.nanoTime()
+                    oursMillis += (t1 - t0) / 1_000_000
+                    theirsMillis += (c1 - c0) / 1_000_000
+                    val ratio = theirs?.let { ours.size / it }
+                    if (ratio != null) {
+                        logSum += ln(ratio)
+                        n++
+                    }
+                    rows += "%-10s %4d %8d %8.3f %8.3f %10s %8s %6d %6d".format(
+                        scene.name, q, ours.size, score, curve.first { it.quality == q }.score, theirs?.let { "%.0f".format(it) } ?: "-",
+                        ratio?.let { "%+.1f%%".format(100 * (it - 1)) } ?: "-", (t1 - t0) / 1_000_000, (c1 - c0) / 1_000_000,
+                    )
+                }
             }
+            val mean = exp(logSum / n)
+            if (effort == 2) {
+                println("effort 2: our file, its SSIMULACRA 2, cwebp -m 4's score at the same q, its size at our score")
+                println("scene        q     ours    score  cwebp q  cwebp size   size     ms  cwebp ms")
+                rows.forEach(::println)
+            }
+            summary += "effort %d: mean size against cwebp -m 4 at equal SSIMULACRA 2 %+.1f%% (%d points); encode %d ms, cwebp %d ms with its process start".format(
+                effort, 100 * (mean - 1), n, oursMillis, theirsMillis,
+            )
+            assertTrue(mean < MEAN_BOUND[effort - 1], "effort $effort: the mean size at equal score is %.3f of cwebp's, above the bound %.3f".format(mean, MEAN_BOUND[effort - 1]))
         }
-        val mean = ratios.sum() / ratios.size
-        println("scene        q     ours    score   cwebp -m4   size     ms  cwebp ms")
-        rows.forEach(::println)
-        println("mean size against cwebp -m 4 at equal SSIMULACRA 2: %+.1f%%; encode %d ms, cwebp %d ms (its process included)".format(100 * (mean - 1), oursMillis, theirsMillis))
-        assertTrue(mean < MEAN_BOUND, "the mean size at equal score is %.3f of cwebp's, above the bound %.3f".format(mean, MEAN_BOUND))
+        summary.forEach(::println)
     }
 
     private companion object {
         val QUALITIES = listOf(50, 75, 90)
-        const val MEAN_BOUND = 2.0
+        /** Geometric mean of our size over cwebp's, for efforts 1 to 3: what the encoder reaches, plus a little. */
+        val MEAN_BOUND = doubleArrayOf(0.95, 0.94, 0.92)
     }
 }

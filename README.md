@@ -132,7 +132,8 @@ val jpeg: ByteArray = ImageKodec.encodeJpeg(bitmap, quality = 85)
 ```
 
 There are encoders for PNG and APNG, JPEG (stb_image_write's, or a port of Jpegli for smaller
-files), GIF, BMP, TIFF, lossless WebP, AVIF and, with the `imagekodec-heic` module, HEIC. See
+files), GIF, BMP, TIFF, WebP (lossy and lossless, still and animated), AVIF, JPEG XR and, with the
+`imagekodec-heic` module, HEIC. See
 [Writing images](docs/encoding.md).
 
 ### Show an image in Compose
@@ -158,7 +159,7 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | GIF | still and animated | still and animated |
 | BMP | every header version and depth, RLE, embedded JPEG and PNG | 24-bit, or 32-bit with alpha |
 | TIFF | strips and tiles, the common compressions, every page, up to 16 bits | 8 or 16 bits, many pages |
-| WebP | lossy and lossless, still and animated | lossless |
+| WebP | lossy and lossless, still and animated | lossy and lossless, still and animated |
 | JPEG 2000 | all of Part 1, JP2 and raw codestream | no |
 | AVIF | stills and image sequences, 8 to 12 bits | intra stills and grids, 8 to 12 bits, alpha, lossless |
 | JPEG XL | both coding modes, layers and animation | no |
@@ -190,7 +191,7 @@ in a browser on the web, so those two modules are for browser apps.
 
 - Every entry point takes the complete file as a `ByteArray`. There is no streaming decode.
 - `decode` returns 8 bits a channel. Use `decode16` for deeper samples.
-- There is no encoder for lossy WebP, JPEG 2000 or JPEG XL.
+- There is no encoder for JPEG 2000 or JPEG XL.
 - A decode refuses an image of more than 2^28 pixels (about 1 GiB of ARGB).
 
 [Limits](docs/limits.md) has the full list, format by format.

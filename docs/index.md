@@ -72,7 +72,7 @@ for (frame in anim.frames) draw(frame.bitmap, frame.delayMillis)
 
 <a class="kite-card" href="encoding/">
 <strong>Writing images</strong>
-<span>PNG, APNG, JPEG, GIF, BMP, TIFF and lossless WebP.</span>
+<span>PNG, APNG, JPEG, GIF, BMP, TIFF, WebP, AVIF, JPEG XR and HEIC.</span>
 </a>
 
 <a class="kite-card" href="resizing/">

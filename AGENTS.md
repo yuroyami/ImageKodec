@@ -197,3 +197,5 @@ being true.
   holds the alpha of a turned file to heif-convert's reading of the same file with `irot` set to 0 (#145).
 - libheif 1.17.6 converts a grid by its tiles' colour properties, not the grid item's, so a grid whose nclx
   only the grid item carries reads up to 54 levels away; the synthetic tiles carry the grid's nclx too (#145).
+- `cwebp -q` does not order SSIMULACRA 2 scores: on the city scene of `PhotoScenes`, quality 75 scores 53 and quality 50
+  scores 68. `WebpLossyEncodeOracleTest` reads cwebp's size at a score off the front of files no smaller file beats (#178).

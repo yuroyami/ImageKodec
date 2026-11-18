@@ -242,6 +242,6 @@ class WebpLossyEncoderTest {
     }
 
     private companion object {
-        val EXPECTED_HASHES = listOf("3aaa62f9", "1d900fe9", "6802c714", "a8404d3c", "e2f6d21e")
+        val EXPECTED_HASHES = listOf("8ef23a5a", "e661a1a6", "c4942aa7", "d355fa2f", "62dc3ac5")
     }
 }

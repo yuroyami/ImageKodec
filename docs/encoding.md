@@ -1,7 +1,7 @@
 # Writing images
 
-ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, lossless WebP, AVIF, JPEG XR and, with the
-`imagekodec-heic` module, HEIC. Every encoder takes a
+ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, WebP (lossless and lossy, still and
+animated), AVIF, JPEG XR and, with the `imagekodec-heic` module, HEIC. Every encoder takes a
 `KiteBitmap` (or a `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows
 it) and returns the file as a `ByteArray`.
 
@@ -17,6 +17,8 @@ ImageKodec.encodeTiff(bitmap)                   // gray or RGB, alpha when prese
 ImageKodec.encodeTiff(pages)                    // one page a bitmap, read back with decodePage
 ImageKodec.encodeTiff16(bitmap16)               // the same at 16 bits, read back with decode16
 ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than the PNG
+ImageKodec.encodeWebp(bitmap, 75)               // lossy VP8 at cwebp's quality 75, alpha kept exact
+ImageKodec.encodeWebp(anim, WebpEncodeOptions(lossless = true)) // animated, lossless or lossy frames
 ImageKodec.encodeAvif(bitmap, quality = 50)     // AV1 in HEIF, built in
 ImageKodec.encodeHeic(bitmap, quality = 50)     // HEVC in HEIF, needs ImageKodecHeic.install()
 ImageKodec.encodeJxr(bitmap, quality = 80)      // lossy JPEG XR, as JxrEncApp -q 0.8
@@ -41,6 +43,38 @@ val withMetadata = ImageKodec.encodeJpeg(bitmap, 75, metadata, JpegEncoderKind.J
 - `repackJpeg` makes its output smaller still, by 6 to 17 percent on the same scenes, with Huffman tables built for the image. `repackJpeg(jpeg, progressive = true)` writes it progressive.
 - The output is the same on every platform. On the JVM it matches pyjpegli 0.3.2, a build of Jpegli, byte for byte on most images and within 0.1 percent in size on the rest. Jpegli works in float32 with fused multiply-adds, this port in Double, so a coefficient now and then rounds the other way.
 - Jpegli's XYB colour space is not written: it needs a reader that applies the ICC profile.
+
+## Lossy and animated WebP
+
+`encodeWebp(bitmap, quality)` writes a lossy WebP, and `WebpEncodeOptions` sets everything else (#178):
+
+```kotlin
+val webp = ImageKodec.encodeWebp(bitmap, 75)
+val thorough = ImageKodec.encodeWebp(bitmap, WebpEncodeOptions(quality = 75, effort = 3))
+val withMetadata = ImageKodec.encodeWebp(bitmap, WebpEncodeOptions(quality = 80), metadata)
+val animated = ImageKodec.encodeWebp(animation, WebpEncodeOptions(quality = 70))
+```
+
+- The encoder is written here from RFC 6386 (VP8) and RFC 9649 (the container). It codes one VP8 key frame in YUV 4:2:0, with the BT.601 studio-range matrix the format names. `dwebp` reads every file to the same pixels as ImageKodec's decoder.
+- `quality` runs from 0 to 100 with the meaning of `cwebp -q`: at the same number, the quantizer is about the one libwebp picks, and the SSIMULACRA 2 score lands within two points of cwebp's on most of the test scenes, and within four on all.
+- Each macroblock chooses its prediction, sixteen 4x4 modes or one 16x16 mode for luma and one of four for chroma, by distortion plus a lambda times the bits it costs. The macroblocks fall into four segments by how busy their luma is, and a busy segment takes a coarser quantizer. The token probabilities are fitted to the frame, and the loop filter follows each segment's quantizer.
+- `effort` 1, 2 and 3 stand in for `cwebp -m 2`, `-m 4` and `-m 6`. Effort 1 codes only the three 4x4 modes that predict best. Effort 2, the default, codes every mode, after a first pass that measures the token statistics. Effort 3 also chooses each coefficient's level by distortion plus bits, in a trellis.
+- `sharpYuv` refines Y, U and V against what the decoder's upsampling will show, as `cwebp -sharp_yuv` does. It keeps thin coloured edges and costs a little size on smooth pictures.
+- Alpha goes in an `ALPH` chunk, coded with the lossless encoder, and is exact by default. `alphaQuality` below 100 reduces it to fewer levels, down to two at 0, and keeps fully opaque and fully clear pixels exact. `alphaFilter` picks the prediction filter of the alpha plane: none, a quick estimate of the best (the default), or every filter coded in full.
+- A lossy image without alpha or metadata is the simple format, one `VP8 ` chunk. Alpha or metadata needs the extended format, with `VP8X`.
+- `encodeWebp(animation, options)` writes `ANIM` with the loop count and `options.background`, and an `ANMF` chunk for each frame with its delay. Every frame after the first codes only the rectangle where it differs from what a decoder shows by then. It replaces that rectangle, or, when every changed pixel is opaque, is drawn over it with the unchanged pixels transparent, whichever file is smaller. Lossless frames decode to the exact frames. A lossy frame is compared with the decoded frames before it and leaves a pixel in place only within a few levels of the new frame: 2 at quality 100, 5 at 75, 14 at 0. `anim_dump` renders every frame as ImageKodec does.
+
+### Size and speed
+
+On the six photo-like scenes of the tests, at qualities 50, 75 and 90, `WebpLossyEncodeOracleTest` measures the size each encode takes for its SSIMULACRA 2 score ([Measuring quality](quality.md)) against what `cwebp -m 4` of libwebp 1.3.2 takes for the same score. cwebp's size is read off the front of its own files at qualities 0 to 100 in steps of 5, interpolated, so a cwebp file that scores below a smaller one never counts against it. The geometric mean over the 18 points:
+
+| Effort | Size against `cwebp -m 4` | Encode time, JVM | Encode time, JS (Node 22) |
+| --- | --- | --- | --- |
+| 1 | 8.5 percent smaller | 26 ms | 87 ms |
+| 2 (default) | 9.5 percent smaller | 64 ms | 215 ms |
+| 3 | 11.6 percent smaller | 243 ms | 837 ms |
+
+The times are the mean of one encode of a scene of about 0.16 megapixels on one core of a 4-core Intel Xeon, after a warm-up. cwebp takes 12 to 32 ms for the same scene, its process start included, about two to three times as fast as effort 2 on the JVM. The gain is not even. At quality 50 and 75 it is 1 to 7 percent on most scenes, and at 90 it is 1 to 20 percent. On the dark night scene at 50 and 75 it is 25 to 31 percent, where cwebp's files score low for their size, and on the city scene at 75 it is 25 percent, where cwebp's quality 75 scores below its quality 50. Two points are larger than cwebp's: the foliage scene at 50 by 3 percent and the city scene at 50 by 6 percent.
 
 ## JPEG XR
 
@@ -90,6 +124,7 @@ val upright = ImageKodec.decode(photo, applyOrientation = true)
 val jpeg = ImageKodec.encodeJpeg(upright, 85, metadata.upright())
 val png = ImageKodec.encodePng(upright, metadata.upright())
 val webp = ImageKodec.encodeWebp(upright, metadata.upright())
+val lossy = ImageKodec.encodeWebp(upright, WebpEncodeOptions(quality = 80), metadata.upright())
 ```
 
 - JPEG writes the EXIF block as an APP1 `Exif` segment, the XMP packet as an APP1 Adobe XMP segment and the ICC profile as APP2 `ICC_PROFILE` chunks. An EXIF block or an XMP packet longer than one segment, about 64 KB, is left out. A profile of any size up to 255 segments goes in.
@@ -200,7 +235,7 @@ The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed
 
 ## What the encoders do not write
 
-- There is no encoder for lossy WebP, JPEG 2000 or JPEG XL.
+- There is no encoder for JPEG 2000 or JPEG XL.
 - The AV1 encoder writes still intra pictures only: no image sequence, no inter frames, no film
   grain, no 128 by 128 superblocks, no intra block copy, no delta quantizer, no Wiener restoration
   filter (the self-guided one only), no chroma palette, and no 4:1 or three-way partitions.
@@ -210,6 +245,9 @@ The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed
   N-channel, fixed-point, half, float, RGBE, premultiplied or packed 5, 5-6-5 and 10-bit formats,
   nor a gain map. Its tiles are square, and its quantizers are one per band set for the image or
   for each tile, not per macroblock.
+- The lossy WebP encoder writes one token partition, no loop filter deltas and no simple loop
+  filter, and chooses the filter level from the quantizer without trying others. An animation
+  never disposes a frame to the background, and its frames are all lossless or all lossy.
 - The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit
   output. It picks a filter for each row, which is a compression choice and not a format
   capability. Use `encodeTiff16` for 16-bit output.

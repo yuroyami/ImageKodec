@@ -55,10 +55,13 @@ internal class Vp8Encoder private constructor(
         var uvDc = 0
         var uvAc = 0
 
-        /** Score weight of a 1/256 bit, against squared error times 4096. */
-        var lambda16 = 0L
-        var lambda4 = 0L
-        var lambdaUv = 0L
+        /**
+         * Score weight of a 1/256 bit, against squared error times 4096. Scores are whole numbers
+         * far below 2^53, so Double holds them exactly, and on JavaScript is faster than Long.
+         */
+        var lambda16 = 0.0
+        var lambda4 = 0.0
+        var lambdaUv = 0.0
         var filterLevel = 0
     }
 
@@ -141,7 +144,7 @@ internal class Vp8Encoder private constructor(
     private val best4Rec = IntArray(16)
     private val best4Lev = IntArray(16)
     private val candidates = IntArray(10)
-    private val preScore = LongArray(10)
+    private val preScore = DoubleArray(10)
 
     // Chroma candidates: levels of 4 U then 4 V blocks, reconstruction of U then V.
     private val uvRec = IntArray(128)
@@ -244,9 +247,9 @@ internal class Vp8Encoder private constructor(
         seg.uvDc = dc[minOf(q, 117)]
         seg.uvAc = ac[q]
         val step = seg.y1Ac.toLong()
-        seg.lambda16 = step * step * LAMBDA_I16 shr 4
-        seg.lambda4 = step * step * LAMBDA_I4 shr 4
-        seg.lambdaUv = step * step * LAMBDA_UV shr 4
+        seg.lambda16 = (step * step * LAMBDA_I16 shr 4).toDouble()
+        seg.lambda4 = (step * step * LAMBDA_I4 shr 4).toDouble()
+        seg.lambdaUv = (step * step * LAMBDA_UV shr 4).toDouble()
         seg.filterLevel = (FILTER_BASE + seg.y1Ac * FILTER_SLOPE / 64).coerceIn(0, 63).let { if (q == 0) 0 else it }
     }
 
@@ -319,7 +322,7 @@ internal class Vp8Encoder private constructor(
         loadContext(mbX, mbY)
 
         // 16x16 luma: each of the four modes, coded in full.
-        var bestI16 = Long.MAX_VALUE
+        var bestI16 = Double.MAX_VALUE
         var bestMode16 = DC_PRED
         for (mode in 0 until 4) {
             val score = tryI16(mode, seg, mbX)
@@ -336,7 +339,7 @@ internal class Vp8Encoder private constructor(
         mode16[mb] = bestMode16.toByte()
 
         // Chroma.
-        var bestUv = Long.MAX_VALUE
+        var bestUv = Double.MAX_VALUE
         var bestUvMode = DC_PRED
         for (mode in 0 until 4) {
             val score = tryUv(mode, seg, mbX)
@@ -418,7 +421,7 @@ internal class Vp8Encoder private constructor(
 
     // --- 16x16 luma -----------------------------------------------------------------------------
 
-    private fun tryI16(mode: Int, seg: Segment, mbX: Int): Long {
+    private fun tryI16(mode: Int, seg: Segment, mbX: Int): Double {
         predict16(mode, pred)
         for (b in 0 until 16) {
             val bx = (b and 3) * 4
@@ -447,7 +450,7 @@ internal class Vp8Encoder private constructor(
             val by = b shr 2
             val ctx = ((tnz shr bx) and 1) + ((lnz shr by) and 1)
             if (effort >= 3) {
-                trellis(coeffs, b * 16, seg.y1Dc, seg.y1Ac, 1, TYPE_Y_AFTER_Y2, ctx, seg.lambda16 * TRELLIS shr 4, tryLev, b * 16)
+                trellis(coeffs, b * 16, seg.y1Dc, seg.y1Ac, 1, TYPE_Y_AFTER_Y2, ctx, seg.lambda16 * TRELLIS / 16, tryLev, b * 16)
             } else {
                 quantize(coeffs, b * 16, seg.y1Dc, seg.y1Ac, 1, tryLev, b * 16, Y1_ROUND)
             }
@@ -459,7 +462,7 @@ internal class Vp8Encoder private constructor(
             tmp[0] = dcs[b]
             sse += reconstruct4(tmp, pred, (by * 4) * 16 + bx * 4, 16, tryRec, srcY)
         }
-        return sse.toLong() * 4096 + seg.lambda16 * rate
+        return sse * 4096.0 + seg.lambda16 * rate
     }
 
     private fun predict16(mode: Int, out: IntArray) {
@@ -489,7 +492,7 @@ internal class Vp8Encoder private constructor(
     // --- 4x4 luma -------------------------------------------------------------------------------
 
     /** The best sixteen 4x4 modes, in [i4Rec], [i4Lev] and [i4Modes]; gives up past [limit]. */
-    private fun tryI4(seg: Segment, mbX: Int, limit: Long): Long {
+    private fun tryI4(seg: Segment, mbX: Int, limit: Double): Double {
         var score = seg.lambda4 * I4_FLAG_COST
         var tnz = 0
         var lnz = 0
@@ -509,7 +512,7 @@ internal class Vp8Encoder private constructor(
                     predict4(m, edge, p4)
                     var e = 0
                     for (k in 0 until 16) { val d = l4[k] - p4[k]; e += d * d }
-                    preScore[m] = e.toLong() * 4096 + seg.lambda4 * bmodeCost(probs, m)
+                    preScore[m] = e * 4096.0 + seg.lambda4 * bmodeCost(probs, m)
                     candidates[m] = m
                 }
                 for (i in 0 until 3) {
@@ -522,7 +525,7 @@ internal class Vp8Encoder private constructor(
                 for (m in 0 until 10) candidates[m] = m
                 10
             }
-            var best = Long.MAX_VALUE
+            var best = Double.MAX_VALUE
             var bestMode = 0
             for (c in 0 until tried) {
                 val m = candidates[c]
@@ -530,14 +533,14 @@ internal class Vp8Encoder private constructor(
                 for (k in 0 until 16) r4[k] = l4[k] - p4[k]
                 fdct(r4, d4, 0, scratch)
                 if (effort >= 3) {
-                    trellis(d4, 0, seg.y1Dc, seg.y1Ac, 0, TYPE_I4, ctx, seg.lambda4 * TRELLIS shr 4, r4, 0)
+                    trellis(d4, 0, seg.y1Dc, seg.y1Ac, 0, TYPE_I4, ctx, seg.lambda4 * TRELLIS / 16, r4, 0)
                 } else {
                     quantize(d4, 0, seg.y1Dc, seg.y1Ac, 0, r4, 0, Y1_ROUND)
                 }
                 val rate = bmodeCost(probs, m) + blockCost(r4, 0, 0, TYPE_I4, ctx)
                 dequantize(r4, 0, seg.y1Dc, seg.y1Ac, tmp)
                 val sse = reconstruct4(tmp, p4, 0, 4, d4, l4)
-                val s = sse.toLong() * 4096 + seg.lambda4 * rate
+                val s = sse * 4096.0 + seg.lambda4 * rate
                 if (s < best) {
                     best = s
                     bestMode = m
@@ -546,7 +549,7 @@ internal class Vp8Encoder private constructor(
                 }
             }
             score += best
-            if (score >= limit) return Long.MAX_VALUE
+            if (score >= limit) return Double.MAX_VALUE
             i4Modes[b] = bestMode
             best4Lev.copyInto(i4Lev, b * 16)
             for (j in 0 until 4) for (i in 0 until 4) i4Rec[(by * 4 + j) * 16 + bx * 4 + i] = best4Rec[j * 4 + i]
@@ -590,7 +593,7 @@ internal class Vp8Encoder private constructor(
 
     // --- chroma ---------------------------------------------------------------------------------
 
-    private fun tryUv(mode: Int, seg: Segment, mbX: Int): Long {
+    private fun tryUv(mode: Int, seg: Segment, mbX: Int): Double {
         predict8(mode, topU, leftU, predU)
         predict8(mode, topV, leftV, predV)
         var rate = UV_MODE_COST[mode]
@@ -611,7 +614,7 @@ internal class Vp8Encoder private constructor(
                 val at = (plane * 4 + b) * 16
                 val ctx = ((tnz shr bx) and 1) + ((lnz shr by) and 1)
                 if (effort >= 3) {
-                    trellis(d4, 0, seg.uvDc, seg.uvAc, 0, TYPE_UV, ctx, seg.lambdaUv * TRELLIS shr 4, tryUvLev, at)
+                    trellis(d4, 0, seg.uvDc, seg.uvAc, 0, TYPE_UV, ctx, seg.lambdaUv * TRELLIS / 16, tryUvLev, at)
                 } else {
                     quantize(d4, 0, seg.uvDc, seg.uvAc, 0, tryUvLev, at, UV_ROUND)
                 }
@@ -623,7 +626,7 @@ internal class Vp8Encoder private constructor(
                 sse += reconstruct4Into(tmp, p, (by * 4) * 8 + bx * 4, 8, tryUvRec, plane * 64, src)
             }
         }
-        return sse.toLong() * 4096 + seg.lambdaUv * rate
+        return sse * 4096.0 + seg.lambdaUv * rate
     }
 
     private fun predict8(mode: Int, top: IntArray, left: IntArray, out: IntArray) {
@@ -691,23 +694,23 @@ internal class Vp8Encoder private constructor(
 
     // Trellis state: 0 the block's start, 1 after a zero (no end of block may follow), 2 after a
     // one, 3 after a larger level. The context of the next token is 0, 0, 1 and 2.
-    private val trellisCost = LongArray(4)
-    private val trellisNext = LongArray(4)
+    private val trellisCost = DoubleArray(4)
+    private val trellisNext = DoubleArray(4)
     private val trellisBack = IntArray(16 * 4) // level shl 2 or previous state
-    private val trellisDist = LongArray(17 * 3)
+    private val trellisDist = DoubleArray(17 * 3)
     private val trellisLevel = IntArray(16 * 3)
-    private val zeroTail = LongArray(17)
+    private val zeroTail = DoubleArray(17)
 
     /**
      * The levels of the block at [from] of [c] that cost least in distortion plus [lambda] times
      * rate, each position choosing among the nearest level, the one below it and zero, with the
      * token context each choice leaves for the next position. Writes them in zigzag order to [out].
      */
-    private fun trellis(c: IntArray, from: Int, qDc: Int, qAc: Int, first: Int, type: Int, ctx0: Int, lambda: Long, out: IntArray, at: Int) {
+    private fun trellis(c: IntArray, from: Int, qDc: Int, qAc: Int, first: Int, type: Int, ctx0: Int, lambda: Double, out: IntArray, at: Int) {
         for (n in 0 until 16) out[at + n] = 0
         // Candidates and their distortion: twice the orthonormal transform, so a pixel's squared
         // error is a quarter of the coefficient's, times the score's 4096.
-        zeroTail[16] = 0
+        zeroTail[16] = 0.0
         for (n in 15 downTo first) {
             val v = c[from + ZIGZAG[n]]
             val a = if (v < 0) -v else v
@@ -722,16 +725,16 @@ internal class Vp8Encoder private constructor(
                 }
                 trellisLevel[n * 3 + k] = l
                 if (l >= 0) {
-                    val d = (a - l * q).toLong()
+                    val d = (a - l * q).toDouble()
                     trellisDist[n * 3 + k] = d * d * 1024
                 }
             }
-            val d0 = a.toLong()
+            val d0 = a.toDouble()
             zeroTail[n] = zeroTail[n + 1] + d0 * d0 * 1024
         }
-        val inf = Long.MAX_VALUE / 4
+        val inf = 1e300
         trellisCost.fill(inf)
-        trellisCost[if (ctx0 == 0) 0 else ctx0 + 1] = 0
+        trellisCost[if (ctx0 == 0) 0 else ctx0 + 1] = 0.0
         var bestEnd = inf
         var endN = first
         var endState = if (ctx0 == 0) 0 else ctx0 + 1
@@ -1296,7 +1299,7 @@ internal class Vp8Encoder private constructor(
         }
 
         /** (quality, quantizer index) pairs. */
-        val QUALITY_ANCHORS = intArrayOf(0, 127, 10, 78, 25, 59, 50, 41, 75, 26, 90, 10, 100, 0)
+        val QUALITY_ANCHORS = intArrayOf(0, 127, 10, 74, 25, 54, 50, 36, 75, 22, 90, 8, 100, 0)
 
         /** The forward transform of the 4x4 block [x] (raster order) into [out] at [at]: twice the orthonormal DCT, the inverse of section 14.3's. */
         fun fdct(x: IntArray, out: IntArray, at: Int, t: IntArray = IntArray(16)) {
