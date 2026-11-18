@@ -14,6 +14,17 @@ reviewable in the diff.
 
 ### Added
 
+- `encodeJp2(bitmap, quality)`, `encodeJp2(bitmap, Jp2EncodeOptions, metadata, cancellationCheck)` and
+  `encodeJp2Wide` for a `KiteBitmap16` write JPEG 2000 Part 1, written from ITU-T T.800: lossy with the
+  9/7 wavelet, the ICT and rate control by a rate and distortion sort of code-block passes, at a
+  quality or at a compression ratio a layer, or lossless with the 5/3 wavelet and the RCT, at 1 to 16
+  bits, gray, RGB and alpha described by a channel definition box. Tiles, levels, code-block sizes,
+  precincts, layers, the five progression orders, SOP and EPH and every Part 1 code-block style are
+  options, in a JP2 file with the metadata or as a bare codestream. OpenJPEG decodes every file to the
+  samples ImageKodec's decoder gives, and on photo-like scenes the files match `opj_compress` within
+  0.05 dB at equal size. `readMetadata` now reads the XMP, EXIF and ICC profile of a JP2 file. See
+  [Writing images](docs/encoding.md) (#180).
+
 - Lossy WebP writing, written from RFC 6386 and RFC 9649: `encodeWebp(bitmap, quality)` writes a VP8
   image at a quality with the meaning of `cwebp -q`, and `encodeWebp(bitmap, options, metadata,
   cancellationCheck)` takes a `WebpEncodeOptions` with `lossless`, `quality`, `effort` 1 to 3 (in

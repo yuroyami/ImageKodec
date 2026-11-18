@@ -20,7 +20,7 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
   `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
   can move by up to 255 sixteen-bit units to stay in that level.
-- There is no encoder for JPEG 2000 or JPEG XL. The AVIF encoder writes still
+- There is no encoder for JPEG XL. The AVIF encoder writes still
   intra pictures only (see [AVIF](#avif)). See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
@@ -52,6 +52,11 @@ and fail during the decode.
   which is the limit of OpenJPEG.
 - A malformed header names the marker, the field and the byte position.
 - The public nullable `JpxDecoder.decode` overloads return null on failure instead of throwing.
+- The encoder writes at most 65535 tiles and 100 layers, 8 bits a sample from a `KiteBitmap` and 16
+  from a `KiteBitmap16`. It pads a flat picture that codes to fewer bytes than the decoder's expansion
+  guard expects of its size with a `COM` segment, so ImageKodec reads back every file it writes. A
+  quality target the finest quantization step cannot reach, near quality 100 on a noisy picture,
+  comes out a little below it.
 - Color comes from the JP2 header, without a color engine. The palette, the channel definitions and
   the color specification apply in the order of T.800 Annex I. sRGB, grayscale, bi-level, sYCC,
   e-sYCC, CMYK and CMY convert to RGB or gray. An ICC profile picks gray, RGB or CMYK, and it is

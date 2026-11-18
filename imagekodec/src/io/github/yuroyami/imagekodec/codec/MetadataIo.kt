@@ -11,8 +11,9 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  * Reads and writes the EXIF, XMP and ICC metadata of JPEG, PNG and WebP files (#129): JPEG APP1
  * `Exif` and Adobe XMP segments and APP2 `ICC_PROFILE` chunks (Exif 2.32, 4.5.4; XMP Part 3,
  * 1.1.3; ICC.1:2022, B.4), PNG `eXIf`, `iTXt` with the keyword `XML:com.adobe.xmp`, and `iCCP`
- * (PNG, Third Edition, 11.3), the `EXIF`, `XMP ` and `ICCP` chunks of extended WebP, and the
- * `Exif` and XMP items and the ICC `colr` of the primary image of a HEIF file (#149).
+ * (PNG, Third Edition, 11.3), the `EXIF`, `XMP ` and `ICCP` chunks of extended WebP, the
+ * `Exif` and XMP items and the ICC `colr` of the primary image of a HEIF file (#149), and the UUID
+ * boxes and colour specification of a JP2 file, which [Jp2Boxes] reads.
  */
 internal object MetadataIo {
 

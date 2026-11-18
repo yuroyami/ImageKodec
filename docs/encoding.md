@@ -1,7 +1,7 @@
 # Writing images
 
 ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, WebP (lossless and lossy, still and
-animated), AVIF, JPEG XR and, with the `imagekodec-heic` module, HEIC. Every encoder takes a
+animated), JPEG 2000, AVIF, JPEG XR and, with the `imagekodec-heic` module, HEIC. Every encoder takes a
 `KiteBitmap` (or a `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows
 it) and returns the file as a `ByteArray`.
 
@@ -23,6 +23,7 @@ ImageKodec.encodeAvif(bitmap, quality = 50)     // AV1 in HEIF, built in
 ImageKodec.encodeHeic(bitmap, quality = 50)     // HEVC in HEIF, needs ImageKodecHeic.install()
 ImageKodec.encodeJxr(bitmap, quality = 80)      // lossy JPEG XR, as JxrEncApp -q 0.8
 ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(lossless = true)) // lossless JPEG XR
+ImageKodec.encodeJp2(bitmap, quality = 75)      // JPEG 2000, lossy 9/7, in a JP2 file
 ```
 
 `encodeJpeg` uses a quality of 90 when you pass none.
@@ -233,9 +234,42 @@ and reconstructs, and the encoder supplies each decision. So the encoder's recon
 decoder rebuilds: `Av1EncoderOracleTest` holds dav1d and ImageKodec's decoder to it, sample for sample.
 The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed inputs.
 
+## JPEG 2000
+
+`encodeJp2` writes JPEG 2000 Part 1 (ITU-T T.800), in a JP2 file or as a bare codestream, the form a
+PDF embeds (#180). `encodeJp2(bitmap, quality)` is lossy; `Jp2EncodeOptions` takes every other choice,
+and `encodeJp2Wide` takes a `KiteBitmap16`:
+
+```kotlin
+ImageKodec.encodeJp2(bitmap, 75)                                          // about 41 dB PSNR
+ImageKodec.encodeJp2(bitmap, Jp2EncodeOptions(lossless = true))           // 5/3 and RCT, exact
+ImageKodec.encodeJp2(bitmap, Jp2EncodeOptions(ratios = listOf(40.0, 20.0, 10.0))) // three layers
+ImageKodec.encodeJp2(bitmap, Jp2EncodeOptions(codestreamOnly = true))     // J2K, for a PDF
+ImageKodec.encodeJp2Wide(bitmap16, Jp2EncodeOptions(lossless = true, bitsPerSample = 12))
+```
+
+- Lossy files use the 9/7 wavelet and the ICT, with expounded step sizes a band. The rate control
+  truncates code-block passes after a rate and distortion sort (T.800 Annex J.14). `quality` aims at
+  a PSNR of `20 + 0.28 * quality` dB over all components, as `opj_compress -q` aims at the PSNR it is
+  given: 34 dB at 50, 41 dB at 75, 48 dB at 100. `ratios` gives each layer's compression ratio over
+  the raw samples, as `opj_compress -r` does, and the file never exceeds it.
+- Lossless files use the 5/3 wavelet and the RCT, at 1 to 16 bits, gray, gray and alpha, RGB and RGBA.
+  The alpha channel is described by a channel definition box (`cdef`).
+- The options set tiles, wavelet levels (5 by default, fewer for a small tile), code-block sizes, precincts,
+  quality layers, the five progression orders, SOP and EPH markers, and the code-block styles: the
+  arithmetic coding bypass, context reset, termination on each pass, vertically causal contexts and
+  segmentation symbols. `effort` 1 sizes layers from an estimate, 3 also tries each lossless tile without
+  the colour transform.
+- A JP2 file carries the metadata: an ICC profile as its colour specification when the profile is gray
+  or RGB as the image is, the XMP packet in the UUID box that XMP assigns to JPEG 2000, and the EXIF
+  block in the UUID box exiftool reads. `readMetadata` reads all three back.
+- On the photo scenes the files match `opj_compress` (OpenJPEG 2.5.0): within 0.05 dB PSNR at ratios
+  10, 20 and 40, at most its size, and about 30 bytes smaller lossless. The encode takes about twice the
+  time of `opj_compress`.
+
 ## What the encoders do not write
 
-- There is no encoder for JPEG 2000 or JPEG XL.
+- There is no encoder for JPEG XL.
 - The AV1 encoder writes still intra pictures only: no image sequence, no inter frames, no film
   grain, no 128 by 128 superblocks, no intra block copy, no delta quantizer, no Wiener restoration
   filter (the self-guided one only), no chroma palette, and no 4:1 or three-way partitions.
@@ -248,6 +282,10 @@ The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed
 - The lossy WebP encoder writes one token partition, no loop filter deltas and no simple loop
   filter, and chooses the filter level from the quantizer without trying others. An animation
   never disposes a frame to the background, and its frames are all lossless or all lossy.
+- The JPEG 2000 encoder writes no palette, no component subsampling, no image or tile offset, no signed
+  components, no region of interest, no POC, PPM or PPT segments, no tile-parts beyond one a tile, no
+  predictable termination, no HTJ2K and no Part 2 extension. A bare codestream carries no metadata and
+  no channel definitions.
 - The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit
   output. It picks a filter for each row, which is a compression choice and not a format
   capability. Use `encodeTiff16` for 16-bit output.

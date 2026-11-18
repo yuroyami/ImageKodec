@@ -1262,9 +1262,10 @@ public object ImageKodec {
     ): ByteArray = JxrEncoder.encode16(bitmap, options, metadata, cancellationCheck)
 
     /**
-     * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, AVIF or HEIC file. The
-     * `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an [ImageMetadata] write them
-     * again, so a re-encode keeps them (#129). A HEIF file gives those of its primary image (#149);
+     * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, JP2, AVIF or HEIC file. The
+     * `encodeJpeg`, `encodePng`, `encodeWebp` and `encodeJp2` overloads that take an [ImageMetadata] write them
+     * again, so a re-encode keeps them (#129). A JP2 file keeps the XMP and EXIF in UUID boxes and the
+     * profile in its colour specification (#180). A HEIF file gives those of its primary image (#149);
      * its orientation is in `irot` and `imir`, which `decode` applies, never in the EXIF tag. The gain map of an Ultra HDR JPEG comes too, found
      * through its Multi-Picture Format segment (#130); the gain map of a HEIF file, which needs a decode,
      * comes from [decodeGainMap] (#153). A file of another format, or one that has none,
