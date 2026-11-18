@@ -412,15 +412,27 @@ What the encoder writes:
   partitions of 64 by 64 superblocks; the intra mode of each block (DC, the directional modes with their
   angle deltas, the three smooth modes, Paeth and filter intra; for chroma, chroma from luma with its
   alphas); the transform size and type (DCT, ADST, identity and their combinations, as the set of the
-  size allows) and the levels, which a greedy search lowers where the rate saved pays for the error. A
-  picture that looks like screen content (few colours in sharp strokes) turns on the screen content
-  tools, and a block whose luma holds few values may code it as a palette.
+  size allows) and the levels, which a greedy search lowers where the rate saved pays for the error.
+- A picture that looks like screen content (few colours in sharp strokes) turns on the screen content
+  tools, from effort 2. A block whose colours are few may code a palette: of luma values, of pairs of U
+  and V, or both. Where an eighth of the picture's 8 by 8 blocks repeat earlier in it, the frame allows
+  intra block copy: a hash of every 8 by 8 window of the source finds, for each block, the nearest
+  earlier place that matches it sample for sample and that a conformant vector may reach, and the block
+  may copy it, with a residual or without. The frame then has no loop filter, CDEF or restoration, as the
+  specification requires. On screen content in 4:4:4 at effort 2, intra block copy makes the files 26
+  percent smaller at equal SSIMULACRA 2 score, and the chroma palette 3 percent (`Av1ToolGainTest`).
 - After the blocks, the loop filter levels, the CDEF strengths of each 64 by 64 block, and, from effort
-  2, the self-guided restoration filter of each unit are chosen on the reconstruction.
+  2, the loop restoration of each unit are chosen on the reconstruction: none, the self-guided filter
+  or the Wiener filter, whose taps are fitted by least squares, each measured through the decoder's own
+  filter and priced by the bits its parameters take, and each plane takes whichever of the four frame
+  types costs least. The Wiener filter wins few units of the photo scenes (0.1 percent smaller files).
 - `effort` 1 tries one luma and one chroma mode at their own transform size, square partitions down to
-  8 by 8, and the DCT or the mode's own transform type; 2 adds angle deltas, filter intra, one transform
-  split, more transform types, the level search and loop restoration; 3 adds 4 by 4 blocks,
-  rectangular partitions, two transform splits, every transform type and more filter strengths.
+  8 by 8, and the DCT or the mode's own transform type; 2 adds filter intra up to 16 by 16, one
+  transform split, 4 by 4 blocks, the identity type while searching and every type of the set at the
+  end, the level search, loop restoration and intra block copy; 3 adds a second luma and chroma mode,
+  angle deltas, rectangular partitions, two transform splits, every transform type throughout and more
+  filter strengths. Effort 2 was set by measuring what each step of effort 3 brings against its time;
+  see [Limits](limits.md#encoding-avif).
 - With `tileSize = null`, a picture wider than 4096 codes as one frame of uniform AV1 tiles, the fewest
   the specification allows. Grid items, the default, are what both libavif and libheif read best, and
   the tile runner encodes them in parallel.
@@ -508,8 +520,9 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   squeeze and no float samples. Its lossy files are 8 or 16 bits in sRGB; an ICC profile in the
   metadata is written as the profile of the samples without converting them.
 - The AV1 encoder writes still intra pictures only: no image sequence, no inter frames, no film
-  grain, no 128 by 128 superblocks, no intra block copy, no delta quantizer, no Wiener restoration
-  filter (the self-guided one only), no chroma palette, and no 4:1 or three-way partitions.
+  grain, no 128 by 128 superblocks, no superres, no delta quantizer, no quantizer matrices, no
+  segmentation and no 4:1 or three-way partitions. Intra block copy copies only places whose source
+  matches the block exactly, and not at effort 1.
 - The HEIC encoder writes still images only, with no image sequence, depth map, gain map or
   premultiplied alpha. See [Writing HEIC](heic.md#writing-heic).
 - The JPEG XR encoder writes neither hard tiles (the decoder reads them), 4:2:2 chroma, CMYK,

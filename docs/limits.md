@@ -178,8 +178,10 @@ and fail during the decode.
 - Tile list OBUs are refused. They belong to AV1's large scale tile decoding, whose tiles an
   application picks from outside the stream; no image uses them, and neither dav1d nor libavif decodes them.
 - The encoder (`encodeAvif`) writes one intra key frame a picture, 8, 10 or 12 bits, at most 65535 on
-  a side. It writes no image sequence, film grain, 128 by 128 superblock, intra block copy, delta
-  quantizer, Wiener restoration, chroma palette, or 4:1 and three-way partition.
+  a side. It writes no image sequence, film grain, 128 by 128 superblock, superres, delta quantizer,
+  segmentation, or 4:1 and three-way partition. Intra block copy, from effort 2 on screen content,
+  copies only places whose source matches the block exactly, from a hash of the source luma kept for
+  pictures of at most 4 Mi samples (a grid tile always is).
 - The encoder is slower than libaom; see [Encoding AVIF](#encoding-avif) below.
 
 ### Encoding AVIF
@@ -189,19 +191,33 @@ and fail during the decode.
 3.8.2, one thread) at `-q 50` and `-q 80`: for each avifenc file, the size ImageKodec needs for the same
 SSIMULACRA 2 score, read between its sizes at qualities 5 apart. The table gives the mean ratio of the six
 scenes; below 1, ImageKodec's file is smaller. Times are on the JVM after a warm-up, on a 4-core Intel Xeon
-at 2.30 GHz shared with other builds, so they are slower than on an idle machine.
+at 2.30 GHz shared with other builds.
 
-| ImageKodec effort | Against `-s 6 -q 50` | `-s 6 -q 80` | `-s 9 -q 50` | `-s 9 -q 80` | Time per scene at `-q 50`'s score |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 1.40 | 1.34 | 0.99 | 1.01 | 0.36 s |
-| 2 | 1.18 | 1.11 | 0.82 | 0.86 | 0.75 s |
-| 3 | 0.98 | 0.96 | 0.71 | 0.76 | 4.9 s |
+| ImageKodec effort | Against `-s 6 -q 50` | `-s 6 -q 80` | `-s 9 -q 50` | `-s 9 -q 80` | Time of the six scenes at quality 50 | Times `-s 6` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.42 | 1.35 | 1.01 | 1.02 | 1.33 s | 5.0 |
+| 2 | 1.18 | 1.07 | 0.85 | 0.85 | 3.02 s | 11.3 |
+| 3 | 0.97 | 0.95 | 0.71 | 0.75 | 27.8 s | 104 |
 
-avifenc takes 0.062 s a file at speed 6 and 0.025 s at speed 9, each a fresh process. So effort 2 makes files 11 to
-18 percent larger than libaom's speed 6 at equal score and 14 to 18 percent smaller than speed 9's, and takes 12 times
-as long as speed 6; effort 1 takes 6 times as long, effort 3 79 times, for files 2 to 4 percent smaller than speed
-6's. At efforts 1 to 3, ImageKodec reaches the scores of avifenc's `-q 50` and `-q 80` at qualities 48 to 50 and 79 to 80. A 256 by 256 scene takes, at efforts 1, 2 and 3, 240, 367 and 1,600 ms on the JVM, 618, 1,582 and
-10,411 ms on JS (Node), and 1,157, 2,649 and 17,206 ms on a debug linuxX64 binary (`AvifEncodeTimingTest`).
+avifenc took 0.267 s for the six scenes at speed 6 and 0.102 s at speed 9, each file a fresh process, start
+included; ImageKodec's times are the CPU time of its thread, the least of three runs. So effort 2 makes files 7 to
+18 percent larger than libaom's speed 6 at equal score and 15 percent smaller than speed 9's, and takes 11 times as
+long as speed 6; effort 1 takes 5 times as long, for files 35 to 42 percent larger; effort 3 makes files 3 to 5
+percent smaller than speed 6's in 100 times its time. At efforts 1 to 3, ImageKodec reaches the scores of avifenc's
+`-q 50` and `-q 80` at qualities 48 to 51 and 79 to 80.
+
+The same test on the encoder as #176 first committed it (the speed work since, the Wiener filter, chroma palette and
+intra block copy not yet in): effort 1 took 1.52 s (5.2 times speed 6, which took 0.294 s in that run), effort 2
+4.03 s (13.7 times) and effort 3 28.3 s, and effort 2's ratios were 1.18, 1.11, 0.82 and 0.86. Effort 2 now takes a
+quarter less time for files of about the same size at equal score, and effort 1 an eighth less. The aim of #176,
+effort 2 within 4 times speed 6, is not met: each candidate block is coded through the decoder's whole syntax walk,
+prediction and inverse transforms, and the search measured which candidates pay (see `Av1BlockSearch`); a faster
+search needs cheaper estimates than that.
+
+On JS (Node, `AvifEncodeTimingTest`, the faster of two runs), a 256 by 256 scene at quality 50 takes 750, 1,492 and
+13,277 ms at efforts 1, 2 and 3, where the first committed encoder took 853, 1,905 and 12,773 ms in the same
+session. Effort 3 got slower there: the Wiener filter's least squares and the exact error of each restoration
+filter run in Long arithmetic, which JS does in software.
 
 ## HEIC
 
