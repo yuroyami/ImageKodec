@@ -24,6 +24,7 @@ import io.github.yuroyami.imagekodec.codec.avif.HeifCodecs
 import io.github.yuroyami.imagekodec.codec.avif.HeifEncode
 import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
 import io.github.yuroyami.imagekodec.codec.jxr.JxrDecoder
+import io.github.yuroyami.imagekodec.codec.jxr.JxrEncoder
 import io.github.yuroyami.imagekodec.internal.color.ColorManagement
 import io.github.yuroyami.imagekodec.internal.color.Ink
 import io.github.yuroyami.imagekodec.internal.color.SrgbConverter
@@ -1150,6 +1151,53 @@ public object ImageKodec {
         metadata: ImageMetadata = ImageMetadata(),
         cancellationCheck: (() -> Unit)? = null,
     ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encode(null, bitmap, options, metadata, "av01", cancel) }
+
+    /**
+     * Encode [bitmap] as a lossy JPEG XR file (#181) at [quality] 0..100 (default 90), which
+     * means what `JxrEncApp -q` means at [quality] divided by 100: YUV 4:4:4 and one level of
+     * overlap filtering from 50 up, 4:2:0 and two levels below. A gray opaque bitmap is written
+     * as 8bppGray, an opaque one as 24bppBGR, and one with alpha as 32bppBGRA with planar alpha,
+     * coded losslessly.
+     *
+     * @throws IllegalArgumentException if [quality] is outside 0..100, or [bitmap] has more than
+     *   2^28 pixels
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxr(bitmap: KiteBitmap, quality: Int = 90): ByteArray =
+        JxrEncoder.encode(bitmap, JxrEncodeOptions(quality = quality), ImageMetadata(), null)
+
+    /**
+     * Encode [bitmap] as a JPEG XR file (#181) with every setting of [options]: lossless or at a
+     * quality, 4:4:4 or 4:2:0 chroma, the overlap mode, quantizers per channel and per tile,
+     * tiles, spatial or frequency order, and planar or interleaved alpha. The ICC profile, XMP
+     * packet and EXIF block of [metadata] go into the file's directory, the EXIF orientation as
+     * its Transformation tag; a [ImageMetadata.gainMap] is left out. [cancellationCheck] runs
+     * before each row of macroblocks of each codestream and may throw to stop the encode.
+     *
+     * @throws IllegalArgumentException if [bitmap] has more than 2^28 pixels, or [options] asks
+     *   for tiles the image does not have
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxr(
+        bitmap: KiteBitmap,
+        options: JxrEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JxrEncoder.encode(bitmap, options, metadata, cancellationCheck)
+
+    /**
+     * [encodeJxr] for 16-bit samples: 16bppGray, 48bppRGB or 64bppRGBA, as [bitmap] has one,
+     * three or four channels; gray with alpha goes as 64bppRGBA. Chroma stays 4:4:4.
+     *
+     * @throws IllegalArgumentException as [encodeJxr] does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxr16(
+        bitmap: KiteBitmap16,
+        options: JxrEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JxrEncoder.encode16(bitmap, options, metadata, cancellationCheck)
 
     /**
      * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, AVIF or HEIC file. The

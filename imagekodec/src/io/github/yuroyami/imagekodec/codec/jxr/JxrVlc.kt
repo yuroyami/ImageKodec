@@ -109,7 +109,52 @@ internal class JxrVlc(val symbols: Int) {
         }
     }
 
+    /**
+     * The codes of the table the discriminant has chosen, for the encoder: per symbol, the code
+     * shifted left by 5 bits and its length in the low 5 bits. They are read off the decode
+     * table itself, so the encoder writes exactly what [JxrBits.huff] reads.
+     */
+    fun codes(): IntArray {
+        val t = table
+        if (codesFor !== t) {
+            codesFor = t
+            codesOfTable = codesOf(t)
+        }
+        return codesOfTable
+    }
+
+    private var codesFor: IntArray? = null
+    private var codesOfTable = IntArray(0)
+
     private companion object {
+        /**
+         * Walks every 16-bit string through the decode table as [JxrBits.huff] does, and keeps
+         * the code each symbol is read from. A code read means the strings it prefixes all read
+         * the same symbol, so the walk skips them.
+         */
+        fun codesOf(table: IntArray): IntArray {
+            val codes = IntArray(MAX_SYMBOLS) { -1 }
+            var v = 0
+            while (v < 0x10000) {
+                var symbol = table[v ushr 11]
+                var length: Int
+                if (symbol >= 0) {
+                    length = symbol and 7
+                    symbol = symbol shr 3
+                } else {
+                    length = 5
+                    do {
+                        symbol = table[symbol + 0x8000 + ((v ushr (15 - length)) and 1)]
+                        length++
+                    } while (symbol < 0)
+                }
+                if (codes[symbol] < 0) codes[symbol] = ((v ushr (16 - length)) shl 5) or length
+                v += 1 shl (16 - length)
+            }
+            return codes
+        }
+
+        const val MAX_SYMBOLS = 12
         const val THRESHOLD = 8
         const val MEMORY = 8
 
