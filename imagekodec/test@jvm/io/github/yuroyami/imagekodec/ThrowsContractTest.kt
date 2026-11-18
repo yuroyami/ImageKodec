@@ -89,7 +89,11 @@ class ThrowsContractTest {
             declares(ImageKodec::class.java, "encodeHeic", unsupported, KiteBitmap::class.java, int)
             declares(ImageKodec::class.java, "encodeHeic", unsupported, KiteBitmap::class.java, options, metadata, check)
             declares(ImageKodec::class.java, "encodeHeic16", unsupported, KiteBitmap16::class.java, options, metadata, check)
+            // An animation too, which needs a sequence encoder of the module (#177).
+            declares(ImageKodec::class.java, "encodeHeic", unsupported, KiteAnimation::class.java, options, metadata, check)
         }
+        // encodeAvif of an animation refuses an argument (#177).
+        declares(ImageKodec::class.java, "encodeAvif", ex, KiteAnimation::class.java, options, metadata, check)
         val optionsConstructor = options.constructors.maxBy { it.parameterCount }
         assertTrue(ex in optionsConstructor.exceptionTypes, "HeifEncodeOptions constructor should declare IllegalArgumentException")
         val wideConstructor = KiteBitmap16::class.java.getConstructor(int, int, int, ShortArray::class.java)

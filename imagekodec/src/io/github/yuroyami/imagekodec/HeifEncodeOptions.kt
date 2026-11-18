@@ -44,7 +44,9 @@ public enum class HeifChroma {
  *   In AV1, 1 tries one mode a block, square partitions down to 8 by 8 and two transform types; 2 adds
  *   filter intra, a transform split, 4 by 4 blocks, more transform types, a level search, loop
  *   restoration and, on screen content, intra block copy; 3 adds a second mode, angle deltas,
- *   rectangular partitions, a second split and every transform type throughout.
+ *   rectangular partitions, a second split and every transform type throughout. In the inter frames of an
+ *   AV1 sequence (#177), 1 predicts from the frame before alone, in a narrow motion search; 2 adds the frame
+ *   before that, the two averaged, and a wider search; 3 searches wider still and codes more candidates.
  * @property tileSize the side of the square tiles of a grid, a multiple of 8 from 64 to 8192: a picture
  *   wider or taller than this is written as a `grid` of tiles of this size, which the tile runner of
  *   [ImageKodec.setTileRunner] encodes, and the edge tiles are padded by repeating the last row and

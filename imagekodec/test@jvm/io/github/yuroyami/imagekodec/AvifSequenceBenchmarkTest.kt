@@ -147,7 +147,7 @@ class AvifSequenceBenchmarkTest {
 
     companion object {
         /** The regression bound on the mean size ratio of effort 2 against libaom at CRF 40. */
-        const val RATIO_BOUND = 3.0
+        const val RATIO_BOUND = 1.3
 
         /** The variants run unless `IMAGEKODEC_AVIS_BENCHMARK_VARIANTS` names others, separated by semicolons. */
         const val DEFAULT_VARIANTS = "effort 2;effort 2, no compound;effort 2, intra only"

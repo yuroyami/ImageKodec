@@ -190,6 +190,13 @@ class FuzzTest {
             KiteBitmap(24, 16, IntArray(24 * 16) { i -> (((i % 24) * 9 + (i / 24) * 40) shl 24) or (if ((i % 24) / 6 % 2 == 0) 0x1080E0 else 0xF0F020) or ((i % 7) * 3) }),
             HeifEncodeOptions(quality = 60, chroma = HeifChroma.Yuv444),
         ),
+        // An animated AVIF the core's own encoder writes: a key frame, then inter frames with an alpha track (#177).
+        "avif-sequence-encoded" to ImageKodec.encodeAvif(
+            KiteAnimation(12, 8, (0 until 3).map { t ->
+                KiteFrame(KiteBitmap(12, 8, IntArray(96) { i -> ((((i % 12) * 20) and 0xFF) shl 24) or (((i % 12 + t) * 19) shl 16) or ((i / 12) * 30 shl 8) or 0x40 }), 40, 4)
+            }, loopCount = 2),
+            HeifEncodeOptions(quality = 60),
+        ),
         // A tmap with its gain map, and alpha and depth auxiliary images (#153, #154).
         "heif-aux-tmap" to AuxiliaryFiles.everything(),
         // JPEG XL from libjxl: both coding modes, the container, an ICC profile, passes, an LF frame, patches,
