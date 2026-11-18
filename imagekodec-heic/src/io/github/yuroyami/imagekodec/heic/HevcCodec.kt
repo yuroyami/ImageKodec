@@ -91,7 +91,7 @@ internal object HevcCodec : HeifCodec {
             width = s.croppedWidth,
             height = s.croppedHeight,
             bitDepthLuma = s.bitDepthY,
-            bitDepthChroma = s.bitDepthC,
+            bitDepthChroma = s.planeBitDepth(1),
             chromaFormat = s.chromaFormatIdc,
             colorPrimaries = if (colour) vui.colourPrimaries else null,
             transferCharacteristics = if (colour) vui.transferCharacteristics else null,

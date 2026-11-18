@@ -437,6 +437,37 @@ class HevcDecodeOracleTest {
         assertTrue(failures.isEmpty(), "${failures.size} of ${interCases.size} cases failed:\n${failures.joinToString("\n")}")
     }
 
+    /**
+     * Three separate colour planes (#188): x265 codes the Y, U and V planes of one 4:4:4 scene as three 4:0:0
+     * sequences of P and B pictures with one fixed structure, [SeparateColourPlanes] joins them into one stream, and
+     * each colour plane of each picture must equal the decode of its own sequence and the MD5 that x265 wrote for it.
+     * Each plane predicts from the same plane of its references and keeps motion of its own for temporal candidates.
+     */
+    @Test
+    fun separateColourPlanesMatchTheHashSei() {
+        requireTools()
+        val params = "keyint=8:bframes=2:b-adapt=0:scenecut=0:ref=2:no-weightp=1:hash=1"
+        for ((format, size) in listOf("yuv444p" to "64x48", "yuv444p10le" to "96x64")) {
+            val pixFmt = if (format == "yuv444p") "gray" else "gray10le"
+            val sources = listOf("y", "u", "v").map { plane ->
+                AnnexB.split(encode(size, pixFmt, params, 6, filter = ",format=$format,extractplanes=$plane").readBytes())
+            }
+            val mono = sources.mapIndexed { k, s -> decode(s).also { checkHashes("$pixFmt plane $k", it) } }
+            val joined = SeparateColourPlanes.join(sources, mono.map { list -> list.map { it.hash!!.values[0] } })
+            val slices = sliceHeaders(joined)
+            assertTrue(slices.all { it.sps.separateColourPlane }, "$pixFmt: the joined stream has separate colour planes")
+            assertTrue(slices.any { it.sliceType == SliceType.B } && slices[0].sps.temporalMvpEnabled, "$pixFmt: B pictures with temporal candidates")
+            val pictures = decode(joined)
+            assertEquals(6, pictures.size, "$pixFmt: pictures")
+            for ((i, p) in pictures.withIndex()) for (c in 0..2) {
+                assertTrue(p.planes[c].contentEquals(mono[c][i].planes[0]), "$pixFmt: picture $i, colour plane $c")
+            }
+            val planes = checkHashes("$pixFmt separate colour planes", pictures)
+            val types = slices.filter { it.colourPlaneId == 0 }.map { "IPB"[2 - it.sliceType] }.joinToString("")
+            println("separate colour planes, $pixFmt $size: ${pictures.size} pictures ($types), $planes planes match x265's MD5")
+        }
+    }
+
     /** P and B sequences against libde265, sample for sample, in output order. */
     @Test
     fun interSamplesMatchLibde265() {
