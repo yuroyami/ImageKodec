@@ -10,7 +10,7 @@ package io.github.yuroyami.imagekodec.codec.avif
  * CDEF filters the deblocked frame once for each of a set of strength pairs, keeps each 64 by 64 block's squared
  * error under each, and picks the 1, 2, 4 or 8 pairs, and each block's choice among them, that cost least with
  * `cdef_idx` priced at its bits. Loop restoration then weighs the self-guided and Wiener filters on the CDEF output
- * ([restoration]).
+ * ([restoration]), which the frames the CDEF search kept put together without filtering again.
  */
 internal class Av1FilterSearch(
     private val d: Av1FrameDecoder,
@@ -41,6 +41,11 @@ internal class Av1FilterSearch(
     var lr: Av1LrChoice? = null
         private set
 
+    private companion object {
+        /** The most luma samples of a frame whose CDEF search keeps the frame each strength pair leaves (#176). */
+        const val KEEP_SAMPLES = 1L shl 22
+    }
+
     fun search(base: Av1FrameParams, stream: Av1StreamParams): Av1FrameParams {
         // Under intra block copy the frame has no loop filters.
         if (fh.codedLossless || fh.allowIntrabc) return base
@@ -58,7 +63,7 @@ internal class Av1FilterSearch(
             saved = Av1LoopRestoration.savedRows(d)
             fh.frameRestorationType.fill(Av1FrameHeader.RESTORE_NONE)
         }
-        val cdef = if (stream.enableCdef) cdef() else null
+        val cdef = if (stream.enableCdef) cdef(saved != null) else null
         var lrType = IntArray(3)
         if (saved != null) {
             if (cdef != null) applyCdef(cdef)
@@ -88,7 +93,32 @@ internal class Av1FilterSearch(
             val m = d.mi(r, col)
             if (d.cdefIdx[m] != -1) d.cdefIdx[m] = record.cdef[(r shl 16) or col] ?: 0
         }
-        Av1Cdef.apply(d)
+        val outputs = c.outputs
+        val presets = c.presets
+        if (outputs == null || presets == null) {
+            Av1Cdef.apply(d)
+            return
+        }
+        // CDEF filters each block from the deblocked samples alone, so each 64 by 64 block's samples are those the
+        // search's pass with its strengths left: what filtering the frame once more would give (#176).
+        for (b in 0 until sbRows * sbCols) {
+            val r = (b / sbCols) * 16
+            val col = (b % sbCols) * 16
+            val idx = d.cdefIdx[d.mi(r, col)]
+            if (idx == -1) continue
+            val fromY = outputs[presets.indexOf(c.y[idx])]!!
+            val fromUv = outputs[presets.indexOf(c.uv[idx])]!!
+            for (p in 0 until d.numPlanes) {
+                val from = if (p == 0) fromY[0] else fromUv[p]
+                val sx = if (p > 0) d.subX else 0
+                val sy = if (p > 0) d.subY else 0
+                val stride = d.planeWidth[p]
+                val x0 = (col * 4) shr sx
+                val x1 = minOf(stride, x0 + (64 shr sx))
+                val y1 = minOf(d.planeHeight[p], ((r * 4) shr sy) + (64 shr sy))
+                for (y in (r * 4) shr sy until y1) from.copyInto(d.frame[p], y * stride + x0, y * stride + x0, y * stride + x1)
+            }
+        }
     }
 
     // ---- loop restoration ----------------------------------------------------------------
@@ -581,7 +611,14 @@ internal class Av1FilterSearch(
 
     // ---- CDEF ----------------------------------------------------------------------------
 
-    private class Cdef(val damping: Int, val bits: Int, val y: IntArray, val uv: IntArray)
+    /**
+     * A CDEF choice: its damping, the number of bits of `cdef_idx` and the strength pairs, as header codes. [presets]
+     * are the codes the search tried and [outputs] the frame each left, where it kept them.
+     */
+    private class Cdef(
+        val damping: Int, val bits: Int, val y: IntArray, val uv: IntArray,
+        val presets: List<Int>? = null, val outputs: Array<Array<ShortArray>?>? = null,
+    )
 
     /**
      * The strength pairs CDEF tries, primary and secondary, each a header code (primary * 4 + secondary code): the
@@ -600,7 +637,11 @@ internal class Av1FilterSearch(
         return all.take(n)
     }
 
-    private fun cdef(): Cdef? {
+    /**
+     * The CDEF strengths by the error they leave. With [keepOutputs], when the frame is no larger than [KEEP_SAMPLES],
+     * the frame each strength pair leaves is kept for [applyCdef].
+     */
+    private fun cdef(keepOutputs: Boolean): Cdef? {
         val sbRows = (d.miRows + 15) shr 4
         val sbCols = (d.miCols + 15) shr 4
         val coded = BooleanArray(sbRows * sbCols) { i -> d.cdefIdx[d.mi((i / sbCols) * 16, (i % sbCols) * 16)] != -1 }
@@ -612,12 +653,20 @@ internal class Av1FilterSearch(
         // Per preset and block, the squared error of luma and of chroma, measured separately so the two pick apart.
         val errY = Array(luma.size) { LongArray(sbRows * sbCols) }
         val errUv = Array(luma.size) { LongArray(sbRows * sbCols) }
+        val outputs = if (keepOutputs && d.planeWidth[0].toLong() * d.planeHeight[0] <= KEEP_SAMPLES) arrayOfNulls<Array<ShortArray>>(luma.size) else null
         fh.cdefDamping = damping
         fh.cdefBits = 0
         for (k in luma.indices) {
+            if (luma[k] == 0) {
+                // Strengths of 0 leave every sample as it is: the deblocked frame's errors, with no pass.
+                blockErrors(errY[k], errUv[k], sbRows, sbCols)
+                if (outputs != null) outputs[k] = saved
+                continue
+            }
             setStrength(0, luma[k], luma[k])
             Av1Cdef.apply(d)
             blockErrors(errY[k], errUv[k], sbRows, sbCols)
+            if (outputs != null) outputs[k] = copyFrame()
             restore(saved)
         }
         // Greedy sets of 1, 2, 4 and 8 presets for luma and for chroma alike, each block taking its best.
@@ -639,7 +688,7 @@ internal class Av1FilterSearch(
             val j = (total shl 8) + (lambda256 * (codedCount.toLong() * bits * 256) shr 8)
             if (j < bestJ) {
                 bestJ = j
-                best = Cdef(damping, bits, IntArray(8) { if (it < size) luma[pickY[it]] else 0 }, IntArray(8) { if (it < size) luma[pickUv[it]] else 0 })
+                best = Cdef(damping, bits, IntArray(8) { if (it < size) luma[pickY[it]] else 0 }, IntArray(8) { if (it < size) luma[pickUv[it]] else 0 }, luma, outputs)
             }
         }
         val chosen = best!!
