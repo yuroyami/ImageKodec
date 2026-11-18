@@ -196,3 +196,9 @@ can still be unsupported. `probe` is the call that reports that, through `isDeco
 of its own, so both take their parameters explicitly and both return packed 1-bit rows instead of
 going through `decode`. A PDF reader is the usual caller. `encodeCcitt`, `CcittFax.encode` and
 `encodeJbig2` write the same data ([Writing images](encoding.md#fax-and-jbig2-data-for-pdf-and-tiff)).
+
+`Jbig2Decoder` reads generic, refinement, text and halftone regions, pattern dictionaries, custom
+Huffman tables, and symbol dictionaries arithmetic or Huffman coded. An arithmetic dictionary may
+refine its symbols and aggregate several instances into one (T.88 6.5.8.2), and an immediate generic
+region may leave its length unknown and end with a row count (7.2.7). `CcittFax` reads Group 3 and
+Group 4 data, the uncompressed mode of T.4 4.2.3 included.

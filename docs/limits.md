@@ -110,6 +110,16 @@ and fail during the decode.
 - CCITT's uncompressed mode (T.4 4.2.3 and Table 5) decodes in Group 3 and Group 4, which no installed
   reader takes: libtiff and ffmpeg stop at it. Its tests write the codes from T.4 and check the page.
 
+## JBIG2
+
+- A Huffman-coded symbol dictionary that refines or aggregates its symbols (SDHUFF and SDREFAGG
+  both 1) throws `UnsupportedImageException`, and `Jbig2Decoder.decode` returns null for it. No
+  encoder here writes one, and jbig2dec 0.20, the only other reader, draws the same symbol whatever
+  its refinement data holds, and stops at its aggregates with a broken symbol ID table, so nothing
+  could check a reading. The arithmetic form of the same dictionaries decodes, held to jbig2dec.
+- A segment of unknown length is allowed only for an immediate generic region, as T.88 7.2.7 says;
+  its end is the first end marker after the region's header, as jbig2dec finds it.
+
 ## PNG
 
 - Apple's CgBI files decode at 8 bits a sample, which is what Xcode writes. A CgBI file of 16-bit

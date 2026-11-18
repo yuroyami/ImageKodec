@@ -425,9 +425,17 @@ class FuzzTest {
             Triple("jbig2-generic-tpgd", hex(GENERIC_TPGD), null),
             Triple("jbig2-text", hex(TEXT_PAGE), hex(SYMBOL_DICT)),
             Triple("jbig2-mmr", hex(JBIG2_MMR), null),
+            // A dictionary that refines and aggregates, and a region of unknown length (#189).
+            Triple("jbig2-aggregate", Jbig2AggregateTest().aggregates(2).stream, null),
+            Triple("jbig2-unknown-length", Jbig2AggregateTest().unknownLength(mmr = false, unknownHeight = true).stream, null),
         )
         for ((name, data, globals) in streams) {
-            val (width, height) = if (name == "jbig2-mmr") 64 to 24 else Jbig2Page.WIDTH to Jbig2Page.HEIGHT
+            val (width, height) = when (name) {
+                "jbig2-mmr" -> 64 to 24
+                "jbig2-aggregate" -> 64 to 40
+                "jbig2-unknown-length" -> 37 to 23
+                else -> Jbig2Page.WIDTH to Jbig2Page.HEIGHT
+            }
             fun run(label: String, stream: ByteArray, dictionary: ByteArray?) {
                 if (!shard.takesNext()) return
                 withDeadline(label + FuzzSettings.replay, DEADLINE_MILLIS) {
