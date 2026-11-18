@@ -58,7 +58,15 @@ internal class Av1BlockChoice {
     /** The luma palette, ascending, and its colour map (64 a row), which a choice never changes once made. */
     val paletteColorsY = IntArray(8)
     var colorMapY: IntArray? = null
+    /** The chroma palette, U ascending with each V beside its U, and its colour map (64 a row), likewise fixed. */
+    val paletteColorsU = IntArray(8)
+    val paletteColorsV = IntArray(8)
+    var colorMapUV: IntArray? = null
     var txSize = Av1.TX_4X4
+    /** Whether the block copies an earlier part of the frame (intra block copy), and its vector in eighths. */
+    var useIntrabc = false
+    var mvRow = 0
+    var mvCol = 0
 
     fun copyFrom(o: Av1BlockChoice): Av1BlockChoice {
         skip = o.skip
@@ -74,7 +82,13 @@ internal class Av1BlockChoice {
         paletteSizeUV = o.paletteSizeUV
         o.paletteColorsY.copyInto(paletteColorsY)
         colorMapY = o.colorMapY
+        o.paletteColorsU.copyInto(paletteColorsU)
+        o.paletteColorsV.copyInto(paletteColorsV)
+        colorMapUV = o.colorMapUV
         txSize = o.txSize
+        useIntrabc = o.useIntrabc
+        mvRow = o.mvRow
+        mvCol = o.mvCol
         return this
     }
 

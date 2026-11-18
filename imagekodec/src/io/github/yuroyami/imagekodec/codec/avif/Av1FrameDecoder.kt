@@ -648,7 +648,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         readDeltas = false
         refFrame[0] = Av1.INTRA_FRAME
         refFrame[1] = Av1.NONE
-        useIntrabc = if (fh.allowIntrabc) sym(cdf[C.INTRABC], 0, 2) { 0 } == 1 else false
+        useIntrabc = if (fh.allowIntrabc) sym(cdf[C.INTRABC], 0, 2) { if (choice.useIntrabc) 1 else 0 } == 1 else false
+        if (useIntrabc) toolUse?.add("intra block copy")
         useFilterIntra = false
         if (useIntrabc) {
             isInter = true
@@ -1131,7 +1132,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
                 predMv[i * 2 + 1] = stack.stack[pos * 4 + i * 2 + 1]
             }
             if (compMode == Av1.NEWMV) {
-                readMv(i)
+                val e = enc
+                if (e != null) writeMv(e.sink, i) else readMv(i)
             } else {
                 mv[i * 2] = predMv[i * 2]
                 mv[i * 2 + 1] = predMv[i * 2 + 1]
@@ -1169,6 +1171,52 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         mv[ref * 2 + 1] = predMv[ref * 2 + 1] + diffCol
     }
 
+    /**
+     * `read_mv` when coding: the block's vector from its [choice] (an intra block copy's, the only one the encoder
+     * codes), as its difference from the predicted vector, each component as [readMvComponent] reads it.
+     */
+    private fun writeMv(sink: Av1SymbolSink, ref: Int) {
+        val mvCtx = if (useIntrabc) MV_INTRABC_CONTEXT else 0
+        mv[ref * 2] = choice.mvRow
+        mv[ref * 2 + 1] = choice.mvCol
+        val diffRow = mv[ref * 2] - predMv[ref * 2]
+        val diffCol = mv[ref * 2 + 1] - predMv[ref * 2 + 1]
+        val joint = (if (diffRow != 0) 2 else 0) + (if (diffCol != 0) 1 else 0)
+        sink.symbol(joint, cdf[C.MV_JOINT], mvCtx * 5, 4)
+        if (diffRow != 0) writeMvComponent(sink, mvCtx, 0, diffRow)
+        if (diffCol != 0) writeMvComponent(sink, mvCtx, 1, diffCol)
+    }
+
+    /**
+     * The inverse of [readMvComponent] for a difference [v] other than 0: its sign, its class, and the bits within
+     * the class, the fraction and high precision bits only where the frame codes them. A vector of whole samples
+     * under force_integer_mv has a fraction of 3 and a precision bit of 1, which the reader adds back.
+     */
+    private fun writeMvComponent(sink: Av1SymbolSink, mvCtx: Int, comp: Int, v: Int) {
+        val ctx = mvCtx * 2 + comp
+        sink.symbol(if (v < 0) 1 else 0, cdf[C.MV_SIGN], ctx * 3, 2)
+        val mag = kotlin.math.abs(v) - 1
+        val integer = fh.forceIntegerMv != 0
+        val fr = if (integer) 3 else (mag shr 1) and 3
+        val hp = if (fh.allowHighPrecisionMv) mag and 1 else 1
+        check(((mag shr 1) and 3) == fr && (mag and 1) == hp) { "a motion vector difference of $v is not one this frame codes" }
+        val offset = mag shr 3
+        if (offset < CLASS0_SIZE) {
+            sink.symbol(0, cdf[C.MV_CLASS], ctx * 12, 11)
+            sink.symbol(offset, cdf[C.MV_CLASS0_BIT], ctx * 3, 2)
+            if (!integer) sink.symbol(fr, cdf[C.MV_CLASS0_FR], (ctx * 2 + offset) * 5, 4)
+            if (fh.allowHighPrecisionMv) sink.symbol(hp, cdf[C.MV_CLASS0_HP], ctx * 3, 2)
+        } else {
+            // offset = CLASS0_SIZE << (mvClass - 1) plus mvClass bits.
+            val mvClass = 31 - (offset / CLASS0_SIZE).countLeadingZeroBits() + 1
+            val bits = offset - (CLASS0_SIZE shl (mvClass - 1))
+            sink.symbol(mvClass, cdf[C.MV_CLASS], ctx * 12, 11)
+            for (i in 0 until mvClass) sink.symbol((bits shr i) and 1, cdf[C.MV_BIT], (ctx * 10 + i) * 3, 2)
+            if (!integer) sink.symbol(fr, cdf[C.MV_FR], ctx * 5, 4)
+            if (fh.allowHighPrecisionMv) sink.symbol(hp, cdf[C.MV_HP], ctx * 3, 2)
+        }
+    }
+
     private fun readMvComponent(mvCtx: Int, comp: Int): Int {
         val ctx = mvCtx * 2 + comp
         val sign = sd.symbol(cdf[C.MV_SIGN], ctx * 3, 2)
@@ -1198,11 +1246,19 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             for (comp in 0 until 2) if (kotlin.math.abs(mv[i * 2 + comp]) >= (1 shl 14)) return false
         }
         if (!useIntrabc) return true
+        return isDvValid(mv[0], mv[1])
+    }
+
+    /**
+     * Whether an intra block copy vector of ([mvRow], [mvCol]), in eighths, is one a conformant stream may code for
+     * the block being decoded: whole samples, inside the tile, and in the part of it decoded far enough back.
+     */
+    fun isDvValid(mvRow: Int, mvCol: Int): Boolean {
         val bw = Av1.blockWidth[miSize]
         val bh = Av1.blockHeight[miSize]
-        if ((mv[0] and 7) != 0 || (mv[1] and 7) != 0) return false
-        val deltaRow = mv[0] shr 3
-        val deltaCol = mv[1] shr 3
+        if ((mvRow and 7) != 0 || (mvCol and 7) != 0) return false
+        val deltaRow = mvRow shr 3
+        val deltaCol = mvCol shr 3
         var srcTopEdge = miRow * Av1.MI_SIZE + deltaRow
         var srcLeftEdge = miCol * Av1.MI_SIZE + deltaCol
         val srcBottomEdge = srcTopEdge + bh
@@ -1524,7 +1580,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             if (hasPaletteY == 1) {
                 paletteSizeY = sym(cdf[C.PALETTE_Y_SIZE], bsizeCtx * 8, 7) { choice.paletteSizeY - 2 } + 2
                 val e = enc
-                if (e != null) writePaletteColors(e.sink, paletteSizeY, choice.paletteColorsY, paletteColorsY)
+                if (e != null) writePaletteColors(e.sink, 0, paletteSizeY, choice.paletteColorsY, paletteColorsY, deltaPlusOne = true)
                 else readPaletteColors(0, paletteSizeY, paletteColorsY, deltaPlusOne = true)
             }
         }
@@ -1534,6 +1590,12 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             if (hasPaletteUv == 1) {
                 toolUse?.add("chroma palette")
                 paletteSizeUV = sym(cdf[C.PALETTE_UV_SIZE], bsizeCtx * 8, 7) { choice.paletteSizeUV - 2 } + 2
+                val e = enc
+                if (e != null) {
+                    writePaletteColors(e.sink, 1, paletteSizeUV, choice.paletteColorsU, paletteColorsU, deltaPlusOne = false)
+                    writePaletteColorsV(e.sink, paletteSizeUV, choice.paletteColorsV)
+                    return
+                }
                 readPaletteColors(1, paletteSizeUV, paletteColorsU, deltaPlusOne = false)
                 if (sd.literal(1) == 1) {
                     val minBits = bitDepth - 4
@@ -1586,18 +1648,19 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     }
 
     /**
-     * The luma palette [colors] (ascending, distinct) as [readPaletteColors] reads them: a bit for each cached colour
-     * telling whether the palette has it, then the others ascending, the first in full and each next as its step
-     * from the one before less one, in as few bits as the largest step needs and the shrinking range allows. Leaves
-     * them in [out], as decoding does. The encoder codes no chroma palette.
+     * The luma or U palette [colors] (ascending; luma's distinct) of [plane] as [readPaletteColors] reads them: a bit
+     * for each cached colour telling whether the palette has it, then the others ascending, the first in full and
+     * each next as its step from the one before (less one for luma, [deltaPlusOne]), in as few bits as the largest
+     * step needs and the shrinking range allows. Leaves them in [out], as decoding does.
      */
-    private fun writePaletteColors(sink: Av1SymbolSink, size: Int, colors: IntArray, out: IntArray) {
-        val cacheN = paletteCache(0)
+    private fun writePaletteColors(sink: Av1SymbolSink, plane: Int, size: Int, colors: IntArray, out: IntArray, deltaPlusOne: Boolean) {
+        val cacheN = paletteCache(plane)
         val fromCache = BooleanArray(size)
+        val one = if (deltaPlusOne) 1 else 0
         var idx = 0
         var i = 0
         while (i < cacheN && idx < size) {
-            val k = (0 until size).firstOrNull { colors[it] == paletteCache[i] }
+            val k = (0 until size).firstOrNull { colors[it] == paletteCache[i] && !fromCache[it] }
             sink.bool(if (k != null) 1 else 0)
             if (k != null) {
                 fromCache[k] = true
@@ -1611,18 +1674,55 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             if (rest.size > 1) {
                 val minBits = bitDepth - 3
                 var need = 0
-                for (k in 1 until rest.size) need = maxOf(need, 32 - (rest[k] - rest[k - 1] - 1).countLeadingZeroBits())
+                for (k in 1 until rest.size) need = maxOf(need, 32 - (rest[k] - rest[k - 1] - one).countLeadingZeroBits())
                 val extra = (need - minBits).coerceIn(0, 3)
                 sink.literal(extra, 2)
                 var paletteBits = minBits + extra
                 for (k in 1 until rest.size) {
-                    sink.literal(rest[k] - rest[k - 1] - 1, paletteBits)
-                    val range = (1 shl bitDepth) - rest[k] - 1
+                    sink.literal(rest[k] - rest[k - 1] - one, paletteBits)
+                    val range = (1 shl bitDepth) - rest[k] - one
                     paletteBits = minOf(paletteBits, Av1BitReader.ceilLog2(range))
                 }
             }
         }
         for (k in 0 until size) out[k] = colors[k]
+    }
+
+    /**
+     * The V colours of a chroma palette, in the order of the U colours they pair with, as `palette_mode_info` reads
+     * them: each in full, or, when that is shorter, the first in full and each next as its signed step from the one
+     * before, the shorter way round the range of values, in as few bits as the largest step needs. Leaves them in
+     * [paletteColorsV], as decoding does.
+     */
+    private fun writePaletteColorsV(sink: Av1SymbolSink, size: Int, colors: IntArray) {
+        val maxVal = 1 shl bitDepth
+        val minBits = bitDepth - 4
+        val steps = IntArray(size)
+        var need = 0
+        for (idx in 1 until size) {
+            var d = colors[idx] - colors[idx - 1]
+            // A step past either end wraps, so the other way round may be shorter.
+            if (d > maxVal / 2) d -= maxVal else if (d < -maxVal / 2) d += maxVal
+            steps[idx] = d
+            need = maxOf(need, 32 - kotlin.math.abs(d).countLeadingZeroBits())
+        }
+        val paletteBits = maxOf(need, minBits)
+        var deltaBits = 2 + bitDepth
+        for (idx in 1 until size) deltaBits += paletteBits + (if (steps[idx] != 0) 1 else 0)
+        if (paletteBits <= minBits + 3 && deltaBits < size * bitDepth) {
+            sink.bool(1)
+            sink.literal(paletteBits - minBits, 2)
+            sink.literal(colors[0], bitDepth)
+            for (idx in 1 until size) {
+                val d = steps[idx]
+                sink.literal(kotlin.math.abs(d), paletteBits)
+                if (d != 0) sink.bool(if (d < 0) 1 else 0)
+            }
+        } else {
+            sink.bool(0)
+            for (idx in 0 until size) sink.literal(colors[idx], bitDepth)
+        }
+        for (idx in 0 until size) paletteColorsV[idx] = colors[idx]
     }
 
     private fun paletteCache(plane: Int): Int {
@@ -1679,7 +1779,9 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
                 blockHeight += 2
                 onscreenHeight += 2
             }
-            readColorMap(colorMapUV, paletteSizeUV, blockWidth, blockHeight, onscreenWidth, onscreenHeight, C.PALETTE_UV_COLOR)
+            val e = enc
+            if (e != null) writeColorMap(e.sink, choice.colorMapUV!!, colorMapUV, paletteSizeUV, blockWidth, blockHeight, onscreenWidth, onscreenHeight, C.PALETTE_UV_COLOR)
+            else readColorMap(colorMapUV, paletteSizeUV, blockWidth, blockHeight, onscreenWidth, onscreenHeight, C.PALETTE_UV_COLOR)
         }
     }
 
@@ -1839,7 +1941,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             val maxTxSz = Av1.findTxSize(size, size)
             val txSzSqrUp = Av1Tables.txSizeSqrUp[txSz]
             val ctx = (if (txSzSqrUp != maxTxSz) 1 else 0) * 3 + (Av1.TX_SIZES - 1 - maxTxSz) * 6 + above + left
-            sd.symbol(cdf[C.TXFM_SPLIT], ctx * 3, 2) == 1
+            // The encoder codes no inter block but an intra block copy, at its largest transform.
+            sym(cdf[C.TXFM_SPLIT], ctx * 3, 2) { 0 } == 1
         }
         val w4 = Av1.txWidth[txSz] / Av1.MI_SIZE
         val h4 = Av1.txHeight[txSz] / Av1.MI_SIZE
@@ -2059,9 +2162,9 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         val txType = if (set > 0 && qIdx > 0) {
             if (isInter) {
                 when (set) {
-                    Av1.TX_SET_INTER_1 -> Av1Tables.txTypeInterInvSet1[sd.symbol(cdf[C.INTER_TX_TYPE_SET1], Av1Tables.txSizeSqr[txSz] * 17, 16)]
-                    Av1.TX_SET_INTER_2 -> Av1Tables.txTypeInterInvSet2[sd.symbol(cdf[C.INTER_TX_TYPE_SET2], 0, 12)]
-                    else -> Av1Tables.txTypeInterInvSet3[sd.symbol(cdf[C.INTER_TX_TYPE_SET3], Av1Tables.txSizeSqr[txSz] * 3, 2)]
+                    Av1.TX_SET_INTER_1 -> Av1Tables.txTypeInterInvSet1[sym(cdf[C.INTER_TX_TYPE_SET1], Av1Tables.txSizeSqr[txSz] * 17, 16) { INTER_SET1_INDEX[enc!!.txType] }]
+                    Av1.TX_SET_INTER_2 -> Av1Tables.txTypeInterInvSet2[sym(cdf[C.INTER_TX_TYPE_SET2], 0, 12) { INTER_SET2_INDEX[enc!!.txType] }]
+                    else -> Av1Tables.txTypeInterInvSet3[sym(cdf[C.INTER_TX_TYPE_SET3], Av1Tables.txSizeSqr[txSz] * 3, 2) { INTER_SET3_INDEX[enc!!.txType] }]
                 }
             } else {
                 val intraDir = if (useFilterIntra) Av1Tables.filterIntraModeToIntraDir[filterIntraMode] else yMode
@@ -2360,6 +2463,14 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         val set = txSet(txSz)
         val qIdx = if (fh.segmentationEnabled) fh.qIndex(true, segmentId, currentQIndex) else fh.baseQIdx
         if (set == 0 || qIdx == 0) return
+        if (isInter) {
+            when (set) {
+                Av1.TX_SET_INTER_1 -> sink.symbol(INTER_SET1_INDEX[type], cdf[C.INTER_TX_TYPE_SET1], Av1Tables.txSizeSqr[txSz] * 17, 16)
+                Av1.TX_SET_INTER_2 -> sink.symbol(INTER_SET2_INDEX[type], cdf[C.INTER_TX_TYPE_SET2], 0, 12)
+                else -> sink.symbol(INTER_SET3_INDEX[type], cdf[C.INTER_TX_TYPE_SET3], Av1Tables.txSizeSqr[txSz] * 3, 2)
+            }
+            return
+        }
         val intraDir = if (useFilterIntra) Av1Tables.filterIntraModeToIntraDir[filterIntraMode] else yMode
         if (set == Av1.TX_SET_INTRA_1) sink.symbol(INTRA_SET1_INDEX[type], cdf[C.INTRA_TX_TYPE_SET1], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 8, 7)
         else sink.symbol(INTRA_SET2_INDEX[type], cdf[C.INTRA_TX_TYPE_SET2], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 6, 5)
@@ -2687,6 +2798,10 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         /** The symbol of each intra transform type in TX_SET_INTRA_1 and TX_SET_INTRA_2, -1 outside it. */
         val INTRA_SET1_INDEX: IntArray = IntArray(16) { -1 }.also { m -> Av1Tables.txTypeIntraInvSet1.forEachIndexed { i, t -> m[t] = i } }
         val INTRA_SET2_INDEX: IntArray = IntArray(16) { -1 }.also { m -> Av1Tables.txTypeIntraInvSet2.forEachIndexed { i, t -> m[t] = i } }
+        /** The symbol of each inter transform type in TX_SET_INTER_1 to TX_SET_INTER_3, -1 outside it. */
+        val INTER_SET1_INDEX: IntArray = IntArray(16) { -1 }.also { m -> Av1Tables.txTypeInterInvSet1.forEachIndexed { i, t -> m[t] = i } }
+        val INTER_SET2_INDEX: IntArray = IntArray(16) { -1 }.also { m -> Av1Tables.txTypeInterInvSet2.forEachIndexed { i, t -> m[t] = i } }
+        val INTER_SET3_INDEX: IntArray = IntArray(16) { -1 }.also { m -> Av1Tables.txTypeInterInvSet3.forEachIndexed { i, t -> m[t] = i } }
 
         private const val COMP_NEWMV_CTXS = 5
         private const val MV_INTRABC_CONTEXT = 1

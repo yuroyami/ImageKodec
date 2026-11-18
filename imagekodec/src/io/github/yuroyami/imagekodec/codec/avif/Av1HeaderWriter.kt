@@ -180,7 +180,13 @@ internal class Av1FrameParams(
     val lrUnitShift: Int = 0,
     val lrUvShift: Int = 0,
     val reducedTxSet: Boolean = false,
+    /** allow_intrabc: blocks may copy earlier parts of the frame, and the frame then has no loop filters. */
+    val allowIntrabc: Boolean = false,
 ) {
+    init {
+        require(!allowIntrabc || allowScreenContentTools) { "intra block copy needs the screen content tools" }
+    }
+
     /**
      * The OBU_FRAME payload's frame header, `uncompressed_header` of a shown key frame under a reduced still picture
      * header (section 5.9), then its byte alignment, for the sequence [stream] describes.
@@ -193,7 +199,7 @@ internal class Av1FrameParams(
         if (allowScreenContentTools) w.flag(false) // force_integer_mv: SELECT under a reduced header, read and then forced to 1
         // frame_size( ): no override, so the sequence's maximum; no superres. render_size( ): the same.
         w.flag(false) // render_and_frame_size_different
-        if (allowScreenContentTools) w.flag(false) // allow_intrabc
+        if (allowScreenContentTools) w.flag(allowIntrabc)
         // tile_info( ): uniform spacing, the columns' and rows' log2 as increments over their minimum.
         val sbCols = (stream.width + 63) shr 6
         val sbRows = (stream.height + 63) shr 6
@@ -238,7 +244,8 @@ internal class Av1FrameParams(
         w.flag(false) // segmentation_enabled
         if (baseQIdx > 0) w.flag(false) // delta_q_present
         val codedLossless = baseQIdx == 0
-        if (!codedLossless) {
+        // loop_filter_params( ), cdef_params( ) and lr_params( ) code nothing under intra block copy.
+        if (!codedLossless && !allowIntrabc) {
             w.f(6, loopFilterLevel[0])
             w.f(6, loopFilterLevel[1])
             if (numPlanes > 1 && (loopFilterLevel[0] != 0 || loopFilterLevel[1] != 0)) {
@@ -275,8 +282,8 @@ internal class Av1FrameParams(
                     if (stream.subX == 1 && stream.subY == 1 && usesChromaLr) w.f(1, lrUvShift)
                 }
             }
-            w.flag(true) // tx_mode_select
         }
+        if (!codedLossless) w.flag(true) // tx_mode_select
         w.flag(reducedTxSet)
         return w.toByteArray().also { check(it.isNotEmpty()) }
     }

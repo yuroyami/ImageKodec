@@ -42,7 +42,8 @@ internal class Av1FilterSearch(
         private set
 
     fun search(base: Av1FrameParams, stream: Av1StreamParams): Av1FrameParams {
-        if (fh.codedLossless) return base
+        // Under intra block copy the frame has no loop filters.
+        if (fh.codedLossless || fh.allowIntrabc) return base
         val levels = deblock()
         // The deblocked frame, which CDEF filters; loop restoration reads its rows around each stripe.
         applyDeblock(levels)

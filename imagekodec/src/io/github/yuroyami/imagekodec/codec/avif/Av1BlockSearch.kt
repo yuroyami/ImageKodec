@@ -36,6 +36,10 @@ internal class Av1BlockSearch(
     private val record: Av1Record,
     qIndex: Int,
     private val effort: Int,
+    /** The source's repeated windows, when the frame allows intra block copy. */
+    private val hash: Av1BlockHash? = null,
+    /** Whether a block may code a chroma palette. */
+    private val chromaPalettes: Boolean = true,
 ) : Av1Coding() {
 
     private val bitDepth = d.bitDepth
@@ -344,9 +348,163 @@ internal class Av1BlockSearch(
                 }
             }
         }
+        // A chroma palette on the chosen luma, where the frame allows screen content tools and the block's chroma
+        // has few colours.
+        if (chromaPalettes && hasChroma && d.fh.allowScreenContentTools != 0 && bSize >= Av1.BLOCK_8X8 && Av1.blockWidth[bSize] <= 64 && Av1.blockHeight[bSize] <= 64) {
+            if (!lastWasBest) {
+                trial(r, c, bSize, best, saved)
+                lastWasBest = true
+            }
+            ch.copyFrom(best)
+            if (chromaPalette(r, c, bSize, ch)) {
+                ch.skip = 0
+                val j = trial(r, c, bSize, ch, saved)
+                if (j < bestJ) {
+                    bestJ = j
+                    best.copyFrom(ch)
+                    lastWasBest = true
+                } else {
+                    lastWasBest = false
+                }
+            }
+        }
+        // A copy of an earlier part of the frame, where the frame allows it and the source repeats there.
+        if (hash != null && d.fh.allowIntrabc && Av1.blockWidth[bSize] >= 8 && Av1.blockHeight[bSize] >= 8 && copy(r, c, bSize, ch)) {
+            val j = trial(r, c, bSize, ch, saved)
+            if (j < bestJ) {
+                bestJ = j
+                best.copyFrom(ch)
+                lastWasBest = true
+            } else {
+                lastWasBest = false
+            }
+            if (nonZero == 0) {
+                ch.skip = 1
+                val js = trial(r, c, bSize, ch, saved)
+                if (js < bestJ) {
+                    bestJ = js
+                    best.copyFrom(ch)
+                    lastWasBest = true
+                } else {
+                    lastWasBest = false
+                }
+            }
+        }
         if (!lastWasBest) trial(r, c, bSize, best, saved)
         chosen[record.key(r, c, bSize)] = best
         return bestJ
+    }
+
+    /**
+     * An intra block copy for the block of [bSize] at ([r], [c]) into [ch]: the nearest earlier place whose source
+     * luma matches the block's, sample for sample, that a conformant stream may copy from (whole samples, decoded
+     * far enough back). Among the last 64 windows of the block's hash. False when there is none.
+     */
+    private fun copy(r: Int, c: Int, bSize: Int, ch: Av1BlockChoice): Boolean {
+        val h = hash ?: return false
+        d.positionBlock(r, c, bSize)
+        val bx = c * 4
+        val by = r * 4
+        val bw = Av1.blockWidth[bSize]
+        val bh = Av1.blockHeight[bSize]
+        var dvRow = 0
+        var dvCol = 0
+        var found = false
+        h.earlier(bx, by, 64) { px, py ->
+            val dr = (py - by) * 8
+            val dc = (px - bx) * 8
+            if (d.isDvValid(dr, dc) && h.same(px, py, bx, by, bw, bh)) {
+                dvRow = dr
+                dvCol = dc
+                found = true
+                false
+            } else {
+                true
+            }
+        }
+        if (!found) return false
+        ch.skip = 0
+        ch.useIntrabc = true
+        ch.mvRow = dvRow
+        ch.mvCol = dvCol
+        ch.yMode = Av1.DC_PRED
+        ch.angleDeltaY = 0
+        ch.uvMode = Av1.DC_PRED
+        ch.angleDeltaUV = 0
+        ch.cflAlphaU = 0
+        ch.cflAlphaV = 0
+        ch.useFilterIntra = false
+        ch.paletteSizeY = 0
+        ch.paletteSizeUV = 0
+        ch.colorMapY = null
+        ch.colorMapUV = null
+        ch.txSize = Av1Tables.maxTxSizeRect[bSize]
+        return true
+    }
+
+    private val pairCounts = HashMap<Int, Int>()
+
+    /**
+     * A chroma palette for the block of [bSize] at ([r], [c]) into [ch], with DC chroma, when its source chroma over
+     * the coded area holds 2 to 8 pairs of U and V, or its 8 commonest cover 15/16 of it: the pairs ordered by U, as
+     * the syntax reads them, and each sample mapped to the nearest pair. False when no palette fits.
+     */
+    private fun chromaPalette(r: Int, c: Int, bSize: Int, ch: Av1BlockChoice): Boolean {
+        val bw = Av1.blockWidth[bSize]
+        val bh = Av1.blockHeight[bSize]
+        // The chroma block and its shown part as palette_tokens sizes them.
+        val w = bw shr d.subX
+        val h = bh shr d.subY
+        if (w < 4 || h < 4) return false
+        val onW = minOf(bw, (d.miCols - c) * 4) shr d.subX
+        val onH = minOf(bh, (d.miRows - r) * 4) shr d.subY
+        val x0 = (c * 4) shr d.subX
+        val y0 = (r * 4) shr d.subY
+        val stride = d.planeWidth[1]
+        val u = src.planes[1]
+        val v = src.planes[2]
+        pairCounts.clear()
+        for (y in 0 until onH) for (x in 0 until onW) {
+            val at = (y0 + y) * stride + x0 + x
+            val key = (u[at].toInt() shl 16) or v[at].toInt()
+            pairCounts[key] = (pairCounts[key] ?: 0) + 1
+            if (pairCounts.size > 64) return false
+        }
+        if (pairCounts.size < 2) return false
+        val top = pairCounts.entries.sortedWith(compareBy({ -it.value }, { it.key })).take(8)
+        if (pairCounts.size > 8 && top.sumOf { it.value } * 16 < onW * onH * 15) return false
+        // The key orders the pairs by U, then by V.
+        val pairs = top.map { it.key }.sorted()
+        val n = pairs.size
+        val map = IntArray(64 * 64)
+        for (y in 0 until onH) for (x in 0 until onW) {
+            val at = (y0 + y) * stride + x0 + x
+            val su = u[at].toInt()
+            val sv = v[at].toInt()
+            var bi = 0
+            var be = Long.MAX_VALUE
+            for (k in 0 until n) {
+                val du = (su - (pairs[k] ushr 16)).toLong()
+                val dv = (sv - (pairs[k] and 0xFFFF)).toLong()
+                val e = du * du + dv * dv
+                if (e < be) {
+                    be = e
+                    bi = k
+                }
+            }
+            map[y * 64 + x] = bi
+        }
+        ch.uvMode = Av1.DC_PRED
+        ch.angleDeltaUV = 0
+        ch.cflAlphaU = 0
+        ch.cflAlphaV = 0
+        ch.paletteSizeUV = n
+        for (k in 0 until n) {
+            ch.paletteColorsU[k] = pairs[k] ushr 16
+            ch.paletteColorsV[k] = pairs[k] and 0xFFFF
+        }
+        ch.colorMapUV = map
+        return true
     }
 
     /** Codes [ch] as the block of [bSize] at ([r], [c]) into the frozen counter: its cost J. */
@@ -962,6 +1120,18 @@ internal class Av1BlockSearch(
         var n = 0
         if (plane > 0) {
             typeList[n++] = d.computeTxType(plane, txSz, x4, y4)
+        } else if (d.isInter) {
+            // An intra block copy's residual: the DCT, and the identity where its set has it, for the hard edges a
+            // near copy of screen content leaves.
+            typeList[n++] = Av1.DCT_DCT
+            val set = d.txSet(txSz)
+            val index = when (set) {
+                Av1.TX_SET_DCTONLY -> -1
+                Av1.TX_SET_INTER_1 -> Av1FrameDecoder.INTER_SET1_INDEX[Av1.IDTX]
+                Av1.TX_SET_INTER_2 -> Av1FrameDecoder.INTER_SET2_INDEX[Av1.IDTX]
+                else -> Av1FrameDecoder.INTER_SET3_INDEX[Av1.IDTX]
+            }
+            if (index >= 0 && effort >= 2) typeList[n++] = Av1.IDTX
         } else {
             val set = d.txSet(txSz)
             if (set == Av1.TX_SET_DCTONLY) {

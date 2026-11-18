@@ -267,6 +267,75 @@ class Av1EncoderOracleTest {
         assertTrue(chosen["wiener restoration unit"] > 0, "no unit chose the Wiener filter by cost: ${chosen.counts}")
     }
 
+    /**
+     * Screen content in colour: text and boxes in a few colours, each with its own chroma, so that both planes'
+     * palettes pay. [subX] and [subY] set the chroma format.
+     */
+    private fun colourScreen(w: Int, h: Int, depth: Int, subX: Int, subY: Int): HeifPlanes {
+        val max = (1 shl depth) - 1
+        // Luma, U and V of each colour, in 8 bits.
+        val colours = arrayOf(intArrayOf(235, 128, 128), intArrayOf(30, 140, 110), intArrayOf(80, 90, 200), intArrayOf(150, 200, 60), intArrayOf(110, 60, 170))
+        fun colour(x: Int, y: Int): IntArray = when {
+            (x / 6 + y / 9) % 5 == 0 && y % 9 < 7 -> colours[1]
+            x % 37 < 3 || y % 29 < 2 -> colours[2]
+            (x / 16) % 3 == 1 && (y / 16) % 2 == 0 -> colours[3]
+            (x / 24 + y / 20) % 4 == 2 -> colours[4]
+            else -> colours[0]
+        }
+        val luma = ShortArray(w * h) { i -> (colour(i % w, i / w)[0] * max / 255).toShort() }
+        val cw = (w + subX) shr subX
+        val ch = (h + subY) shr subY
+        val u = ShortArray(cw * ch) { i -> (colour((i % cw) shl subX, (i / cw) shl subY)[1] * max / 255).toShort() }
+        val v = ShortArray(cw * ch) { i -> (colour((i % cw) shl subX, (i / cw) shl subY)[2] * max / 255).toShort() }
+        return HeifPlanes(w, h, depth, depth, subX, subY, arrayOf(luma, u, v), intArrayOf(w, cw, cw), true)
+    }
+
+    /**
+     * The chroma palette (#176): on colour screen content, in 4:2:0, 4:2:2 and 4:4:4 at 8, 10 and 12 bits and at two
+     * efforts, some blocks code a palette of U and V pairs, which ImageKodec's decoder reads in the stream, and dav1d
+     * decodes each stream to the encoder's reconstruction.
+     */
+    @Test
+    fun chromaPalette() {
+        assumeTrue("ffmpeg with libdav1d is needed", dav1d())
+        for ((sx, sy) in listOf(1 to 1, 1 to 0, 0 to 0)) for (depth in listOf(8, 10, 12)) for (effort in listOf(2, 3)) {
+            val label = "chroma palette 4:${if (sx == 0) 4 else 2}:${if (sy == 0 && sx == 1) 2 else if (sy == 0) 4 else 0} $depth-bit effort $effort"
+            val (encoder, use) = agree(colourScreen(160, 96, depth, sx, sy), Av1EncodeSettings(80, effort, null), label)
+            assertTrue(use["chroma palette"] > 0, "$label: no block codes a chroma palette: ${use.counts}")
+            assertEquals(use["chroma palette"], encoder.toolUse()["chroma palette"], "$label: the decoder read another count of chroma palettes")
+        }
+    }
+
+    /**
+     * Intra block copy (#176): on colour screen content, whose text and boxes repeat, in every format, depth and two
+     * efforts, the frame header allows intra block copy and so codes no loop filter, some blocks copy an earlier part
+     * of the frame, which ImageKodec's decoder reads in the stream and checks against the rules of a conformant
+     * vector, and dav1d decodes each stream to the encoder's reconstruction. On a photo, which does not repeat, the
+     * encoder leaves it off.
+     */
+    @Test
+    fun intraBlockCopy() {
+        assumeTrue("ffmpeg with libdav1d is needed", dav1d())
+        for ((sx, sy) in listOf(1 to 1, 1 to 0, 0 to 0)) for (depth in listOf(8, 10, 12)) for (effort in listOf(2, 3)) {
+            val label = "intra block copy 4:${if (sx == 0) 4 else 2}:${if (sy == 0 && sx == 1) 2 else if (sy == 0) 4 else 0} $depth-bit effort $effort"
+            val (encoder, use) = agree(colourScreen(320, 200, depth, sx, sy), Av1EncodeSettings(80, effort, null), label)
+            assertEquals(1, use["intra block copy allowed"], "$label: the frame header does not allow intra block copy")
+            assertTrue(use["intra block copy"] > 0, "$label: no block copies: ${use.counts}")
+            assertEquals(use["intra block copy"], encoder.toolUse()["intra block copy"], "$label: the decoder read another count of copies")
+        }
+        val (_, gray) = agree(screen(320, 200, 8).let { HeifPlanes(320, 200, 8, 8, 0, 0, arrayOf(it.planes[0]), intArrayOf(320), true) }, Av1EncodeSettings(60, 2, null), "intra block copy, gray")
+        assertTrue(gray["intra block copy"] > 0, "gray: no block copies: ${gray.counts}")
+        for (depth in listOf(8, 10, 12)) {
+            val input = colourScreen(320, 200, depth, 0, 0)
+            val (lossless, use) = agree(input, Av1EncodeSettings(0, 2, null), "intra block copy, lossless $depth-bit")
+            assertTrue(use["intra block copy"] > 0, "lossless $depth-bit: no block copies: ${use.counts}")
+            val out = lossless.decodedPlanes()
+            for (p in 0 until 3) assertContentEquals(input.planes[p], out[p], "lossless $depth-bit with copies, plane $p")
+        }
+        val (_, photo) = agree(picture(200, 120, 8, 1, 1, false), Av1EncodeSettings(80, 2, null), "intra block copy, photo")
+        assertEquals(0, photo["intra block copy allowed"], "a photo allows intra block copy")
+    }
+
     private val sizes = listOf(1 to 1, 7 to 5, 64 to 64, 65 to 33, 200 to 120, 513 to 257)
 
     /** Every size in every format and depth at the default effort and a middle quantizer. */

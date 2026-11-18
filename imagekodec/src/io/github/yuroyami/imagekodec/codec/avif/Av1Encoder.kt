@@ -19,6 +19,10 @@ internal class Av1EncodeSettings(
     val selfGuided: Boolean = true,
     /** Whether every restoration unit takes a filter whatever it costs, so tests see each filter in every unit. */
     val forceRestoration: Boolean = false,
+    /** Whether the frame allows intra block copy: null to decide from how much of the source repeats. */
+    val intrabc: Boolean? = null,
+    /** Whether blocks may code a chroma palette where the frame allows screen content tools; tests turn it off. */
+    val chromaPalette: Boolean = true,
 )
 
 /** A coded AV1 still picture: the sequence header OBU, and the item's data (the sequence header and the frame OBU). */
@@ -59,14 +63,21 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         val seqPayload = stream.sequenceHeader()
         val seq = Av1SequenceHeader.parse(Av1BitReader(seqPayload, 0, seqPayload.size))
         val (colsLog2, rowsLog2) = tiles()
-        val search = Av1FrameParams(settings.qIndex, screenContent(), colsLog2, rowsLog2, cdefBits = if (lossless) 0 else 3)
+        val screen = screenContent()
+        val hash = if (screen && settings.intrabc != false && width.toLong() * height <= Av1BlockHash.MAX_SAMPLES && (effort >= 2 || settings.intrabc == true)) {
+            Av1BlockHash(planes.planes[0], planes.strides[0], width, height)
+        } else null
+        // Intra block copy turns the loop filters off, so it is allowed only where enough of the picture repeats:
+        // an eighth of its blocks that are not flat.
+        val intrabc = hash != null && (settings.intrabc == true || hash.repeatedShare() >= 32)
+        val search = Av1FrameParams(settings.qIndex, screen, colsLog2, rowsLog2, cdefBits = if (lossless) 0 else 3, allowIntrabc = intrabc)
         val fh1 = parseFrameHeader(seq, search)
         val d = Av1FrameDecoder(seq, fh1, Av1Cdfs.initial(fh1.baseQIdx), Av1RefSlots())
         d.cancel = cancel
         val source = Av1Source(planes, d)
         val record = Av1Record()
         lastRecord = record
-        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort)
+        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort, if (intrabc) hash else null, settings.chromaPalette)
         for (tile in 0 until fh1.tileCols * fh1.tileRows) block.tile(tile)
         // The filters on the reconstruction, then the final header.
         val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration)
@@ -147,6 +158,7 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         }
         for (b in rec.blocks) {
             when {
+                b.useIntrabc -> add("intra block copy")
                 b.paletteSizeY > 0 -> add("palette")
                 b.useFilterIntra -> add("filter intra")
                 Av1.isDirectionalMode(b.yMode) -> add(if (b.angleDeltaY != 0) "directional with angle delta" else "directional")
@@ -155,6 +167,7 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
                 else -> add("smooth")
             }
             if (b.uvMode == Av1.UV_CFL_PRED) add("chroma from luma")
+            if (b.paletteSizeUV > 0) add("chroma palette")
             if (b.skip == 1) add("skip")
         }
         var at = 0

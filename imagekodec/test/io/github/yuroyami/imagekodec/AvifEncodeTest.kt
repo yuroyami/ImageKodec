@@ -140,7 +140,7 @@ class AvifEncodeTest {
             "b80bea983405812565589583d712da49",
             "9977bad19ea57ca3c391c927c705777f",
             "f871e971453e11b1d677a15d55ba106a",
-            "3098850468858dd6b029de746051e90e",
+            "0a02a9e27160c4c81846950096e103fd",
             "ffb07de137aee50a069da0cb2ea31297",
         )
     }
