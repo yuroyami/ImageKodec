@@ -123,10 +123,12 @@ internal class Av1FilterSearch(
 
     // ---- loop restoration ----------------------------------------------------------------
 
-    /** The self-guided sets tried: none at effort 1, two at 2 (four gained nothing measurable), all sixteen at 3. */
+    /**
+     * The self-guided sets tried: none at efforts 1 and 2, all sixteen at 3. Two sets at effort 2 took a tenth of its
+     * time and, beside the Wiener filter, changed no size at equal SSIMULACRA 2 score on the photo scenes (#176).
+     */
     private fun sgrSets(): IntArray = if (!selfGuided) IntArray(0) else when (effort) {
-        1 -> IntArray(0)
-        2 -> intArrayOf(0, 4)
+        1, 2 -> IntArray(0)
         else -> IntArray(16) { it }
     }
 
@@ -622,7 +624,8 @@ internal class Av1FilterSearch(
 
     /**
      * The strength pairs CDEF tries, primary and secondary, each a header code (primary * 4 + secondary code): the
-     * first 2 at effort 1, 4 at effort 2 (8 gained nothing measurable on the photo scenes) and all at 3.
+     * first 2 at effort 1, 3 at effort 2 and all at 3. A fourth at effort 2 took a tenth of its time for a tenth of a
+     * percent on the photo scenes (#176), and 8 gained nothing measurable.
      */
     private fun presets(): List<Pair<Int, Int>> {
         val all = listOf(
@@ -631,7 +634,7 @@ internal class Av1FilterSearch(
         )
         val n = when (effort) {
             1 -> 2
-            2 -> 4
+            2 -> 3
             else -> all.size
         }
         return all.take(n)
