@@ -84,7 +84,7 @@ internal object JxlEncHeaders {
                 bw.bool(false) // no intrinsic size
                 bw.bool(false) // no preview
                 bw.bool(true)
-                val a = im.animation!!
+                val a = im.animation
                 bw.u32(a[0], fv(100), fv(1000), fo(10, 1), fo(30, 1))
                 bw.u32(a[1], fv(1), fv(1001), fo(8, 1), fo(10, 1))
                 bw.u32(im.loops.toInt(), fv(0), fb(3), fb(16), fb(32))
