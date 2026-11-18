@@ -10,6 +10,8 @@ import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.KiteFrame
 import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.internal.Budget
+import io.github.yuroyami.imagekodec.internal.color.IccInverse
+import io.github.yuroyami.imagekodec.UnsupportedImageException
 
 /**
  * JPEG XL (ISO/IEC 18181): reads the container, the image header and the frames of a file,
@@ -43,11 +45,21 @@ internal object JxlDecoder {
             // The first bytes of a file may stop inside its profile. Any other fault is the file's own.
             if (!lenient || !br.ranOut) throw e
         }
+        // libjxl writes a lossy picture into the profile it comes with, through a colour engine.
+        if (header.xybEncoded && header.color.wantIcc) icc?.let { header.iccInverse = IccInverse.of(it) }
         return Stream(cs, header, icc, first)
     }
 
     /** Colour and alpha at the pixel ceiling. An image of more channels has to be smaller. */
     private const val MAX_SAMPLES = 4 * Budget.MAX_PIXELS
+
+    /**
+     * Why the image of [h] is refused for a feature, or null. CMYK, whose black is an extra channel,
+     * needs the file's CMYK profile, and no tool here writes such a file to check a reading against:
+     * cjxl 0.7 reads no CMYK source, neither a CMYK PAM nor a CMYK JPEG, and has no `jxl_from_tree`.
+     */
+    internal fun unsupported(h: JxlImageHeader): String? =
+        if (h.extraChannels.any { it.type == JxlExtraChannel.BLACK }) "JPEG XL with a black channel (CMYK)" else null
 
     /** Why an image or a frame of [width] by [height] is refused, or null: its pixels first, then the samples of all its channels. */
     internal fun refusal(h: JxlImageHeader, width: Int, height: Int): String? = when {
@@ -61,7 +73,7 @@ internal object JxlDecoder {
         val s = open(data, lenient = true)
         val h = s.header
         val frames = if (h.animation != null) shownFrames(s) else 1
-        val reason = refusal(h, h.width, h.height)?.let { "JPEG XL image of $it" }
+        val reason = unsupported(h) ?: refusal(h, h.width, h.height)?.let { "JPEG XL image of $it" }
         return ImageInfo(
             format = ImageFormat.JXL,
             width = h.width,
@@ -183,6 +195,7 @@ internal object JxlDecoder {
      * the frame that completed it. It stops when [onFrame] returns false.
      */
     private fun frames(s: Stream, cancel: (() -> Unit)?, onFrame: (Array<JxlPlane>, Array<JxlPlane>, JxlFrameHeader) -> Boolean) {
+        unsupported(s.header)?.let { throw UnsupportedImageException(it) }
         val h = s.header
         // A frame may be smaller than the image, and it is blended into a canvas of the image's size.
         refusal(h, h.width, h.height)?.let { jxlFail("image of $it") }
@@ -323,10 +336,16 @@ internal object JxlDecoder {
     /** The alpha below which libjxl does not divide by it. */
     private const val SMALL_ALPHA = 1.0 / (1 shl 26)
 
-    /** What the decoded samples are in: the embedded profile, or the code points of the header's colour encoding. */
+    /**
+     * What the decoded samples are in: the embedded profile, the code points of the header's colour
+     * encoding, or a profile made of it. An XYB image is converted to the encoding its header names,
+     * or to its profile when that is one of matrix and curves; any other image keeps the samples it
+     * stores.
+     */
     internal fun colorProfile(h: JxlImageHeader, icc: ByteArray?): ColorProfile {
-        // An XYB image is converted to the encoding its header names, or to sRGB when it has only a profile,
-        // because nothing here applies a profile. Any other image keeps the samples it stores.
+        if (h.xybEncoded && h.color.wantIcc) {
+            return if (h.iccInverse != null && icc != null) ColorProfile(icc = icc) else ColorProfile(cicp = intArrayOf(1, 13, 0, 1))
+        }
         val c = if (h.xybEncoded) JxlColor.outputEncoding(h) else h.color
         if (c.wantIcc) return if (icc == null) ColorProfile(cicp = intArrayOf(1, 13, 0, 1)) else ColorProfile(icc = icc)
         val primaries = when {
@@ -344,9 +363,15 @@ internal object JxlDecoder {
             (c.gamma + 50) / 100 == 35714 -> 5
             else -> 2
         }
+        val hdr = !c.haveGamma && (c.transferFunction == JxlColorEncoding.TF_PQ || c.transferFunction == JxlColorEncoding.TF_HLG)
+        // Primaries or a white point of their own have no code points: libjxl describes every such
+        // header with an ICC profile it makes (MaybeCreateProfile), and so does this for the SDR curves.
+        if (primaries == 2 && !c.isGray && !hdr) JxlColor.matrixProfile(c)?.let { return ColorProfile(icc = it) }
         return ColorProfile(
             cicp = intArrayOf(primaries, transfer, 0, 1),
             gamma = if (c.haveGamma) (c.gamma + 50) / 100 else null,
+            // The intensity target is the brightest the picture gets, which tone mapping takes as its peak.
+            contentLight = if (hdr) intArrayOf(minOf(h.intensityTarget * 10000.0, Int.MAX_VALUE.toDouble()).toInt(), 0) else null,
         )
     }
 }

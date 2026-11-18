@@ -314,7 +314,32 @@ static int convertLab(void) {
     return 0;
 }
 
+/*
+ * Linear sRGB floats on stdin, three a pixel, to the device values of PROFILE as floats, one a pixel
+ * for gray and three for RGB, relative colorimetric: the way a JPEG XL decoder writes a lossy picture
+ * into the profile it comes with.
+ */
+static int toProfile(const char *path, int channels) {
+    cmsHPROFILE out = cmsOpenProfileFromFile(path, "r");
+    if (out == NULL) return 3;
+    const double p[6] = { 0.64, 0.33, 0.30, 0.60, 0.15, 0.06 };
+    cmsHPROFILE in = rgb(0.3127, 0.3290, p, para(1, 1.0, 0, 0, 0, 0, 0, 0), 4.3);
+    cmsHTRANSFORM x = cmsCreateTransform(in, TYPE_RGB_FLT, out, channels == 1 ? TYPE_GRAY_FLT : TYPE_RGB_FLT,
+        INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE);
+    if (x == NULL) return 4;
+    float v[3], o[3];
+    while (fread(v, sizeof(float), 3, stdin) == 3) {
+        cmsDoTransform(x, v, o, 1);
+        fwrite(o, sizeof(float), channels, stdout);
+    }
+    cmsDeleteTransform(x);
+    cmsCloseProfile(in);
+    cmsCloseProfile(out);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 4 && !strcmp(argv[1], "to-profile")) return toProfile(argv[2], atoi(argv[3]));
     if (argc == 2 && !strcmp(argv[1], "convert-lab")) return convertLab();
     if (argc == 3 && !strcmp(argv[1], "make")) return make(argv[2]);
     if (argc == 11 && !strcmp(argv[1], "make-rgb")) return emit(rgbOf(argv + 2));
@@ -325,6 +350,6 @@ int main(int argc, char **argv) {
         if (bytes != 1 && bytes != 2) return 2;
         return convert(argv[2], atoi(argv[3]), atoi(argv[4]), bytes);
     }
-    fprintf(stderr, "usage: %s make KIND | make-rgb RX RY GX GY BX BY WX WY GAMMA | convert-rgb ... GAMMA INTENT BYTES | convert PROFILE INTENT CHANNELS [BYTES]\n", argv[0]);
+    fprintf(stderr, "usage: %s make KIND | make-rgb RX RY GX GY BX BY WX WY GAMMA | convert-rgb ... GAMMA INTENT BYTES | convert PROFILE INTENT CHANNELS [BYTES] | to-profile PROFILE CHANNELS\n", argv[0]);
     return 2;
 }

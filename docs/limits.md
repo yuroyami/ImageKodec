@@ -283,17 +283,26 @@ long as heif-enc with its own threads; with four threads, 1.4 and 3.5 times as l
 
 - A lossy file stores its color in the XYB space. It converts to the encoding that its header
   names: the white point, the primaries, and the sRGB, linear, gamma, BT.709, DCI, PQ or HLG curve.
-- A header that has only an ICC profile gives sRGB, and `probe` reports sRGB. libjxl converts to
-  the profile with a color engine instead.
+- A lossy picture whose header has only an ICC profile comes out in that profile, as libjxl writes it
+  through a colour engine, when the profile is one of matrix and curves, RGB or gray: linear sRGB goes
+  through the inverse of its colorants and curves, within 7 of 65535 of lcms2. `probe` reports the
+  profile. A profile of lookup tables gives sRGB, and `probe` reports sRGB: the colour engine reads
+  such a profile one way only, into sRGB. The djxl 0.7 here has no colour engine and writes linear sRGB
+  for both, so the lossy files are held to the picture they were coded from.
 - A file that is not XYB keeps the samples it stores. Its ICC profile is reported, not applied.
 - No tone mapping runs by default. With `colorTarget = ColorTarget.Srgb()`, the shared color
   conversion applies supported profiles or code points and tone-maps HDR.
-- That conversion takes the peak of an HDR file as 1000 cd/m². It does not read the intensity
-  target of the header, which libjxl sets to 10000 when the encoder was told nothing.
-- A header with primaries of its own, or with a gamma other than 2.2 or 2.8, has no code points and
-  converts as sRGB.
+- That conversion takes the intensity target of a PQ or HLG header as the peak of the picture, which
+  `probe` reports as its maximum content light level. libjxl sets it to 10000 cd/m² when the encoder
+  was told nothing.
+- A header with primaries or a white point of its own, or with a gamma other than 2.2 or 2.8, is
+  described by an ICC profile of matrix and curves made from it, as libjxl describes every header, and
+  converts through it. With the PQ or HLG curve, which such a profile does not hold, it converts as
+  BT.709's primaries.
 - A sample outside the range of 0 to 1, which a float file can hold, is clipped.
-- The black channel of a CMYK file is read and not applied.
+- A CMYK file, whose black is an extra channel, throws `UnsupportedImageException`. No tool here
+  writes one to check a reading against: cjxl 0.7 reads neither a CMYK PAM nor a CMYK JPEG, and has no
+  `jxl_from_tree`.
 
 ### Speed and memory
 

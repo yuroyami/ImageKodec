@@ -29,6 +29,10 @@ reviewable in the diff.
 - AVIF converts BT.2020 and chromaticity-derived constant luminance and ICtCp (PQ and HLG) as zimg
   converts them, within a level of `zscale`. SMPTE ST 2085, `iloc` construction method 2, reserved sample
   transform tokens and tile list OBUs stay refused, each with its reason in `docs/limits.md` (#189).
+- JPEG XL writes a lossy picture whose header has only an ICC profile into that profile when it is one
+  of matrix and curves, as libjxl does through a colour engine, and describes a header of its own
+  primaries with an ICC profile made from it, so `ColorTarget.Srgb` converts it as djxl does. The intensity
+  target is the peak that tone mapping takes. A CMYK file is refused by name instead of losing its black (#189).
 - PNG decodes Apple's CgBI files, which Xcode writes into iOS apps: the raw deflate stream, and BGR
   and premultiplied BGRA samples at 8 bits, which come back as straight RGB and RGBA. A CgBI file of
   16-bit colour, which Xcode does not write, stays refused by name (#189).
