@@ -297,6 +297,12 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun encodeHeic$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeHeic16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeHeic16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeJp2 (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
+	public final fun encodeJp2 (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/Jp2EncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJp2$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
+	public static synthetic fun encodeJp2$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/Jp2EncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeJp2Wide (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/Jp2EncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJp2Wide$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/Jp2EncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;Lio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
@@ -347,6 +353,45 @@ public final class io/github/yuroyami/imagekodec/ImageMetadata {
 	public final fun isEmpty ()Z
 	public fun toString ()Ljava/lang/String;
 	public final fun upright ()Lio/github/yuroyami/imagekodec/ImageMetadata;
+}
+
+public final class io/github/yuroyami/imagekodec/Jp2EncodeOptions {
+	public fun <init> ()V
+	public fun <init> (IZLjava/util/List;IZIIIIIILio/github/yuroyami/imagekodec/Jp2Progression;IZZZZZZZI)V
+	public synthetic fun <init> (IZLjava/util/List;IZIIIIIILio/github/yuroyami/imagekodec/Jp2Progression;IZZZZZZZIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBitsPerSample ()I
+	public final fun getBypass ()Z
+	public final fun getCodeBlockHeight ()I
+	public final fun getCodeBlockWidth ()I
+	public final fun getCodestreamOnly ()Z
+	public final fun getEffort ()I
+	public final fun getEphMarkers ()Z
+	public final fun getLayers ()I
+	public final fun getLevels ()I
+	public final fun getLossless ()Z
+	public final fun getPrecinctSize ()I
+	public final fun getProgression ()Lio/github/yuroyami/imagekodec/Jp2Progression;
+	public final fun getQuality ()I
+	public final fun getRatios ()Ljava/util/List;
+	public final fun getResetContexts ()Z
+	public final fun getSegmentationSymbols ()Z
+	public final fun getSopMarkers ()Z
+	public final fun getTerminateEachPass ()Z
+	public final fun getTileHeight ()I
+	public final fun getTileWidth ()I
+	public final fun getVerticalCausal ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/Jp2Progression : java/lang/Enum {
+	public static final field CPRL Lio/github/yuroyami/imagekodec/Jp2Progression;
+	public static final field LRCP Lio/github/yuroyami/imagekodec/Jp2Progression;
+	public static final field PCRL Lio/github/yuroyami/imagekodec/Jp2Progression;
+	public static final field RLCP Lio/github/yuroyami/imagekodec/Jp2Progression;
+	public static final field RPCL Lio/github/yuroyami/imagekodec/Jp2Progression;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/Jp2Progression;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/Jp2Progression;
 }
 
 public final class io/github/yuroyami/imagekodec/JpegComponents {
