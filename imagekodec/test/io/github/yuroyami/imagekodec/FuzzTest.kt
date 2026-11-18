@@ -207,6 +207,13 @@ class FuzzTest {
             KiteBitmap(16, 12, IntArray(192) { ((it * 21) and 0xFF shl 24) or (it * 1311 and 0xFFFFFF) }),
             JxlEncodeOptions(quality = 80, effort = 1),
         ),
+        // A lossy JPEG XL picture whose only colour is a profile of lookup tables, which the decoder writes
+        // through the profile's B2A0 (#189).
+        "jxl-table-profile" to ImageKodec.encodeJxl(
+            KiteBitmap(16, 12, IntArray(192) { (0xFF shl 24) or (it * 1311 and 0xFFFFFF) }),
+            JxlEncodeOptions(quality = 80, effort = 1),
+            ImageMetadata(icc = TableProfile.build()),
+        ),
         // JPEG XR from jxrlib: both bitstream orders, every subsampling, tiles soft and hard, planar and
         // interleaved alpha, 16-bit, half and packed samples, and HD Photo's codec subversion (#125).
         *JxrFixtures.all.map { (name, data) -> "jxr-$name" to data }.toTypedArray(),

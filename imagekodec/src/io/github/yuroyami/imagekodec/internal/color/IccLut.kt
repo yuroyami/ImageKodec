@@ -1,33 +1,55 @@
 package io.github.yuroyami.imagekodec.internal.color
 
 /**
- * A device-to-PCS lookup table of ICC.1 (10.10 lut8Type, 10.11 lut16Type and 10.12
- * lutAToBType), as lcms2 reads one into a floating-point pipeline: every stage works on values
- * from 0 to 1, a table is interpolated as cmsintrp.c interpolates it, and the result is PCS
- * Lab or XYZ in lcms2's own normalized encoding, which [toXyz] decodes.
+ * A lookup table of ICC.1 between device values and the PCS (10.10 lut8Type, 10.11 lut16Type,
+ * 10.12 lutAToBType and 10.13 lutBToAType), as lcms2 reads one into a floating-point pipeline:
+ * every stage works on values from 0 to 1, and a table is interpolated as cmsintrp.c interpolates
+ * it. An A2B table gives the PCS, Lab or XYZ, in lcms2's normalized encoding, which [toXyz]
+ * decodes; a B2A table takes the PCS in that encoding, which [fromXyz] makes, and gives device
+ * values.
  */
 internal class IccLut private constructor(
     val inputs: Int,
+    val outputs: Int,
     private val stages: List<(DoubleArray) -> DoubleArray>,
     /** The PCS is Lab, and with [legacyLab], in v2's 16-bit encoding (L* 100 at 0xFF00). */
     private val lab: Boolean,
     private val legacyLab: Boolean,
 ) {
-    /** [device], 0 to 1 a channel, as D50 XYZ. */
+    /** [device], 0 to 1 a channel, as D50 XYZ, through an A2B table. */
     fun toXyz(device: DoubleArray): DoubleArray {
         var v = device
         for (stage in stages) v = stage(v)
         if (!lab) {
             // u1Fixed15, as lcms2's MAX_ENCODEABLE_XYZ normalizes it.
-            val s = 1.0 + 32767.0 / 32768.0
-            return doubleArrayOf(v[0] * s, v[1] * s, v[2] * s)
+            return doubleArrayOf(v[0] * MAX_ENCODEABLE_XYZ, v[1] * MAX_ENCODEABLE_XYZ, v[2] * MAX_ENCODEABLE_XYZ)
         }
         // _cmsStageAllocLabV2ToV4 for lut16Type, then the v4 encoding: L* over 0 to 100, a* and b* over -128 to 127.
         val f = if (legacyLab) 65535.0 / 65280.0 else 1.0
         return ColorMath.labToXyz(doubleArrayOf(v[0] * f * 100.0, v[1] * f * 255.0 - 128.0, v[2] * f * 255.0 - 128.0))
     }
 
+    /**
+     * D50 [xyz] as device values from 0 to 1, unclamped, through a B2A table: the PCS in the
+     * encoding the table takes (v2's Lab ahead of a lut16Type, as lcms2's _cmsReadOutputLUT puts
+     * it), then the table's stages.
+     */
+    fun fromXyz(xyz: DoubleArray): DoubleArray {
+        var v = if (lab) {
+            val l = ColorMath.xyzToLab(xyz)
+            val f = if (legacyLab) 65280.0 / 65535.0 else 1.0
+            doubleArrayOf(l[0] / 100.0 * f, (l[1] + 128.0) / 255.0 * f, (l[2] + 128.0) / 255.0 * f)
+        } else {
+            doubleArrayOf(xyz[0] / MAX_ENCODEABLE_XYZ, xyz[1] / MAX_ENCODEABLE_XYZ, xyz[2] / MAX_ENCODEABLE_XYZ)
+        }
+        for (stage in stages) v = stage(v)
+        return v
+    }
+
     companion object {
+        /** The largest XYZ the PCS encodes, 1 + 32767/32768, which lcms2's pipelines scale XYZ by. */
+        private const val MAX_ENCODEABLE_XYZ = 1.0 + 32767.0 / 32768.0
+
         /** cmsintrp.c's 16.16 fixed point: a cell index times the grid's domain, spread over 0x10000 a cell. */
         private fun toFixedDomain(a: Int) = a + (a + 0x7FFF) / 0xFFFF
 
@@ -40,9 +62,10 @@ internal class IccLut private constructor(
          * profile holds, even in its floating-point pipeline (EvaluateCLUTfloatIn16): the inputs
          * rounded to 16 bits, then in fixed point linear in one dimension, bilinear in two,
          * tetrahedral in three, and in more, linear between two tables of one dimension fewer
-         * along the first.
+         * along the first. With [trilinear], a table of three inputs is trilinear instead, as
+         * lcms2 reads a table indexed by Lab (ChangeInterpolationToTrilinear).
          */
-        fun clut(grid: IntArray, outputs: Int, table: IntArray): (DoubleArray) -> DoubleArray {
+        fun clut(grid: IntArray, outputs: Int, table: IntArray, trilinear: Boolean = false): (DoubleArray) -> DoubleArray {
             val inputs = grid.size
             // The stride of each input in the table, the last input fastest (lcms2's opta, reversed).
             val stride = IntArray(inputs)
@@ -101,6 +124,26 @@ internal class IccLut private constructor(
                     }
                 }
             }
+            /**
+             * TrilinearInterp16: along the first input at the four corners of the cell's other
+             * two, then along the second, then the third, each step rounded to 16 bits.
+             */
+            fun trilinear(input: IntArray, out: IntArray) {
+                val f = IntArray(3) { toFixedDomain(input[it] * (grid[it] - 1)) }
+                val lo = IntArray(3) { stride[it] * (f[it] shr 16) }
+                val hi = IntArray(3) { lo[it] + if (input[it] == 0xFFFF) 0 else stride[it] }
+                val rx = f[0] and 0xFFFF
+                val ry = f[1] and 0xFFFF
+                val rz = f[2] and 0xFFFF
+                for (o in 0 until outputs) {
+                    fun d(x: Int, y: Int, z: Int) = table[x + y + z + o]
+                    val dx00 = lerp(rx, d(lo[0], lo[1], lo[2]), d(hi[0], lo[1], lo[2]))
+                    val dx01 = lerp(rx, d(lo[0], lo[1], hi[2]), d(hi[0], lo[1], hi[2]))
+                    val dx10 = lerp(rx, d(lo[0], hi[1], lo[2]), d(hi[0], hi[1], lo[2]))
+                    val dx11 = lerp(rx, d(lo[0], hi[1], hi[2]), d(hi[0], hi[1], hi[2]))
+                    out[o] = lerp(rz, lerp(ry, dx00, dx10), lerp(ry, dx01, dx11))
+                }
+            }
             fun eval(input: IntArray, first: Int, base: Int, out: IntArray) {
                 when (inputs - first) {
                     1 -> {
@@ -133,7 +176,7 @@ internal class IccLut private constructor(
                             out[o] = l(ry, dx0, dx1)
                         }
                     }
-                    3 -> tetrahedral(input, first, base, out, exact = first == 0)
+                    3 -> if (trilinear && first == 0) trilinear(input, out) else tetrahedral(input, first, base, out, exact = first == 0)
                     else -> {
                         // Eval4Inputs and up: linear along the first input between two tables.
                         val f = toFixedDomain(input[first] * (grid[first] - 1))
@@ -173,7 +216,16 @@ internal class IccLut private constructor(
         }
 
         /** The A2B tag [signature] of [profile], or null when it is absent, damaged or not device to PCS. */
-        fun read(profile: IccProfile, signature: String): IccLut? {
+        fun read(profile: IccProfile, signature: String): IccLut? = parse(profile, signature, toPcs = true)
+
+        /** The B2A tag [signature] of [profile], or null when it is absent, damaged or not PCS to device. */
+        fun readOutput(profile: IccProfile, signature: String): IccLut? = parse(profile, signature, toPcs = false)
+
+        /**
+         * A table of [profile] of lut8Type, lut16Type, or, as [toPcs] asks, lutAToBType or lutBToAType.
+         * Its device side has the channels of the profile's colour space and its PCS side three.
+         */
+        private fun parse(profile: IccProfile, signature: String, toPcs: Boolean): IccLut? {
             val (at, size) = profile.tag(signature) ?: return null
             val d = profile.bytes()
             val end = at + size
@@ -184,20 +236,24 @@ internal class IccLut private constructor(
             fun u32(i: Int) = ((u16(i).toLong() shl 16) or u16(i + 2).toLong())
             val type = CharArray(4) { u8(at + it).toChar() }.concatToString()
             val lab = profile.pcs == "Lab "
-            val expectedInputs = when (profile.colorSpace) {
+            val device = when (profile.colorSpace) {
                 "GRAY" -> 1
                 "RGB ", "Lab ", "XYZ ", "YCbr", "HSV ", "HLS ", "Yxy ", "Luv ", "CMY " -> 3
                 "CMYK" -> 4
                 else -> profile.colorSpace.takeIf { it.endsWith("CLR") }?.substring(0, 1)?.toIntOrNull(16) ?: return null
             }
+            val expectedInputs = if (toPcs) device else 3
+            val expectedOutputs = if (toPcs) 3 else device
+            // lcms2 interpolates a table indexed by Lab, the PCS of a B2A table, trilinearly (_cmsReadOutputLUT).
+            val trilinear = lab && !toPcs
             return when (type) {
                 "mft1", "mft2" -> {
                     val sixteen = type == "mft2"
                     val inputs = u8(at + 8)
                     val outputs = u8(at + 9)
                     val grid = u8(at + 10)
-                    // No grid points means no table, which only a space of three to three can do without.
-                    if (inputs != expectedInputs || outputs != 3 || grid == 1 || (grid == 0 && inputs != 3)) return null
+                    // No grid points means no table, which only a space of as many channels on both sides can do without.
+                    if (inputs != expectedInputs || outputs != expectedOutputs || grid == 1 || (grid == 0 && inputs != outputs)) return null
                     val e = DoubleArray(9) { s15f16(at + 12 + 4 * it) }
                     val inEntries = if (sixteen) u16(at + 48) else 256
                     val outEntries = if (sixteen) u16(at + 50) else 256
@@ -224,14 +280,15 @@ internal class IccLut private constructor(
                     p += (nodes * outputs).toInt() * width
                     val outCurves = List(outputs) { k -> IccCurve.Table(IntArray(outEntries) { value(p + (k * outEntries + it) * width) }) }
                     stages += curves(inCurves)
-                    if (grid > 0) stages += clut(IntArray(inputs) { grid }, outputs, table)
+                    if (grid > 0) stages += clut(IntArray(inputs) { grid }, outputs, table, trilinear)
                     stages += curves(outCurves)
-                    IccLut(inputs, stages, lab, legacyLab = lab && sixteen)
+                    IccLut(inputs, outputs, stages, lab, legacyLab = lab && sixteen)
                 }
-                "mAB " -> {
+                "mAB ", "mBA " -> {
+                    if ((type == "mAB ") != toPcs) return null
                     val inputs = u8(at + 8)
                     val outputs = u8(at + 9)
-                    if (inputs != expectedInputs || outputs != 3) return null
+                    if (inputs != expectedInputs || outputs != expectedOutputs) return null
                     val offB = u32(at + 12)
                     val offMatrix = u32(at + 16)
                     val offM = u32(at + 20)
@@ -247,9 +304,11 @@ internal class IccLut private constructor(
                             curve
                         }
                     }
-                    val stages = ArrayList<(DoubleArray) -> DoubleArray>()
-                    if (offA != 0L) stages += curves(curveSet(offA, inputs) ?: return null)
-                    if (offClut != 0L) {
+                    // The A curves sit on the device side, the B curves on the PCS side, and the matrix
+                    // with its M curves between the B curves and the table, whichever way the tag goes.
+                    val pcsSide = 3
+                    val curvesA = if (offA != 0L) curves(curveSet(offA, device) ?: return null) else null
+                    val table = if (offClut != 0L) {
                         val c = at + offClut.toInt()
                         if (c + 20 > end) return null
                         val grid = IntArray(inputs) { u8(c + it) }
@@ -262,22 +321,29 @@ internal class IccLut private constructor(
                             if (nodes > Int.MAX_VALUE) return null
                         }
                         if (nodes * outputs * precision > end - c - 20) return null
-                        val table = IntArray((nodes * outputs).toInt()) {
+                        val samples = IntArray((nodes * outputs).toInt()) {
                             if (precision == 2) u16(c + 20 + 2 * it) else u8(c + 20 + it) * 257
                         }
-                        stages += clut(grid, outputs, table)
+                        clut(grid, outputs, samples, trilinear)
                     } else if (inputs != outputs) {
                         return null
+                    } else {
+                        null
                     }
-                    if (offM != 0L) stages += curves(curveSet(offM, outputs) ?: return null)
-                    if (offMatrix != 0L) {
+                    val curvesM = if (offM != 0L) curves(curveSet(offM, pcsSide) ?: return null) else null
+                    val matrixStage = if (offMatrix != 0L) {
                         val m = at + offMatrix.toInt()
                         if (m + 48 > end) return null
-                        stages += matrix(DoubleArray(9) { s15f16(m + 4 * it) }, DoubleArray(3) { s15f16(m + 36 + 4 * it) })
+                        matrix(DoubleArray(9) { s15f16(m + 4 * it) }, DoubleArray(3) { s15f16(m + 36 + 4 * it) })
+                    } else {
+                        null
                     }
                     if (offB == 0L) return null
-                    stages += curves(curveSet(offB, outputs) ?: return null)
-                    IccLut(inputs, stages, lab, legacyLab = false)
+                    val curvesB = curves(curveSet(offB, pcsSide) ?: return null)
+                    // ICC.1 10.12 and 10.13: A, CLUT, M, matrix, B to the PCS, and the reverse from it.
+                    val order = listOf(curvesA, table, curvesM, matrixStage, curvesB)
+                    val stages = (if (toPcs) order else order.reversed()).filterNotNull()
+                    IccLut(inputs, outputs, stages, lab, legacyLab = false)
                 }
                 else -> null
             }
