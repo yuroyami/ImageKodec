@@ -214,9 +214,108 @@ The output is the same on every platform. `HeicEncodeOracleTest` checks it again
 XMP and ICC). On 4:2:0 and 4:2:2, heif-convert repeats each chroma sample where ImageKodec
 interpolates, so the two differ by up to 17 levels at colour edges and by 0.3 to 1.5 on average.
 
-Not written: image sequences, depth maps, gain maps, premultiplied alpha, limited range, other
-matrices or primaries than sRGB's, HDR transfer functions, and HEVC inter pictures. A grid holds at
-most 256 by 256 tiles, and a side of 65535 is the most a reader accepts.
+Not written: image sequences (the HEVC side is below, the tracks are #177's other half), depth maps,
+gain maps, premultiplied alpha, limited range, other matrices or primaries than sRGB's and HDR
+transfer functions. A grid holds at most 256 by 256 tiles, and a side of 65535 is the most a reader
+accepts.
+
+### HEVC sequences
+
+The module also codes sequences of P and B pictures (#177), for the image sequence tracks that the
+core's HEIF writer adds. The entry point is internal: `HevcHeifEncoder.encodeSequence(frames,
+durations, parameters, sequence, cancellationCheck)` takes the planes of each frame, all of one size
+and format, with each frame's duration, and returns a `HevcSequence`:
+
+| Field | What a track writer does with it |
+| --- | --- |
+| `hvcC` | The `hvcC` box of the `hvc1` sample entry. The parameter sets are there only, not in the samples. |
+| `samples` | One `HevcSample` per access unit, in decoding order: `data` (the NAL units behind 4-byte lengths) for `mdat`, `stsz` and `stco`; `sync` for `stss`; `duration` for `stts`; `compositionOffset` for `ctts`; `frame`, the frame's index in presentation order. |
+| `reordered` | True when a sample's composition offset is not 0, so the track needs `ctts`. |
+| `presentationOffset` | The composition time of the first frame: the `media_time` of the edit list that shows it at time 0. 0 without B pictures. |
+| `width`, `height` | The decoded size, as `encode` gives it; a `clap` crops the padding of odd subsampled sizes. |
+| `profile` | `HevcHeifEncoder.sequenceBrand` maps it to `hevc` (Main) or `hevx` (Main 10 and the range extensions profiles). |
+
+Decoding times are the presentation times in order, and each composition time is its frame's, later
+by the most that reordering delays any frame, so no composition offset is negative and the decoding
+durations add up to the presentation's. Alpha is a second sequence of the alpha planes as 4:0:0,
+coded the same way.
+
+What the stream holds:
+
+- An IDR picture first, then groups of `gopSize` frames (4 by default): the last frame of a group is
+  a P picture, and the frames before it B pictures of a dyadic pyramid, coded after it, the middle
+  one first. A group of 1 codes IPPP. `irapPeriod` starts another IDR picture every so many frames,
+  and no picture refers across one, so each period decodes on its own.
+- Each picture refers to the nearest reference pictures on each side: one in each list, two at
+  effort 3. The reference picture sets keep every picture a later one needs; the SPS holds each
+  distinct set once, and `sps_max_dec_pic_buffering_minus1` and `sps_max_num_reorder_pics` come from
+  running the plan through C.5.2's buffer. The level takes the buffer into account (A-2).
+- P and B pictures code their QP 3 above an IDR picture's, and B pictures 4 more plus their depth in
+  the pyramid, so the pictures others refer to keep more detail. Temporal motion vector prediction is
+  on, from the nearest later picture in a B slice. Main and Main 10 replace the still picture profiles.
+- Each coding unit is weighed as an inter unit and, where it pays, an intra one: the merging
+  candidates of least SATD, skipped and with a residual; AMVP, whose motion search runs a square
+  pattern over whole samples by SAD from up to two AMVP predictors and the zero vector, then half and
+  quarter samples by SATD through the decoder's own interpolation, in one list or both; and 2NxN,
+  Nx2N and, at effort 3, the asymmetric partitions of the direction whose symmetric split won. The
+  residual goes through the intra encoder's transforms, RDOQ and transform skip, with a rounding
+  offset of a sixth instead of a third where RDOQ is off.
+- The reconstruction runs through the decoder's own merging candidates, AMVP, reference lists,
+  decoded picture buffer and interpolation, so the encoder decides on what a decoder makes.
+
+`HevcInterOracleTest` codes 84 sequences over sizes from 8x8 to 130x66, the four chroma formats, 8, 10
+and 12 bits, groups of 1 to 8, periodic IDR pictures, the three efforts and lossless coding. libde265
+(`dec265 -c`) and ffmpeg (`-err_detect crccheck`) check every picture's MD5 hash SEI and decode every
+stream to the encoder's reconstruction, sample for sample; lossless sequences give their input back.
+HM's decoder is not installed where this was written, so it did not run. The decoder counts the tools
+the streams use: skipped, merged and AMVP units, bi-prediction, intra units in P and B pictures and
+every partition.
+
+`HevcInterBenchmarkTest` (run with `IMAGEKODEC_HEVC_INTER_BENCH=1`) compares the size of the slice data
+at an equal mean SSIMULACRA 2 score over 24 frames of 384 by 256 in 8-bit 4:2:0 against x265 3.5
+(`ffmpeg -c:v libx265 -preset medium`, its own GOP of B frames, and again with `-tune ssim`, which turns
+its psycho-visual tuning off). The scenes pan over a photo-like landscape by 1.5 and 0.5 samples a
+frame, move two objects over a still city, and pan with sensor grain that changes every frame.
+
+| Scene | Setting | Bytes | Mean score | ms | x265 medium (ratio) | x265 `-tune ssim` (ratio) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| pan | quality 50, effort 2, groups of 4 (default) | 3530 | 78.24 | 5035 | 7134 (0.495) | 7334 (0.481) |
+| pan | quality 75, effort 2, groups of 4 | 46744 | 88.30 | 8324 | 60015 (0.779) | 64275 (0.727) |
+| pan | quality 50, effort 1, groups of 4 | 6051 | 77.59 | 979 | 6472 (0.935) | 6557 (0.923) |
+| pan | quality 50, effort 3, groups of 4 | 3568 | 78.36 | 60058 | 7299 (0.489) | 7490 (0.476) |
+| pan | quality 50, effort 2, IPPP | 4871 | 77.89 | 2783 | 6696 (0.727) | 6900 (0.706) |
+| pan | quality 50, effort 2, groups of 8 | 3363 | 78.10 | 2658 | 6951 (0.484) | 7161 (0.470) |
+| objects | quality 50, effort 2, groups of 4 (default) | 12974 | 81.42 | 5141 | 24608 (0.527) | 25244 (0.514) |
+| objects | quality 75, effort 2, groups of 4 | 54910 | 87.93 | 6390 | 75067 (0.731) | 76153 (0.721) |
+| objects | quality 50, effort 1, groups of 4 | 20511 | 81.01 | 1244 | 23717 (0.865) | 24353 (0.842) |
+| objects | quality 50, effort 3, groups of 4 | 12546 | 81.51 | 66100 | 24817 (0.506) | 25453 (0.493) |
+| objects | quality 50, effort 2, IPPP | 13648 | 81.42 | 3528 | 24609 (0.555) | 25245 (0.541) |
+| objects | quality 50, effort 2, groups of 8 | 12974 | 81.07 | 4610 | 23849 (0.544) | 24485 (0.530) |
+| grain | quality 50, effort 2, groups of 4 (default) | 9366 | 70.98 | 2869 | 14245 (0.657) | 13651 (0.686) |
+| grain | quality 75, effort 2, groups of 4 | 625051 | 87.42 | 53566 | out of range | out of range |
+| grain | quality 50, effort 1, groups of 4 | 11779 | 70.34 | 753 | 11257 (1.046) | 11400 (1.033) |
+| grain | quality 50, effort 3, groups of 4 | 9801 | 71.83 | 62007 | 19422 (0.505) | 17687 (0.554) |
+| grain | quality 50, effort 2, IPPP | 10836 | 70.55 | 3388 | 12175 (0.890) | 12105 (0.895) |
+| grain | quality 50, effort 2, groups of 8 | 9248 | 70.85 | 3346 | 13616 (0.679) | 13187 (0.701) |
+
+| Setting | Geometric mean ratio, x265 medium | x265 `-tune ssim` |
+| --- | ---: | ---: |
+| quality 50, effort 2, groups of 4 (default) | 0.556 | 0.554 |
+| quality 50, effort 1, groups of 4 | 0.946 | 0.930 |
+| quality 50, effort 3, groups of 4 | 0.500 | 0.507 |
+| quality 50, effort 2, IPPP | 0.711 | 0.699 |
+| quality 50, effort 2, groups of 8 | 0.563 | 0.559 |
+| quality 75, effort 2, groups of 4 (two scenes) | 0.755 | 0.724 |
+
+The x265 columns hold x265's size at this encoder's score, interpolated between its constant rate
+factors; times are on one core of the JVM, x265's with its own threads and SIMD. The QP offsets come
+from the same benchmark: with none, groups of 4 measured 0.74 of x265's size, with 1 and 1 0.62, with
+2 and 2 0.59, with 3 and 4 0.56, and with 5 and 5 0.56. The test holds the default to a ratio of
+0.75, which catches a regression of about a third. At quality 75 the grain scene scores above
+anything x265 reached, so that row has no ratio. Effort 3 takes 12 to 20 times effort 2's time for
+about a tenth less size, and effort 1 a quarter of it for about two thirds more. SSIMULACRA 2 is not
+x265's target, but `-tune ssim`, which turns its psycho-visual tuning off, moves the ratios by less
+than 0.04. The scenes are synthetic and short; no camera footage was measured.
 
 ## Platforms
 

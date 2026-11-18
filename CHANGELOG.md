@@ -68,6 +68,20 @@ reviewable in the diff.
   QP offsets, and disabled intra boundary filtering. It also decodes three separate colour planes
   (`separate_colour_plane_flag`). Every picture of the 15 SCC conformance streams of H.265.1 matches
   its hash SEI and its package MD5, so all 211 conformance streams match (#188).
+- `imagekodec-heic` codes HEVC sequences of P and B pictures, for the image sequence tracks of #177. An
+  internal entry point (`HevcEncoder.encodeSequence`, and `HevcHeifEncoder.encodeSequence` for the HEIF
+  writer) takes frames with their durations and returns the `hvcC`, each access unit as a track sample,
+  its sync flag, decoding duration and composition offset, and the edit list's start. The pictures go in
+  groups of four by default: a P picture, then a dyadic pyramid of B pictures, with an IDR picture every
+  so many frames as an option; IPPP is a group of one. Short-term reference picture sets in the SPS,
+  temporal motion vector prediction, and the decoded picture buffer sizes come from the plan. The encoder
+  searches motion over whole, half and quarter samples through the decoder's own interpolation, weighs
+  merging candidates, skipped units, AMVP with uni- and bi-prediction, 2NxN, Nx2N and the asymmetric
+  partitions, and intra units by rate and distortion, and reconstructs through the decoder's own merging,
+  AMVP, reference lists and picture buffer. libde265 and ffmpeg decode every stream of
+  `HevcInterOracleTest` to the encoder's reconstruction and check its MD5 hash SEI. At equal mean
+  SSIMULACRA 2 the slice data measured about 0.56 of x265 medium's on three animated scenes; see
+  [HEVC sequences](docs/heic.md#hevc-sequences) (#177).
 - `encodeTiff(bitmap, TiffEncodeOptions, metadata, cancellationCheck)`, the same for pages, and
   `encodeTiff16` with options write the layouts the TIFF decoder reads: no compression, PackBits,
   LZW and Deflate with or without the predictor, CCITT Group 4 and Group 3 for a bi-level page
