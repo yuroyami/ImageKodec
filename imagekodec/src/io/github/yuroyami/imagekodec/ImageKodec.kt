@@ -1133,6 +1133,52 @@ public object ImageKodec {
         JpegEncoder.encode(bitmap, quality, metadata, encoder)
 
     /**
+     * Encode [bitmap] as a JPEG the way [options] ask (#183): baseline, progressive, arithmetic
+     * coded or lossless, one component or three at the subsampling chosen, with optimized
+     * Huffman tables and restart markers, and [metadata] written as the overload with metadata
+     * writes it. Alpha is discarded. The defaults of [JpegEncodeOptions] write what
+     * `encodeJpeg(bitmap, 90)` writes, except that a gray bitmap becomes one component.
+     *
+     * A lossless file from an 8-bit bitmap keeps every sample: [decode] returns the same pixels.
+     * [cancellationCheck], when given, runs once a row of MCUs and once a scan, and may throw to
+     * stop the encode; what it throws comes out of this call as it is.
+     *
+     * @throws IllegalArgumentException if [JpegEncodeOptions.precision] is not 8, which
+     *   [encodeJpeg16] writes, if a side of [bitmap] is larger than 65535, or if a lossless
+     *   restart interval does not hold whole rows
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJpeg(
+        bitmap: KiteBitmap,
+        options: JpegEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JpegEncoder.encode(bitmap, options, metadata, cancellationCheck)
+
+    /**
+     * Encode [bitmap] as a JPEG of [JpegEncodeOptions.precision] bits (#183): a 12-bit DCT file
+     * (extended sequential SOF1, progressive SOF2, or their arithmetic forms), or a lossless file
+     * of 2 to 16 bits (SOF3, or SOF11 with arithmetic coding). Each sample is the top
+     * [JpegEncodeOptions.precision] bits of its 16-bit value, so a lossless file of a bitmap that
+     * [decode16] gave from a file of that precision comes back from [decode16] the same, and one
+     * of 16 bits keeps every sample of any bitmap. One or two channels are gray, three or four
+     * RGB; alpha is discarded. An 8-bit precision writes what [encodeJpeg] writes of the high
+     * bytes.
+     *
+     * [metadata] and [cancellationCheck] work as in [encodeJpeg].
+     *
+     * @throws IllegalArgumentException if a side of [bitmap] is larger than 65535, or if a
+     *   lossless restart interval does not hold whole rows
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJpeg16(
+        bitmap: KiteBitmap16,
+        options: JpegEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JpegEncoder.encode16(bitmap, options, metadata, cancellationCheck)
+
+    /**
      * [bytes], a JPEG, with the same quantized coefficients written again with Huffman tables
      * built for the image (#132), as `jpegtran -optimize -copy all` does: the file gets smaller,
      * and it decodes to the same pixels, byte for byte. Every segment outside the entropy coding

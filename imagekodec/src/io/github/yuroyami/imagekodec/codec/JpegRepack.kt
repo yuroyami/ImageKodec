@@ -440,7 +440,7 @@ internal object JpegRepack {
      * Code lengths for symbol [counts] by Annex K.2, limited to 16 bits by K.3, as libjpeg's
      * `jpeg_gen_optimal_table`: the 16 counts and the symbols in code order.
      */
-    private fun optimalTable(counts: IntArray): Pair<IntArray, IntArray> {
+    internal fun optimalTable(counts: IntArray): Pair<IntArray, IntArray> {
         val freq = LongArray(257) { counts[it].toLong() }
         freq[256] = 1 // a reserved code point, so that no code is all 1s
         val size = IntArray(257)
