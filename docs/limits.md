@@ -335,8 +335,14 @@ picture.
 
 ## JPEG XR
 
-- CMYK, the N-channel formats and RGBE (32bppRGBE) throw `UnsupportedImageException`, and so do
-  pixel formats that T.832 does not list. `probe` names the format in `unsupportedReason`.
+- CMYK and the N-channel formats throw `UnsupportedImageException`, and so do pixel formats that
+  T.832 does not list. `probe` names the format in `unsupportedReason`. Nothing here makes a file of
+  either to check a reading against: `JxrEncApp` stops with WMP_errUnsupportedFormat on every CMYK
+  TIFF it is given and has no N-channel source format, and no other writer is installed. An N-channel
+  format also names no colour for its channels.
+- 32bppRGBE decodes to `JxrDecApp`'s samples. Its picture is a mantissa times 2^(E - 136), as jxrlib's
+  RGBE_RGB96Float reads it, in linear light converted to sRGB like the float formats. `JxrDecApp`'s own
+  24bppRGB of an RGBE file does not follow from its RGBE samples, so it is not used as a reference.
 - An image may hold 2^30 samples over all of its channels, and a macroblock row of all its
   channels may hold 2^30 samples, so a 128-bit format has to be smaller than the shared ceiling.
 - `decodeReduced` samples the thumbnails of jxrlib rather than averaging, and where jxrlib would

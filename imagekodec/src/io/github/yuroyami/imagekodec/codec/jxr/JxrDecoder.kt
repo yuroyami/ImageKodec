@@ -46,14 +46,23 @@ internal object JxrDecoder {
         return Parsed(container, header)
     }
 
-    /** Why this decoder cannot give the pixels of [p], or null when it can. */
+    /**
+     * Why this decoder cannot give the pixels of [p], or null when it can.
+     *
+     * CMYK and the N-channel formats are refused because nothing here can make a file of either to
+     * check a reading against: JxrEncApp stops with WMP_errUnsupportedFormat on every CMYK TIFF it is
+     * given and has no N-channel source format, and no other writer is installed. An N-channel format
+     * also names no colour for its channels (T.832 Table A.6), so it has no picture to give.
+     */
     private fun refusal(p: Parsed): String? {
         val pf = p.container.pixelFormat
         val h = p.header
+        val rgbe = pf.colorFormat == JxrColor.RGBE
         return when {
             pf.colorFormat == JxrColor.CMYK -> "JPEG XR ${pf.name}: CMYK is not decoded"
             pf.colorFormat == JxrColor.NCOMPONENT || h.plane.colorFormat == JxrColor.NCOMPONENT -> "JPEG XR ${pf.name}: N-channel images are not decoded"
-            pf.colorFormat == JxrColor.RGBE || h.sourceColorFormat == JxrColor.RGBE -> "JPEG XR ${pf.name}: RGBE is not decoded"
+            rgbe != (h.sourceColorFormat == JxrColor.RGBE) -> "JPEG XR: a codestream of colour format ${h.sourceColorFormat} in ${pf.name}"
+            rgbe && (h.plane.colorFormat == JxrColor.Y_ONLY || p.container.planarAlpha || h.alphaPlane) -> "JPEG XR ${pf.name}: RGBE of colour format ${h.plane.colorFormat}"
             h.plane.colorFormat == JxrColor.CMYK -> "JPEG XR: a CMYK codestream in ${pf.name}"
             !Budget.fitsAbsolute(h.width, h.height) -> "JPEG XR image of ${h.width} by ${h.height} passes the pixel ceiling"
             h.width.toLong() * h.height * slots(pf) > MAX_SAMPLES -> "JPEG XR image of ${h.width} by ${h.height} in ${pf.name} passes the sample ceiling"
@@ -146,6 +155,15 @@ internal object JxrDecoder {
         if (h.plane.colorFormat == JxrColor.YUV_444 && (external == JxrColor.YUV_422 || external == JxrColor.YUV_420)) external = JxrColor.YUV_444
         if (h.sourceColorFormat == JxrColor.RGB && external != JxrColor.Y_ONLY) external = JxrColor.RGB
         val planar = p.container.planarAlpha && !h.alphaPlane
+        if (pf.colorFormat == JxrColor.RGBE) {
+            // The codestream holds each channel as an integer of its own exponent; the decode gives
+            // those integers, after the inverse colour transform, as signed 32-bit RGB.
+            val internal = JxrRaster(raster.width, raster.height, 3)
+            val wide = JxrOutputFormat(JxrColor.RGB, JxrDepth.BD_32S, rgb = true, alpha = false, leadingPadding = 0)
+            JxrCodestream.decode(data, p.container.imageOffset, p.container.imageEnd, wide, internal, cancel, scale, asJxrlib)
+            toRgbe(internal, raster)
+            return Decoded(pf, raster, alpha = false)
+        }
         val format = JxrOutputFormat(external, h.sourceBitDepth, rgb = !pf.bgr, alpha = pf.alpha && h.alphaPlane, leadingPadding = 0)
         JxrCodestream.decode(data, p.container.imageOffset, p.container.imageEnd, format, raster, cancel, scale, asJxrlib)
         if (planar) {
@@ -159,11 +177,41 @@ internal object JxrDecoder {
         return Decoded(pf, raster, pf.alpha && (h.alphaPlane || planar), redHigh = scale != 1 || !h.rbSwapped)
     }
 
+    /**
+     * The RGBE pixels of [internal], each channel's integer of T.832's RGBE coding, into [raster] as
+     * jxrlib writes 32bppRGBE: a mantissa a channel and the exponent they share. An integer i of a
+     * channel holds the exponent i >> 7 and the mantissa 128 + (i & 127), or, below 128, the mantissa
+     * i at exponent 1; the shared exponent is the largest, and each mantissa is shifted down to it.
+     * A pixel of no positive channel is 0 in all four.
+     */
+    private fun toRgbe(internal: JxrRaster, raster: JxrRaster) {
+        val src = internal.samples
+        val out = raster.samples
+        val e = IntArray(3)
+        val m = IntArray(3)
+        for (i in 0 until internal.width * internal.height) {
+            var shared = 0
+            for (c in 0 until 3) {
+                val v = src[i * 3 + c]
+                if (v <= 0) {
+                    e[c] = 0; m[c] = 0
+                } else {
+                    e[c] = maxOf(1, v shr 7)
+                    m[c] = if (v >= 128) (v and 127) or 128 else v
+                    shared = maxOf(shared, e[c])
+                }
+            }
+            if (shared > 255) jxrFail("an RGBE exponent of $shared")
+            for (c in 0 until 3) out[i * 4 + c] = if (m[c] == 0) 0 else m[c] shr minOf(31, shared - e[c])
+            out[i * 4 + 3] = shared
+        }
+    }
+
     fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap = bitmap(decodeRaw(data, cancel))
 
     private fun bitmap(d: Decoded): KiteBitmap {
         val pf = d.format
-        if (pf.bitDepth != JxrDepth.BD_8) return to16(d).toBitmap()
+        if (pf.bitDepth != JxrDepth.BD_8 || pf.colorFormat == JxrColor.RGBE) return to16(d).toBitmap()
         val r = d.raster
         val s = r.samples
         val argb = IntArray(r.width * r.height)
@@ -209,18 +257,23 @@ internal object JxrDecoder {
         val alphaSlot = if (gray) 1 else 3
         val v = IntArray(4)
         repeat(r.width * r.height) {
-            when (bd) {
-                JxrDepth.BD_5 -> {
+            when {
+                pf.colorFormat == JxrColor.RGBE -> {
+                    // RGBE_RGB96Float of JXRGluePFC.c: a mantissa times 2^(E - 136), or 0 at an exponent of 0.
+                    val exponent = s[o + 3]
+                    for (c in 0 until 3) v[c] = if (exponent == 0) 0 else linear(s[o + c] * twoTo(exponent - 136), alpha = false)
+                }
+                bd == JxrDepth.BD_5 -> {
                     val x = s[o]
                     for (c in 0 until 3) v[c] = widen((x shr (if (d.redHigh) 10 - 5 * c else 5 * c)) and 31, 5)
                 }
-                JxrDepth.BD_565 -> {
+                bd == JxrDepth.BD_565 -> {
                     val x = s[o]
                     v[0] = widen((x shr (if (d.redHigh) 11 else 0)) and 31, 5)
                     v[1] = widen((x shr 5) and 63, 6)
                     v[2] = widen((x shr (if (d.redHigh) 0 else 11)) and 31, 5)
                 }
-                JxrDepth.BD_10 -> {
+                bd == JxrDepth.BD_10 -> {
                     val x = s[o]
                     for (c in 0 until 3) v[c] = widen((x shr (if (d.redHigh) 20 - 10 * c else 10 * c)) and 1023, 10)
                 }
@@ -239,6 +292,9 @@ internal object JxrDecoder {
         }
         return KiteBitmap16(r.width, r.height, channels, out)
     }
+
+    /** 2 to the power [e], exactly, for an exponent a binary64 holds as a normal number. */
+    private fun twoTo(e: Int): Double = Double.fromBits((1023L + e) shl 52)
 
     /** A sample of [bits] bits widened to 16 by repeating its bits. */
     private fun widen(x: Int, bits: Int): Int {

@@ -200,6 +200,8 @@ class FuzzTest {
         // JPEG XR from jxrlib: both bitstream orders, every subsampling, tiles soft and hard, planar and
         // interleaved alpha, 16-bit, half and packed samples, and HD Photo's codec subversion (#125).
         *JxrFixtures.all.map { (name, data) -> "jxr-$name" to data }.toTypedArray(),
+        // JPEG XR's 32bppRGBE (#189).
+        "jxr-rgbe" to JxrFixtures.rgbe,
     )
 
     private fun malformedCorpus(): List<Pair<String, ByteArray>> = listOf(

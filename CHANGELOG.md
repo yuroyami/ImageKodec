@@ -24,6 +24,8 @@ reviewable in the diff.
 - JBIG2 decodes arithmetic symbol dictionaries that aggregate several instances into a symbol, and
   immediate generic regions of unknown length that end with a row count, as jbig2dec reads them. A
   Huffman dictionary that refines stays refused: jbig2dec misreads one, so nothing could check (#189).
+- JPEG XR decodes 32bppRGBE, sample for sample as `JxrDecApp`, its picture in linear light converted
+  to sRGB. CMYK and the N-channel formats stay refused: no installed tool writes either (#189).
 - PNG decodes Apple's CgBI files, which Xcode writes into iOS apps: the raw deflate stream, and BGR
   and premultiplied BGRA samples at 8 bits, which come back as straight RGB and RGBA. A CgBI file of
   16-bit colour, which Xcode does not write, stays refused by name (#189).
