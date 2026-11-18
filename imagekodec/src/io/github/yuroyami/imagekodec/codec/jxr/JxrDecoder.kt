@@ -20,6 +20,7 @@ import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.internal.color.ColorMath
+import io.github.yuroyami.imagekodec.internal.color.Ink
 
 /**
  * JPEG XR (ITU-T T.832 | ISO/IEC 29199-2), HD Photo and Windows Media Photo: reads the container
@@ -49,21 +50,28 @@ internal object JxrDecoder {
     /**
      * Why this decoder cannot give the pixels of [p], or null when it can.
      *
-     * CMYK and the N-channel formats are refused because nothing here can make a file of either to
-     * check a reading against: JxrEncApp stops with WMP_errUnsupportedFormat on every CMYK TIFF it is
-     * given and has no N-channel source format, and no other writer is installed. An N-channel format
-     * also names no colour for its channels (T.832 Table A.6), so it has no picture to give.
+     * CMYK decodes only from a YUVK codestream and YUVK only to CMYK, and an N-channel format only
+     * from an NCOMPONENT codestream of as many channels: the pairings T.832's Table 183 allows.
+     * jxrlib refuses the others too. CMYKDIRECT, which jxrlib does not read, is refused, and so is
+     * N-channel alpha interleaved with the colour, which jxrlib writes only after RGB or CMYK.
      */
     private fun refusal(p: Parsed): String? {
         val pf = p.container.pixelFormat
         val h = p.header
         val rgbe = pf.colorFormat == JxrColor.RGBE
         return when {
-            pf.colorFormat == JxrColor.CMYK -> "JPEG XR ${pf.name}: CMYK is not decoded"
-            pf.colorFormat == JxrColor.NCOMPONENT || h.plane.colorFormat == JxrColor.NCOMPONENT -> "JPEG XR ${pf.name}: N-channel images are not decoded"
+            pf.colorFormat == JxrColor.CMYK && (h.sourceColorFormat != JxrColor.CMYK || h.plane.colorFormat != JxrColor.CMYK) ->
+                "JPEG XR ${pf.name}: a codestream of colour format ${h.sourceColorFormat} and internal format ${h.plane.colorFormat}"
+            pf.colorFormat == JxrColor.NCOMPONENT &&
+                (h.sourceColorFormat != JxrColor.NCOMPONENT || h.plane.colorFormat != JxrColor.NCOMPONENT || h.plane.channels != pf.colorChannels) ->
+                "JPEG XR ${pf.name}: a codestream of colour format ${h.sourceColorFormat}, internal format ${h.plane.colorFormat} and ${h.plane.channels} channels"
+            pf.colorFormat != JxrColor.NCOMPONENT && (h.plane.colorFormat == JxrColor.NCOMPONENT || h.sourceColorFormat == JxrColor.NCOMPONENT) ->
+                "JPEG XR: an N-channel codestream in ${pf.name}"
+            pf.colorFormat == JxrColor.NCOMPONENT && h.alphaPlane -> "JPEG XR ${pf.name}: alpha interleaved with N channels"
             rgbe != (h.sourceColorFormat == JxrColor.RGBE) -> "JPEG XR: a codestream of colour format ${h.sourceColorFormat} in ${pf.name}"
             rgbe && (h.plane.colorFormat == JxrColor.Y_ONLY || p.container.planarAlpha || h.alphaPlane) -> "JPEG XR ${pf.name}: RGBE of colour format ${h.plane.colorFormat}"
-            h.plane.colorFormat == JxrColor.CMYK -> "JPEG XR: a CMYK codestream in ${pf.name}"
+            pf.colorFormat != JxrColor.CMYK && (h.plane.colorFormat == JxrColor.CMYK || h.sourceColorFormat == JxrColor.CMYK || h.sourceColorFormat == 5) ->
+                "JPEG XR: a CMYK codestream in ${pf.name}"
             !Budget.fitsAbsolute(h.width, h.height) -> "JPEG XR image of ${h.width} by ${h.height} passes the pixel ceiling"
             h.width.toLong() * h.height * slots(pf) > MAX_SAMPLES -> "JPEG XR image of ${h.width} by ${h.height} in ${pf.name} passes the sample ceiling"
             h.mbWidth.toLong() * 512 * maxOf(h.plane.channels, 1) > MAX_SAMPLES -> "JPEG XR image ${h.width} wide passes the row ceiling"
@@ -96,7 +104,7 @@ internal object JxrDecoder {
             isDecodable = reason == null,
             unsupportedReason = reason,
             colorProfile = p.container.icc?.let { ColorProfile(icc = it) },
-        ).also { it.colorChannels = if (pf.colorFormat == JxrColor.Y_ONLY) 1 else 3 }
+        ).also { it.colorChannels = if (pf.colorFormat == JxrColor.Y_ONLY) 1 else if (ink(pf)) 4 else 3 }
     }
 
     /** The Transformation tag of T.832 Table A.4 as an EXIF orientation: rotation first, then the flips. */
@@ -125,7 +133,12 @@ internal object JxrDecoder {
 
     /** [decodeRaw] at a reduction of 2, 4 or 8, as jxrlib's thumbnail, or null where jxrlib would give another size. */
     internal fun decodeRawReduced(data: ByteArray, reduction: Int, cancel: (() -> Unit)? = null, asJxrlib: Boolean = true): Decoded? {
-        val h = parse(data).header
+        val p = parse(data)
+        val h = p.header
+        // jxrlib's CMYK thumbnail is not ported, and its N-channel thumbnail puts alpha in the fourth
+        // slot whatever the count, so these decode in full and average.
+        val cf = p.container.pixelFormat.colorFormat
+        if (cf == JxrColor.CMYK || cf == JxrColor.NCOMPONENT) return null
         val scale = thumbnailScale(h.width, h.height, reduction)
         if (scale == 0 || h.extraLeft != 0 || h.extraTop != 0) return null
         // jxrlib's quarter thumbnail of subsampled chroma cannot be narrower than 8 (its loop wraps),
@@ -220,6 +233,11 @@ internal object JxrDecoder {
         for (i in argb.indices) {
             argb[i] = if (pf.colorFormat == JxrColor.Y_ONLY) {
                 0xFF000000.toInt() or (s[o] * 0x010101)
+            } else if (ink(pf)) {
+                // TIFF's naive CMYK, as TiffDecoder and libtiff's putRGBcontig8bitCMYKtile draw it, truncating.
+                val k = 255 - s[o + 3]
+                val a = if (d.alpha) s[o + pf.colorChannels] else 255
+                (a shl 24) or ((k * (255 - s[o]) / 255) shl 16) or ((k * (255 - s[o + 1]) / 255) shl 8) or (k * (255 - s[o + 2]) / 255)
             } else {
                 var red = s[o + if (bgr) 2 else 0]
                 var green = s[o + 1]
@@ -237,7 +255,11 @@ internal object JxrDecoder {
         return KiteBitmap(r.width, r.height, argb)
     }
 
-    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 = to16(decodeRaw(data, cancel))
+    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 {
+        val d = decodeRaw(data, cancel)
+        // 8-bit ink widens what decode draws, as an 8-bit CMYK TIFF's does.
+        return if (ink(d.format) && d.format.bitDepth == JxrDepth.BD_8) KiteBitmap16.widened(bitmap(d), alpha = d.alpha) else to16(d)
+    }
 
     /** Colour divided by its alpha, 0 where the alpha is, as TIFF 6.0 section 18 asks of associated alpha. */
     private fun straight(value: Int, a: Int, max: Int): Int =
@@ -248,16 +270,21 @@ internal object JxrDecoder {
         val r = d.raster
         val s = r.samples
         val gray = pf.colorFormat == JxrColor.Y_ONLY
+        val cmyk = ink(pf)
         val channels = (if (gray) 1 else 3) + (if (d.alpha) 1 else 0)
         val out = ShortArray(r.width * r.height * channels)
         val bd = pf.bitDepth
         var o = 0
         var w = 0
         val colorOrder = if (gray) intArrayOf(0) else if (pf.bgr) intArrayOf(2, 1, 0) else intArrayOf(0, 1, 2)
-        val alphaSlot = if (gray) 1 else 3
+        val alphaSlot = pf.colorChannels
         val v = IntArray(4)
         repeat(r.width * r.height) {
             when {
+                cmyk -> {
+                    val k = sample16(s[o + 3], bd, alpha = true)
+                    for (c in 0 until 3) v[c] = cmyk16(sample16(s[o + c], bd, alpha = true), k)
+                }
                 pf.colorFormat == JxrColor.RGBE -> {
                     // RGBE_RGB96Float of JXRGluePFC.c: a mantissa times 2^(E - 136), or 0 at an exponent of 0.
                     val exponent = s[o + 3]
@@ -291,6 +318,45 @@ internal object JxrDecoder {
             o += r.slots
         }
         return KiteBitmap16(r.width, r.height, channels, out)
+    }
+
+    /**
+     * Whether [pf] holds ink: CMYK, or an N-channel format of four channels or more, whose first
+     * four T.832 Annex C has read as CMYK when nothing else names their colour, the rest dropped.
+     * Three N channels are RGB there.
+     */
+    private fun ink(pf: JxrPixelFormat): Boolean =
+        pf.colorFormat == JxrColor.CMYK || (pf.colorFormat == JxrColor.NCOMPONENT && pf.colorChannels >= 4)
+
+    /** A 16-bit colorant [c] under black [k] as light, TiffDecoder's 16-bit form of libtiff's CMYK formula, rounded. */
+    private fun cmyk16(c: Int, k: Int): Int = (((65535L - k) * (65535 - c) + 32767) / 65535).toInt()
+
+    /**
+     * The CMYK ink of [data] for a conversion through its profile, at 16 bits with [wide] and else
+     * at 8, or null when it is not CMYK.
+     */
+    fun decodeInk(data: ByteArray, wide: Boolean, cancel: (() -> Unit)? = null): Ink? {
+        if (!ink(parse(data, lenient = true).container.pixelFormat)) return null
+        val d = decodeRaw(data, cancel)
+        val r = d.raster
+        val s = r.samples
+        val n = r.width * r.height
+        val deep = d.format.bitDepth == JxrDepth.BD_16
+        fun at8(v: Int) = if (deep) (v * 255 + 32767) / 65535 else v
+        fun at16(v: Int) = if (deep) v else v * 257
+        return if (wide) {
+            Ink(
+                r.width, r.height,
+                ink16 = ShortArray(n * 4) { at16(s[(it / 4) * r.slots + it % 4]).toShort() },
+                alpha16 = if (d.alpha) ShortArray(n) { at16(s[it * r.slots + d.format.colorChannels]).toShort() } else null,
+            )
+        } else {
+            Ink(
+                r.width, r.height,
+                ink = ByteArray(n * 4) { at8(s[(it / 4) * r.slots + it % 4]).toByte() },
+                alpha = if (d.alpha) ByteArray(n) { at8(s[it * r.slots + d.format.colorChannels]).toByte() } else null,
+            )
+        }
     }
 
     /** 2 to the power [e], exactly, for an exponent a binary64 holds as a normal number. */

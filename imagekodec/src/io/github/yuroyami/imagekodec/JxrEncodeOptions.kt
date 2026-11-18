@@ -13,7 +13,8 @@ public enum class JxrChroma {
 }
 
 /**
- * The settings of a JPEG XR encode (#181), for [ImageKodec.encodeJxr] and [ImageKodec.encodeJxr16].
+ * The settings of a JPEG XR encode (#181), for [ImageKodec.encodeJxr], [ImageKodec.encodeJxr16] and
+ * [ImageKodec.encodeJxrCmyk].
  *
  * @property quality 0 to 100, higher is better, as `JxrEncApp -q` reads a value of [quality]
  *   divided by 100: it picks the quantizer of each band and channel. Ignored when [lossless].

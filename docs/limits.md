@@ -409,11 +409,17 @@ picture.
 
 ## JPEG XR
 
-- CMYK and the N-channel formats throw `UnsupportedImageException`, and so do pixel formats that
-  T.832 does not list. `probe` names the format in `unsupportedReason`. Nothing here makes a file of
-  either to check a reading against: `JxrEncApp` stops with WMP_errUnsupportedFormat on every CMYK
-  TIFF it is given and has no N-channel source format, and no other writer is installed. An N-channel
-  format also names no colour for its channels.
+- CMYK and the N-channel formats decode to `JxrDecApp`'s samples (#189). `JxrEncApp` writes neither,
+  so ImageKodec's encoder writes the test files, and `JxrDecApp` reads them. Of the N-channel formats,
+  `JxrDecApp` reads 3 to 8 channels with planar alpha or none, and fails on alpha interleaved with the
+  channels, which stays refused. CMYKDIRECT, a codestream whose colour format does not match its pixel
+  format (CMYK from anything but YUVK, N channels from anything but as many N channels), and pixel
+  formats that T.832 does not list throw `UnsupportedImageException`, and `probe` names them in
+  `unsupportedReason`. jxrlib refuses the same pairings and has no CMYKDIRECT pixel format.
+- An N-channel format names no colour, so the picture is T.832 Annex C's default: sRGB for three
+  channels, CMYK for the first four of more, the rest dropped. No reader at hand draws one.
+- `decodeReduced` of a CMYK or N-channel file decodes it in full and averages: jxrlib's CMYK thumbnail
+  is not ported, and its N-channel thumbnail writes alpha to the fourth sample whatever the count.
 - 32bppRGBE decodes to `JxrDecApp`'s samples. Its picture is a mantissa times 2^(E - 136), as jxrlib's
   RGBE_RGB96Float reads it, in linear light converted to sRGB like the float formats. `JxrDecApp`'s own
   24bppRGB of an RGBE file does not follow from its RGBE samples, so it is not used as a reference.
@@ -430,7 +436,8 @@ picture.
   so that size is not held to the file.
 - The encoder (#181) takes at most 2^28 pixels, writes at most 4096 tiles across and down, and keeps
   about two working planes of `Int` a channel besides the bitmap. It writes soft tiles only, of one
-  square size, 4:4:4 or 4:2:0 chroma, and the gray, BGR, BGRA, 16-bit gray, RGB and RGBA formats.
+  square size, 4:4:4 or 4:2:0 chroma, and the gray, BGR, BGRA, 16-bit gray, RGB, RGBA, 32bppCMYK
+  and 64bppCMYK formats.
   16-bit and lossless encodes keep 4:4:4. With two levels of overlap, 4:2:0 needs an image two
   macroblocks wide, as jxrlib does, so a narrower one gets one level.
 

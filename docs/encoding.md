@@ -127,6 +127,7 @@ val jxr = ImageKodec.encodeJxr(bitmap, 80)
 val exact = ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(lossless = true))
 val deep = ImageKodec.encodeJxr16(bitmap16, JxrEncodeOptions(quality = 90), metadata)
 val tiled = ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(quality = 60, tileSize = 256, frequencyOrder = true))
+val ink = ImageKodec.encodeJxrCmyk(width, height, cmyk, JxrEncodeOptions(lossless = true), ImageMetadata(icc = press))
 ```
 
 - The pixel format follows the bitmap: 8bppGray when every pixel is gray and opaque, 24bppBGR when
@@ -152,6 +153,11 @@ val tiled = ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(quality = 60, tileSize
   directory. The EXIF orientation becomes the Transformation tag, the camera's make, model and
   dates become tags of the directory, and the EXIF and GPS directories are copied after it.
 - `cancellationCheck` runs before each row of macroblocks and may throw to stop the encode.
+- `encodeJxrCmyk` writes CMYK ink, four samples a pixel from no ink (0) to full, as
+  `encodeTiffCmyk` takes it: 32bppCMYK from a `ByteArray`, 64bppCMYK from a `ShortArray` (#189).
+  The ink goes through the reversible transform of T.832 D.3.3 to YUVK, whose K channel takes
+  luma's quantizer. YUVK has no subsampled form, so `chroma = JxrChroma.Half` is refused. Give the
+  press's ICC profile in the metadata, so that a reader can convert the ink.
 - Every file decodes in jxrlib's `JxrDecApp` to the samples ImageKodec's decoder gives.
 
 ## TIFF and BMP layouts
@@ -572,9 +578,10 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   projection.
 - The HEIC encoder writes still images only, with no image sequence, depth map, gain map or
   premultiplied alpha. See [Writing HEIC](heic.md#writing-heic).
-- The JPEG XR encoder writes neither hard tiles (the decoder reads them), 4:2:2 chroma, CMYK,
-  N-channel, fixed-point, half, float, RGBE, premultiplied or packed 5, 5-6-5 and 10-bit formats,
-  nor a gain map. Its tiles are square, and its quantizers are one per band set for the image or
+- The JPEG XR encoder writes neither hard tiles (the decoder reads them), 4:2:2 chroma, CMYK with
+  alpha or N-channel formats through the public API (the tests write them through internal
+  entries), CMYKDIRECT, fixed-point, half, float, RGBE, premultiplied or packed 5, 5-6-5 and 10-bit
+  formats, nor a gain map. Its tiles are square, and its quantizers are one per band set for the image or
   for each tile, not per macroblock.
 - The lossy WebP encoder writes one token partition, no loop filter deltas and no simple loop
   filter, and chooses the filter level from the quantizer without trying others. An animation

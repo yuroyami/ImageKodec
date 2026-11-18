@@ -385,6 +385,10 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun encodeJxr$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeJxr16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeJxr16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeJxrCmyk (II[BLio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public final fun encodeJxrCmyk (II[SLio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJxrCmyk$default (Lio/github/yuroyami/imagekodec/ImageKodec;II[BLio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public static synthetic fun encodeJxrCmyk$default (Lio/github/yuroyami/imagekodec/ImageKodec;II[SLio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteAnimation;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/PngEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B

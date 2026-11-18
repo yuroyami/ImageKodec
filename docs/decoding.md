@@ -21,7 +21,7 @@ info.isDecodable                 // and info.unsupportedReason when it is false
 ```
 
 `isDecodable` is a statement about features. It is false when the file uses something this build
-does not implement, such as an AVIF of SMPTE ST 2085 colour or a JPEG XR of N channels, and
+does not implement, such as an AVIF of SMPTE ST 2085 colour or a CMYKDIRECT JPEG XR, and
 `unsupportedReason` names it. The Coil decoder uses this flag to decide which files to claim.
 
 `isDecodable` stays true for a file that declares only supported features and is then truncated
@@ -62,7 +62,7 @@ when you pass `applyOrientation = true`.
 | AVIF | still images and animated image sequences: every AV1 coding tool, intra and inter, with the loop filter, CDEF, superres, loop restoration and film grain, 8 to 12 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, every matrix but SMPTE ST 2085 (constant luminance and ICtCp as zimg converts them), alpha straight or premultiplied, grids, sample transforms, overlays, clean aperture, rotation and mirror |
 | HEIC | with the `imagekodec-heic` module installed: intra, P and B HEVC pictures and image sequences of the Main, Main 10, Main Still Picture and format range extensions profiles with their range extension tools, 8 to 16 bits in 4:0:0, 4:2:0, 4:2:2 and 4:4:4, with deblocking, SAO, wavefront rows, tiles and dependent slices, and the HEIF structure of the AVIF row. Without the module, `probe` and `readMetadata` still read the container |
 | JPEG XL | the bare codestream and the container, both coding modes: lossy VarDCT with every transform size, and Modular, lossless or lossy. Progressive passes, LF frames, patches, splines, noise, both smoothing filters, upsampling, samples of up to 16 bits and float samples, alpha straight or premultiplied, extra channels, spot colors, recompressed JPEGs, layers with every blend mode, animations |
-| JPEG XR | the container of T.832 Annex A and HD Photo's, lossless and lossy, spatial and frequency order, the three overlap modes, Y only, 4:2:0, 4:2:2 and 4:4:4, soft and hard tiles, planar and interleaved alpha, straight or premultiplied, in the gray, RGB and BGR pixel formats at 8 and 16 bits, 16-bit and 32-bit fixed point, half and float, the packed 5-5-5, 5-6-5 and 10-10-10 formats, and 32bppRGBE, a mantissa a channel and a shared exponent |
+| JPEG XR | the container of T.832 Annex A and HD Photo's, lossless and lossy, spatial and frequency order, the three overlap modes, Y only, 4:2:0, 4:2:2 and 4:4:4, soft and hard tiles, planar and interleaved alpha, straight or premultiplied, in the gray, RGB and BGR pixel formats at 8 and 16 bits, 16-bit and 32-bit fixed point, half and float, the packed 5-5-5, 5-6-5 and 10-10-10 formats, 32bppRGBE, a mantissa a channel and a shared exponent, CMYK at 8 and 16 bits with or without alpha, and the N-channel formats of 3 to 8 channels |
 
 Chroma subsampling, in the JPEG, AVIF and HEIC rows, means that the file stores color at a lower
 resolution than brightness. ImageKodec upsamples it before it returns the pixels.
@@ -126,6 +126,18 @@ own converter does when it writes 8 bits, at 16 bits for `decode16`; their alpha
 Premultiplied color is divided by its alpha. The Transformation tag of the file is reported as
 `ImageInfo.orientation`, and `applyOrientation` applies it.
 
+CMYK (32bppCMYK, 64bppCMYK, 40bppCMYKAlpha and 80bppCMYKAlpha) decodes its YUVK codestream to
+the ink `JxrDecApp -c 17` writes. Without a `colorTarget`, `decode` draws the ink as it draws a CMYK
+TIFF, as libtiff's RGBA interface does: `tiff2rgba` of `JxrDecApp`'s TIFF gives the same pixels.
+`JxrDecApp`'s own RGB of a CMYK file (`-c 9`) decodes into a buffer of the wrong size and is no
+reference. A file that carries a CMYK profile converts its ink through it with
+`ColorTarget.Srgb()`, as a CMYK TIFF or JPEG does, within a level of lcms2.
+
+The N-channel formats of 3 to 8 channels, with planar alpha or none, decode to the samples
+`JxrDecApp` writes. Their channels name no colour, so the picture follows T.832 Annex C: three
+channels are sRGB, and of four or more the first four are CMYK, drawn and converted as above, and
+the rest are dropped.
+
 `decodeReduced` decodes the thumbnails of jxrlib, the samples `JxrDecApp -T` writes. At a half it
 takes every second sample of the full transform, and at a quarter and an eighth every fourth or
 eighth, the DC of a block from the second transform stage alone, so the first stage never runs
@@ -133,7 +145,8 @@ and a file in frequency order skips its highpass band. These are samples, not av
 reduction can alias where a full decode averaged would not. A size whose sides jxrlib rounds
 otherwise than `decodeReduced` promises, such as an eighth of an image 16 by 1, decodes in full and
 averages. jxrlib's own thumbnail of a gray codestream in a BGR format is black, from a channel it
-never wrote; `decodeReduced` gives the gray there.
+never wrote; `decodeReduced` gives the gray there. A CMYK or N-channel file decodes in full and
+averages too.
 
 ## Pages of a TIFF
 

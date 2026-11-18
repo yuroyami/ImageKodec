@@ -43,11 +43,17 @@ internal class JxrPlaneEncoder(
     private val numV = tileX.size - 1
     private val numH = tileY.size - 1
     private val subsampled = cf == JxrColor.YUV_420
+
+    /** Each channel coded on its own, as gray and YUVK are (the YONLY, YUVK and NCOMPONENT paths of clause 8.7). */
+    private val independent = cf == JxrColor.Y_ONLY || cf == JxrColor.CMYK || cf == JxrColor.NCOMPONENT
+
+    /** The prediction modes look at the first channel alone, as they do for gray and N channels (not for YUVK). */
+    private val lumaOnly = cf == JxrColor.Y_ONLY || cf == JxrColor.NCOMPONENT
     private val planes = if (subsampled) 1 else channels
     private val stride = IntArray(channels) { if (it == 0 || !subsampled) 256 else 64 }
 
     val contexts = Array(numV + 1) {
-        JxrContext(if (cf == JxrColor.Y_ONLY) 5 else 9)
+        JxrContext(if (independent) 5 else 9)
     }
 
     private var pred = Array(channels) { JxrPlane.PredRow(mbWidth) }
@@ -67,7 +73,7 @@ internal class JxrPlaneEncoder(
     private val res = Array(channels) { IntArray(16) }
     private val hq = Array(channels) { IntArray(256) }
     private val recon = IntArray(256)
-    private val cbp = IntArray(3)
+    private val cbp = IntArray(maxOf(3, channels))
     private var orientation = 0
 
     /** Which tile column a macroblock of column [x] and row [y] lies in, as the decoder's getTilePos finds it. */
@@ -196,7 +202,7 @@ internal class JxrPlaneEncoder(
             val tl = predAbove[0].dc[x - 1]
             val strH: Int
             val strV: Int
-            if (cf == JxrColor.Y_ONLY) {
+            if (lumaOnly) {
                 strH = abs(tl - l)
                 strV = abs(tl - tp)
             } else {
@@ -218,7 +224,7 @@ internal class JxrPlaneEncoder(
         val y = q[0]
         var strH = abs(y[1]) + abs(y[2]) + abs(y[3])
         var strV = abs(y[4]) + abs(y[8]) + abs(y[12])
-        if (cf != JxrColor.Y_ONLY) {
+        if (!lumaOnly) {
             val u = q[1]
             val v = q[2]
             strH += abs(u[1]) + abs(v[1])
@@ -303,7 +309,7 @@ internal class JxrPlaneEncoder(
     /** EncodeMacroblockDC: the mirror of DecodeMacroblockDC. */
     private fun writeDC(ctx: JxrContext, w: JxrBitWriter) {
         val lm = IntArray(2)
-        if (cf == JxrColor.Y_ONLY) {
+        if (independent) {
             var modelBits = ctx.modelDC.flcBits[0]
             var lmAt = 0
             for (i in 0 until channels) {
@@ -377,7 +383,7 @@ internal class JxrPlaneEncoder(
             }
             if (any) cbpLP = cbpLP or (1 shl ch)
         }
-        if (cf == JxrColor.Y_ONLY) {
+        if (independent) {
             for (ch in 0 until channels) w.bits(cbpLP ushr ch, 1)
         } else {
             val countM = ctx.cbpCountMax
@@ -488,7 +494,7 @@ internal class JxrPlaneEncoder(
         }
         // The decoder's predCBP, run backwards: each plane's difference from its prediction.
         val x = column
-        val diff = IntArray(3)
+        val diff = IntArray(maxOf(3, channels))
         for (i in 0 until planes) {
             diff[i] = diffCBP16(cbp[i], x, i, ctx)
             pred[i].cbp[x] = cbp[i]
@@ -499,12 +505,18 @@ internal class JxrPlaneEncoder(
                 pred[c].cbp[x] = cbp[c]
             }
         }
+        // Gray and YUVK write one pattern a channel; YUV writes luma's with chroma's flags in it.
+        for (i in 0 until (if (independent) channels else 1)) writeCBPChannel(ctx, w, diff, i)
+    }
+
+    /** The difference pattern of channel [i], and for YUV the chroma under it, as DecodeCBP reads one channel. */
+    private fun writeCBPChannel(ctx: JxrContext, w: JxrBitWriter, diff: IntArray, i: Int) {
         val cbpY1 = ctx.cbpY1
         val cbpY = ctx.cbpY
         var quads = 0
         val chromaFlags = IntArray(4)
         for (block in 0 until 4) {
-            val lumaBits = (diff[0] ushr (block * 4)) and 0xF
+            val lumaBits = (diff[i] ushr (block * 4)) and 0xF
             var flags = 0
             if (subsampled) {
                 if ((diff[1] ushr block) and 1 != 0) flags = flags or 1
@@ -522,7 +534,7 @@ internal class JxrPlaneEncoder(
         writePattern(quads, kind, w)
         for (block in 0 until 4) {
             if ((quads ushr block) and 1 == 0) continue
-            val lumaBits = (diff[0] ushr (block * 4)) and 0xF
+            val lumaBits = (diff[i] ushr (block * 4)) and 0xF
             val code1 = FLC_IN0[lumaBits]
             val cls = classOf(code1)
             val flags = chromaFlags[block]

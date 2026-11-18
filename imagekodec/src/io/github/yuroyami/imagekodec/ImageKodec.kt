@@ -763,12 +763,13 @@ public object ImageKodec {
     /**
      * The CMYK ink of page [page] of [data], at 16 bits with [wide] and else at 8 with each side
      * divided by [reduction], or null when the page holds no ink this reads: a CMYK or YCCK
-     * JPEG, alone or in a BMP, or a CMYK TIFF.
+     * JPEG, alone or in a BMP, a CMYK TIFF or a CMYK JPEG XR.
      */
     private fun inkOf(data: ByteArray, page: Int, reduction: Int, wide: Boolean, cancel: (() -> Unit)?): Ink? = when (detect(data)) {
         ImageFormat.JPEG -> if (wide) JpegDecoder.decodeInk16(data, cancel) else JpegDecoder.decodeInk(data, scale = reduction.countTrailingZeroBits(), cancel = cancel)
         ImageFormat.TIFF -> TiffDecoder.decodeInk(data, page, wide, cancel)?.let { if (wide) it else it.reducedBy(reduction) }
         ImageFormat.BMP -> BmpDecoder.embedded(data)?.let { inkOf(it, 0, reduction, wide, cancel) }
+        ImageFormat.JXR -> JxrDecoder.decodeInk(data, wide, cancel)?.let { if (wide) it else it.reducedBy(reduction) }
         else -> null
     }
 
@@ -1541,6 +1542,39 @@ public object ImageKodec {
         metadata: ImageMetadata = ImageMetadata(),
         cancellationCheck: (() -> Unit)? = null,
     ): ByteArray = JxrEncoder.encode16(bitmap, options, metadata, cancellationCheck)
+
+    /**
+     * Encode CMYK [ink] as a JPEG XR file of pixel format 32bppCMYK (#189), through T.832's
+     * reversible transform to YUVK. [ink] holds four samples a pixel, cyan, magenta, yellow and
+     * black, from no ink (0) to full (255), row by row from the top, as [convertCmykToSrgb] takes
+     * them. Give [metadata] the press's ICC profile, so that a reader can convert the ink; without
+     * one, [decode] draws it as it draws a CMYK TIFF. [options] works as for [encodeJxr]; chroma
+     * stays full, since YUVK has no subsampled form.
+     *
+     * @throws IllegalArgumentException if [ink] does not hold [width] times [height] pixels, a side
+     *   is not positive, the image has more than 2^28 pixels, or [options] asks for
+     *   [JxrChroma.Half] or for tiles the image does not have
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxrCmyk(
+        width: Int,
+        height: Int,
+        ink: ByteArray,
+        options: JxrEncodeOptions = JxrEncodeOptions(),
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JxrEncoder.encodeCmyk(width, height, ink, null, options, metadata, cancellationCheck)
+
+    /** [encodeJxrCmyk] at 16 bits a sample, from no ink (0) to full (65535), as 64bppCMYK. */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeJxrCmyk(
+        width: Int,
+        height: Int,
+        ink: ShortArray,
+        options: JxrEncodeOptions = JxrEncodeOptions(),
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = JxrEncoder.encodeCmyk16(width, height, ink, null, options, metadata, cancellationCheck)
 
     /**
      * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, JP2, AVIF, HEIC, TIFF, JPEG XL,

@@ -13,18 +13,79 @@ import io.github.yuroyami.imagekodec.KiteBitmap16
  * Colour goes through the reversible colour transform of D.3.2 to YUV 4:4:4 or 4:2:0, alpha
  * becomes a plane of its own, and each plane goes through [JxrForward] and [JxrPlaneEncoder].
  * The pixel formats are 8bppGray, 24bppBGR and 32bppBGRA from a [KiteBitmap], and 16bppGray,
- * 48bppRGB and 64bppRGBA from a [KiteBitmap16].
+ * 48bppRGB and 64bppRGBA from a [KiteBitmap16]. CMYK ink (#189) goes through the transform of
+ * D.3.3 to YUVK, as 32bppCMYK, 40bppCMYKAlpha, 64bppCMYK or 80bppCMYKAlpha.
  */
 internal object JxrEncoder {
 
-    /** The pictures this encoder takes: its colour planes (one or three) and alpha, raster order. */
+    /** The pictures this encoder takes: its colour planes (one or three, or four of ink) and alpha, raster order. */
     private class Source(
         val width: Int,
         val height: Int,
         val depth: Int,
         val color: Array<IntArray>,
         val alpha: IntArray?,
-    )
+        /** The colour planes are the channels of an N-channel format, coded each on its own. */
+        val nChannel: Boolean = false,
+    ) {
+        val cmyk: Boolean get() = color.size == 4 && !nChannel
+    }
+
+    /**
+     * Encodes [n] channels of [depth] bits a sample, [samples] interleaved, as the N-channel
+     * format of 3 to 8 channels (NCOMPONENT, T.832 Table A.6), with [alpha] after them when given.
+     */
+    fun encodeChannels(
+        width: Int, height: Int, depth: Int, n: Int, samples: IntArray, alpha: IntArray?,
+        options: JxrEncodeOptions, metadata: ImageMetadata, cancel: (() -> Unit)?,
+    ): ByteArray {
+        require(n in 3..8) { "an N-channel format holds 3 to 8 channels, not $n" }
+        require(depth == 8 || depth == 16) { "an N-channel format of $depth bits" }
+        require(width > 0 && height > 0) { "a JPEG XR image of $width by $height" }
+        checkSize(width, height)
+        val pixels = width * height
+        require(samples.size.toLong() == pixels.toLong() * n) { "${samples.size} samples for $width by $height pixels of $n channels" }
+        require(alpha == null || alpha.size == pixels) { "${alpha?.size} alpha samples for $width by $height pixels" }
+        val color = Array(n) { c -> IntArray(pixels) { samples[it * n + c] } }
+        return encode(Source(width, height, depth, color, alpha, nChannel = true), options, metadata, cancel)
+    }
+
+    /**
+     * Encodes CMYK ink: [ink] holds cyan, magenta, yellow and black of each pixel, each from no
+     * ink (0) to full (255), and [alpha] one straight sample a pixel when given. The file is
+     * 32bppCMYK, or 40bppCMYKAlpha with alpha.
+     */
+    fun encodeCmyk(
+        width: Int, height: Int, ink: ByteArray, alpha: ByteArray?,
+        options: JxrEncodeOptions, metadata: ImageMetadata, cancel: (() -> Unit)?,
+    ): ByteArray {
+        val n = checkInk(width, height, ink.size, alpha?.size, options)
+        val color = Array(4) { c -> IntArray(n) { ink[it * 4 + c].toInt() and 0xFF } }
+        val a = alpha?.let { s -> IntArray(n) { s[it].toInt() and 0xFF } }
+        return encode(Source(width, height, 8, color, a), options, metadata, cancel)
+    }
+
+    /** [encodeCmyk] at 16 bits a sample, from no ink (0) to full (65535): 64bppCMYK, or 80bppCMYKAlpha. */
+    fun encodeCmyk16(
+        width: Int, height: Int, ink: ShortArray, alpha: ShortArray?,
+        options: JxrEncodeOptions, metadata: ImageMetadata, cancel: (() -> Unit)?,
+    ): ByteArray {
+        val n = checkInk(width, height, ink.size, alpha?.size, options)
+        val color = Array(4) { c -> IntArray(n) { ink[it * 4 + c].toInt() and 0xFFFF } }
+        val a = alpha?.let { s -> IntArray(n) { s[it].toInt() and 0xFFFF } }
+        return encode(Source(width, height, 16, color, a), options, metadata, cancel)
+    }
+
+    /** The pixels of a CMYK encode, once its sizes and options are checked. */
+    private fun checkInk(width: Int, height: Int, inkSize: Int, alphaSize: Int?, options: JxrEncodeOptions): Int {
+        require(width > 0 && height > 0) { "a JPEG XR image of $width by $height" }
+        checkSize(width, height)
+        val n = width * height
+        require(inkSize.toLong() == n * 4L) { "$inkSize ink samples for $width by $height pixels, which need ${n * 4L}" }
+        require(alphaSize == null || alphaSize == n) { "$alphaSize alpha samples for $width by $height pixels" }
+        require(options.chroma != JxrChroma.Half) { "CMYK keeps every sample: YUVK has no 4:2:0 form" }
+        return n
+    }
 
     fun encode(bitmap: KiteBitmap, options: JxrEncodeOptions, metadata: ImageMetadata, cancel: (() -> Unit)?): ByteArray {
         checkSize(bitmap.width, bitmap.height)
@@ -96,6 +157,10 @@ internal object JxrEncoder {
     private fun indices(quality: Int, chromaQuality: Int?, depth: Int, cf: Int): IntArray {
         val y = lumaIndex(quality, depth)
         val c = if (chromaQuality != null) lumaIndex(chromaQuality, depth) else y + chromaOffset(quality, cf)
+        // YUVK's K is black less half of Y (T.832 D.3.3), a picture of its own, so it takes luma's index.
+        if (cf == JxrColor.CMYK) return intArrayOf(clamp(y), clamp(c), clamp(c), clamp(y))
+        // N channels name no luma or chroma, so every one takes luma's index.
+        if (cf == JxrColor.NCOMPONENT) return intArrayOf(clamp(y))
         return intArrayOf(clamp(y), clamp(c))
     }
 
@@ -136,6 +201,7 @@ internal object JxrEncoder {
         val w = src.width
         val h = src.height
         val gray = src.color.size == 1
+        val cmyk = src.cmyk
         val mbW = (w + 15) / 16
         val mbH = (h + 15) / 16
         val tileX = tileStarts(mbW, o.tileSize / 16)
@@ -148,6 +214,8 @@ internal object JxrEncoder {
         val lossless = o.lossless
         val cf = when {
             gray -> JxrColor.Y_ONLY
+            cmyk -> JxrColor.CMYK
+            src.nChannel -> JxrColor.NCOMPONENT
             lossless || src.depth == 16 -> JxrColor.YUV_444
             o.chroma == JxrChroma.Half -> JxrColor.YUV_420
             o.chroma == JxrChroma.Full -> JxrColor.YUV_444
@@ -179,7 +247,7 @@ internal object JxrEncoder {
         val interleaved = alpha != null && !o.planarAlpha
         val image = codestream(
             src, src.color, plan, if (interleaved) alpha else null, if (interleaved) alphaPlan else null,
-            outputColor = if (gray) JxrColor.Y_ONLY else JxrColor.RGB, tileX, tileY, o.frequencyOrder, cancel,
+            outputColor = if (src.nChannel) JxrColor.NCOMPONENT else if (gray) JxrColor.Y_ONLY else if (cmyk) JxrColor.CMYK else JxrColor.RGB, tileX, tileY, o.frequencyOrder, cancel,
         )
         val planar = if (alpha != null && !interleaved) {
             codestream(src, arrayOf(alpha), alphaPlan!!, null, null, JxrColor.Y_ONLY, tileX, tileY, o.frequencyOrder, cancel)
@@ -187,6 +255,8 @@ internal object JxrEncoder {
             null
         }
         val format = when {
+            cmyk -> if (src.depth == 8) (if (alpha == null) 0x1C else 0x2C) else if (alpha == null) 0x1F else 0x2D
+            src.nChannel -> src.color.size - 3 + if (src.depth == 8) (if (alpha == null) 0x20 else 0x2E) else if (alpha == null) 0x26 else 0x34
             src.depth == 8 && gray -> 0x08
             src.depth == 8 && alpha == null -> 0x0C
             src.depth == 8 -> 0x0F
@@ -310,7 +380,7 @@ internal object JxrEncoder {
         val eh = mbH * 16
         val shift = if (plan.scaled) JxrPlane.SHIFT_ZERO + JxrPlane.QP_FRAC_BITS else 0
         val bias = if (src.depth == 8) 128 else 32768
-        val channels = if (plan.cf == JxrColor.Y_ONLY) 1 else 3
+        val channels = if (plan.cf == JxrColor.Y_ONLY) 1 else if (plan.cf == JxrColor.CMYK || plan.cf == JxrColor.NCOMPONENT) colors.size else 3
         // The samples, centred on 0, scaled, and extended to whole macroblocks by repeating the last row and column (D.3.5).
         fun extended(c: IntArray): IntArray {
             val e = IntArray(ew * eh)
@@ -321,8 +391,33 @@ internal object JxrEncoder {
             }
             return e
         }
-        val planes: Array<IntArray> = if (channels == 1) {
-            arrayOf(extended(colors[0]))
+        val planes: Array<IntArray> = if (channels == 1 || plan.cf == JxrColor.NCOMPONENT) {
+            Array(channels) { extended(colors[it]) }
+        } else if (plan.cf == JxrColor.CMYK) {
+            // AddBias (Table 188) adds half the bias to c, m and y and takes it from k, so the
+            // encoder takes it off first (D.3.1); extended() has taken the whole bias off all four.
+            val half = (bias shr 1) shl shift
+            val c = extended(colors[0])
+            val m = extended(colors[1])
+            val ye = extended(colors[2])
+            val k = extended(colors[3])
+            // FwdColorFmtConvert2 (Table D.7), in place: c becomes Y, m U, y V and k K. Table D.7
+            // prints a plus where its comments, and the inverse of Table 186, have a minus; the
+            // comments are what InvColorFmtConvert3 undoes.
+            for (i in c.indices) {
+                val cc = c[i] + half
+                val mm = m[i] + half
+                val yy = ye[i] + half
+                val kk = k[i] + (bias shl shift) + half
+                val v = cc - yy
+                val u = cc - mm - (v shr 1)
+                val y = kk - mm - (u shr 1)
+                c[i] = y
+                m[i] = u
+                ye[i] = v
+                k[i] = kk - (y shr 1)
+            }
+            arrayOf(c, m, ye, k)
         } else {
             val r = extended(colors[0])
             val g = extended(colors[1])
@@ -371,7 +466,7 @@ internal object JxrEncoder {
 
     /** The quantization steps of DC, lowpass and highpass for each channel from indices of luma and chroma (formatQuantizer). */
     private fun steps(index: IntArray, channels: Int, scaled: Boolean): Array<IntArray> {
-        fun idx(ch: Int) = if (ch == 0 || index.size == 1) index[0] else index[1]
+        fun idx(ch: Int) = if (index.size == channels) index[ch] else if (ch == 0 || index.size == 1) index[0] else index[1]
         val dc = IntArray(channels) { JxrPlane.remapQP(idx(it), if (it > 0) JxrPlane.SHIFT_ZERO - 1 else JxrPlane.SHIFT_ZERO, scaled) }
         val hp = IntArray(channels) { JxrPlane.remapQP(idx(it), JxrPlane.SHIFT_ZERO, scaled) }
         return arrayOf(dc, dc.copyOf(), hp)
@@ -505,6 +600,10 @@ internal object JxrEncoder {
             // Chroma centred on the even luma samples (CHROMA_CENTERING 0), where the downsampling centres it.
             JxrColor.YUV_420 -> w.bits(0, 8)
             JxrColor.YUV_444 -> w.bits(0, 8)
+            JxrColor.NCOMPONENT -> {
+                w.bits(channels - 1, 4) // NUM_COMPONENTS_MINUS1
+                w.bits(0, 4) // RESERVED_H
+            }
         }
         if (depth == 16) w.bits(0, 8) // SHIFT_BITS
         val frame = plan.tileIndices == null
@@ -519,11 +618,14 @@ internal object JxrEncoder {
         w.alignToByte()
     }
 
-    /** A quantizer index for each channel: one for all, or one for luma and one for chroma (COMPONENT_MODE). */
+    /** A quantizer index for each channel: one for all, one for luma and one for chroma, or one each (COMPONENT_MODE). */
     private fun writeQuantizer(w: JxrBitWriter, index: IntArray, channels: Int) {
         val luma = index[0]
         val chroma = if (index.size > 1) index[1] else luma
-        if (channels > 1) {
+        if (channels > 2 && index.size == channels && index.any { it != luma } && (2 until channels).any { index[it] != chroma }) {
+            w.bits(2, 2)
+            for (i in index) w.bits(i, 8)
+        } else if (channels > 1) {
             if (chroma == luma) {
                 w.bits(0, 2)
                 w.bits(luma, 8)

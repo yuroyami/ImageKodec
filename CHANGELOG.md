@@ -25,7 +25,13 @@ reviewable in the diff.
   immediate generic regions of unknown length that end with a row count, as jbig2dec reads them. A
   Huffman dictionary that refines stays refused: jbig2dec misreads one, so nothing could check (#189).
 - JPEG XR decodes 32bppRGBE, sample for sample as `JxrDecApp`, its picture in linear light converted
-  to sRGB. CMYK and the N-channel formats stay refused: no installed tool writes either (#189).
+  to sRGB (#189).
+- JPEG XR decodes CMYK (32bppCMYK, 64bppCMYK, 40bppCMYKAlpha, 80bppCMYKAlpha) and the N-channel
+  formats of 3 to 8 channels, sample for sample as `JxrDecApp`. CMYK draws as a CMYK TIFF draws, as
+  libtiff does, or converts through its CMYK profile with `ColorTarget.Srgb()`; N channels take T.832
+  Annex C's default, sRGB for three and CMYK for the first four of more. `encodeJxrCmyk` writes
+  32bppCMYK and 64bppCMYK through T.832's reversible transform to YUVK. N-channel alpha interleaved
+  with the channels, which `JxrDecApp` fails on, and CMYKDIRECT stay refused (#189).
 - AVIF converts BT.2020 and chromaticity-derived constant luminance and ICtCp (PQ and HLG) as zimg
   converts them, within a level of `zscale`. SMPTE ST 2085, `iloc` construction method 2, reserved sample
   transform tokens and tile list OBUs stay refused, each with its reason in `docs/limits.md` (#189).
