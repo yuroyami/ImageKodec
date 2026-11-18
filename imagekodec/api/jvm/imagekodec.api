@@ -308,6 +308,14 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;Lio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
 	public static synthetic fun encodeJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
+	public final fun encodeJxl (Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public final fun encodeJxl (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
+	public final fun encodeJxl (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJxl$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteAnimation;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public static synthetic fun encodeJxl$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
+	public static synthetic fun encodeJxl$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeJxl16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJxl16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxlEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeJxr (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
 	public final fun encodeJxr (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeJxr$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
@@ -430,6 +438,19 @@ public final class io/github/yuroyami/imagekodec/JpxComponents {
 	public final fun getHeight ()I
 	public final fun getSamples ()[B
 	public final fun getWidth ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/JxlEncodeOptions {
+	public fun <init> ()V
+	public fun <init> (ILjava/lang/Double;ZIZ)V
+	public synthetic fun <init> (ILjava/lang/Double;ZIZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getContainer ()Z
+	public final fun getDistance ()Ljava/lang/Double;
+	public final fun getEffectiveDistance ()D
+	public final fun getEffort ()I
+	public final fun getLossless ()Z
+	public final fun getQuality ()I
 	public fun toString ()Ljava/lang/String;
 }
 

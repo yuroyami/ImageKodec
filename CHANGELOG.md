@@ -14,6 +14,15 @@ reviewable in the diff.
 
 ### Added
 
+- `encodeJxl(bitmap, quality)`, `encodeJxl(bitmap, JxlEncodeOptions, metadata, cancellationCheck)`,
+  `encodeJxl16` and `encodeJxl(animation, ...)` write JPEG XL, written from ISO/IEC 18181-1 and
+  18181-2: lossy VarDCT in XYB with transforms up to 32 by 32 and chroma from luma, lossless
+  Modular with a learned tree, a chosen colour transform and palettes, alpha, 16 bits, animations
+  with delays and play count, and the container with EXIF, XMP and an ICC profile. libjxl's djxl
+  reads every file; lossless files read back exactly. On photo-like scenes lossless files are 11
+  percent smaller than `cjxl -d 0 -e 7` of libjxl 0.7, and lossy ones 11 percent smaller at the
+  SSIMULACRA 2 score of `cjxl -d 1`. See [Writing images](docs/encoding.md#jpeg-xl) (#179).
+
 - `encodeJp2(bitmap, quality)`, `encodeJp2(bitmap, Jp2EncodeOptions, metadata, cancellationCheck)` and
   `encodeJp2Wide` for a `KiteBitmap16` write JPEG 2000 Part 1, written from ITU-T T.800: lossy with the
   9/7 wavelet, the ICT and rate control by a rate and distortion sort of code-block passes, at a

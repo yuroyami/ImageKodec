@@ -1,7 +1,7 @@
 # Writing images
 
 ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, WebP (lossless and lossy, still and
-animated), JPEG 2000, AVIF, JPEG XR and, with the `imagekodec-heic` module, HEIC. Every encoder takes a
+animated), JPEG 2000, JPEG XL, AVIF, JPEG XR and, with the `imagekodec-heic` module, HEIC. Every encoder takes a
 `KiteBitmap` (or a `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows
 it) and returns the file as a `ByteArray`.
 
@@ -24,6 +24,8 @@ ImageKodec.encodeHeic(bitmap, quality = 50)     // HEVC in HEIF, needs ImageKode
 ImageKodec.encodeJxr(bitmap, quality = 80)      // lossy JPEG XR, as JxrEncApp -q 0.8
 ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(lossless = true)) // lossless JPEG XR
 ImageKodec.encodeJp2(bitmap, quality = 75)      // JPEG 2000, lossy 9/7, in a JP2 file
+ImageKodec.encodeJxl(bitmap, quality = 90)      // lossy JPEG XL, VarDCT in XYB
+ImageKodec.encodeJxl(bitmap, JxlEncodeOptions(lossless = true)) // decodes to exactly the input
 ```
 
 `encodeJpeg` uses a quality of 90 when you pass none.
@@ -267,9 +269,41 @@ ImageKodec.encodeJp2Wide(bitmap16, Jp2EncodeOptions(lossless = true, bitsPerSamp
   10, 20 and 40, at most its size, and about 30 bytes smaller lossless. The encode takes about twice the
   time of `opj_compress`.
 
+## JPEG XL
+
+`encodeJxl` writes a JPEG XL codestream (ISO/IEC 18181-1), or the ISO BMFF container of 18181-2
+when there is EXIF or XMP to carry or `JxlEncodeOptions.container` asks for it (#179).
+
+```kotlin
+ImageKodec.encodeJxl(bitmap, 90)                                         // lossy, distance 1.0
+ImageKodec.encodeJxl(bitmap, JxlEncodeOptions(distance = 2.5, effort = 3))
+ImageKodec.encodeJxl(bitmap, JxlEncodeOptions(lossless = true), metadata) // ICC in the codestream, EXIF and XMP in boxes
+ImageKodec.encodeJxl16(bitmap16, JxlEncodeOptions(lossless = true))      // 16 bits, gray to RGBA
+ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // delays in milliseconds, play count
+```
+
+- Lossy files use VarDCT in XYB. `distance` means what `cjxl -d` means, and `quality` maps to it
+  as `cjxl -q` does: `0.1 + (100 - quality) * 0.09` from 30 up, so 90 is distance 1. Effort 1
+  uses 8 by 8 transforms, 2 adds 16 by 16, 16 by 8 and 8 by 16, and 3 adds 32 by 32. Chroma from
+  luma is set for each 64 by 64 tile, and the edge-preserving filter runs from distance 0.5 up.
+  Alpha is coded losslessly with Modular beside the colour.
+- Lossless files use Modular: a meta-adaptive tree learned from the image, the predictors of the
+  standard, a reversible colour transform chosen for the image, a palette for images of 1024
+  colours or fewer, and ANS with clustered distributions. A gray bitmap is coded as one channel,
+  and alpha only when a pixel is not opaque.
+- An animation's frames share one header. A frame that differs from the one before only inside
+  a rectangle is coded as that rectangle over a saved copy of the frame before.
+- On the scenes of `PhotoScenes`, lossless files at effort 2 are 11 percent smaller than
+  `cjxl -d 0 -e 7` of libjxl 0.7, and lossy files at effort 2 are 11 percent smaller at the
+  SSIMULACRA 2 score of `cjxl -d 1 -e 7` and the same size at that of `-d 2.5`.
+  `JxlEncodeBenchmarkTest` prints the tables.
+
 ## What the encoders do not write
 
-- There is no encoder for JPEG XL.
+- The JPEG XL encoder writes no lossless JPEG recompression, no progressive passes, no patches,
+  splines or noise, no LZ77 and no prefix codes, no Gaborish, no adaptive quantization, no
+  squeeze and no float samples. Its lossy files are 8 or 16 bits in sRGB; an ICC profile in the
+  metadata is written as the profile of the samples without converting them.
 - The AV1 encoder writes still intra pictures only: no image sequence, no inter frames, no film
   grain, no 128 by 128 superblocks, no intra block copy, no delta quantizer, no Wiener restoration
   filter (the self-guided one only), no chroma palette, and no 4:1 or three-way partitions.

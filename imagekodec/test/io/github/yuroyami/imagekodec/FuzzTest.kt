@@ -178,6 +178,11 @@ class FuzzTest {
         // JPEG XL from libjxl: both coding modes, the container, an ICC profile, passes, an LF frame, patches,
         // splines, noise, upsampling, a recompressed JPEG, float samples and a blended animation (#42).
         *JxlFixtures.all.map { (name, data) -> "jxl-$name" to data }.toTypedArray(),
+        // ImageKodec's own JPEG XL encoder: a small lossy VarDCT frame with Modular alpha beside it (#179).
+        "jxl-encoder" to ImageKodec.encodeJxl(
+            KiteBitmap(16, 12, IntArray(192) { ((it * 21) and 0xFF shl 24) or (it * 1311 and 0xFFFFFF) }),
+            JxlEncodeOptions(quality = 80, effort = 1),
+        ),
         // JPEG XR from jxrlib: both bitstream orders, every subsampling, tiles soft and hard, planar and
         // interleaved alpha, 16-bit, half and packed samples, and HD Photo's codec subversion (#125).
         *JxrFixtures.all.map { (name, data) -> "jxr-$name" to data }.toTypedArray(),

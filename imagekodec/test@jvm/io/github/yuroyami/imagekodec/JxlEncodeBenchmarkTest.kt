@@ -95,7 +95,7 @@ class JxlEncodeBenchmarkTest {
             println("total at -d $d: ours / cjxl = %.3f".format(ratio))
             worst = maxOf(worst, ratio)
         }
-        assertTrue(worst < 1.6, "lossy files are %.3f times cjxl's at the same score".format(worst))
+        assertTrue(worst < 1.2, "lossy files are %.3f times cjxl's at the same score".format(worst))
     }
 
     @Test

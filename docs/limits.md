@@ -20,8 +20,8 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
   `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
   can move by up to 255 sixteen-bit units to stay in that level.
-- There is no encoder for JPEG XL. The AVIF encoder writes still
-  intra pictures only (see [AVIF](#avif)). See
+- The AVIF encoder writes still intra pictures only (see [AVIF](#avif)), and the JPEG XL
+  encoder writes a part of the format. See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
 ## Size ceilings
