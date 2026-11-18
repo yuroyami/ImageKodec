@@ -431,8 +431,8 @@ public final class io/github/yuroyami/imagekodec/Jbig2EncodeOptions {
 
 public final class io/github/yuroyami/imagekodec/Jp2EncodeOptions {
 	public fun <init> ()V
-	public fun <init> (IZLjava/util/List;IZIIIIIILio/github/yuroyami/imagekodec/Jp2Progression;IZZZZZZZI)V
-	public synthetic fun <init> (IZLjava/util/List;IZIIIIIILio/github/yuroyami/imagekodec/Jp2Progression;IZZZZZZZIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (IZLjava/util/List;IZIIIIIILio/github/yuroyami/imagekodec/Jp2Progression;IZZZZZZZIZ)V
+	public synthetic fun <init> (IZLjava/util/List;IZIIIIIILio/github/yuroyami/imagekodec/Jp2Progression;IZZZZZZZIZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getBitsPerSample ()I
 	public final fun getBypass ()Z
 	public final fun getCodeBlockHeight ()I
@@ -440,6 +440,7 @@ public final class io/github/yuroyami/imagekodec/Jp2EncodeOptions {
 	public final fun getCodestreamOnly ()Z
 	public final fun getEffort ()I
 	public final fun getEphMarkers ()Z
+	public final fun getHighThroughput ()Z
 	public final fun getLayers ()I
 	public final fun getLevels ()I
 	public final fun getLossless ()Z
