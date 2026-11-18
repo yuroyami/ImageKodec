@@ -15,14 +15,17 @@ internal object JxlVarDctEncoder {
     /** Parameters of the encoder's decisions, kept apart so that a test can measure other values. */
     internal object Tuning {
         /** The quant field at distance 1: steps are the table's weights divided by it. */
-        var acQuant = 0.79
+        var acQuant = 0.68
 
         /** The step of Y's LF at distance 1, and the power of the distance it grows with. */
-        var lfStep = 0.0017
+        var lfStep = 0.001
         var lfPower = 0.6
 
-        /** The adaptive quantization: how strongly busy blocks get coarser steps, and its bounds. */
-        var aqStrength = 0.5
+        /**
+         * The adaptive quantization: how strongly busy blocks get coarser steps, and its bounds.
+         * Every strength above 0 measured worse in SSIMULACRA 2 per byte on PhotoScenes, so it is off.
+         */
+        var aqStrength = 0.0
         var aqOffset = 0.004
         var aqMin = 0.55
         var aqMax = 1.7
@@ -34,9 +37,15 @@ internal object JxlVarDctEncoder {
         var lambda = 0.06
 
         /** Distances from which the edge-preserving filter runs one, two and three times. */
-        var epf1 = 0.8
-        var epf2 = 2.5
-        var epf3 = 6.0
+        var epf1 = 0.5
+        var epf2 = 1.5
+        var epf3 = 4.0
+
+        /**
+         * Whether the decoder smooths with Gaborish, which the encoder sharpens for. Off: with this
+         * encoder's sharpening it measured about 7 percent larger at d 1 for the same score.
+         */
+        var gaborish = false
     }
 
     private const val GROUP_BLOCKS = 32
@@ -140,7 +149,7 @@ internal object JxlVarDctEncoder {
             modular = false,
             x0 = frame.x0, y0 = frame.y0, cropWidth = frame.cropWidth, cropHeight = frame.cropHeight, source = frame.source,
             duration = frame.duration, isLast = frame.isLast, saveAsReference = frame.saveAsReference,
-            gaborish = true, epfIters = epf,
+            gaborish = Tuning.gaborish, epfIters = epf,
         )
         JxlEncHeaders.writeFrameHeader(bw, image, fr)
         val dim = JxlEncoder.frameDim(picture.w, picture.h, false)
@@ -149,7 +158,7 @@ internal object JxlVarDctEncoder {
         val ctx = Ctx(xb, yb, toXyb(picture, xb * 8, yb * 8), xb * 8)
         cancel?.invoke()
         adaptiveQuant(ctx, distance)
-        inverseGaborish(ctx)
+        if (Tuning.gaborish) inverseGaborish(ctx)
         chooseTransforms(ctx, effort)
         cancel?.invoke()
 

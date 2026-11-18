@@ -169,6 +169,26 @@ class JxlEncodeOracleTest {
         assertEquals(4, djxl(jxl).channels, "a 16-bit lossy file with alpha")
     }
 
+    @Test
+    fun animationsPlayInDjxlFrameForFrame() {
+        assumeTrue("djxl is not installed", Tools.hasAll("djxl"))
+        val a = synthetic(48, 36, alpha = false, gray = false, seed = 21)
+        val b = KiteBitmap(48, 36, a.argb.copyOf().also { for (y in 4 until 20) for (x in 10 until 30) it[y * 48 + x] = argb(255, 250, 20, 90) })
+        val c = synthetic(48, 36, alpha = false, gray = false, seed = 22)
+        val anim = KiteAnimation(48, 36, listOf(KiteFrame(a, 120, 12), KiteFrame(b, 300, 30), KiteFrame(c, 50, 5)), 0)
+        val jxl = ImageKodec.encodeJxl(anim, JxlEncodeOptions(lossless = true))
+        val input = temp(".jxl").apply { writeBytes(jxl) }
+        val out = temp(".apng")
+        val (code, text) = run(Tools.require("djxl").path, input.path, out.path)
+        assertEquals(0, code, "djxl could not read the animation: $text")
+        val played = ImageKodec.decodeAnimation(out.readBytes())
+        assertEquals(3, played.frames.size, "djxl's frames")
+        for (i in 0 until 3) {
+            assertContentEquals(anim.frames[i].bitmap.argb, played.frames[i].bitmap.argb, "frame $i in djxl")
+            assertEquals(anim.frames[i].delayMillis, played.frames[i].delayMillis, "delay of frame $i in djxl")
+        }
+    }
+
     private fun worst(a: KiteBitmap16, b: KiteBitmap16): Int {
         var worst = 0
         for (i in a.samples.indices) worst = maxOf(worst, abs((a.samples[i].toInt() and 0xFFFF) - (b.samples[i].toInt() and 0xFFFF)))
