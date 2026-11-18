@@ -249,9 +249,9 @@ internal object JxrForward {
     // --- Planes ---------------------------------------------------------------------------------
 
     /**
-     * Pre-filters a raster plane of [w] by [h] samples, both multiples of 4 and at least 8 by 8,
-     * as clause 9.9.6 post-filters it, with [blockSide] samples to a block: 4 for the samples,
-     * where the filter straddles block corners at an offset of 2.
+     * Pre-filters a raster plane of [w] by [h] values, both multiples of 4, as clause 9.9.6
+     * post-filters the samples and clause 9.9.3.2 the DC values: the 4x4 filter straddles the
+     * corners of blocks of 4 at an offset of 2.
      */
     fun preFilterPlane(p: IntArray, w: Int, h: Int) {
         val q = IntArray(16)
