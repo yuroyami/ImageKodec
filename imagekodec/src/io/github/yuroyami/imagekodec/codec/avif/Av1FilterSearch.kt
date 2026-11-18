@@ -1,14 +1,16 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
 /**
- * The second pass of the AV1 encoder (#176): the loop filter levels and the CDEF strengths, chosen on the first
- * pass's reconstruction with the decoder's own filters ([Av1LoopFilter], [Av1Cdef]), each candidate measured by
- * its squared error against the source. The frame is filtered in place and put back after each candidate.
+ * The second pass of the AV1 encoder (#176): the loop filter levels, the CDEF strengths and the loop restoration
+ * units, chosen on the first pass's reconstruction with the decoder's own filters ([Av1LoopFilter], [Av1Cdef],
+ * [Av1LoopRestoration]), each candidate measured by its squared error against the source. The frame is filtered
+ * in place and put back after each candidate.
  *
  * Deblocking tries luma levels around a guess from the quantizer and keeps the best, then chroma the same way.
  * CDEF filters the deblocked frame once for each of a set of strength pairs, keeps each 64 by 64 block's squared
  * error under each, and picks the 1, 2, 4 or 8 pairs, and each block's choice among them, that cost least with
- * `cdef_idx` priced at its bits.
+ * `cdef_idx` priced at its bits. Loop restoration then weighs the self-guided and Wiener filters on the CDEF output
+ * ([restoration]).
  */
 internal class Av1FilterSearch(
     private val d: Av1FrameDecoder,
@@ -89,17 +91,17 @@ internal class Av1FilterSearch(
 
     // ---- loop restoration ----------------------------------------------------------------
 
-    /** The self-guided sets tried: none at effort 1, a spread of four at 2, all sixteen at 3. */
+    /** The self-guided sets tried: none at effort 1, two at 2 (four gained nothing measurable), all sixteen at 3. */
     private fun sgrSets(): IntArray = if (!selfGuided) IntArray(0) else when (effort) {
         1 -> IntArray(0)
-        2 -> intArrayOf(0, 4, 10, 14)
+        2 -> intArrayOf(0, 4)
         else -> IntArray(16) { it }
     }
 
     /** How many least-squares passes fit the Wiener taps, vertical and horizontal in turn from the identity. */
     private fun wienerPasses(): Int = if (!wiener) 0 else when (effort) {
         1 -> 0
-        2 -> 3
+        2 -> 2
         else -> 4
     }
 
@@ -512,13 +514,14 @@ internal class Av1FilterSearch(
     /**
      * The loop filter levels by the squared error they leave: luma both ways, then each chroma plane, each by a
      * pattern search from a guess that grows with the quantizer, as the filter's thresholds do: the level and its
-     * neighbours a step away, moving to the best and halving the step. Effort 1 keeps the guess.
+     * neighbours a step away, moving to the best and halving the step, down to a step of 4 at effort 2 and of 1 at 3.
+     * Effort 1 keeps the guess.
      */
     private fun deblock(): IntArray {
         val saved = copyFrame()
         val levels = IntArray(4)
         val guess = (fh.baseQIdx * 3 / 32).coerceIn(0, 63)
-        val minStep = if (effort >= 3) 1 else 2
+        val minStep = if (effort >= 3) 1 else 4
         // Luma.
         fun lumaError(l: Int): Long {
             if (l == 0) return planeError(0)
@@ -578,15 +581,18 @@ internal class Av1FilterSearch(
 
     private class Cdef(val damping: Int, val bits: Int, val y: IntArray, val uv: IntArray)
 
-    /** The strength pairs CDEF tries, primary and secondary, each a header code (primary * 4 + secondary code). */
+    /**
+     * The strength pairs CDEF tries, primary and secondary, each a header code (primary * 4 + secondary code): the
+     * first 2 at effort 1, 4 at effort 2 (8 gained nothing measurable on the photo scenes) and all at 3.
+     */
     private fun presets(): List<Pair<Int, Int>> {
         val all = listOf(
             0 to 0, 1 to 0, 2 to 1, 3 to 1, 4 to 2, 6 to 2, 8 to 3, 10 to 3, 12 to 3, 15 to 3,
             2 to 0, 4 to 0, 6 to 1, 1 to 1, 0 to 1, 0 to 2,
         )
         val n = when (effort) {
-            1 -> 4
-            2 -> 8
+            1 -> 2
+            2 -> 4
             else -> all.size
         }
         return all.take(n)
@@ -678,11 +684,20 @@ internal class Av1FilterSearch(
             val a = src.planes[p]
             val f = d.frame[p]
             val out = if (p == 0) y else uv
+            // A superblock's width of one row in an Int (at most 64 squares of 13 bits), then into its Long.
+            val span = 64 shr sx
             for (yy in 0 until h) {
                 val br = (yy shl sy) shr 6
-                for (xx in 0 until w) {
-                    val e = a[yy * stride + xx] - f[yy * stride + xx]
-                    out[br * sbCols + ((xx shl sx) shr 6)] += (e * e).toLong()
+                var x0 = 0
+                while (x0 < w) {
+                    val x1 = minOf(w, x0 + span)
+                    var row = 0
+                    for (xx in x0 until x1) {
+                        val e = a[yy * stride + xx] - f[yy * stride + xx]
+                        row += e * e
+                    }
+                    out[br * sbCols + ((x0 shl sx) shr 6)] += row
+                    x0 = x1
                 }
             }
         }

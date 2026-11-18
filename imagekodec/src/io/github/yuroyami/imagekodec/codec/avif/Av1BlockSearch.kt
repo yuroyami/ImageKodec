@@ -16,11 +16,19 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * Modes are first ranked by the Hadamard cost of their prediction (SATD) and the price of their symbols, and only
  * the best few are coded in full: luma with DC chroma first, then the chroma modes, chroma from luma included, on
  * the chosen luma. Effort widens each step: 1 codes one luma and one chroma mode at the largest transform, square
- * partitions down to 8 by 8, and the DCT or the mode's own transform type with a dead-zone quantizer; 2 codes two of
- * each, ranks angle deltas and filter intra, tries one transform split for the best mode, the DCT and ADST families
- * when the superblock is committed, and searches the levels ([optimize]); 3 codes five luma and four chroma modes,
- * two splits, 4 by 4 blocks, horizontal and vertical partitions and every transform type of the set. Where the frame
- * allows screen content tools, a block whose luma holds few values also tries a palette.
+ * partitions down to 8 by 8, and the DCT or the mode's own transform type with a dead-zone quantizer; 2 also ranks
+ * filter intra up to 16 by 16, tries one transform split for the best mode, 4 by 4 blocks, searches the levels
+ * ([optimize]), tries the DCT, the identity and the mode's own type while it searches and every type of the set
+ * when the superblock is committed; 3 codes five luma and four chroma modes, ranks angle deltas and filter intra up
+ * to 32 by 32, tries two splits, horizontal and vertical partitions and every type of the set throughout. Where the
+ * frame allows screen content tools, a block whose colours are few also tries a palette.
+ *
+ * Effort 2 was set by measuring, on the photo scenes of the tests, what each step of effort 3 brought against its
+ * time, as the size at equal SSIMULACRA 2 score (#176). Kept: 4 by 4 blocks (4.6 percent smaller for 9 percent more
+ * time), the identity and the mode's own type while searching and every type at the commit (together about 3.5
+ * percent for 6 percent), the level search (5 percent) and the transform split (3 percent). Left to effort 3: a second
+ * luma and chroma mode, angle deltas, rectangular partitions and filter intra above 16 by 16, each under a percent for
+ * its time or, for the partitions and five modes, 6 to 8 percent for twice the time.
  */
 internal class Av1BlockSearch(
     private val d: Av1FrameDecoder,
@@ -206,7 +214,7 @@ internal class Av1BlockSearch(
         return bestJ
     }
 
-    private fun allow4x4(): Boolean = effort >= 3 || (lossless && effort >= 2)
+    private fun allow4x4(): Boolean = effort >= 2
 
     /** Whether a block of [size] has a chroma block at this subsampling. */
     private fun valid(size: Int): Boolean = d.numPlanes == 1 || Av1.subsampledSize(size, d.subX, d.subY) != Av1.BLOCK_INVALID
@@ -236,7 +244,7 @@ internal class Av1BlockSearch(
         d.positionBlock(r, c, bSize)
         val hasChroma = d.hasChroma
         val n = rankLuma(r, c, bSize)
-        val keep = minOf(n, if (lossless) 3 else if (effort <= 1) 1 else if (effort == 2) 2 else 5)
+        val keep = minOf(n, if (lossless) 3 else if (effort <= 2) 1 else 5)
         // Each kept mode at the largest transform; then the transform splits of the best mode alone.
         var bestCode = lumaCand[0]
         for (step in 0..txDepths) {
@@ -305,7 +313,7 @@ internal class Av1BlockSearch(
             }
             val base = best.copy()
             val ranked = rankChroma(r, c, bSize, base)
-            val keepUv = minOf(ranked, if (effort <= 1) 1 else if (effort == 2) 2 else 4)
+            val keepUv = minOf(ranked, if (effort <= 2) 1 else 4)
             for (k in 0 until keepUv) {
                 ch.copyFrom(base)
                 val code = uvCand[k]
@@ -445,7 +453,7 @@ internal class Av1BlockSearch(
             lumaRank[n] = lumaSatd(r, c, bSize, lumaCand[n])
             n++
         }
-        if (!lossless && effort >= 2 && d.seq.enableFilterIntra && maxOf(Av1.blockWidth[bSize], Av1.blockHeight[bSize]) <= 32) {
+        if (!lossless && effort >= 2 && d.seq.enableFilterIntra && maxOf(Av1.blockWidth[bSize], Av1.blockHeight[bSize]) <= (if (effort == 2) 16 else 32)) {
             for (f in 0 until 5) {
                 lumaCand[n] = Av1.DC_PRED or (3 shl 8) or ((f + 1) shl 16)
                 lumaRank[n] = lumaSatd(r, c, bSize, lumaCand[n])
@@ -453,7 +461,7 @@ internal class Av1BlockSearch(
             }
         }
         sortCandidates(lumaCand, lumaRank, n)
-        if (directional && effort >= 2) {
+        if (directional && effort >= 3) {
             // Angle deltas of the best two directional modes.
             var tried = 0
             val base = n
@@ -678,18 +686,52 @@ internal class Av1BlockSearch(
         while (y < y0 + h && y < sh) {
             var x = x0
             while (x < x0 + w && x < sw) {
-                for (i in 0 until 4) for (j in 0 until 4) {
-                    val yy = y + i
-                    val xx = x + j
-                    diff[i * 4 + j] = if (yy < sh && xx < sw) a[yy * stride + xx] - b[yy * stride + xx] else 0
+                if (x + 4 <= sw && y + 4 <= sh) {
+                    total += hadamard4(a, b, y * stride + x, stride)
+                } else {
+                    for (i in 0 until 4) for (j in 0 until 4) {
+                        val yy = y + i
+                        val xx = x + j
+                        diff[i * 4 + j] = if (yy < sh && xx < sw) a[yy * stride + xx] - b[yy * stride + xx] else 0
+                    }
+                    total += hadamard4(diff)
                 }
-                total += hadamard4(diff)
                 x += 4
             }
             y += 4
         }
         return total
     }
+
+    /** [hadamard4] of the 4x4 differences of [a] less [b] at [at], rows [stride] apart, without the array. */
+    private fun hadamard4(a: ShortArray, b: ShortArray, at: Int, stride: Int): Int {
+        // Each row's transform: t0 to t3 of row i, from its four differences.
+        val r0 = at
+        val r1 = at + stride
+        val r2 = r1 + stride
+        val r3 = r2 + stride
+        var x0 = a[r0] - b[r0]; var x1 = a[r0 + 1] - b[r0 + 1]; var x2 = a[r0 + 2] - b[r0 + 2]; var x3 = a[r0 + 3] - b[r0 + 3]
+        val s00 = x0 + x1 + x2 + x3; val s01 = x0 - x1 + x2 - x3; val s02 = x0 + x1 - x2 - x3; val s03 = x0 - x1 - x2 + x3
+        x0 = a[r1] - b[r1]; x1 = a[r1 + 1] - b[r1 + 1]; x2 = a[r1 + 2] - b[r1 + 2]; x3 = a[r1 + 3] - b[r1 + 3]
+        val s10 = x0 + x1 + x2 + x3; val s11 = x0 - x1 + x2 - x3; val s12 = x0 + x1 - x2 - x3; val s13 = x0 - x1 - x2 + x3
+        x0 = a[r2] - b[r2]; x1 = a[r2 + 1] - b[r2 + 1]; x2 = a[r2 + 2] - b[r2 + 2]; x3 = a[r2 + 3] - b[r2 + 3]
+        val s20 = x0 + x1 + x2 + x3; val s21 = x0 - x1 + x2 - x3; val s22 = x0 + x1 - x2 - x3; val s23 = x0 - x1 - x2 + x3
+        x0 = a[r3] - b[r3]; x1 = a[r3 + 1] - b[r3 + 1]; x2 = a[r3 + 2] - b[r3 + 2]; x3 = a[r3 + 3] - b[r3 + 3]
+        val s30 = x0 + x1 + x2 + x3; val s31 = x0 - x1 + x2 - x3; val s32 = x0 + x1 - x2 - x3; val s33 = x0 - x1 - x2 + x3
+        val sum = column(s00, s10, s20, s30) + column(s01, s11, s21, s31) + column(s02, s12, s22, s32) + column(s03, s13, s23, s33)
+        return (sum + 1) shr 1
+    }
+
+    /** The sum of the absolute values of the 4-point Hadamard transform of one column. */
+    private fun column(m0: Int, m1: Int, m2: Int, m3: Int): Int {
+        val a0 = m0 + m1
+        val a1 = m0 - m1
+        val a2 = m2 + m3
+        val a3 = m2 - m3
+        return abs(a0 + a2) + abs(a1 + a3) + abs(a0 - a2) + abs(a1 - a3)
+    }
+
+    private fun abs(v: Int): Int = if (v < 0) -v else v
 
     private fun hadamard4(m: IntArray): Int {
         for (i in 0 until 4) {
@@ -841,6 +883,8 @@ internal class Av1BlockSearch(
     /** Whether the levels go through [optimize]: from effort 2, and in lossy coding. */
     private val rdoq = effort >= 2 && !lossless
 
+
+
     /**
      * A rate-distortion search of the levels in [trialLevels] for the coefficients in [coef], in reverse scan order as
      * they are coded: each level, its value one lower, and two lower, priced by the symbols its context would code
@@ -926,12 +970,15 @@ internal class Av1BlockSearch(
                 val inSet = if (set == Av1.TX_SET_INTRA_1) Av1Tables.txTypeIntraInvSet1 else Av1Tables.txTypeIntraInvSet2
                 val implied = Av1Tables.modeToTxfm[if (d.useFilterIntra) Av1Tables.filterIntraModeToIntraDir[d.filterIntraMode] else d.yMode]
                 typeList[n++] = Av1.DCT_DCT
-                if (effort <= 1 || (effort == 2 && mode != Mode.COMMIT)) {
+                if (effort <= 1) {
+                    if (implied != Av1.DCT_DCT && implied in inSet) typeList[n++] = implied
+                } else if (effort == 2 && mode != Mode.COMMIT) {
+                    // While searching, the identity for hard edges and the mode's own type beside the DCT.
+                    if (Av1.IDTX in inSet) typeList[n++] = Av1.IDTX
                     if (implied != Av1.DCT_DCT && implied in inSet) typeList[n++] = implied
                 } else {
                     for (t in inSet) {
                         if (t == Av1.DCT_DCT) continue
-                        if (effort == 2 && (t == Av1.V_DCT || t == Av1.H_DCT)) continue
                         typeList[n++] = t
                     }
                 }
@@ -1004,6 +1051,7 @@ internal class Av1BlockSearch(
     }
 
     companion object {
+        val PRUNE = LongArray(4)
         /** The floor of the square root of [x], by Newton's method in integers. */
         fun isqrt(x: Long): Long {
             if (x <= 0) return 0
