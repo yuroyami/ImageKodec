@@ -302,6 +302,12 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/ImageMetadata;Lio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
 	public final fun encodeJpeg (Lio/github/yuroyami/imagekodec/KiteBitmap;ILio/github/yuroyami/imagekodec/JpegEncoderKind;)[B
 	public static synthetic fun encodeJpeg$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
+	public final fun encodeJxr (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
+	public final fun encodeJxr (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJxr$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
+	public static synthetic fun encodeJxr$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeJxr16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJxr16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/JxrEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteAnimation;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodePng (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/ImageMetadata;)[B
@@ -375,6 +381,32 @@ public final class io/github/yuroyami/imagekodec/JpxComponents {
 	public final fun getSamples ()[B
 	public final fun getWidth ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/yuroyami/imagekodec/JxrChroma : java/lang/Enum {
+	public static final field Auto Lio/github/yuroyami/imagekodec/JxrChroma;
+	public static final field Full Lio/github/yuroyami/imagekodec/JxrChroma;
+	public static final field Half Lio/github/yuroyami/imagekodec/JxrChroma;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/yuroyami/imagekodec/JxrChroma;
+	public static fun values ()[Lio/github/yuroyami/imagekodec/JxrChroma;
+}
+
+public final class io/github/yuroyami/imagekodec/JxrEncodeOptions {
+	public fun <init> ()V
+	public fun <init> (IZLio/github/yuroyami/imagekodec/JxrChroma;Ljava/lang/Integer;Ljava/lang/Integer;ZZIILjava/util/List;Z)V
+	public synthetic fun <init> (IZLio/github/yuroyami/imagekodec/JxrChroma;Ljava/lang/Integer;Ljava/lang/Integer;ZZIILjava/util/List;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAlphaLossless ()Z
+	public final fun getAlphaQuality ()I
+	public final fun getChroma ()Lio/github/yuroyami/imagekodec/JxrChroma;
+	public final fun getChromaQuality ()Ljava/lang/Integer;
+	public final fun getFrequencyOrder ()Z
+	public final fun getLossless ()Z
+	public final fun getOverlap ()Ljava/lang/Integer;
+	public final fun getPlanarAlpha ()Z
+	public final fun getQuality ()I
+	public final fun getTileQualities ()Ljava/util/List;
+	public final fun getTileSize ()I
 }
 
 public final class io/github/yuroyami/imagekodec/KiteAnimation {

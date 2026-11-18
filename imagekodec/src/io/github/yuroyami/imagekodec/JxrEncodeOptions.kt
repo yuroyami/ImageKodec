@@ -51,9 +51,12 @@ public class JxrEncodeOptions @Throws(IllegalArgumentException::class) public co
     public val alphaLossless: Boolean = true,
     public val alphaQuality: Int = 90,
     public val tileSize: Int = 0,
-    public val tileQualities: IntArray? = null,
+    tileQualities: List<Int>? = null,
     public val frequencyOrder: Boolean = false,
 ) {
+    // A copy of the list given, so the options stay as they were made.
+    public val tileQualities: List<Int>? = tileQualities?.toList()
+
     init {
         require(quality in 0..100) { "quality must be 0 to 100, was $quality" }
         require(overlap == null || overlap in 0..2) { "overlap must be 0, 1 or 2, was $overlap" }

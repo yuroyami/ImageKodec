@@ -143,10 +143,10 @@ class JxrEncoderTest {
         assertFailsWith<IllegalArgumentException> { JxrEncodeOptions(quality = 101) }
         assertFailsWith<IllegalArgumentException> { JxrEncodeOptions(overlap = 3) }
         assertFailsWith<IllegalArgumentException> { JxrEncodeOptions(tileSize = 20) }
-        assertFailsWith<IllegalArgumentException> { JxrEncodeOptions(lossless = true, tileQualities = intArrayOf(50)) }
+        assertFailsWith<IllegalArgumentException> { JxrEncodeOptions(lossless = true, tileQualities = listOf(50)) }
         assertFailsWith<IllegalArgumentException> { ImageKodec.encodeJxr(scene(8, 8, 1), -1) }
         assertFailsWith<IllegalArgumentException> {
-            ImageKodec.encodeJxr(scene(40, 40, 1), JxrEncodeOptions(tileSize = 16, tileQualities = intArrayOf(50, 60)))
+            ImageKodec.encodeJxr(scene(40, 40, 1), JxrEncodeOptions(tileSize = 16, tileQualities = listOf(50, 60)))
         }
     }
 

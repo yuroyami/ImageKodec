@@ -163,7 +163,7 @@ class JxrEncodeOracleTest {
         Case("q80 chroma 40", JxrEncodeOptions(quality = 80, chromaQuality = 40)),
         Case("q70 tiles", JxrEncodeOptions(quality = 70, tileSize = 32)),
         Case("q50 tiles 4:2:0 overlap 2", JxrEncodeOptions(quality = 50, tileSize = 32, chroma = JxrChroma.Half, overlap = 2)),
-        Case("tile qualities", JxrEncodeOptions(quality = 70, tileSize = 48, tileQualities = intArrayOf(90, 20, 60, 75))),
+        Case("tile qualities", JxrEncodeOptions(quality = 70, tileSize = 48, tileQualities = listOf(90, 20, 60, 75))),
         Case("q70 frequency", JxrEncodeOptions(quality = 70, frequencyOrder = true)),
         Case("q40 frequency tiles", JxrEncodeOptions(quality = 40, frequencyOrder = true, tileSize = 32)),
         Case("alpha q50", JxrEncodeOptions(quality = 70, alphaLossless = false, alphaQuality = 50)),
