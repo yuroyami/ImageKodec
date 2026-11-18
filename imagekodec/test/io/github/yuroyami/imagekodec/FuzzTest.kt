@@ -359,6 +359,8 @@ class FuzzTest {
         if (variant == 0) mustFailCleanly("$label decodeScaled") { ImageKodec.decodeScaled(bytes, 7, 5, applyOrientation = true) }
         mustFailCleanly("$label decodeAnimation") { ImageKodec.decodeAnimation(bytes, applyOrientation = true) }
         mustFailCleanly("$label probe") { ImageKodec.probe(bytes) }
+        // Metadata is read apart from the pixels, and a damaged block is left out, never an error (#186).
+        mustFailCleanly("$label readMetadata") { ImageKodec.readMetadata(bytes) }
         // The 16-bit paths read their own samples; the others widen what decode gives.
         val format = ImageFormat.sniff(bytes)
         if (format == ImageFormat.PNG || format == ImageFormat.TIFF || format == ImageFormat.AVIF || format == ImageFormat.HEIC || format == ImageFormat.JXL || format == ImageFormat.JXR) {

@@ -71,3 +71,9 @@ class BrotliTest {
         }
     }
 }
+
+/** The XMP packet of [BrotliTest]'s first vector, Brotli-compressed, for the `brob` box of a JPEG XL file. */
+internal const val BROTLI_XMP_STREAM = "G0wDICwOMrkXO2mUzedE/mJDMdyoQHhq93dxTmUHuusJQBeHlE9Yc9gGm0/QVq3AE0T1fy5HdkB+/9/YozVxbSrtZRRTnFDD9CZdNWUFp0BJU2RNihj9JfKfftvn2jlaCsveVYl4VpcXq1zW59p0IgzAj3yRkQKmhjDWBDk/OOGNhrXvVk24HDxWm4l8YI81xR/4+pD/w5TDG7o+ofQXZARQkOqoUPO20giPsG1jZA1tl7OpjPLEWxLOMFOMcD3l8xT8aA6D1CA38p8PJPrWFIwHcjZgRSRDNPcyuOHZSNEiygEkCOvJLZGL+zLJlBUpAxMEhDuM0hH/p5NAUQUXBk9araFW4iliczK/MyZt+ieRoMd8ew0KiGIP/GiwnHWxAoSJgvg71CL/VesNzoGO+IwhybbgOQcDsGWaxjblZMunjGVP3ip5NJTBWng2lufX88daOa3nn/1la1hEtr1xfGmntzO+CJRQFq8TDMJgRHkR5pkdfCumk/gzPr/FQ4MPtqmLAu4enkEgy3huJ2Kh/zAheTwR8KUotekE"
+
+/** The CRC-32 of the packet [BROTLI_XMP_STREAM] holds. */
+internal const val BROTLI_XMP_CRC = 0x269CF1DBL

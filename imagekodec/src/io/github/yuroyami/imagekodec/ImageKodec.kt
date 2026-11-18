@@ -1013,8 +1013,10 @@ public object ImageKodec {
      * colour: decoding the result returns the exact same pixels.
      *
      * [metadata]'s ICC profile goes in InterColorProfile (tag 34675) and its XMP packet in tag 700.
-     * Its EXIF block is not written: in a TIFF it is a directory of its own, whose offsets would
-     * have to be rebuilt.
+     * Its EXIF block is taken apart (#186): the descriptive tags of its IFD0 (make, model, date,
+     * orientation, resolution and the like) join the page's directory in place of the writer's own
+     * resolution, and its EXIF and GPS directories follow, rewritten little endian at new offsets,
+     * behind tags 34665 and 34853. Its thumbnail directory (IFD1) is left out.
      *
      * [cancellationCheck], when given, runs before each strip or tile and every 64 rows of fax
      * coding, and may throw to stop the encode; what it throws comes out of this call as it is.
@@ -1034,8 +1036,8 @@ public object ImageKodec {
 
     /**
      * Encode [pages] as one multi-page TIFF, each page as [encodeTiff] with [options] writes one and
-     * marked with its page number. Every page carries [metadata]'s ICC profile; the XMP packet goes
-     * with the first.
+     * marked with its page number. Every page carries [metadata]'s ICC profile; the XMP packet and
+     * the EXIF block go with the first.
      *
      * @throws IllegalArgumentException if [pages] is empty, or as [encodeTiff] with options does
      */
@@ -1497,14 +1499,22 @@ public object ImageKodec {
     ): ByteArray = JxrEncoder.encode16(bitmap, options, metadata, cancellationCheck)
 
     /**
-     * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, JP2, AVIF or HEIC file. The
-     * `encodeJpeg`, `encodePng`, `encodeWebp` and `encodeJp2` overloads that take an [ImageMetadata] write them
-     * again, so a re-encode keeps them (#129). A JP2 file keeps the XMP and EXIF in UUID boxes and the
+     * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, JP2, AVIF, HEIC, TIFF, JPEG XL,
+     * JPEG XR, GIF or BMP file. The encoders that take an [ImageMetadata] write them again, so a
+     * re-encode keeps them (#129, #186). A JP2 file keeps the XMP and EXIF in UUID boxes and the
      * profile in its colour specification (#180). A HEIF file gives those of its primary image (#149);
-     * its orientation is in `irot` and `imir`, which `decode` applies, never in the EXIF tag. The gain map of an Ultra HDR JPEG comes too, found
-     * through its Multi-Picture Format segment (#130); the gain map of a HEIF file, which needs a decode,
-     * comes from [decodeGainMap] (#153). A file of another format, or one that has none,
-     * gives empty metadata; a damaged segment or chunk is left out.
+     * its orientation is in `irot` and `imir`, which `decode` applies, never in the EXIF tag. The gain
+     * map of an Ultra HDR JPEG comes too, found through its Multi-Picture Format segment (#130); the
+     * gain map of a HEIF file, which needs a decode, comes from [decodeGainMap] (#153).
+     *
+     * A TIFF or JPEG XR file has no EXIF block of its own: its first directory points to EXIF and GPS
+     * directories, and the block given is built of those and of the directory's descriptive tags,
+     * little endian, and only when it points to either. A JPEG XL file gives its `Exif` and `xml `
+     * boxes, also from a Brotli-compressed `brob` box, and the profile of its codestream. A GIF
+     * gives its XMP and ICC application extensions, and a BMP the profile of a BITMAPV5HEADER.
+     *
+     * A file of another format, or one that has none, gives empty metadata; a damaged segment, chunk
+     * or box is left out.
      */
     public fun readMetadata(data: ByteArray): ImageMetadata = MetadataIo.read(data)
 
@@ -1554,6 +1564,19 @@ public object ImageKodec {
     public fun encodeBmp(bitmap: KiteBitmap, options: BmpEncodeOptions): ByteArray = BmpEncoder.encode(bitmap, options)
 
     /**
+     * [encodeBmp] with [options] that also embeds [metadata]'s ICC profile (#186): with a profile,
+     * the header is a BITMAPV5HEADER whose colour space is PROFILE_EMBEDDED, and the profile
+     * follows the pixels; without one, the file is what the overload without metadata writes. A
+     * BMP has no place for EXIF or XMP, so those are left out. [readMetadata] reads the profile back.
+     *
+     * @throws IllegalArgumentException as the overload without metadata does, or if the file with
+     *   its profile would pass 2 GB
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeBmp(bitmap: KiteBitmap, options: BmpEncodeOptions, metadata: ImageMetadata): ByteArray =
+        BmpEncoder.encode(bitmap, options, metadata)
+
+    /**
      * Encode [bitmap] as a GIF89a. Colours are quantised to the format's 256-entry
      * limit; images that already fit encode losslessly. Alpha is reduced to GIF's
      * single transparent index at a 50% threshold.
@@ -1581,6 +1604,28 @@ public object ImageKodec {
     @Throws(IllegalArgumentException::class)
     public fun encodeGif(animation: KiteAnimation, dither: Boolean = true): ByteArray =
         GifEncoder.encode(animation, dither)
+
+    /**
+     * [encodeGif] that also writes [metadata] (#186), in application extensions before the first
+     * frame: the ICC profile in an `ICCRGBG1` `012` extension (ICC.1:2022, B.6), and the XMP
+     * packet in an `XMP DataXMP` extension with the trailer XMP Part 3 gives it. A GIF has no place
+     * for EXIF, so it is left out. The pixels are those the overload without metadata writes, and
+     * [readMetadata] reads both blocks back.
+     *
+     * @throws IllegalArgumentException as the overload without metadata does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeGif(bitmap: KiteBitmap, metadata: ImageMetadata, dither: Boolean = true): ByteArray =
+        GifEncoder.encode(bitmap, dither, metadata)
+
+    /**
+     * [encodeGif] of [animation] that also writes [metadata], as the still overload with metadata does.
+     *
+     * @throws IllegalArgumentException as the overload without metadata does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeGif(animation: KiteAnimation, metadata: ImageMetadata, dither: Boolean = true): ByteArray =
+        GifEncoder.encode(animation, dither, metadata)
 
     /**
      * Encode [bitmap] as a lossy JPEG 2000 file (JP2) at [quality] 0..100 (default 75), as

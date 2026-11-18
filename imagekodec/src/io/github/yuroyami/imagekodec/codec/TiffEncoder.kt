@@ -290,6 +290,7 @@ internal object TiffEncoder {
         out.append(ByteArray(4))
         var patchAt = firstIfdAt
         val jpegQuality = options.quality.coerceAtLeast(1)
+        val exifFields = metadata.exif?.let { ExifDirectories.parseBlock(it) }
         // The JPEG encoder halves the chroma at quality 90 and below.
         val subsampled = jpegQuality <= 90
         for ((index, page) in pages.withIndex()) {
@@ -376,6 +377,27 @@ internal object TiffEncoder {
             }
             metadata.icc?.let { bytes(34675, UNDEFINED, it) }
             if (index == 0) metadata.xmp?.let { bytes(700, BYTE, it.encodeToByteArray()) }
+            // The EXIF block's descriptive tags join the first page's directory, in place of the
+            // writer's own resolution, and its EXIF and GPS directories hang from it (#186).
+            val exifEntries = ArrayList<IntArray>()
+            if (index == 0) exifFields?.forEach { f ->
+                val sub = f.sub
+                if (sub != null) {
+                    pad(out)
+                    exifEntries += intArrayOf(f.tag, LONG, 1, out.size)
+                    out.append(ExifDirectories.serialize(sub, out.size))
+                } else if (f.tag in ExifDirectories.DESCRIPTIVE) {
+                    var v = 0
+                    if (f.value.size <= 4) {
+                        for (i in f.value.indices) v = v or ((f.value[i].toInt() and 0xFF) shl (8 * i))
+                    } else {
+                        pad(out)
+                        v = out.size
+                        out.append(f.value)
+                    }
+                    exifEntries += intArrayOf(f.tag, f.type, f.count, v)
+                }
+            }
             pad(out)
             val ifd = out.size
             patch(out, patchAt, ifd)
@@ -414,6 +436,8 @@ internal object TiffEncoder {
             if (page.alpha) entry(338, SHORT, 1, 2)
             if (page.photometric == 6) entry(530, SHORT, 2, if (subsampled) 2 or (2 shl 16) else 1 or (1 shl 16))
             // TIFF 6.0 section 2: the entries are sorted by tag.
+            entries.removeAll { e -> exifEntries.any { it[0] == e[0] } }
+            entries += exifEntries
             entries.sortBy { it[0] }
             short(out, entries.size)
             for (e in entries) {

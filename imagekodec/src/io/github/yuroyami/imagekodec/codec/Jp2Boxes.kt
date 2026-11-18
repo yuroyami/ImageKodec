@@ -112,7 +112,8 @@ internal object Jp2Boxes {
                     exif = if (signed) body.copyOfRange(6, body.size) else body
                 }
             }
-            if (type == "jp2c" || len == 0L) break
+            // ExifTool writes the UUID boxes after the codestream, so the walk goes on past it (#186).
+            if (len == 0L) break
             p = end.toInt()
         }
         val icc = try {

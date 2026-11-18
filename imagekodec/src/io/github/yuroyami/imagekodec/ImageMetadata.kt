@@ -2,10 +2,10 @@ package io.github.yuroyami.imagekodec
 
 /**
  * The metadata of a photo that a re-encode can carry over (#129): the [exif] block, the [xmp]
- * packet and the [icc] colour profile. [ImageKodec.readMetadata] reads them from a JPEG, PNG or
- * WebP file, and the `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an
- * [ImageMetadata] write them, so a re-encoded camera photo keeps its capture date, its place,
- * its camera and its colours.
+ * packet and the [icc] colour profile. [ImageKodec.readMetadata] reads them from every format that
+ * carries them, and the encoders that take an [ImageMetadata] write what their format has a place
+ * for (#186), so a re-encoded camera photo keeps its capture date, its place, its camera and its
+ * colours. A GIF keeps no EXIF, and a BMP only the profile.
  *
  * @property exif the EXIF block: the TIFF structure that follows `Exif\0\0` in a JPEG APP1
  *   segment, as a PNG `eXIf` chunk stores it, or null.

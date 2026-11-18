@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.imagekodec.BmpEncodeOptions
+import io.github.yuroyami.imagekodec.ImageMetadata
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
 
@@ -26,6 +27,10 @@ internal object BmpEncoder {
     private const val FILE_HEADER = 14
     private const val INFO_HEADER = 40
     private const val V4_HEADER = 108
+    private const val V5_HEADER = 124
+
+    /** The perceptual rendering intent, as a BITMAPV5HEADER names it. */
+    private const val LCS_GM_IMAGES = 4
 
     private const val BI_RGB = 0
     private const val BI_RLE8 = 1
@@ -51,6 +56,37 @@ internal object BmpEncoder {
             else -> encodePalette(bitmap, bits, options.rle)
         }
     }
+
+    /**
+     * [encode] with options, and with [metadata]'s ICC profile, when it has one, embedded under a
+     * BITMAPV5HEADER (#186): the header written grows to 124 bytes, its colour space becomes
+     * PROFILE_EMBEDDED with the perceptual intent (LCS_GM_IMAGES), and the profile follows the
+     * pixels, where bV5ProfileData points. The pixels are those [encode] writes.
+     */
+    fun encode(bitmap: KiteBitmap, options: BmpEncodeOptions, metadata: ImageMetadata): ByteArray {
+        val plain = encode(bitmap, options)
+        val icc = metadata.icc ?: return plain
+        val header = le32(plain, 14)
+        val bodyStart = FILE_HEADER + header
+        val body = plain.size - bodyStart
+        val total = FILE_HEADER.toLong() + V5_HEADER + body + icc.size
+        require(total <= Int.MAX_VALUE) { "BMP: a file of $total bytes with its ICC profile is more than a file can hold" }
+        val out = ByteArray(total.toInt())
+        plain.copyInto(out, 0, 0, bodyStart)
+        val c = Cursor(out)
+        c.at = 2; c.u32(out.size)
+        c.at = 10; c.u32(le32(plain, 10) + V5_HEADER - header)
+        c.at = FILE_HEADER; c.u32(V5_HEADER)
+        // bV5CSType, then bV5Intent, bV5ProfileData (from the start of the header) and bV5ProfileSize.
+        c.at = FILE_HEADER + 56; c.u32(MetadataIo.PROFILE_EMBEDDED)
+        c.at = FILE_HEADER + 108; c.u32(LCS_GM_IMAGES); c.u32(V5_HEADER + body); c.u32(icc.size)
+        plain.copyInto(out, FILE_HEADER + V5_HEADER, bodyStart, plain.size)
+        icc.copyInto(out, FILE_HEADER + V5_HEADER + body)
+        return out
+    }
+
+    private fun le32(d: ByteArray, at: Int): Int = (d[at].toInt() and 0xFF) or ((d[at + 1].toInt() and 0xFF) shl 8) or
+        ((d[at + 2].toInt() and 0xFF) shl 16) or ((d[at + 3].toInt() and 0xFF) shl 24)
 
     private fun encode24(bitmap: KiteBitmap): ByteArray {
         val w = bitmap.width
@@ -325,7 +361,7 @@ internal object BmpEncoder {
 
     /** Little-endian write cursor over a pre-sized array. */
     private class Cursor(private val out: ByteArray) {
-        private var at = 0
+        var at = 0
         fun u8(v: Int) { out[at++] = (v and 0xFF).toByte() }
         fun u16(v: Int) { u8(v); u8(v ushr 8) }
         fun u32(v: Int) { u16(v); u16(v ushr 16) }

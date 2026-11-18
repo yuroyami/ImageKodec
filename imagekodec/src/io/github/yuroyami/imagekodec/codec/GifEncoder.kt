@@ -1,5 +1,6 @@
 package io.github.yuroyami.imagekodec.codec
 
+import io.github.yuroyami.imagekodec.ImageMetadata
 import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.internal.flate.ByteArrayBuilder
@@ -37,17 +38,17 @@ internal object GifEncoder {
     private const val MAX_SIDE = 65535                // width and height are 16-bit fields
     private const val TRANSPARENT_CUTOFF = 128       // alpha < this becomes the transparent index
 
-    fun encode(bitmap: KiteBitmap, dither: Boolean = true): ByteArray =
-        write(listOf(bitmap), intArrayOf(0), loopCount = 1, animated = false, dither = dither)
+    fun encode(bitmap: KiteBitmap, dither: Boolean = true, metadata: ImageMetadata = ImageMetadata()): ByteArray =
+        write(listOf(bitmap), intArrayOf(0), loopCount = 1, animated = false, dither = dither, metadata = metadata)
 
-    fun encode(animation: KiteAnimation, dither: Boolean = true): ByteArray {
+    fun encode(animation: KiteAnimation, dither: Boolean = true, metadata: ImageMetadata = ImageMetadata()): ByteArray {
         val frames = animation.frames.map { it.bitmap }
         // Delays travel in centiseconds on the wire; round the millisecond value.
         val delays = IntArray(animation.frames.size) { i ->
             val f = animation.frames[i]
             if (f.delayRawCentiseconds > 0) f.delayRawCentiseconds else (f.delayMillis + 5) / 10
         }
-        return write(frames, delays, animation.loopCount, animated = frames.size > 1, dither = dither)
+        return write(frames, delays, animation.loopCount, animated = frames.size > 1, dither = dither, metadata = metadata)
     }
 
     // --- container --------------------------------------------------------------
@@ -58,6 +59,7 @@ internal object GifEncoder {
         loopCount: Long,
         animated: Boolean,
         dither: Boolean,
+        metadata: ImageMetadata,
     ): ByteArray {
         require(frames.isNotEmpty()) { "GIF needs at least one frame" }
         require(loopCount in 0L..65_536L) { "GIF total play count must be in 0..65536" }
@@ -96,6 +98,24 @@ internal object GifEncoder {
             out.append("NETSCAPE2.0".encodeToByteArray())
             out.append(3); out.append(1)
             out.u16(if (loopCount == 0L) 0 else (loopCount - 1).toInt())
+            out.append(0)
+        }
+
+        // --- metadata (#186) ----------------------------------------------------
+        // The ICC profile in sub-blocks after its identifier (ICC.1:2022, B.6).
+        metadata.icc?.let { profile ->
+            out.append(0x21.toByte()); out.append(0xFF.toByte()); out.append(11)
+            out.append(MetadataIo.GIF_ICC.encodeToByteArray())
+            writeSubBlocks(out, profile)
+        }
+        // The XMP packet raw, then a trailer of 1, 255 down to 0 and the block end, so that a reader
+        // of sub-blocks steps through the packet and lands on the end (XMP Part 3, 1.1.2).
+        metadata.xmp?.let { packet ->
+            out.append(0x21.toByte()); out.append(0xFF.toByte()); out.append(11)
+            out.append(MetadataIo.GIF_XMP.encodeToByteArray())
+            out.append(packet.encodeToByteArray())
+            out.append(1)
+            for (v in 255 downTo 0) out.append(v)
             out.append(0)
         }
 
