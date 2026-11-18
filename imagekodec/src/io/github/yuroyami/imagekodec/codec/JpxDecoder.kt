@@ -1135,11 +1135,7 @@ public object JpxDecoder {
         resetContexts(cx)
 
         val t1 = T1(w, h, style and Jp2Headers.STYLE_VSC != 0)
-        val zc = when (band.orient) {
-            1 -> ZC_HL
-            3 -> ZC_HH
-            else -> ZC_LL
-        }
+        val zc = zeroCodingTable(band.orient)
 
         // OpenJPEG's numbps and bpno_plus_one: the block's magnitude bitplanes, and one more than
         // the plane the next pass codes, which an ROI shift (H.1) raises by the shift.
