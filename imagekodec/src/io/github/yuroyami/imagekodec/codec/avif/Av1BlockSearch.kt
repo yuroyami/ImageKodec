@@ -17,7 +17,7 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * the best few are coded in full: luma with DC chroma first, then the chroma modes, chroma from luma included, on
  * the chosen luma. Effort widens each step: 1 codes one luma and one chroma mode at the largest transform, square
  * partitions down to 8 by 8, and the DCT or the mode's own transform type with a dead-zone quantizer; 2 also tries
- * one transform split for the best mode, 4 by 4 blocks, searches the levels ([optimize]), and weighs the DCT, the
+ * one transform split for the best mode below 64 by 64, 4 by 4 blocks, searches the levels ([optimize]), and weighs the DCT, the
  * identity and the mode's own type; 3 codes five luma and four chroma modes, ranks angle deltas and filter intra up
  * to 32 by 32, tries two splits, horizontal and vertical partitions and codes every type of the set. Where the
  * frame allows screen content tools, a block whose colours are few also tries a palette.
@@ -315,7 +315,10 @@ internal class Av1BlockSearch(
         var lastWasBest = false
         val maxTx = Av1Tables.maxTxSizeRect[bSize]
         val maxDepth = if (lossless) 0 else minOf(Av1Tables.maxTxDepth[bSize], if (Av1Tables.maxTxDepth[bSize] > 1) 2 else 1)
-        val txDepths = minOf(maxDepth, effort - 1)
+        // At effort 2 a 64 by 64 block keeps its largest transform: on the photo scenes, leaving out the split to four
+        // 32 by 32 transforms made the files 0.2 to 0.4 percent smaller at equal score and the search 6 to 14 percent
+        // faster (#176), as a split 64 by 64 partition codes the same transforms with better modes.
+        val txDepths = if (effort == 2 && bSize == Av1.BLOCK_64X64) 0 else minOf(maxDepth, effort - 1)
 
         // In an inter frame, the inter candidates first; intra modes then compete with the best of them, except at
         // effort 1 when it codes no residual.
