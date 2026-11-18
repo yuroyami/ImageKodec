@@ -7,6 +7,18 @@ public final class io/github/yuroyami/imagekodec/AuxiliaryImage {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/yuroyami/imagekodec/CcittEncodeOptions {
+	public fun <init> ()V
+	public fun <init> (IZZZZ)V
+	public synthetic fun <init> (IZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBlackIs1 ()Z
+	public final fun getEncodedByteAlign ()Z
+	public final fun getEndOfBlock ()Z
+	public final fun getEndOfLine ()Z
+	public final fun getK ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/github/yuroyami/imagekodec/ColorProfile {
 	public fun <init> ()V
 	public fun <init> ([BLjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;[I[I[I[I)V
@@ -287,6 +299,9 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun encodeAvif16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeAvif16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
+	public final fun encodeCcitt (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
+	public final fun encodeCcitt (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/CcittEncodeOptions;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeCcitt$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/CcittEncodeOptions;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteAnimation;Z)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteBitmap;Z)[B
 	public static synthetic fun encodeGif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteAnimation;ZILjava/lang/Object;)[B
@@ -297,6 +312,9 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public static synthetic fun encodeHeic$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeHeic16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeHeic16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeJbig2 (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
+	public final fun encodeJbig2 (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/Jbig2EncodeOptions;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeJbig2$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/Jbig2EncodeOptions;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeJp2 (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
 	public final fun encodeJp2 (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/Jp2EncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
 	public static synthetic fun encodeJp2$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
@@ -361,6 +379,17 @@ public final class io/github/yuroyami/imagekodec/ImageMetadata {
 	public final fun isEmpty ()Z
 	public fun toString ()Ljava/lang/String;
 	public final fun upright ()Lio/github/yuroyami/imagekodec/ImageMetadata;
+}
+
+public final class io/github/yuroyami/imagekodec/Jbig2EncodeOptions {
+	public fun <init> ()V
+	public fun <init> (IZZZ)V
+	public synthetic fun <init> (IZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getMmr ()Z
+	public final fun getStandalone ()Z
+	public final fun getTemplate ()I
+	public final fun getTypicalPrediction ()Z
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/yuroyami/imagekodec/Jp2EncodeOptions {
@@ -640,6 +669,7 @@ public final class io/github/yuroyami/imagekodec/WebpEncodeOptions {
 public final class io/github/yuroyami/imagekodec/codec/CcittFax {
 	public static final field INSTANCE Lio/github/yuroyami/imagekodec/codec/CcittFax;
 	public final fun decode ([BILio/github/yuroyami/imagekodec/codec/CcittOptions;)[B
+	public final fun encode ([BILio/github/yuroyami/imagekodec/codec/CcittOptions;)[B
 }
 
 public final class io/github/yuroyami/imagekodec/codec/CcittOptions {

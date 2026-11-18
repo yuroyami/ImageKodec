@@ -1,9 +1,10 @@
 # Writing images
 
 ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, WebP (lossless and lossy, still and
-animated), JPEG 2000, JPEG XL, AVIF, JPEG XR and, with the `imagekodec-heic` module, HEIC. Every encoder takes a
-`KiteBitmap` (or a `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows
-it) and returns the file as a `ByteArray`.
+animated), JPEG 2000, JPEG XL, AVIF, JPEG XR, HEIC with the `imagekodec-heic` module, and the CCITT
+fax and JBIG2 data that PDF and TIFF embed. Every encoder takes a `KiteBitmap` (or a
+`KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows it) and returns the
+file as a `ByteArray`.
 
 ```kotlin
 ImageKodec.encodePng(bitmap)                    // 8-bit RGB, or RGBA when alpha is present
@@ -26,6 +27,8 @@ ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(lossless = true)) // lossless JPEG
 ImageKodec.encodeJp2(bitmap, quality = 75)      // JPEG 2000, lossy 9/7, in a JP2 file
 ImageKodec.encodeJxl(bitmap, quality = 90)      // lossy JPEG XL, VarDCT in XYB
 ImageKodec.encodeJxl(bitmap, JxlEncodeOptions(lossless = true)) // decodes to exactly the input
+ImageKodec.encodeCcitt(bitmap)                  // CCITT Group 4 fax data, for a PDF or a TIFF
+ImageKodec.encodeJbig2(bitmap)                  // a JBIG2 generic region, for a PDF
 ```
 
 `encodeJpeg` uses a quality of 90 when you pass none.
@@ -115,6 +118,50 @@ val tiled = ImageKodec.encodeJxr(bitmap, JxrEncodeOptions(quality = 60, tileSize
   dates become tags of the directory, and the EXIF and GPS directories are copied after it.
 - `cancellationCheck` runs before each row of macroblocks and may throw to stop the encode.
 - Every file decodes in jxrlib's `JxrDecApp` to the samples ImageKodec's decoder gives.
+
+## Fax and JBIG2 data for PDF and TIFF
+
+`encodeCcitt` and `encodeJbig2` write the two bilevel codings that PDF and TIFF carry for scanned
+pages (#185). Neither writes a file of its own: the result goes into a PDF image stream, or a TIFF
+strip, with the parameters the caller states there.
+
+```kotlin
+val g4 = ImageKodec.encodeCcitt(page)                                       // Group 4, ended with EOFB
+val g3 = ImageKodec.encodeCcitt(page, CcittEncodeOptions(k = 4, endOfLine = true, endOfBlock = false))
+val jbig2 = ImageKodec.encodeJbig2(page)                                    // template 0, typical prediction
+val jb2File = ImageKodec.encodeJbig2(page, Jbig2EncodeOptions(standalone = true))
+```
+
+- Both take a `KiteBitmap` and make it bilevel: a pixel is black when its luma, with BT.601 weights,
+  laid over white by its alpha, is below half. A transparent pixel is white. The coding of that page
+  is lossless, so `CcittFax.decode` and `Jbig2Decoder.decode` return it exactly.
+- `CcittEncodeOptions` takes the parameters of PDF's `CCITTFaxDecode`: `k` (negative for Group 4, the
+  default; 0 for Group 3 one-dimensional; positive for Group 3 two-dimensional), `encodedByteAlign`,
+  `blackIs1`, `endOfLine` and `endOfBlock`. Write the same values into the PDF's `DecodeParms`, with
+  `Columns` and `Rows` for the size. For a TIFF, Group 4 is compression 4; Group 3 with `endOfLine`
+  and without `endOfBlock` is compression 3, with T4Options bit 0 set when `k` is positive; Group 3
+  one-dimensional with `encodedByteAlign` and neither mark is compression 2.
+- `CcittFax.encode` takes a page packed as `CcittFax.decode` returns one, with its `CcittOptions`.
+- Each run and each two-dimensional step has one code in T.4 and T.6, so the output is the one
+  coding of the page: libtiff's `tiffcp -c g4`, `-c g3:1d` and `-c g3:2d` write the same bytes.
+- `encodeJbig2` writes one page holding one immediate generic region, coded with the MQ arithmetic
+  coder. By default it is the embedded stream of PDF's `JBIG2Decode`: a page information segment
+  and the region, with no global stream. `Jbig2EncodeOptions(standalone = true)` writes a `.jb2`
+  file instead, with the file header and the end-of-page and end-of-file segments.
+- `template` picks one of the four generic templates with its nominal adaptive pixels; 0, the
+  default, codes text smallest. `typicalPrediction` codes a row that repeats the row above in one
+  bit. `mmr = true` codes the region with T.6 instead, faster to read and about twice as large.
+- Without typical prediction, the output matches jbig2enc's generic coder (`jbig2 -p`) byte for
+  byte. With it, jbig2enc codes the first row in full where this encoder predicts a white one, so
+  the two differ by a few bytes.
+- On text-like pages, a JBIG2 generic region is about half the size of Group 4:
+
+| Page | Group 4 | Group 3 2D, K = 4 | JBIG2, template 0 | JBIG2 with prediction | JBIG2 MMR |
+| --- | --- | --- | --- | --- | --- |
+| 1728 x 2200 | 142,134 | 154,206 | 68,719 | 68,523 | 142,190 |
+| 2480 x 3508 | 323,754 | 353,955 | 152,401 | 151,998 | 323,810 |
+
+  Group 4 takes 25 and 55 ms on the JVM for these pages, and JBIG2 60 and 138 ms.
 
 ## Keeping a photo's metadata
 
@@ -320,6 +367,10 @@ ImageKodec.encodeJxl(animation, JxlEncodeOptions(lossless = true))       // dela
   components, no region of interest, no POC, PPM or PPT segments, no tile-parts beyond one a tile, no
   predictable termination, no HTJ2K and no Part 2 extension. A bare codestream carries no metadata and
   no channel definitions.
+- The JBIG2 encoder writes generic regions only. Symbol dictionaries and text regions, which pay
+  only on text and which encoders that merge look-alike glyphs make lossy, are not written, and
+  neither are refinement, halftone or striped pages. The CCITT encoder writes no uncompressed mode.
+- `encodeTiff` does not write fax compression; a TIFF of a fax page is built around `encodeCcitt`.
 - The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit
   output. It picks a filter for each row, which is a compression choice and not a format
   capability. Use `encodeTiff16` for 16-bit output.

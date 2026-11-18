@@ -194,4 +194,5 @@ can still be unsupported. `probe` is the call that reports that, through `isDeco
 
 `Jbig2Decoder` and `CcittFax` are public as well. Neither format carries magic bytes or dimensions
 of its own, so both take their parameters explicitly and both return packed 1-bit rows instead of
-going through `decode`. A PDF reader is the usual caller.
+going through `decode`. A PDF reader is the usual caller. `encodeCcitt`, `CcittFax.encode` and
+`encodeJbig2` write the same data ([Writing images](encoding.md#fax-and-jbig2-data-for-pdf-and-tiff)).

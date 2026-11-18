@@ -114,6 +114,12 @@ public object Jbig2Decoder {
     /** The pattern pixels any halftone grid may draw, however small its region. */
     private const val HALFTONE_SLACK = 1L shl 20
 
+    /**
+     * The context that codes SLTP, whether a row repeats the row above, under typical prediction
+     * (T.88 6.2.5.7, Figures 8 to 11), by template. [Jbig2Encoder] codes with the same contexts.
+     */
+    internal val TPGDON_CONTEXTS: IntArray = intArrayOf(0x9B25, 0x0795, 0x00E5, 0x0195)
+
     private fun newCx() = IntArray(1 shl 16)
     private fun newIntCx() = IntArray(512)
 
@@ -280,8 +286,7 @@ public object Jbig2Decoder {
         for (y in 0 until h) {
             if ((y and 63) == 0) cancel?.invoke()
             if (tpgdon) {
-                val ctxTp = when (template) { 0 -> 0x9B25; 1 -> 0x0795; 2 -> 0x00E5; else -> 0x0195 }
-                ltp = ltp xor mq.bit(cx, ctxTp)
+                ltp = ltp xor mq.bit(cx, TPGDON_CONTEXTS[template])
                 if (ltp == 1) { // copy previous row
                     if (y > 0) for (x in 0 until w) bmp.bits[y * w + x] = bmp.bits[(y - 1) * w + x]
                     continue

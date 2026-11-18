@@ -166,8 +166,9 @@ keeps its fetching and caching while ImageKodec decodes. See [Compose and Coil](
 | JPEG XR | HD Photo and JPEG XR, 8 and 16 bits, fixed point, half and float, alpha | lossy and lossless, 8 and 16 bits, alpha, tiles |
 | HEIC | stills, grids, alpha, depth and gain maps, and image sequences, 8 to 16 bits, with the `imagekodec-heic` module | intra stills and grids, 8 to 12 bits, alpha, lossless, with the `imagekodec-heic` module |
 
-`Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it. Neither format
-carries a header of its own, so both take their parameters explicitly. HEIC decodes and encodes only
+`Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it, and `encodeJbig2`
+(generic regions) and `encodeCcitt` (Group 3 and Group 4) write it. Neither format carries a header
+of its own, so both take their parameters explicitly. HEIC decodes and encodes only
 with the separate `imagekodec-heic` module, which is not published yet. [HEIC](docs/heic.md) explains why and
 how to install it. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
 format.

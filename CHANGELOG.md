@@ -14,6 +14,15 @@ reviewable in the diff.
 
 ### Added
 
+- `encodeCcitt` writes CCITT fax data, Group 4 (T.6) by default and Group 3 one- or two-dimensional
+  (T.4) with `CcittEncodeOptions`, which takes the parameters of PDF's `CCITTFaxDecode`: K, the byte
+  alignment, the polarity, EOL and EOFB or RTC. `CcittFax.encode` takes a packed page as
+  `CcittFax.decode` returns one. `encodeJbig2` writes a JBIG2 page as one generic region, with the MQ
+  coder in any of the four templates, typical prediction and MMR as `Jbig2EncodeOptions` choose, as
+  the embedded stream of PDF's `JBIG2Decode` or as a `.jb2` file. Both make a bitmap bilevel at half
+  its luma and code it losslessly. libtiff writes the same fax bytes, and jbig2enc the same generic
+  region without typical prediction; libtiff and jbig2dec read every variant back to the source page.
+  Symbol dictionaries are not written. See [Writing images](docs/encoding.md) (#185).
 - `encodeJxl(bitmap, quality)`, `encodeJxl(bitmap, JxlEncodeOptions, metadata, cancellationCheck)`,
   `encodeJxl16` and `encodeJxl(animation, ...)` write JPEG XL, written from ISO/IEC 18181-1 and
   18181-2: lossy VarDCT in XYB with transforms up to 32 by 32 and chroma from luma, lossless

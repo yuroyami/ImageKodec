@@ -9,16 +9,16 @@ import io.github.yuroyami.imagekodec.internal.Budget
  * KitePDF's `/CCITTFaxDecode` filter (the algorithm half; the PdfDictionary
  * parameter-parsing glue stayed behind). Also the compression used by TIFF
  * compressions 2/3/4, which is why it lives in ImageKodec now. JBIG2's MMR
- * regions reuse [decodeGroup4] directly.
+ * regions reuse [decodeGroup4] directly. The encoder is in CcittFaxEncoder.kt and shares the tables.
  */
 
 /**
- * CCITT fax decoding. Bilevel scan-world compression: there is no standalone
+ * CCITT fax decoding and encoding. Bilevel scan-world compression: there is no standalone
  * container/magic for it, so this is a parameterized codec API, not part of
  * [io.github.yuroyami.imagekodec.ImageKodec.decode]'s sniffing.
  *
- * Output is 1 bit per pixel, packed MSB-first, padded to a byte boundary per
- * row; polarity follows [CcittOptions.blackIs1].
+ * A page is 1 bit per pixel, packed MSB-first, padded to a byte boundary per
+ * row; polarity follows [CcittOptions.blackIs1]. [decode] returns one and [encode] takes one.
  */
 public object CcittFax {
     /**
@@ -39,6 +39,45 @@ public object CcittFax {
             k == 0 -> decodeGroup3OneD(reader, options)
             else -> decodeGroup3Mixed(reader, options)
         }
+    }
+
+    /**
+     * Encode [input], a page laid out as [decode] returns one: rows of [CcittOptions.columns] pixels,
+     * packed MSB first and padded to a whole byte, a set bit black when [CcittOptions.blackIs1] and
+     * white otherwise. The padding bits are ignored. [CcittOptions.rows] rows are written, or every
+     * whole row [input] holds when it is 0. [k] selects the coding as [decode] reads it: negative is
+     * Group 4 (T.6), zero is Group 3 one-dimensional (T.4 Modified Huffman), and a positive [k] is
+     * Group 3 two-dimensional, each 1D row followed by up to k - 1 rows coded against the row above.
+     *
+     * [decode] with the same [k] and options returns [input] with its padding cleared. The other
+     * options set the framing, as PDF's `CCITTFaxDecode` names it:
+     * - [CcittOptions.encodedByteAlign] starts each row on a byte, its EOL included in Group 3. Group 4
+     *   pads after each row, and the end of block then starts on a byte too.
+     * - [CcittOptions.endOfLine] writes an EOL before each Group 3 row. T.6 has no EOL, so Group 4
+     *   refuses it.
+     * - [CcittOptions.endOfBlock] ends the data with EOFB in Group 4 and with RTC in Group 3, which
+     *   lets a reader that is given no row count find the end.
+     *
+     * The last byte is padded with zero bits.
+     *
+     * @throws IllegalArgumentException if [CcittOptions.columns] is outside 1 to 65536, if
+     *   [CcittOptions.rows] is negative or [input] holds fewer rows, or if [k] is negative and
+     *   [CcittOptions.endOfLine] is set
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encode(input: ByteArray, k: Int, options: CcittOptions): ByteArray {
+        val cols = options.columns
+        require(cols in 1..CCITT_MAX_ENCODE_COLUMNS) { "CCITT: $cols columns is outside 1 to $CCITT_MAX_ENCODE_COLUMNS" }
+        require(options.rows >= 0) { "CCITT: ${options.rows} rows" }
+        require(k >= 0 || !options.endOfLine) { "CCITT: Group 4 (K < 0) has no EOL, so endOfLine must be false" }
+        val bytesPerRow = (cols + 7) / 8
+        val rows = if (options.rows == 0) input.size / bytesPerRow else options.rows
+        require(rows.toLong() * bytesPerRow <= input.size) {
+            "CCITT: ${input.size} bytes hold fewer than $rows rows of $bytesPerRow bytes"
+        }
+        return encodeCcittRows(
+            input, cols, rows, k, options.blackIs1, options.encodedByteAlign, options.endOfLine, options.endOfBlock,
+        )
     }
 }
 
@@ -183,7 +222,7 @@ internal object CcittFaxTables {
      * Modified Huffman White-run terminators (run lengths 0..63).
      * Entries: code, length, runLength.
      */
-    private val WHITE_TERMINATORS = intArrayOf(
+    val WHITE_TERMINATORS = intArrayOf(
         0b00110101, 8, 0,
         0b000111, 6, 1,
         0b0111, 4, 2,
@@ -251,7 +290,7 @@ internal object CcittFaxTables {
     )
 
     /** Modified Huffman White-run makeups (64, 128, 192, ...). */
-    private val WHITE_MAKEUPS = intArrayOf(
+    val WHITE_MAKEUPS = intArrayOf(
         0b11011, 5, 64,
         0b10010, 5, 128,
         0b010111, 6, 192,
@@ -298,7 +337,7 @@ internal object CcittFaxTables {
     )
 
     /** Modified Huffman Black-run terminators (run lengths 0..63). */
-    private val BLACK_TERMINATORS = intArrayOf(
+    val BLACK_TERMINATORS = intArrayOf(
         0b0000110111, 10, 0,
         0b010, 3, 1,
         0b11, 2, 2,
@@ -366,7 +405,7 @@ internal object CcittFaxTables {
     )
 
     /** Modified Huffman Black-run makeups (64, 128, 192, ...). */
-    private val BLACK_MAKEUPS = intArrayOf(
+    val BLACK_MAKEUPS = intArrayOf(
         0b0000001111, 10, 64,
         0b000011001000, 12, 128,
         0b000011001001, 12, 192,
@@ -433,20 +472,21 @@ internal object CcittFaxTables {
     const val MODE_VR3 = 8
     const val MODE_EXTENSION = 9
 
-    val twoDimensional: HuffmanTable = HuffmanTable.build(
-        intArrayOf(
-            0b1, 1, MODE_V0,
-            0b011, 3, MODE_VR1,
-            0b010, 3, MODE_VL1,
-            0b001, 3, MODE_HORIZONTAL,
-            0b0001, 4, MODE_PASS,
-            0b000011, 6, MODE_VR2,
-            0b000010, 6, MODE_VL2,
-            0b0000011, 7, MODE_VR3,
-            0b0000010, 7, MODE_VL3,
-            0b0000001, 7, MODE_EXTENSION,
-        ),
+    /** The mode codes of T.4 Table 4 and T.6 Table 1, as `code, length, mode` triples. */
+    val TWO_DIMENSIONAL_CODES = intArrayOf(
+        0b1, 1, MODE_V0,
+        0b011, 3, MODE_VR1,
+        0b010, 3, MODE_VL1,
+        0b001, 3, MODE_HORIZONTAL,
+        0b0001, 4, MODE_PASS,
+        0b000011, 6, MODE_VR2,
+        0b000010, 6, MODE_VL2,
+        0b0000011, 7, MODE_VR3,
+        0b0000010, 7, MODE_VL3,
+        0b0000001, 7, MODE_EXTENSION,
     )
+
+    val twoDimensional: HuffmanTable = HuffmanTable.build(TWO_DIMENSIONAL_CODES)
 }
 
 /* ─── 1D run decoder ──────────────────────────────────────────────────────── */

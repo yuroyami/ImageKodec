@@ -4,6 +4,12 @@ import io.github.yuroyami.imagekodec.internal.cancellable
 import io.github.yuroyami.imagekodec.internal.Tiles
 import io.github.yuroyami.imagekodec.codec.BmpDecoder
 import io.github.yuroyami.imagekodec.codec.BmpEncoder
+import io.github.yuroyami.imagekodec.codec.CCITT_MAX_ENCODE_COLUMNS
+import io.github.yuroyami.imagekodec.codec.CcittFax
+import io.github.yuroyami.imagekodec.codec.Jbig2Decoder
+import io.github.yuroyami.imagekodec.codec.Jbig2Encoder
+import io.github.yuroyami.imagekodec.codec.bilevelRows
+import io.github.yuroyami.imagekodec.codec.encodeCcittRows
 import io.github.yuroyami.imagekodec.codec.GifDecoder
 import io.github.yuroyami.imagekodec.codec.GifEncoder
 import io.github.yuroyami.imagekodec.codec.ImageProbe
@@ -1455,6 +1461,78 @@ public object ImageKodec {
         metadata: ImageMetadata = ImageMetadata(),
         cancellationCheck: (() -> Unit)? = null,
     ): ByteArray = JxlEncoder.encode(animation, options, metadata, cancellationCheck)
+
+    /**
+     * Encode [bitmap] as CCITT Group 4 fax data (ITU-T T.6), ended with EOFB, as [CcittEncodeOptions]
+     * gives by default. See the overload with options.
+     *
+     * @throws IllegalArgumentException as the overload with options does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeCcitt(bitmap: KiteBitmap): ByteArray = encodeCcitt(bitmap, CcittEncodeOptions())
+
+    /**
+     * Encode [bitmap] as CCITT fax data (#185): Group 4, or Group 3 one- or two-dimensional, framed as
+     * [options] says. A pixel is black when its luma (BT.601 weights), laid over white by its alpha,
+     * is below half, so a transparent pixel is white; the coding of that bilevel page is lossless.
+     *
+     * Fax data carries no size or parameters of its own. A PDF image needs `/CCITTFaxDecode` with
+     * `/K`, `/Columns` (the width), `/Rows` (the height) and the flags of [options] that differ from
+     * PDF's defaults; a TIFF needs compression 4, or 3 with `T4Options`, or 2. [CcittFax.decode]
+     * reads the data back given the same values, and [CcittFax.encode] takes a packed page.
+     *
+     * [cancellationCheck], when given, runs every 64 rows and may throw to stop the encode; what it
+     * throws comes out of this call as it is.
+     *
+     * @throws IllegalArgumentException if [bitmap] is wider than 65536 pixels
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeCcitt(
+        bitmap: KiteBitmap,
+        options: CcittEncodeOptions,
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray {
+        require(bitmap.width <= CCITT_MAX_ENCODE_COLUMNS) { "CCITT: ${bitmap.width} columns is more than $CCITT_MAX_ENCODE_COLUMNS" }
+        val rows = bilevelRows(bitmap, options.blackIs1, cancellationCheck)
+        return encodeCcittRows(
+            rows, bitmap.width, bitmap.height, options.k, options.blackIs1, options.encodedByteAlign,
+            options.endOfLine, options.endOfBlock, cancellationCheck,
+        )
+    }
+
+    /**
+     * Encode [bitmap] as a JBIG2 generic region with template 0 and typical prediction, in the
+     * embedded form a PDF takes, as [Jbig2EncodeOptions] gives by default. See the overload with
+     * options.
+     */
+    public fun encodeJbig2(bitmap: KiteBitmap): ByteArray = encodeJbig2(bitmap, Jbig2EncodeOptions())
+
+    /**
+     * Encode [bitmap] as JBIG2 (ITU-T T.88, #185): one page holding one generic region, coded with the
+     * MQ arithmetic coder or, with [Jbig2EncodeOptions.mmr], with T.6. A pixel is black when its luma
+     * (BT.601 weights), laid over white by its alpha, is below half, so a transparent pixel is white;
+     * the coding of that bilevel page is lossless.
+     *
+     * By default the result is the embedded stream of PDF's `/JBIG2Decode`: a page information
+     * segment and an immediate generic region segment, with no global stream. With
+     * [Jbig2EncodeOptions.standalone] it is a `.jb2` file. [Jbig2Decoder.decode] reads the
+     * embedded form back. Symbol dictionaries and text regions, which pay only for text and which
+     * other encoders make lossy, are not written.
+     *
+     * [cancellationCheck], when given, runs every 64 rows and may throw to stop the encode; what it
+     * throws comes out of this call as it is.
+     */
+    public fun encodeJbig2(
+        bitmap: KiteBitmap,
+        options: Jbig2EncodeOptions,
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray {
+        val rows = bilevelRows(bitmap, blackIs1 = true, cancel = cancellationCheck)
+        return Jbig2Encoder.encode(
+            rows, bitmap.width, bitmap.height, options.template, options.typicalPrediction, options.mmr,
+            options.standalone, cancellationCheck,
+        )
+    }
 
     /** JPEG 2000 → ARGB via the JPX codec (gray replicated, cdef alpha honored), each side divided by [reduction]. */
     private fun jp2ToBitmap(data: ByteArray, reduction: Int = 1, cancel: (() -> Unit)? = null): KiteBitmap {

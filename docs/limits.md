@@ -23,6 +23,9 @@ ImageKodec does not do, and the bounds it puts on hostile input.
 - The AVIF encoder writes still intra pictures only (see [AVIF](#avif)), and the JPEG XL
   encoder writes a part of the format. See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
+- `encodeCcitt` and `CcittFax.encode` write rows of up to 65536 pixels and refuse a wider page
+  with `IllegalArgumentException`; T.4 pages are 1728 to 4864 wide. `encodeJbig2` writes one generic
+  region a page, with no symbol coding.
 
 ## Size ceilings
 

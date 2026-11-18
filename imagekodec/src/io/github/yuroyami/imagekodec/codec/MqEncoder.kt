@@ -1,8 +1,9 @@
 package io.github.yuroyami.imagekodec.codec
 
 /**
- * The MQ arithmetic encoder of T.800 Annex C (C.2), the counterpart of [MqDecoder], whose state
- * table it shares. Contexts are the same packed `(stateIndex shl 1) or MPS` slots the decoder uses.
+ * The MQ arithmetic encoder of T.800 Annex C (C.2), the same coder as T.88 Annex E.2, the
+ * counterpart of [MqDecoder], whose state table it shares. Contexts are the same packed
+ * `(stateIndex shl 1) or MPS` slots the decoder uses.
  *
  * The register C holds 28 bits as C.2 lays it out: 8 output bits above a spacer bit and 3 more,
  * then the 16 bits that line up with the interval A. [ct] counts the shifts left before the next
@@ -104,6 +105,18 @@ internal class MqEncoder(capacity: Int = 256) {
         var n = bp
         while (n > 0 && buf[n].toInt() and 0xFF == 0xFF) n--
         return buf.copyOfRange(1, n + 1)
+    }
+
+    /**
+     * The JBIG2 end of [flush]: the bytes, then the marker 0xFF 0xAC that ends the data, as T.88 E.2.9
+     * notes. A last 0xFF has already been dropped by [flush]; the marker supplies it.
+     */
+    fun finish(): ByteArray {
+        val data = flush()
+        val out = data.copyOf(data.size + 2)
+        out[data.size] = 0xFF.toByte()
+        out[data.size + 1] = 0xAC.toByte()
+        return out
     }
 
     companion object {
