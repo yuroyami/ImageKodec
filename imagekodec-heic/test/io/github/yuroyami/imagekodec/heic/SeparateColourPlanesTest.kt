@@ -41,11 +41,12 @@ class SeparateColourPlanesTest {
     private fun md5(p: DecodedPicture, c: Int): ByteArray =
         PictureHash.md5(PictureHash.pictureData(p.planes[c], 0, p.strides[c], p.sps.width, p.sps.height, p.sps.planeBitDepth(c)))
 
+    /** The three monochrome pictures, decoded, and the stream that joins them. */
+    private val mono = (0..2).map { decode(encode(it)) }
+    internal val joined = SeparateColourPlanes.join((0..2).map { encode(it) }, mono.map { list -> list.map { it.hash!!.values[0] } })
+
     @Test
     fun threePlanesDecodeAsTheirMonochromePictures() {
-        val sources = (0..2).map { encode(it) }
-        val mono = sources.map { decode(it) }
-        val joined = SeparateColourPlanes.join(sources, mono.map { list -> list.map { it.hash!!.values[0] } })
         val pictures = decode(joined)
         assertEquals(1, pictures.size)
         val p = pictures[0]
@@ -71,9 +72,6 @@ class SeparateColourPlanesTest {
 
     @Test
     fun aColourPlaneThatIsMissingIsADecodeError() {
-        val sources = (0..2).map { encode(it) }
-        val mono = sources.map { decode(it) }
-        val joined = SeparateColourPlanes.join(sources, mono.map { list -> list.map { it.hash!!.values[0] } })
         // Without the slices of the third plane, the picture holds no CTB of it.
         val third = joined.indexOfLast { NalType.isSlice((it[0].toInt() shr 1) and 0x3F) }
         val e = kotlin.runCatching { decode(joined.filterIndexed { i, _ -> i != third }) }.exceptionOrNull()

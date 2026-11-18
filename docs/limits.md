@@ -129,9 +129,11 @@ as long as speed 6; effort 1 takes 6 times as long, effort 3 79 times, for files
   decode error, except for the RASL pictures of a CRA picture that starts the stream, which are
   skipped as H.265 allows. All the pictures the decoded picture buffer holds count together
   against the pixel ceiling.
-- The tools of the screen content extensions (palette mode, current picture referencing, the
-  adaptive colour transform and disabled intra boundary filtering), separate colour planes and CTBs
-  of 8 samples are refused, and `unsupportedReason` names the field that asks for them.
+- CTBs of 8 samples, which no profile of H.265 allows, are refused, and `unsupportedReason` names
+  the field that asks for them. So is a parameter set whose screen content coding extension follows a
+  multilayer or 3D extension, which only a decoder of those layers reads.
+- Three separate colour planes are each decoded as luma, as H.265 does, so all three take the luma
+  bit depth, and `bit_depth_chroma_minus8` is not used.
 - Chroma is upsampled bilinearly, as for AVIF. libheif's `heif-convert` takes the nearest sample,
   so the two differ at sharp colour edges of a subsampled image.
 

@@ -204,3 +204,10 @@ being true.
   only the grid item carries reads up to 54 levels away; the synthetic tiles carry the grid's nclx too (#145).
 - `cwebp -q` does not order SSIMULACRA 2 scores: on the city scene of `PhotoScenes`, quality 75 scores 53 and quality 50
   scores 68. `WebpLossyEncodeOracleTest` reads cwebp's size at a score off the front of files no smaller file beats (#178).
+- H.265's 8-86 and 8-87 size the 8x8 bi-prediction restriction of current picture referencing by the coding unit, which
+  also takes in the blocks of a 16x16 AMP unit; the SCC conformance streams want the prediction block's own size (#188).
+- 8-13 with 8-69 and 8-70 as printed transpose a palette unit twice, which is no transposition; the SCC conformance
+  streams want the index map transposed once, as the 4:2:2 escape rule of 7.3.8.13 implies (#188).
+- `PictureDecoder.flags` is a `ByteArray` in which `FLAG_CODED` makes a unit's `Byte` negative, so test a bit above 7 only
+  after `and 0xFF`: sign extension once kept every coded unit from the deblocking filter as if it were a palette unit (#188).
+- x265 3.5 aborts with heap corruption on a 48x32 `gray10le` sequence with B pictures; 64x48 works (#188).

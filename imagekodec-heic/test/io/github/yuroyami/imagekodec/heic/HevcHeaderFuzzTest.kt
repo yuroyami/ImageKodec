@@ -28,7 +28,7 @@ class HevcHeaderFuzzTest {
             "range extension" to it.rangeExtensionReconstruction, "range extension parsing" to it.rangeExtensionParsing,
             "P and B" to it.interPictures,
         )
-    }
+    } + listOf("screen content" to SccStream.units(), "separate colour planes" to SeparateColourPlanesTest().joined)
 
     private val shard = FuzzShard.fromEnvironment()
 

@@ -38,8 +38,8 @@ finds the video of a Motion Photo, with or without the module.
 
 ## What decodes
 
-- The HEVC pictures of the Main, Main 10, Main Still Picture and format range extensions profiles,
-  in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 16 bits.
+- The HEVC pictures of the Main, Main 10, Main Still Picture, format range extensions and screen
+  content coding extensions profiles, in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 16 bits.
 - Scaling lists, transform skip, lossless coding, PCM, wavefront rows, tiles, several slices,
   dependent slice segments, deblocking and sample adaptive offset.
 - The coding tools of the range extensions: residual DPCM, cross-component prediction, extended
@@ -52,6 +52,15 @@ finds the video of a Motion Photo, with or without the module.
   interpolation and default and explicit weighted prediction. Every picture of the HEVC_v1 and RExt
   conformance streams of H.265.1 matches its hash SEI where it has one, and the output of each
   stream matches the MD5 its package gives.
+- The coding tools of the screen content coding extensions (#188): palette mode with its predictor
+  palette, the predictor initializers of the SPS and the PPS, escape samples and transposed index
+  maps; current picture referencing (intra block copy), whose vectors are in whole samples, with
+  `use_integer_mv_flag` of motion vector resolution control; the adaptive colour transform with its
+  QP offsets; and disabled intra boundary filtering. Every picture of the 15 SCC conformance streams
+  matches its hash SEI where it has one, and each stream the MD5 of its package, so all 211 streams
+  of the HEVC_v1, RExt and SCC packages match.
+- Three separate colour planes (`separate_colour_plane_flag`), each decoded as a monochrome picture
+  of its own with motion of its own, which together give a 4:4:4 picture (#188).
 - HEVC image sequences (brands `msf1`, `hevc`, `hevx`): `decodeAnimation` returns every frame of a
   track whose sample entry is `hvc1` or `hev1` and whose handler is `pict` or `vide`, as ffmpeg writes
   an MP4. The frames come in presentation order, the order of the composition times of `ctts`, which

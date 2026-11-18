@@ -49,20 +49,17 @@ internal object HevcSupport {
      * Why the picture of [h] cannot be decoded, or null when it can. Without a slice header the
      * parameter sets decide. Each issue that adds a tool removes its line here.
      */
-    fun reason(h: HevcHeaders): String? {
-        h.slice?.let { return sliceReason(it) }
-        return firstUnsupportedField(h.sps, h.pps, null)?.let { "HEVC: $it is not supported yet" }
-    }
+    fun reason(h: HevcHeaders): String? = spsReason(h.slice?.sps ?: h.sps)
 
     /** Why the slice segment [h] cannot be decoded, or null. */
-    fun sliceReason(h: SliceHeader): String? = firstUnsupportedField(h.sps, h.pps, h)?.let { "HEVC: $it is not supported yet" }
+    fun sliceReason(h: SliceHeader): String? = spsReason(h.sps)
 
-    @Suppress("UNUSED_PARAMETER")
-    private fun firstUnsupportedField(s: Sps, p: Pps?, slice: SliceHeader?): String? = when {
-        // A CTB of 8 samples, which no profile of Annex A allows (CtbLog2SizeY of 4 to 6).
-        s.ctbLog2 < 4 -> "a CTB of ${s.ctbSize} samples (log2_diff_max_min_luma_coding_block_size)"
-        else -> null
-    }
+    /**
+     * Every tool of the parameter sets decodes since the screen content coding tools and separate colour planes
+     * (#188), but for a CTB of 8 samples, which every profile of Annex A rules out (CtbLog2SizeY of 4 to 6).
+     */
+    private fun spsReason(s: Sps): String? =
+        if (s.ctbLog2 < 4) "HEVC: a CTB of ${s.ctbSize} samples (log2_diff_max_min_luma_coding_block_size) is not supported yet" else null
 }
 
 /** The HEVC codec of `hvc1` items and of `hvc1` and `hev1` tracks, for the core's HEIF reader. */

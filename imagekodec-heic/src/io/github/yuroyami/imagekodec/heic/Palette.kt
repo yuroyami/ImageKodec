@@ -38,7 +38,8 @@ internal class PaletteDecoder(private val d: PictureDecoder, private val cabac: 
         val size = init?.get(0)?.size ?: 0
         // Pps.checkAgainst bounds a PPS's count by PaletteMaxPredictorSize and readSpsScc the SPS's.
         predictorSize[CURRENT] = size
-        if (init != null) for (c in 0 until comps) init[minOf(c, init.size - 1)].copyInto(predictor[CURRENT][c], 0, 0, size)
+        // An empty list of the PPS holds one component only.
+        if (init != null && size > 0) for (c in 0 until comps) init[c].copyInto(predictor[CURRENT][c], 0, 0, size)
     }
 
     /** 9.3.2.4: keeps the predictor palette in copy [slot], [WPP] or [DEPENDENT]. */

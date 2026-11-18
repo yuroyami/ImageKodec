@@ -14,6 +14,12 @@ reviewable in the diff.
 
 ### Added
 
+- `imagekodec-heic` decodes the tools of the HEVC screen content coding extensions: palette mode
+  with its predictor palette and initializers, escape samples and transposition, current picture
+  referencing (intra block copy) with `use_integer_mv_flag`, the adaptive colour transform with its
+  QP offsets, and disabled intra boundary filtering. It also decodes three separate colour planes
+  (`separate_colour_plane_flag`). Every picture of the 15 SCC conformance streams of H.265.1 matches
+  its hash SEI and its package MD5, so all 211 conformance streams match (#188).
 - `encodeTiff(bitmap, TiffEncodeOptions, metadata, cancellationCheck)`, the same for pages, and
   `encodeTiff16` with options write the layouts the TIFF decoder reads: no compression, PackBits,
   LZW and Deflate with or without the predictor, CCITT Group 4 and Group 3 for a bi-level page

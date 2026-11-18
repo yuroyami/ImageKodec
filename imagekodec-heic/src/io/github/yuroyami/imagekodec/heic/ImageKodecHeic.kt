@@ -13,9 +13,10 @@ import io.github.yuroyami.imagekodec.ImageKodec
  * ```
  *
  * The module decodes intra, P and B pictures of HEVC in 4:0:0, 4:2:0, 4:2:2 and 4:4:4 at 8 to 16 bits,
- * with both loop filters, tiles, wavefront rows and dependent slice segments, and HEVC image sequences
- * through `ImageKodec.decodeAnimation`, in presentation order. A picture that needs a tool it lacks,
- * such as palette mode, reports why in `ImageInfo.unsupportedReason`, and `decode` throws
+ * with the tools of the range and screen content coding extensions, separate colour planes, both loop
+ * filters, tiles, wavefront rows and dependent slice segments, and HEVC image sequences through
+ * `ImageKodec.decodeAnimation`, in presentation order. A picture that needs a tool it lacks, such as a
+ * CTB of 8 samples, reports why in `ImageInfo.unsupportedReason`, and `decode` throws
  * `UnsupportedImageException`.
  */
 public object ImageKodecHeic {

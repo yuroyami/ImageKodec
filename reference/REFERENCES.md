@@ -9,7 +9,11 @@ The sources of dav1d, libheif and libde265 are not fetched. The AV1 and AVIF dec
 were written from their specifications (see below). The HEVC decoder of HEIC, in the separate
 module `imagekodec-heic`, was written from ITU-T H.265 (07/2024). libde265, ffmpeg, x265 and
 libheif are run as external test tools and never ported. HEVC is under patent licence, so the
-module is kept out of the core and is not published until the owner decides (#136).
+module is kept out of the core and is not published until the owner decides (#136). Its screen
+content coding tools and separate colour planes came from the same text (#188): HM and its SCM, the
+reference software that wrote the SCC conformance streams, were neither fetched nor read, and no
+decoder at hand reads those streams (ffmpeg 6.1 does not implement the tools and libde265 cannot
+parse them), so their hash SEIs and package MD5s are the only oracle.
 
 The HEVC test data is fetched, never committed: `tools/heic_data.py` downloads the JCT-VC
 conformance packages of ITU-T H.265.1 from the ITU's site and a few HEIC test images of
