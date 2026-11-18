@@ -8,6 +8,7 @@
  *   ./icc_lcms make-rgb RX RY GX GY BX BY WX WY GAMMA > profile.icc
  *   ./icc_lcms convert-rgb RX RY GX GY BX BY WX WY GAMMA INTENT BYTES < samples > rgb
  *   ./icc_lcms convert profile.icc INTENT CHANNELS [BYTES] < samples > rgb
+ *   ./icc_lcms convert-lab < lab > rgb
  *
  * make writes a profile of KIND:
  *
@@ -34,6 +35,9 @@
  * of BYTES bytes, 1 (the default) or 2 in the machine's byte order, and writes three
  * float32 sRGB values a pixel, 0 to 1, in the machine's byte order. INTENT is
  * 0 perceptual, 1 relative colorimetric, 2 saturation, 3 absolute colorimetric.
+ *
+ * convert-lab reads L*, a* and b* as three float64 values a pixel and converts them through a
+ * D50 Lab profile (cmsCreateLab4Profile), relative colorimetric, to float32 sRGB as convert does.
  */
 #include <lcms2.h>
 #include <math.h>
@@ -293,7 +297,25 @@ static cmsHPROFILE rgbOf(char **v) {
     return rgb(atof(v[6]), atof(v[7]), p, curve, 4.3);
 }
 
+static int convertLab(void) {
+    cmsHPROFILE in = cmsCreateLab4Profile(NULL);
+    cmsHPROFILE out = cmsCreate_sRGBProfile();
+    cmsHTRANSFORM x = cmsCreateTransform(in, TYPE_Lab_DBL, out, TYPE_RGB_FLT, INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE);
+    if (x == NULL) return 4;
+    double lab[3];
+    float rgb[3];
+    while (fread(lab, sizeof(double), 3, stdin) == 3) {
+        cmsDoTransform(x, lab, rgb, 1);
+        fwrite(rgb, sizeof(float), 3, stdout);
+    }
+    cmsDeleteTransform(x);
+    cmsCloseProfile(in);
+    cmsCloseProfile(out);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "convert-lab")) return convertLab();
     if (argc == 3 && !strcmp(argv[1], "make")) return make(argv[2]);
     if (argc == 11 && !strcmp(argv[1], "make-rgb")) return emit(rgbOf(argv + 2));
     // Saving a profile rounds its colorants to s15Fixed16, so this converts through it unsaved.

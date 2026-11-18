@@ -1827,6 +1827,7 @@ public object JpxDecoder {
         val out16 = if (wide) ShortArray(imgW * imgH * n) else null
         val samples = IntArray(colors.size)
         val rgb = IntArray(3)
+        val lab = if (plan.space == Jp2Color.Space.LAB) Jp2Lab(boxes.colors.first { it.enumerated == 14 }.lab, precs) else null
         for (y in 0 until imgH) for (x in 0 until imgW) {
             for (k in colors.indices) samples[k] = value(colors[k], x, y)
             val o = (y * imgW + x) * n
@@ -1863,6 +1864,15 @@ public object JpxDecoder {
                     val v = ((1 shl precs[k]) - 1) - samples[k]
                     out[o + k] = to8(v, precs[k]).toByte()
                     out16?.set(o + k, to16(v, precs[k]).toShort())
+                }
+                Jp2Color.Space.LAB -> {
+                    val linear = lab!!.linearSrgb(samples)
+                    for (k in 0 until 3) {
+                        val e = Jp2Lab.encode(linear[k])
+                        val v8 = (e * 255.0 + 0.5).toInt()
+                        out[o + k] = v8.toByte()
+                        out16?.set(o + k, within((e * 65535.0 + 0.5).toLong(), v8))
+                    }
                 }
             }
         }

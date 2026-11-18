@@ -72,7 +72,7 @@ class Jp2HeaderProbeTest {
     @Test
     fun tileCodingParametersAndFeatureSegmentsAgree() {
         for ((offset, value, field) in listOf(Triple(1, 5, "progression"),
-            Triple(5, 33, "decomposition"), Triple(8, 0x40, "high-throughput"))) {
+            Triple(5, 33, "decomposition"), Triple(8, 0xC0, "MIXED"))) {
             refused(withHeader(0xff52, payload(0xff52).also { it[offset] = value.toByte() }, true), field)
         }
         // RGN, POC, PPM and PPT decode (#5), so only damaged ones are refused, the same way in both header scopes.
@@ -93,7 +93,7 @@ class Jp2HeaderProbeTest {
         val coc = byteArrayOf(0, (cod[0].toInt() and 1).toByte()) + cod.copyOfRange(5, cod.size)
         for (tile in listOf(false, true)) {
             for ((offset, value, field) in listOf(Triple(1, 2, "Scoc"), Triple(2, 33, "decomposition"),
-                Triple(3, 0x14, "code-block"), Triple(5, 0x80, "high-throughput"), Triple(6, 2, "wavelet transform"))) {
+                Triple(3, 0x14, "code-block"), Triple(5, 0x80, "MIXED"), Triple(6, 2, "wavelet transform"))) {
                 refused(withHeader(0xff53, coc.copyOf().also { it[offset] = value.toByte() }, tile), field)
             }
         }
@@ -134,11 +134,11 @@ class Jp2HeaderProbeTest {
     fun laterTilePartHeadersAreInspected() {
         val cs = stream(); val eoc = marker(cs, 0xffd9); val sot = marker(cs, 0xff90)
         cs[sot + 11] = 2
-        val cod = segment(0xff52, payload(0xff52).also { it[8] = 0x40 })
+        val cod = segment(0xff52, payload(0xff52).also { it[8] = 0xC0.toByte() })
         val part = byteArrayOf(0xff.toByte(), 0x90.toByte(), 0, 10, 0, 0, 0, 0, 0, 0, 1, 2) + cod +
             byteArrayOf(0xff.toByte(), 0x93.toByte())
         put32(part, 6, part.size)
-        refused(cs.copyOfRange(0, eoc) + part + cs.copyOfRange(eoc, cs.size), "high-throughput")
+        refused(cs.copyOfRange(0, eoc) + part + cs.copyOfRange(eoc, cs.size), "MIXED")
     }
 
     @Test

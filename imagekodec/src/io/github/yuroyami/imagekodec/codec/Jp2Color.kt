@@ -10,8 +10,12 @@ import io.github.yuroyami.imagekodec.UnsupportedImageException
  */
 internal object Jp2Color {
 
-    /** A colour specification box (I.5.3.3): [enumerated] for method 1, else the ICC profile's data colour space. */
-    class ColorSpec(val method: Int, val enumerated: Int, val iccSpace: String?, val icc: ByteArray? = null)
+    /**
+     * A colour specification box (I.5.3.3): [enumerated] for method 1, else the ICC profile's data colour space.
+     * [lab] holds the parameters of a CIELab space (T.801 M.11.7.4) when the box gives them: the
+     * range and offset of L*, a* and b*, then the illuminant.
+     */
+    class ColorSpec(val method: Int, val enumerated: Int, val iccSpace: String?, val icc: ByteArray? = null, val lab: LongArray? = null)
 
     /**
      * A palette box (I.5.3.4): [values] holds each column's entries, already shifted to the unsigned range,
@@ -36,7 +40,7 @@ internal object Jp2Color {
     )
 
     /** How [JpxDecoder] turns decoded samples into the colours of the result. */
-    enum class Space(val channels: Int) { GRAY(1), RGB(3), SYCC(3), ESYCC(3), CMYK(4), CMY(3) }
+    enum class Space(val channels: Int) { GRAY(1), RGB(3), SYCC(3), ESYCC(3), CMYK(4), CMY(3), LAB(3) }
 
     /** A channel: a component used directly ([column] -1) or through a palette column. */
     class Channel(val component: Int, val column: Int)
@@ -104,7 +108,13 @@ internal object Jp2Color {
         if (to - from < 3) return null
         val method = d[from].toInt() and 0xFF
         return when (method) {
-            1 -> if (to - from >= 7) ColorSpec(1, u32(d, from + 3).toInt(), null) else null
+            1 -> when {
+                to - from < 7 -> null
+                // CIELab's seven parameters follow its code when the box gives them; otherwise the defaults hold.
+                u32(d, from + 3) == ENUM_CIELAB && to - from >= 7 + 28 ->
+                    ColorSpec(1, ENUM_CIELAB.toInt(), null, lab = LongArray(7) { u32(d, from + 7 + 4 * it) })
+                else -> ColorSpec(1, u32(d, from + 3).toInt(), null)
+            }
             // ICC: a profile's header holds its data colour space at offset 16.
             2, 3 -> ColorSpec(
                 method, -1,
@@ -171,6 +181,7 @@ internal object Jp2Color {
             17, 0, 15 -> Space.GRAY      // greyscale, and bi-level, whose samples are already 0 or 1
             18 -> Space.SYCC
             24 -> Space.ESYCC
+            14 -> Space.LAB
             12 -> Space.CMYK
             11 -> Space.CMY
             else -> null
@@ -184,6 +195,8 @@ internal object Jp2Color {
         }
         else -> null
     }
+
+    private const val ENUM_CIELAB = 14L
 
     private val ENUMERATED_NAMES = mapOf(
         1 to "YCbCr(1)", 3 to "YCbCr(2)", 4 to "YCbCr(3)", 9 to "PhotoYCC", 13 to "YCCK", 14 to "CIELab",
