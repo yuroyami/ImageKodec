@@ -280,6 +280,12 @@ public final class io/github/yuroyami/imagekodec/ImageKodec {
 	public final fun decodeThumbnail ([BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public static synthetic fun decodeThumbnail$default (Lio/github/yuroyami/imagekodec/ImageKodec;[BIIZLio/github/yuroyami/imagekodec/ColorTarget;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)Lio/github/yuroyami/imagekodec/KiteBitmap;
 	public final fun detect ([B)Lio/github/yuroyami/imagekodec/ImageFormat;
+	public final fun encodeAvif (Lio/github/yuroyami/imagekodec/KiteBitmap;I)[B
+	public final fun encodeAvif (Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeAvif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;IILjava/lang/Object;)[B
+	public static synthetic fun encodeAvif$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
+	public final fun encodeAvif16 (Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;)[B
+	public static synthetic fun encodeAvif16$default (Lio/github/yuroyami/imagekodec/ImageKodec;Lio/github/yuroyami/imagekodec/KiteBitmap16;Lio/github/yuroyami/imagekodec/HeifEncodeOptions;Lio/github/yuroyami/imagekodec/ImageMetadata;Lkotlin/jvm/functions/Function0;ILjava/lang/Object;)[B
 	public final fun encodeBmp (Lio/github/yuroyami/imagekodec/KiteBitmap;)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteAnimation;Z)[B
 	public final fun encodeGif (Lio/github/yuroyami/imagekodec/KiteBitmap;Z)[B

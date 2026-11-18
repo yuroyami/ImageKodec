@@ -1,7 +1,7 @@
 # Writing images
 
-ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, lossless WebP and, with the `imagekodec-heic`
-module, HEIC. Every encoder takes a
+ImageKodec writes PNG and APNG, JPEG, GIF, BMP, TIFF, lossless WebP, AVIF and, with the
+`imagekodec-heic` module, HEIC. Every encoder takes a
 `KiteBitmap` (or a `KiteAnimation`, a list of pages or a `KiteBitmap16` where the format allows
 it) and returns the file as a `ByteArray`.
 
@@ -17,6 +17,7 @@ ImageKodec.encodeTiff(bitmap)                   // gray or RGB, alpha when prese
 ImageKodec.encodeTiff(pages)                    // one page a bitmap, read back with decodePage
 ImageKodec.encodeTiff16(bitmap16)               // the same at 16 bits, read back with decode16
 ImageKodec.encodeWebp(bitmap)                   // lossless VP8L, smaller than the PNG
+ImageKodec.encodeAvif(bitmap, quality = 50)     // AV1 in HEIF, built in
 ImageKodec.encodeHeic(bitmap, quality = 50)     // HEVC in HEIF, needs ImageKodecHeic.install()
 ```
 
@@ -112,9 +113,58 @@ val kept = ImageKodec.encodeHeic(upright, HeifEncodeOptions(thumbnailSize = 320)
 
 [Writing HEIC](heic.md#writing-heic) describes the file, the options and what is not written.
 
+## AVIF
+
+`encodeAvif` writes an AVIF file: HEIF with AV1 pictures, coded by the core's own intra AV1 encoder
+(#176). AV1 is royalty-free, so the encoder needs no module. It takes the same `HeifEncodeOptions` as
+`encodeHeic`, and the file has the same structure: colour in BT.601's matrix in full range signalled as
+sRGB, alpha as an auxiliary image (`auxC` `urn:mpeg:mpegB:cicp:systems:auxiliary:alpha`), a `grid` of
+items for a picture larger than `tileSize`, a thumbnail, `irot` and `imir`, and the ICC profile, EXIF and
+XMP of an `ImageMetadata`.
+
+```kotlin
+val avif = ImageKodec.encodeAvif(bitmap, quality = 60)
+val exact = ImageKodec.encodeAvif(bitmap, HeifEncodeOptions(lossless = true))
+val deep = ImageKodec.encodeAvif16(bitmap16, HeifEncodeOptions(quality = 70, bitDepth = 12, chroma = HeifChroma.Yuv444))
+val fast = ImageKodec.encodeAvif(bitmap, HeifEncodeOptions(quality = 50, effort = 1))
+```
+
+What the encoder writes:
+
+- Each item is the sequence header and one frame OBU: a key frame under a reduced still picture
+  header, as libavif writes a still image, with `av1C` holding the sequence header. The profile follows
+  the picture: 0 for 4:2:0 and gray up to 10 bits, 1 for 4:4:4 up to 10 bits, 2 for 12 bits and 4:2:2.
+- `quality` sets base_q_idx: 240 at 0, 117 at 50, 43 at 80 and 1 from 97 on, straight
+  between, so that 50 and 80 score about what libavif's `avifenc -q 50` and `-q 80` score. `lossless` codes at base_q_idx 0, AV1's lossless mode, with
+  the identity matrix in 4:4:4 (or gray), so `decode` returns the bitmap exactly.
+- The encoder chooses, by rate and distortion: square and, at effort 3, horizontal and vertical
+  partitions of 64 by 64 superblocks; the intra mode of each block (DC, the directional modes with their
+  angle deltas, the three smooth modes, Paeth and filter intra; for chroma, chroma from luma with its
+  alphas); the transform size and type (DCT, ADST, identity and their combinations, as the set of the
+  size allows) and the levels, which a greedy search lowers where the rate saved pays for the error. A
+  picture that looks like screen content (few colours in sharp strokes) turns on the screen content
+  tools, and a block whose luma holds few values may code it as a palette.
+- After the blocks, the loop filter levels, the CDEF strengths of each 64 by 64 block, and, from effort
+  2, the self-guided restoration filter of each unit are chosen on the reconstruction.
+- `effort` 1 tries one luma and one chroma mode at their own transform size, square partitions down to
+  8 by 8, and the DCT or the mode's own transform type; 2 adds angle deltas, filter intra, one transform
+  split, more transform types, the level search and loop restoration; 3 adds 4 by 4 blocks,
+  rectangular partitions, two transform splits, every transform type and more filter strengths.
+- With `tileSize = null`, a picture wider than 4096 codes as one frame of uniform AV1 tiles, the fewest
+  the specification allows. Grid items, the default, are what both libavif and libheif read best, and
+  the tile runner encodes them in parallel.
+
+The encoder runs the core's own AV1 decoder in a coding mode: the decoder walks the syntax, predicts
+and reconstructs, and the encoder supplies each decision. So the encoder's reconstruction is what any
+decoder rebuilds: `Av1EncoderOracleTest` holds dav1d and ImageKodec's decoder to it, sample for sample.
+The output is the same on every platform; `AvifEncodeTest` keeps hashes of fixed inputs.
+
 ## What the encoders do not write
 
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR.
+- There is no encoder for lossy WebP, JPEG 2000, JPEG XL or JPEG XR.
+- The AV1 encoder writes still intra pictures only: no image sequence, no inter frames, no film
+  grain, no 128 by 128 superblocks, no intra block copy, no delta quantizer, no Wiener restoration
+  filter (the self-guided one only), no chroma palette, and no 4:1 or three-way partitions.
 - The HEIC encoder writes still images only, with no image sequence, depth map, gain map or
   premultiplied alpha. See [Writing HEIC](heic.md#writing-heic).
 - The PNG encoder writes 8-bit RGB or RGBA only, with no interlace, no palette and no 16-bit

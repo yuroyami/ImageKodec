@@ -14,6 +14,19 @@ reviewable in the diff.
 
 ### Added
 
+- `ImageKodec.encodeAvif(bitmap, quality)`, `encodeAvif(bitmap, options, metadata, cancellationCheck)` and
+  `encodeAvif16` write AVIF files with the core's own intra AV1 encoder, registered by default as the HEIF
+  encoder of `av01` items, through the HEIF writer of #174 and the same `HeifEncodeOptions` (#176). Each
+  picture is one key frame with a reduced still picture header: 8, 10 or 12 bits, 4:2:0, 4:2:2, 4:4:4 and
+  gray, alpha as an auxiliary image, lossless at base_q_idx 0 with the identity matrix in 4:4:4. The encoder
+  chooses partitions, intra modes (directional with angle deltas, smooth, Paeth, chroma from luma, filter
+  intra, and a luma palette for screen content), transform sizes and types and levels by rate and
+  distortion, and the loop filter levels, CDEF strengths and self-guided restoration units. It runs the
+  core's AV1 decoder in a coding mode, so its reconstruction is the decoder's; dav1d and ImageKodec decode
+  every stream of `Av1EncoderOracleTest` to it sample for sample, and libavif, libheif and exiftool read
+  the files in `AvifEncodeOracleTest`. A picture wider than 4096 with no tile size codes as AV1 tiles.
+  The AV1 decoder's inverse transform skips the rows that hold only zeros and CDEF works out its damping
+  once a block, which leaves its output unchanged.
 - `ImageKodec.encodeHeic(bitmap, quality)`, `encodeHeic(bitmap, options, metadata, cancellationCheck)` and
   `encodeHeic16` write HEIC files: a HEIF writer in the core (`ftyp`, `meta` with `hdlr`, `pitm`, `iloc`,
   `iinf`, `iref`, `iprp` and `idat`, then `mdat`) around the intra HEVC encoder of `imagekodec-heic`, which

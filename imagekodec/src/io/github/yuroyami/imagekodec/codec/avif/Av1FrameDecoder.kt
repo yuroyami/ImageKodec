@@ -235,10 +235,47 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     /** Quant[ ] of the transform block being read, laid out with Min( 32, w ) columns. */
     val quant = IntArray(1024)
 
-    private val transform = Av1Transform()
+    val transform = Av1Transform()
     private val paletteCache = IntArray(16)
     private val colorOrder = IntArray(8)
     private var colorContextHash = 0
+
+    // ---- coding instead of decoding (#176) ------------------------------------------------
+
+    /**
+     * Set when this frame decoder codes a frame instead of decoding one: every syntax element then comes from
+     * [enc] (the partition, the block's [choice], the levels, the CDEF and restoration parameters), goes to
+     * [Av1Coding.sink] with the contexts and CDFs decoding would use, and the same prediction and reconstruction
+     * as decoding run on it. So the encoder's reconstruction is the decoder's by construction.
+     */
+    var enc: Av1Coding? = null
+
+    /** The block being coded, when [enc] is set. */
+    lateinit var choice: Av1BlockChoice
+
+    /** `read_symbol`, or in coding the symbol [value] gives, written. */
+    private inline fun sym(a: IntArray, o: Int, n: Int, value: () -> Int): Int {
+        val e = enc ?: return sd.symbol(a, o, n)
+        val v = value()
+        e.sink.symbol(v, a, o, n)
+        return v
+    }
+
+    /** `read_literal`, or in coding the literal [value] gives, written. */
+    private inline fun lit(n: Int, value: () -> Int): Int {
+        val e = enc ?: return sd.literal(n)
+        val v = value()
+        e.sink.literal(v, n)
+        return v
+    }
+
+    /** `NS(n)`, or in coding the value [value] gives, written. */
+    private inline fun nsym(n: Int, value: () -> Int): Int {
+        val e = enc ?: return sd.ns(n)
+        val v = value()
+        e.sink.ns(v, n)
+        return v
+    }
 
     // ---- tiles -------------------------------------------------------------------------
 
@@ -247,6 +284,26 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     var cancel: (() -> Unit)? = null
 
     fun decodeTile(tileNum: Int, data: ByteArray, start: Int, size: Int) {
+        beginTile(tileNum)
+        sd = Av1SymbolDecoder(data, start, size, fh.disableCdfUpdate)
+        var r = miRowStart
+        while (r < miRowEnd) {
+            beginSuperblockRow()
+            var c = miColStart
+            while (c < miColEnd) {
+                superblock(r, c)
+                c += sbSize4
+            }
+            r += sbSize4
+        }
+        endTile(tileNum)
+    }
+
+    /**
+     * `init_symbol` and the start of `decode_tile` for tile [tileNum], without the symbol decoder: its bounds,
+     * its CDFs from the frame's, and the above contexts cleared. The encoder starts a tile here too (#176).
+     */
+    fun beginTile(tileNum: Int) {
         val tileRow = tileNum / fh.tileCols
         val tileCol = tileNum % fh.tileCols
         miRowStart = fh.miRowStarts[tileRow]
@@ -257,7 +314,6 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         // init_symbol( tileSize ): the tile's CDFs start from the frame's.
         cdf = frameCdfs.copy()
         cdf.resetIntraFrameYMode()
-        sd = Av1SymbolDecoder(data, start, size, fh.disableCdfUpdate)
         // decode_tile( )
         for (plane in 0 until 3) {
             aboveLevelContext[plane].fill(0)
@@ -269,27 +325,34 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             refSgrXqd[plane][pass] = Av1Tables.sgrprojXqdMid[pass]
             for (i in 0 until 3) refLrWiener[plane][pass][i] = Av1Tables.wienerTapsMid[i]
         }
-        val sbSize = if (sb128) Av1.BLOCK_128X128 else Av1.BLOCK_64X64
-        var r = miRowStart
-        while (r < miRowEnd) {
-            cancel?.invoke()
-            for (plane in 0 until 3) {
-                leftLevelContext[plane].fill(0)
-                leftDcContext[plane].fill(0)
-            }
-            leftSegPredContext.fill(0)
-            var c = miColStart
-            while (c < miColEnd) {
-                readDeltas = fh.deltaQPresent
-                clearCdef(r, c)
-                clearBlockDecodedFlags(r, c)
-                readLr(r, c, sbSize)
-                decodePartition(r, c, sbSize)
-                c += sbSize4
-            }
-            r += sbSize4
+    }
+
+    /** The start of a row of superblocks: the caller's cancellation check, and the left contexts cleared. */
+    fun beginSuperblockRow() {
+        cancel?.invoke()
+        for (plane in 0 until 3) {
+            leftLevelContext[plane].fill(0)
+            leftDcContext[plane].fill(0)
         }
-        // exit_symbol( ): keep this tile's CDFs when it is the one that updates the frame context.
+        leftSegPredContext.fill(0)
+    }
+
+    /** The superblock at ([r], [c]): its CDEF and decoded flags cleared, its loop restoration units, its partition tree. */
+    fun superblock(r: Int, c: Int) {
+        startSuperblock(r, c)
+        readLr(r, c, if (sb128) Av1.BLOCK_128X128 else Av1.BLOCK_64X64)
+        decodePartition(r, c, if (sb128) Av1.BLOCK_128X128 else Av1.BLOCK_64X64)
+    }
+
+    /** What `decode_tile` does before the syntax of each superblock; the encoder repeats it before each search. */
+    fun startSuperblock(r: Int, c: Int) {
+        readDeltas = fh.deltaQPresent
+        clearCdef(r, c)
+        clearBlockDecodedFlags(r, c)
+    }
+
+    /** `exit_symbol( )`: keep this tile's CDFs when it is the one that updates the frame context. */
+    fun endTile(tileNum: Int) {
         if (!fh.disableFrameEndUpdateCdf && tileNum == fh.contextUpdateTileId) savedCdfs = cdf
     }
 
@@ -328,22 +391,14 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
 
     // ---- partitions ------------------------------------------------------------------
 
-    private fun decodePartition(r: Int, c: Int, bSize: Int) {
+    fun decodePartition(r: Int, c: Int, bSize: Int) {
         if (r >= miRows || c >= miCols) return
-        availU = isInside(r - 1, c)
-        availL = isInside(r, c - 1)
         val num4x4 = Av1.num4x4Wide[bSize]
         val halfBlock4x4 = num4x4 shr 1
         val quarterBlock4x4 = halfBlock4x4 shr 1
         val hasRows = (r + halfBlock4x4) < miRows
         val hasCols = (c + halfBlock4x4) < miCols
-        val partition = when {
-            bSize < Av1.BLOCK_8X8 -> Av1.PARTITION_NONE
-            hasRows && hasCols -> readPartition(r, c, bSize)
-            hasCols -> if (readSplitOrHorz(r, c, bSize) == 1) Av1.PARTITION_SPLIT else Av1.PARTITION_HORZ
-            hasRows -> if (readSplitOrVert(r, c, bSize) == 1) Av1.PARTITION_SPLIT else Av1.PARTITION_VERT
-            else -> Av1.PARTITION_SPLIT
-        }
+        val partition = partitionSyntax(r, c, bSize)
         val subSize = Av1.partitionSubsize(partition, bSize)
         // A partition whose blocks have no chroma size at this subsampling breaks conformance.
         if (numPlanes > 1 && Av1.subsampledSize(subSize, subX, subY) == Av1.BLOCK_INVALID) {
@@ -401,6 +456,26 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         }
     }
 
+    /**
+     * The partition of the block of [bSize] at ([r], [c]), read, or in coding written, as `decode_partition` does:
+     * a symbol, a choice between a split and the one partition the frame edge leaves, or a split forced by both
+     * edges. The encoder also runs it into a counter to price a partition.
+     */
+    fun partitionSyntax(r: Int, c: Int, bSize: Int): Int {
+        availU = isInside(r - 1, c)
+        availL = isInside(r, c - 1)
+        val halfBlock4x4 = Av1.num4x4Wide[bSize] shr 1
+        val hasRows = (r + halfBlock4x4) < miRows
+        val hasCols = (c + halfBlock4x4) < miCols
+        return when {
+            bSize < Av1.BLOCK_8X8 -> Av1.PARTITION_NONE
+            hasRows && hasCols -> readPartition(r, c, bSize)
+            hasCols -> if (readSplitOrHorz(r, c, bSize) == 1) Av1.PARTITION_SPLIT else Av1.PARTITION_HORZ
+            hasRows -> if (readSplitOrVert(r, c, bSize) == 1) Av1.PARTITION_SPLIT else Av1.PARTITION_VERT
+            else -> Av1.PARTITION_SPLIT
+        }
+    }
+
     /** The partition CDF for [bSize] at ([r], [c]): its array and offset. */
     private fun partitionCdf(r: Int, c: Int, bSize: Int): Pair<IntArray, Int> {
         val bsl = Av1.miWidthLog2[bSize]
@@ -424,7 +499,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             5 -> 8
             else -> 10
         }
-        return sd.symbol(a, o, n)
+        return sym(a, o, n) { enc!!.partition(r, c, bSize) }
     }
 
     private fun cdfAt(a: IntArray, o: Int, i: Int): Int = if (i < 0) 0 else a[o + i]
@@ -435,7 +510,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         var psum = p(Av1.PARTITION_VERT) + p(Av1.PARTITION_SPLIT) + p(Av1.PARTITION_HORZ_A) +
             p(Av1.PARTITION_VERT_A) + p(Av1.PARTITION_VERT_B)
         if (bSize != Av1.BLOCK_128X128) psum += p(Av1.PARTITION_VERT_4)
-        return boolSymbol(psum)
+        return boolSymbol(psum) { if (enc!!.partition(r, c, bSize) == Av1.PARTITION_SPLIT) 1 else 0 }
     }
 
     private fun readSplitOrVert(r: Int, c: Int, bSize: Int): Int {
@@ -444,7 +519,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         var psum = p(Av1.PARTITION_HORZ) + p(Av1.PARTITION_SPLIT) + p(Av1.PARTITION_HORZ_A) +
             p(Av1.PARTITION_HORZ_B) + p(Av1.PARTITION_VERT_A)
         if (bSize != Av1.BLOCK_128X128) psum += p(Av1.PARTITION_HORZ_4)
-        return boolSymbol(psum)
+        return boolSymbol(psum) { if (enc!!.partition(r, c, bSize) == Av1.PARTITION_SPLIT) 1 else 0 }
     }
 
     private val tmpCdf = IntArray(3)
@@ -454,37 +529,23 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
      * split_or_horz and split_or_vert; it adapts a throwaway copy, as the built array is
      * never kept.
      */
-    private fun boolSymbol(psum: Int): Int {
+    private inline fun boolSymbol(psum: Int, value: () -> Int): Int {
         tmpCdf[0] = (1 shl 15) - psum
         tmpCdf[1] = 1 shl 15
         tmpCdf[2] = 0
-        return sd.symbol(tmpCdf, 0, 2)
+        return sym(tmpCdf, 0, 2, value)
     }
 
     // ---- blocks ----------------------------------------------------------------------
 
-    private fun decodeBlock(r: Int, c: Int, subSize: Int) {
+    fun decodeBlock(r: Int, c: Int, subSize: Int) {
         miRow = r
         miCol = c
         miSize = subSize
+        enc?.let { choice = it.block(this, r, c, subSize) }
+        positionBlock(r, c, subSize)
         val bw4 = Av1.num4x4Wide[subSize]
         val bh4 = Av1.num4x4High[subSize]
-        hasChroma = when {
-            bh4 == 1 && subY == 1 && (miRow and 1) == 0 -> false
-            bw4 == 1 && subX == 1 && (miCol and 1) == 0 -> false
-            else -> numPlanes > 1
-        }
-        availU = isInside(r - 1, c)
-        availL = isInside(r, c - 1)
-        availUChroma = availU
-        availLChroma = availL
-        if (hasChroma) {
-            if (subY == 1 && bh4 == 1) availUChroma = isInside(r - 2, c)
-            if (subX == 1 && bw4 == 1) availLChroma = isInside(r, c - 2)
-        } else {
-            availUChroma = false
-            availLChroma = false
-        }
         if (fh.frameIsIntra) intraFrameModeInfo() else interFrameModeInfo()
         paletteTokens()
         readBlockTxSize()
@@ -530,6 +591,34 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         }
     }
 
+    /**
+     * The block position state `decode_block` sets before its syntax: the position and size, whether it has chroma,
+     * and which neighbours are available. The encoder sets it too, to predict a candidate outside the syntax walk.
+     */
+    fun positionBlock(r: Int, c: Int, subSize: Int) {
+        miRow = r
+        miCol = c
+        miSize = subSize
+        val bw4 = Av1.num4x4Wide[subSize]
+        val bh4 = Av1.num4x4High[subSize]
+        hasChroma = when {
+            bh4 == 1 && subY == 1 && (miRow and 1) == 0 -> false
+            bw4 == 1 && subX == 1 && (miCol and 1) == 0 -> false
+            else -> numPlanes > 1
+        }
+        availU = isInside(r - 1, c)
+        availL = isInside(r, c - 1)
+        availUChroma = availU
+        availLChroma = availL
+        if (hasChroma) {
+            if (subY == 1 && bh4 == 1) availUChroma = isInside(r - 2, c)
+            if (subX == 1 && bw4 == 1) availLChroma = isInside(r, c - 2)
+        } else {
+            availUChroma = false
+            availLChroma = false
+        }
+    }
+
     private fun resetBlockContext(bw4: Int, bh4: Int) {
         for (plane in 0 until 1 + (if (hasChroma) 2 else 0)) {
             val sx = if (plane > 0) subX else 0
@@ -559,7 +648,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         readDeltas = false
         refFrame[0] = Av1.INTRA_FRAME
         refFrame[1] = Av1.NONE
-        useIntrabc = if (fh.allowIntrabc) sd.symbol(cdf[C.INTRABC], 0, 2) == 1 else false
+        useIntrabc = if (fh.allowIntrabc) sym(cdf[C.INTRABC], 0, 2) { 0 } == 1 else false
         useFilterIntra = false
         if (useIntrabc) {
             isInter = true
@@ -578,7 +667,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             isInter = false
             val aboveMode = Av1Tables.intraModeContext[if (availU) yModes[mi(miRow - 1, miCol)] else DC_PRED]
             val leftMode = Av1Tables.intraModeContext[if (availL) yModes[mi(miRow, miCol - 1)] else DC_PRED]
-            yMode = sd.symbol(cdf[C.INTRA_FRAME_Y_MODE], (aboveMode * 5 + leftMode) * 14, 13)
+            yMode = sym(cdf[C.INTRA_FRAME_Y_MODE], (aboveMode * 5 + leftMode) * 14, 13) { choice.yMode }
             intraAngleInfoY()
             if (hasChroma) {
                 readUvMode()
@@ -1252,8 +1341,8 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     private fun readUvMode() {
         val cflAllowed = if (lossless && Av1.subsampledSize(miSize, subX, subY) == Av1.BLOCK_4X4) true
         else !lossless && maxOf(Av1.blockWidth[miSize], Av1.blockHeight[miSize]) <= 32
-        uvMode = if (cflAllowed) sd.symbol(cdf[C.UV_MODE_CFL_ALLOWED], yMode * 15, 14)
-        else sd.symbol(cdf[C.UV_MODE_CFL_NOT_ALLOWED], yMode * 14, 13)
+        uvMode = if (cflAllowed) sym(cdf[C.UV_MODE_CFL_ALLOWED], yMode * 15, 14) { choice.uvMode }
+        else sym(cdf[C.UV_MODE_CFL_NOT_ALLOWED], yMode * 14, 13) { choice.uvMode }
     }
 
     private fun intraSegmentId() {
@@ -1309,7 +1398,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             var ctx = 0
             if (availU) ctx += skips[mi(miRow - 1, miCol)]
             if (availL) ctx += skips[mi(miRow, miCol - 1)]
-            skip = sd.symbol(cdf[C.SKIP], ctx * 3, 2)
+            skip = sym(cdf[C.SKIP], ctx * 3, 2) { choice.skip }
         }
     }
 
@@ -1319,7 +1408,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         val r = miRow and (cdefSize4 - 1).inv()
         val c = miCol and (cdefSize4 - 1).inv()
         if (cdefIdx[mi(r, c)] == -1) {
-            val v = sd.literal(fh.cdefBits)
+            val v = lit(fh.cdefBits) { enc!!.cdefIdx(r, c) }
             cdefIdx[mi(r, c)] = v
             val w4 = Av1.num4x4Wide[miSize]
             val h4 = Av1.num4x4High[miSize]
@@ -1377,44 +1466,47 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     private fun intraAngleInfoY() {
         angleDeltaY = 0
         if (miSize >= Av1.BLOCK_8X8 && Av1.isDirectionalMode(yMode)) {
-            angleDeltaY = sd.symbol(cdf[C.ANGLE_DELTA], (yMode - Av1.V_PRED) * 8, 7) - Av1.MAX_ANGLE_DELTA
+            angleDeltaY = sym(cdf[C.ANGLE_DELTA], (yMode - Av1.V_PRED) * 8, 7) { choice.angleDeltaY + Av1.MAX_ANGLE_DELTA } - Av1.MAX_ANGLE_DELTA
         }
     }
 
     private fun intraAngleInfoUv() {
         angleDeltaUV = 0
         if (miSize >= Av1.BLOCK_8X8 && Av1.isDirectionalMode(uvMode)) {
-            angleDeltaUV = sd.symbol(cdf[C.ANGLE_DELTA], (uvMode - Av1.V_PRED) * 8, 7) - Av1.MAX_ANGLE_DELTA
+            angleDeltaUV = sym(cdf[C.ANGLE_DELTA], (uvMode - Av1.V_PRED) * 8, 7) { choice.angleDeltaUV + Av1.MAX_ANGLE_DELTA } - Av1.MAX_ANGLE_DELTA
         }
     }
 
     private fun readCflAlphas() {
-        val signs = sd.symbol(cdf[C.CFL_SIGN], 0, 8)
+        val signs = sym(cdf[C.CFL_SIGN], 0, 8) { cflSign(choice.cflAlphaU) * 3 + cflSign(choice.cflAlphaV) - 1 }
         val signU = (signs + 1) / 3
         val signV = (signs + 1) % 3
         if (signU != Av1.CFL_SIGN_ZERO) {
             val ctx = (signU - 1) * 3 + signV
-            cflAlphaU = 1 + sd.symbol(cdf[C.CFL_ALPHA], ctx * 17, 16)
+            cflAlphaU = 1 + sym(cdf[C.CFL_ALPHA], ctx * 17, 16) { kotlin.math.abs(choice.cflAlphaU) - 1 }
             if (signU == Av1.CFL_SIGN_NEG) cflAlphaU = -cflAlphaU
         } else {
             cflAlphaU = 0
         }
         if (signV != Av1.CFL_SIGN_ZERO) {
             val ctx = (signV - 1) * 3 + signU
-            cflAlphaV = 1 + sd.symbol(cdf[C.CFL_ALPHA], ctx * 17, 16)
+            cflAlphaV = 1 + sym(cdf[C.CFL_ALPHA], ctx * 17, 16) { kotlin.math.abs(choice.cflAlphaV) - 1 }
             if (signV == Av1.CFL_SIGN_NEG) cflAlphaV = -cflAlphaV
         } else {
             cflAlphaV = 0
         }
     }
 
+    /** The CFL_SIGN code of an alpha: 0 for zero, 1 for negative, 2 for positive. */
+    private fun cflSign(alpha: Int): Int = if (alpha == 0) Av1.CFL_SIGN_ZERO else if (alpha < 0) Av1.CFL_SIGN_NEG else Av1.CFL_SIGN_POS
+
     private fun filterIntraModeInfo() {
         useFilterIntra = false
         if (seq.enableFilterIntra && yMode == DC_PRED && paletteSizeY == 0 &&
             maxOf(Av1.blockWidth[miSize], Av1.blockHeight[miSize]) <= 32
         ) {
-            useFilterIntra = sd.symbol(cdf[C.FILTER_INTRA], miSize * 3, 2) == 1
-            if (useFilterIntra) filterIntraMode = sd.symbol(cdf[C.FILTER_INTRA_MODE], 0, 5)
+            useFilterIntra = sym(cdf[C.FILTER_INTRA], miSize * 3, 2) { if (choice.useFilterIntra) 1 else 0 } == 1
+            if (useFilterIntra) filterIntraMode = sym(cdf[C.FILTER_INTRA_MODE], 0, 5) { choice.filterIntraMode }
         }
     }
 
@@ -1428,17 +1520,19 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             var ctx = 0
             if (availU && paletteSizes[0][mi(miRow - 1, miCol)] > 0) ctx++
             if (availL && paletteSizes[0][mi(miRow, miCol - 1)] > 0) ctx++
-            val hasPaletteY = sd.symbol(cdf[C.PALETTE_Y_MODE], (bsizeCtx * 3 + ctx) * 3, 2)
+            val hasPaletteY = sym(cdf[C.PALETTE_Y_MODE], (bsizeCtx * 3 + ctx) * 3, 2) { if (choice.paletteSizeY > 0) 1 else 0 }
             if (hasPaletteY == 1) {
-                paletteSizeY = sd.symbol(cdf[C.PALETTE_Y_SIZE], bsizeCtx * 8, 7) + 2
-                readPaletteColors(0, paletteSizeY, paletteColorsY, deltaPlusOne = true)
+                paletteSizeY = sym(cdf[C.PALETTE_Y_SIZE], bsizeCtx * 8, 7) { choice.paletteSizeY - 2 } + 2
+                val e = enc
+                if (e != null) writePaletteColors(e.sink, paletteSizeY, choice.paletteColorsY, paletteColorsY)
+                else readPaletteColors(0, paletteSizeY, paletteColorsY, deltaPlusOne = true)
             }
         }
         if (hasChroma && uvMode == DC_PRED) {
             val ctx = if (paletteSizeY > 0) 1 else 0
-            val hasPaletteUv = sd.symbol(cdf[C.PALETTE_UV_MODE], ctx * 3, 2)
+            val hasPaletteUv = sym(cdf[C.PALETTE_UV_MODE], ctx * 3, 2) { if (choice.paletteSizeUV > 0) 1 else 0 }
             if (hasPaletteUv == 1) {
-                paletteSizeUV = sd.symbol(cdf[C.PALETTE_UV_SIZE], bsizeCtx * 8, 7) + 2
+                paletteSizeUV = sym(cdf[C.PALETTE_UV_SIZE], bsizeCtx * 8, 7) { choice.paletteSizeUV - 2 } + 2
                 readPaletteColors(1, paletteSizeUV, paletteColorsU, deltaPlusOne = false)
                 if (sd.literal(1) == 1) {
                     val minBits = bitDepth - 4
@@ -1490,6 +1584,46 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         colors.sort(0, size)
     }
 
+    /**
+     * The luma palette [colors] (ascending, distinct) as [readPaletteColors] reads them: a bit for each cached colour
+     * telling whether the palette has it, then the others ascending, the first in full and each next as its step
+     * from the one before less one, in as few bits as the largest step needs and the shrinking range allows. Leaves
+     * them in [out], as decoding does. The encoder codes no chroma palette.
+     */
+    private fun writePaletteColors(sink: Av1SymbolSink, size: Int, colors: IntArray, out: IntArray) {
+        val cacheN = paletteCache(0)
+        val fromCache = BooleanArray(size)
+        var idx = 0
+        var i = 0
+        while (i < cacheN && idx < size) {
+            val k = (0 until size).firstOrNull { colors[it] == paletteCache[i] }
+            sink.bool(if (k != null) 1 else 0)
+            if (k != null) {
+                fromCache[k] = true
+                idx++
+            }
+            i++
+        }
+        val rest = (0 until size).filter { !fromCache[it] }.map { colors[it] }
+        if (rest.isNotEmpty()) {
+            sink.literal(rest[0], bitDepth)
+            if (rest.size > 1) {
+                val minBits = bitDepth - 3
+                var need = 0
+                for (k in 1 until rest.size) need = maxOf(need, 32 - (rest[k] - rest[k - 1] - 1).countLeadingZeroBits())
+                val extra = (need - minBits).coerceIn(0, 3)
+                sink.literal(extra, 2)
+                var paletteBits = minBits + extra
+                for (k in 1 until rest.size) {
+                    sink.literal(rest[k] - rest[k - 1] - 1, paletteBits)
+                    val range = (1 shl bitDepth) - rest[k] - 1
+                    paletteBits = minOf(paletteBits, Av1BitReader.ceilLog2(range))
+                }
+            }
+        }
+        for (k in 0 until size) out[k] = colors[k]
+    }
+
     private fun paletteCache(plane: Int): Int {
         val aboveN = if ((miRow * Av1.MI_SIZE) % 64 != 0) paletteSizes[plane][mi(miRow - 1, miCol)] else 0
         val leftN = if (availL) paletteSizes[plane][mi(miRow, miCol - 1)] else 0
@@ -1527,7 +1661,9 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         var onscreenHeight = minOf(blockHeight, (miRows - miRow) * Av1.MI_SIZE)
         var onscreenWidth = minOf(blockWidth, (miCols - miCol) * Av1.MI_SIZE)
         if (paletteSizeY != 0) {
-            readColorMap(colorMapY, paletteSizeY, blockWidth, blockHeight, onscreenWidth, onscreenHeight, C.PALETTE_Y_COLOR)
+            val e = enc
+            if (e != null) writeColorMap(e.sink, choice.colorMapY!!, colorMapY, paletteSizeY, blockWidth, blockHeight, onscreenWidth, onscreenHeight, C.PALETTE_Y_COLOR)
+            else readColorMap(colorMapY, paletteSizeY, blockWidth, blockHeight, onscreenWidth, onscreenHeight, C.PALETTE_Y_COLOR)
         }
         if (paletteSizeUV != 0) {
             blockHeight = blockHeight shr subY
@@ -1557,6 +1693,33 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
                 val ctx = Av1Tables.paletteColorContext[colorContextHash]
                 val idx = sd.symbol(colorCdf, ctx * (n + 1), n)
                 map[(i - j) * 64 + j] = colorOrder[idx]
+                j--
+            }
+        }
+        for (i in 0 until onscreenHeight) for (j in onscreenWidth until blockWidth) map[i * 64 + j] = map[i * 64 + onscreenWidth - 1]
+        for (i in onscreenHeight until blockHeight) for (j in 0 until blockWidth) map[i * 64 + j] = map[(onscreenHeight - 1) * 64 + j]
+    }
+
+    /**
+     * [readColorMap] when coding: the indices of [from] (64 a row) in the same wavefront order, each as its rank in
+     * the order its neighbours' colours give, into [map], which is then extended past the shown area as decoding does.
+     */
+    private fun writeColorMap(
+        sink: Av1SymbolSink, from: IntArray, map: IntArray, n: Int, blockWidth: Int, blockHeight: Int,
+        onscreenWidth: Int, onscreenHeight: Int, cdfBase: Int,
+    ) {
+        for (i in 0 until onscreenHeight) for (j in 0 until onscreenWidth) map[i * 64 + j] = from[i * 64 + j]
+        sink.ns(map[0], n)
+        val colorCdf = cdf[cdfBase + n - 2]
+        for (i in 1 until onscreenHeight + onscreenWidth - 1) {
+            var j = minOf(i, onscreenWidth - 1)
+            while (j >= maxOf(0, i - onscreenHeight + 1)) {
+                paletteColorContext(map, i - j, j, n)
+                val ctx = Av1Tables.paletteColorContext[colorContextHash]
+                val v = map[(i - j) * 64 + j]
+                var rank = 0
+                while (colorOrder[rank] != v) rank++
+                sink.symbol(rank, colorCdf, ctx * (n + 1), n)
                 j--
             }
         }
@@ -1645,13 +1808,25 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             }
             val ctx = (if (aboveW >= maxTxWidth) 1 else 0) + (if (leftH >= maxTxHeight) 1 else 0)
             val txDepth = when (maxTxDepth) {
-                4 -> sd.symbol(cdf[C.TX_64X64], ctx * 4, 3)
-                3 -> sd.symbol(cdf[C.TX_32X32], ctx * 4, 3)
-                2 -> sd.symbol(cdf[C.TX_16X16], ctx * 4, 3)
-                else -> sd.symbol(cdf[C.TX_8X8], ctx * 3, 2)
+                4 -> sym(cdf[C.TX_64X64], ctx * 4, 3) { txDepthOf(maxRectTxSize, choice.txSize) }
+                3 -> sym(cdf[C.TX_32X32], ctx * 4, 3) { txDepthOf(maxRectTxSize, choice.txSize) }
+                2 -> sym(cdf[C.TX_16X16], ctx * 4, 3) { txDepthOf(maxRectTxSize, choice.txSize) }
+                else -> sym(cdf[C.TX_8X8], ctx * 3, 2) { txDepthOf(maxRectTxSize, choice.txSize) }
             }
             for (i in 0 until txDepth) txSize = Av1Tables.splitTxSize[txSize]
         }
+    }
+
+    /** How many times [Av1Tables.splitTxSize] takes [from] to [to]: the tx_depth that codes [to]. */
+    private fun txDepthOf(from: Int, to: Int): Int {
+        var t = from
+        var depth = 0
+        while (t != to && depth < 4) {
+            t = Av1Tables.splitTxSize[t]
+            depth++
+        }
+        check(t == to) { "transform size $to is not a split of $from" }
+        return depth
     }
 
     private fun readVarTxSize(row: Int, col: Int, txSz: Int, depth: Int) {
@@ -1890,9 +2065,9 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
             } else {
                 val intraDir = if (useFilterIntra) Av1Tables.filterIntraModeToIntraDir[filterIntraMode] else yMode
                 if (set == Av1.TX_SET_INTRA_1) {
-                    Av1Tables.txTypeIntraInvSet1[sd.symbol(cdf[C.INTRA_TX_TYPE_SET1], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 8, 7)]
+                    Av1Tables.txTypeIntraInvSet1[sym(cdf[C.INTRA_TX_TYPE_SET1], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 8, 7) { INTRA_SET1_INDEX[enc!!.txType] }]
                 } else {
-                    Av1Tables.txTypeIntraInvSet2[sd.symbol(cdf[C.INTRA_TX_TYPE_SET2], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 6, 5)]
+                    Av1Tables.txTypeIntraInvSet2[sym(cdf[C.INTRA_TX_TYPE_SET2], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 6, 5) { INTRA_SET2_INDEX[enc!!.txType] }]
                 }
             }
         } else Av1.DCT_DCT
@@ -1902,12 +2077,14 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     }
 
     /** The scan order for [txSz] with the current PlaneTxType (`get_scan`). */
-    private fun scan(txSz: Int): IntArray {
+    private fun scan(txSz: Int): IntArray = scanFor(txSz, planeTxType)
+
+    /** `get_scan` for [txSz] under transform type [type]. */
+    fun scanFor(txSz: Int, type: Int): IntArray {
         val t = Av1Tables
         if (txSz == Av1.TX_16X64) return t.defaultScan16x32
         if (txSz == Av1.TX_64X16) return t.defaultScan32x16
         if (t.txSizeSqrUp[txSz] == Av1.TX_64X64) return t.defaultScan32x32
-        val type = planeTxType
         val preferRow = type == Av1.V_DCT || type == Av1.V_ADST || type == Av1.V_FLIPADST
         val preferCol = type == Av1.H_DCT || type == Av1.H_ADST || type == Av1.H_FLIPADST
         if (type != Av1.IDTX && preferRow) {
@@ -1955,6 +2132,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     }
 
     private fun coeffs(plane: Int, startX: Int, startY: Int, txSz: Int): Int {
+        enc?.let { return writeCoeffs(it, plane, startX, startY, txSz) }
         val x4 = startX shr 2
         val y4 = startY shr 2
         val w4 = Av1.txWidth[txSz] shr 2
@@ -2051,6 +2229,141 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         return eob
     }
 
+    /**
+     * `coeffs` when coding: the levels [Av1Coding.coefficients] chose, and for luma its transform type, written
+     * with the contexts decoding uses, then left in [quant] signed, as decoding leaves them for reconstruction.
+     */
+    private fun writeCoeffs(e: Av1Coding, plane: Int, startX: Int, startY: Int, txSz: Int): Int {
+        val x4 = startX shr 2
+        val y4 = startY shr 2
+        val w4 = Av1.txWidth[txSz] shr 2
+        val h4 = Av1.txHeight[txSz] shr 2
+        val txSzCtx = (Av1Tables.txSizeSqr[txSz] + Av1Tables.txSizeSqrUp[txSz] + 1) shr 1
+        val eob = e.coefficients(this, plane, startX, startY, txSz)
+        val levels = e.levels
+        val segEob = if (txSz == Av1.TX_16X64 || txSz == Av1.TX_64X16) 512 else minOf(1024, Av1.txWidth[txSz] * Av1.txHeight[txSz])
+        var culLevel = 0
+        var dcCategory = 0
+        e.sink.symbol(if (eob == 0) 1 else 0, cdf[C.TXB_SKIP], (txSzCtx * 13 + allZeroCtx(plane, txSz, x4, y4, w4, h4)) * 3, 2)
+        if (eob == 0) {
+            for (c in 0 until segEob) quant[c] = 0
+            if (plane == 0) for (i in 0 until w4) for (j in 0 until h4) txTypes[mi(y4 + j, x4 + i)] = Av1.DCT_DCT
+        } else {
+            if (plane == 0) transformType(x4, y4, txSz)
+            planeTxType = computeTxType(plane, txSz, x4, y4)
+            writeLevels(e.sink, plane, x4, y4, txSz, levels, eob)
+            val scan = scan(txSz)
+            for (c in 0 until eob) {
+                val pos = scan[c]
+                val v = levels[pos]
+                val a = kotlin.math.abs(v)
+                if (pos == 0 && a > 0) dcCategory = if (v < 0) 1 else 2
+                culLevel += a
+                quant[pos] = v
+            }
+            culLevel = minOf(63, culLevel)
+        }
+        for (i in 0 until w4) {
+            aboveLevelContext[plane][x4 + i] = culLevel
+            aboveDcContext[plane][x4 + i] = dcCategory
+        }
+        for (i in 0 until h4) {
+            leftLevelContext[plane][y4 + i] = culLevel
+            leftDcContext[plane][y4 + i] = dcCategory
+        }
+        return eob
+    }
+
+    /**
+     * The symbols of a coded transform block after `all_zero` and the transform type: the end of block, the
+     * levels in reverse scan order, then the signs and Golomb remainders in scan order, for the signed [levels]
+     * (laid out as [quant]) up to [eob] under the current [planeTxType]. It leaves [quant] holding the levels'
+     * magnitudes; nothing else changes, so the encoder also runs it into a counter to price a candidate.
+     */
+    fun writeLevels(sink: Av1SymbolSink, plane: Int, x4: Int, y4: Int, txSz: Int, levels: IntArray, eob: Int) {
+        val w4 = Av1.txWidth[txSz] shr 2
+        val h4 = Av1.txHeight[txSz] shr 2
+        val txSzCtx = (Av1Tables.txSizeSqr[txSz] + Av1Tables.txSizeSqrUp[txSz] + 1) shr 1
+        val ptype = if (plane > 0) 1 else 0
+        val segEob = if (txSz == Av1.TX_16X64 || txSz == Av1.TX_64X16) 512 else minOf(1024, Av1.txWidth[txSz] * Av1.txHeight[txSz])
+        for (c in 0 until segEob) quant[c] = 0
+        val scan = scan(txSz)
+        val eobMultisize = minOf(Av1.txWidthLog2[txSz], 5) + minOf(Av1.txHeightLog2[txSz], 5) - 4
+        val classCtx = if (Av1.txClass(planeTxType) == Av1.TX_CLASS_2D) 0 else 1
+        val eobPt = if (eob < 2) eob else 33 - (eob - 1).countLeadingZeroBits()
+        when (eobMultisize) {
+            0 -> sink.symbol(eobPt - 1, cdf[C.EOB_PT_16], (ptype * 2 + classCtx) * 6, 5)
+            1 -> sink.symbol(eobPt - 1, cdf[C.EOB_PT_32], (ptype * 2 + classCtx) * 7, 6)
+            2 -> sink.symbol(eobPt - 1, cdf[C.EOB_PT_64], (ptype * 2 + classCtx) * 8, 7)
+            3 -> sink.symbol(eobPt - 1, cdf[C.EOB_PT_128], (ptype * 2 + classCtx) * 9, 8)
+            4 -> sink.symbol(eobPt - 1, cdf[C.EOB_PT_256], (ptype * 2 + classCtx) * 10, 9)
+            5 -> sink.symbol(eobPt - 1, cdf[C.EOB_PT_512], ptype * 11, 10)
+            else -> sink.symbol(eobPt - 1, cdf[C.EOB_PT_1024], ptype * 12, 11)
+        }
+        if (eobPt >= 3) {
+            val rest = eob - ((1 shl (eobPt - 2)) + 1)
+            sink.symbol((rest shr (eobPt - 3)) and 1, cdf[C.EOB_EXTRA], ((txSzCtx * 2 + ptype) * 9 + eobPt - 3) * 3, 2)
+            for (i in 1 until eobPt - 2) sink.bool((rest shr (eobPt - 3 - i)) and 1)
+        }
+        val brCtxSize = minOf(txSzCtx, Av1.TX_32X32)
+        for (c in eob - 1 downTo 0) {
+            val pos = scan[c]
+            val a = kotlin.math.abs(levels[pos])
+            if (c == eob - 1) {
+                val ctx = coeffBaseCtx(txSz, plane, x4, y4, pos, c, true) - Av1.SIG_COEF_CONTEXTS + Av1.SIG_COEF_CONTEXTS_EOB
+                sink.symbol(minOf(a, 3) - 1, cdf[C.COEFF_BASE_EOB], ((txSzCtx * 2 + ptype) * 4 + ctx) * 4, 3)
+            } else {
+                val ctx = coeffBaseCtx(txSz, plane, x4, y4, pos, c, false)
+                sink.symbol(minOf(a, 3), cdf[C.COEFF_BASE], ((txSzCtx * 2 + ptype) * 42 + ctx) * 5, 4)
+            }
+            if (a > Av1.NUM_BASE_LEVELS) {
+                val ctx = coeffBrCtx(txSz, pos)
+                var left = a - Av1.NUM_BASE_LEVELS - 1
+                for (idx in 0 until Av1.COEFF_BASE_RANGE / (Av1.BR_CDF_SIZE - 1)) {
+                    val br = minOf(left, Av1.BR_CDF_SIZE - 1)
+                    sink.symbol(br, cdf[C.COEFF_BR], ((brCtxSize * 2 + ptype) * 21 + ctx) * 5, 4)
+                    left -= br
+                    if (br < Av1.BR_CDF_SIZE - 1) break
+                }
+            }
+            quant[pos] = minOf(a, Av1.NUM_BASE_LEVELS + Av1.COEFF_BASE_RANGE + 1)
+        }
+        for (c in 0 until eob) {
+            val pos = scan[c]
+            val v = levels[pos]
+            if (v != 0) {
+                val sign = if (v < 0) 1 else 0
+                if (c == 0) sink.symbol(sign, cdf[C.DC_SIGN], (ptype * 3 + dcSignCtx(plane, x4, y4, w4, h4)) * 3, 2)
+                else sink.bool(sign)
+            }
+            val a = kotlin.math.abs(v)
+            if (a > Av1.NUM_BASE_LEVELS + Av1.COEFF_BASE_RANGE) {
+                // golomb_length_bit zeros, a one, then the bits of x below its top one, for x = a - 14.
+                val x = a - Av1.NUM_BASE_LEVELS - Av1.COEFF_BASE_RANGE
+                val length = 32 - x.countLeadingZeroBits()
+                for (i in 1 until length) sink.bool(0)
+                sink.bool(1)
+                for (i in length - 2 downTo 0) sink.bool((x shr i) and 1)
+            }
+        }
+    }
+
+    /** The symbols of `all_zero` for a block of [txSz] at ([x4], [y4]) of [plane]: [allZero] 1 or 0, written to [sink]. */
+    fun writeAllZero(sink: Av1SymbolSink, plane: Int, x4: Int, y4: Int, txSz: Int, allZero: Int) {
+        val txSzCtx = (Av1Tables.txSizeSqr[txSz] + Av1Tables.txSizeSqrUp[txSz] + 1) shr 1
+        sink.symbol(allZero, cdf[C.TXB_SKIP], (txSzCtx * 13 + allZeroCtx(plane, txSz, x4, y4, Av1.txWidth[txSz] shr 2, Av1.txHeight[txSz] shr 2)) * 3, 2)
+    }
+
+    /** The symbol of luma transform type [type] for [txSz], to [sink], when the set and qindex code one. */
+    fun writeTxType(sink: Av1SymbolSink, txSz: Int, type: Int) {
+        val set = txSet(txSz)
+        val qIdx = if (fh.segmentationEnabled) fh.qIndex(true, segmentId, currentQIndex) else fh.baseQIdx
+        if (set == 0 || qIdx == 0) return
+        val intraDir = if (useFilterIntra) Av1Tables.filterIntraModeToIntraDir[filterIntraMode] else yMode
+        if (set == Av1.TX_SET_INTRA_1) sink.symbol(INTRA_SET1_INDEX[type], cdf[C.INTRA_TX_TYPE_SET1], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 8, 7)
+        else sink.symbol(INTRA_SET2_INDEX[type], cdf[C.INTRA_TX_TYPE_SET2], (Av1Tables.txSizeSqr[txSz] * 13 + intraDir) * 6, 5)
+    }
+
     private fun allZeroCtx(plane: Int, txSz: Int, x4: Int, y4: Int, w4: Int, h4: Int): Int {
         var maxX4 = miCols
         var maxY4 = miRows
@@ -2089,7 +2402,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         return ctx
     }
 
-    private fun coeffBaseCtx(txSz: Int, plane: Int, blockX: Int, blockY: Int, pos: Int, c: Int, isEob: Boolean): Int {
+    fun coeffBaseCtx(txSz: Int, plane: Int, blockX: Int, blockY: Int, pos: Int, c: Int, isEob: Boolean): Int {
         val adjTxSz = Av1Tables.adjustedTxSize[txSz]
         val bwl = Av1.txWidthLog2[adjTxSz]
         val width = 1 shl bwl
@@ -2121,7 +2434,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         return ctx + Av1Tables.coeffBasePosCtxOffset[minOf(idx, 2)]
     }
 
-    private fun coeffBrCtx(txSz: Int, pos: Int): Int {
+    fun coeffBrCtx(txSz: Int, pos: Int): Int {
         val adjTxSz = Av1Tables.adjustedTxSize[txSz]
         val bwl = Av1.txWidthLog2[adjTxSz]
         val txw = Av1.txWidth[adjTxSz]
@@ -2211,6 +2524,7 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     }
 
     private fun readLrUnit(plane: Int, unitRow: Int, unitCol: Int) {
+        enc?.let { return writeLrUnit(it, plane, unitRow, unitCol) }
         val u = unitRow * lrUnitCols[plane] + unitCol
         val type = when (fh.frameRestorationType[plane]) {
             Av1FrameHeader.RESTORE_WIENER -> if (sd.symbol(cdf[C.USE_WIENER], 0, 2) == 1) Av1FrameHeader.RESTORE_WIENER else Av1FrameHeader.RESTORE_NONE
@@ -2256,6 +2570,81 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
         }
     }
 
+    /** `read_lr_unit` when coding: the unit's type and coefficients from [Av1Coding.lrUnit], with the references of decoding. */
+    private fun writeLrUnit(e: Av1Coding, plane: Int, unitRow: Int, unitCol: Int) {
+        val u = unitRow * lrUnitCols[plane] + unitCol
+        val sink = e.sink
+        val type = e.lrUnit(plane, unitRow, unitCol, lrWiener[plane]!!, u * 6, lrSgrXqd[plane]!!, u * 2)
+        when (fh.frameRestorationType[plane]) {
+            Av1FrameHeader.RESTORE_WIENER -> sink.symbol(if (type == Av1FrameHeader.RESTORE_WIENER) 1 else 0, cdf[C.USE_WIENER], 0, 2)
+            Av1FrameHeader.RESTORE_SGRPROJ -> sink.symbol(if (type == Av1FrameHeader.RESTORE_SGRPROJ) 1 else 0, cdf[C.USE_SGRPROJ], 0, 2)
+            else -> sink.symbol(type, cdf[C.RESTORATION_TYPE], 0, 3)
+        }
+        lrType[plane]!![u] = type
+        if (type == Av1FrameHeader.RESTORE_WIENER) {
+            for (pass in 0 until 2) {
+                val firstCoeff = if (plane != 0) 1 else 0
+                if (plane != 0) lrWiener[plane]!![u * 6 + pass * 3] = 0
+                for (j in firstCoeff until 3) {
+                    val v = lrWiener[plane]!![u * 6 + pass * 3 + j]
+                    writeSignedSubexpWithRefBool(sink, Av1Tables.wienerTapsMin[j], Av1Tables.wienerTapsMax[j] + 1, Av1Tables.wienerTapsK[j], refLrWiener[plane][pass][j], v)
+                    refLrWiener[plane][pass][j] = v
+                }
+            }
+        } else if (type == Av1FrameHeader.RESTORE_SGRPROJ) {
+            val set = e.lrSgrSet
+            lrSgrSet[plane]!![u] = set
+            sink.literal(set, 4)
+            for (i in 0 until 2) {
+                val radius = Av1Tables.sgrParams[set * 4 + i * 2]
+                val min = Av1Tables.sgrprojXqdMin[i]
+                val max = Av1Tables.sgrprojXqdMax[i]
+                var v = lrSgrXqd[plane]!![u * 2 + i]
+                if (radius != 0) {
+                    writeSignedSubexpWithRefBool(sink, min, max + 1, 4, refSgrXqd[plane][i], v)
+                } else {
+                    v = if (i == 1) ((1 shl 7) - refSgrXqd[plane][0]).coerceIn(min, max) else 0
+                    lrSgrXqd[plane]!![u * 2 + i] = v
+                }
+                refSgrXqd[plane][i] = v
+            }
+        }
+    }
+
+    /** The inverse of [decodeSignedSubexpWithRefBool]: [v] in [low] until [high], coded about the reference [r]. */
+    private fun writeSignedSubexpWithRefBool(sink: Av1SymbolSink, low: Int, high: Int, k: Int, r: Int, v: Int) {
+        val mx = high - low
+        val x = v - low
+        val rr = r - low
+        val s = if ((rr shl 1) <= mx) recenter(rr, x) else recenter(mx - 1 - rr, mx - 1 - x)
+        var i = 0
+        var mk = 0
+        while (true) {
+            val b2 = if (i != 0) k + i - 1 else k
+            val a = 1 shl b2
+            if (mx <= mk + 3 * a) {
+                sink.ns(s - mk, mx - mk)
+                return
+            }
+            if (s >= mk + a) {
+                sink.bool(1)
+                i++
+                mk += a
+            } else {
+                sink.bool(0)
+                sink.literal(s - mk, b2)
+                return
+            }
+        }
+    }
+
+    /** The inverse of [inverseRecenter]. */
+    private fun recenter(r: Int, v: Int): Int = when {
+        v > 2 * r -> v
+        v >= r -> (v - r) shl 1
+        else -> ((r - v) shl 1) - 1
+    }
+
     private fun decodeSignedSubexpWithRefBool(low: Int, high: Int, k: Int, r: Int): Int =
         decodeUnsignedSubexpWithRefBool(high - low, k, r - low) + low
 
@@ -2287,6 +2676,10 @@ internal class Av1FrameDecoder(val seq: Av1SequenceHeader, val fh: Av1FrameHeade
     }
 
     companion object {
+        /** The symbol of each intra transform type in TX_SET_INTRA_1 and TX_SET_INTRA_2, -1 outside it. */
+        val INTRA_SET1_INDEX: IntArray = IntArray(16) { -1 }.also { m -> Av1Tables.txTypeIntraInvSet1.forEachIndexed { i, t -> m[t] = i } }
+        val INTRA_SET2_INDEX: IntArray = IntArray(16) { -1 }.also { m -> Av1Tables.txTypeIntraInvSet2.forEachIndexed { i, t -> m[t] = i } }
+
         private const val COMP_NEWMV_CTXS = 5
         private const val MV_INTRABC_CONTEXT = 1
         private const val CLASS0_SIZE = 2

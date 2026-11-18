@@ -1098,6 +1098,60 @@ public object ImageKodec {
     ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encode(null, bitmap, options, metadata, "hvc1", cancel) }
 
     /**
+     * Encode [bitmap] as an AVIF file at [quality], 0 to 100 (default 50), with the other settings of
+     * [HeifEncodeOptions]: 8-bit 4:2:0, effort 2, tiles of 512 for a larger picture. See the overload with options.
+     *
+     * @throws IllegalArgumentException if [quality] is outside 0..100, or the picture is too large for a HEIF reader
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeAvif(bitmap: KiteBitmap, quality: Int = 50): ByteArray = encodeAvif(bitmap, HeifEncodeOptions(quality = quality))
+
+    /**
+     * Encode [bitmap] as an AVIF file (#176): HEIF (ISO/IEC 23008-12) with AV1 pictures, coded by the core's own
+     * intra AV1 encoder, as the AV1 Image File Format 1.1 describes. AV1 is royalty-free, so the encoder is part of
+     * the core and needs no module.
+     *
+     * Each picture is one AV1 key frame with a reduced still picture header, as libavif writes a still image.
+     * [HeifEncodeOptions.quality] sets the quantizer: base_q_idx 240 at 0, 117 at 50, 43 at 80 and 1 from 97 on,
+     * straight between, so 50 and 80 score next to avifenc's `-q 50` and `-q 80`. [HeifEncodeOptions.lossless] codes at base_q_idx 0, AV1's lossless mode with its Walsh-Hadamard
+     * transform, and the file decodes to exactly [bitmap]. [HeifEncodeOptions.effort] widens the encoder's search:
+     * 1 is fast, 3 tries every mode and transform the encoder knows. Colour converts to Y, Cb and Cr with BT.601's
+     * matrix in full range and is signalled as sRGB, both in `colr` and in the sequence header; a lossless file uses
+     * the identity matrix in 4:4:4. A gray bitmap codes luma alone (AV1's monochrome), and alpha below 255 adds an
+     * alpha auxiliary image. A picture wider or taller than [HeifEncodeOptions.tileSize] is a `grid` of AV1 items,
+     * which the runner of [setTileRunner] encodes; with no tile size, a picture codes as one frame of AV1 tiles of at
+     * most 4096 samples across. [HeifEncodeOptions.thumbnailSize], [HeifEncodeOptions.orientation] and [metadata]
+     * are written as [encodeHeic] writes them. [cancellationCheck] runs at least once a tile and once a row of
+     * superblocks, and what it throws comes out of this call as it is.
+     *
+     * @throws IllegalArgumentException if the picture is too large for a HEIF reader (65535 on a side, or more than
+     *   256 tiles on a side of a grid)
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeAvif(
+        bitmap: KiteBitmap,
+        options: HeifEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encode(bitmap, null, options, metadata, "av01", cancel) }
+
+    /**
+     * Encode [bitmap] as an AVIF file of 10 or 12 bits a sample ([HeifEncodeOptions.bitDepth]; by default 10, or 12
+     * when lossless), as [encodeAvif] writes an 8-bit bitmap. One or two channels code as gray, and so do three or
+     * four whose colour channels are equal. AV1 holds 12 bits at most, so [decode16] gives each sample back rounded
+     * to the coded depth; a lossless file gives back exactly every sample that a file of its depth can give.
+     *
+     * @throws IllegalArgumentException as [encodeAvif] does
+     */
+    @Throws(IllegalArgumentException::class)
+    public fun encodeAvif16(
+        bitmap: KiteBitmap16,
+        options: HeifEncodeOptions,
+        metadata: ImageMetadata = ImageMetadata(),
+        cancellationCheck: (() -> Unit)? = null,
+    ): ByteArray = cancellable(cancellationCheck) { cancel -> HeifEncode.encode(null, bitmap, options, metadata, "av01", cancel) }
+
+    /**
      * The EXIF block, XMP packet and ICC profile of a JPEG, PNG, WebP, AVIF or HEIC file. The
      * `encodeJpeg`, `encodePng` and `encodeWebp` overloads that take an [ImageMetadata] write them
      * again, so a re-encode keeps them (#129). A HEIF file gives those of its primary image (#149);

@@ -163,6 +163,11 @@ class FuzzTest {
         "jp2-ppm" to Jp2FeatureFixtures.ppm,
         // AVIF from libavif: alpha, premultiplied 10-bit, a grid, a crop with orientation, 12-bit gray and a sequence (#41).
         *AvifFixtures.all.map { (name, data) -> "avif-$name" to data }.toTypedArray(),
+        // An AVIF the core's own encoder writes: 4:4:4 with alpha, palette blocks among intra ones, CDEF and restoration (#176).
+        "avif-encoded" to ImageKodec.encodeAvif(
+            KiteBitmap(24, 16, IntArray(24 * 16) { i -> (((i % 24) * 9 + (i / 24) * 40) shl 24) or (if ((i % 24) / 6 % 2 == 0) 0x1080E0 else 0xF0F020) or ((i % 7) * 3) }),
+            HeifEncodeOptions(quality = 60, chroma = HeifChroma.Yuv444),
+        ),
         // A tmap with its gain map, and alpha and depth auxiliary images (#153, #154).
         "heif-aux-tmap" to AuxiliaryFiles.everything(),
         // JPEG XL from libjxl: both coding modes, the container, an ICC profile, passes, an LF frame, patches,

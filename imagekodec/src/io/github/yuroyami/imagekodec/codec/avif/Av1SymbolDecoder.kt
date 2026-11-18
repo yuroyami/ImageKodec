@@ -50,17 +50,7 @@ internal class Av1SymbolDecoder(private val data: ByteArray, start: Int, size: I
         symbolRange = prev - cur
         symbolValue -= cur
         renormalize()
-        if (!disableCdfUpdate) {
-            val count = cdf[offset + n]
-            val rate = 3 + (if (count > 15) 1 else 0) + (if (count > 31) 1 else 0) + minOf(floorLog2(n), 2)
-            var tmp = 0
-            for (i in 0 until n - 1) {
-                if (i == symbol) tmp = 1 shl 15
-                val c = cdf[offset + i]
-                cdf[offset + i] = if (tmp < c) c - ((c - tmp) shr rate) else c + ((tmp - c) shr rate)
-            }
-            if (count < 32) cdf[offset + n] = count + 1
-        }
+        if (!disableCdfUpdate) adapt(cdf, offset, n, symbol)
         return symbol
     }
 
@@ -112,10 +102,26 @@ internal class Av1SymbolDecoder(private val data: ByteArray, start: Int, size: I
     /** How many bits the tile's data had left when it ended; negative once padding was used. */
     val remainingBits: Int get() = symbolMaxBits
 
-    private companion object {
-        const val EC_PROB_SHIFT = 6
-        const val EC_MIN_PROB = 4
+    companion object {
+        private const val EC_PROB_SHIFT = 6
+        private const val EC_MIN_PROB = 4
 
-        fun floorLog2(x: Int): Int = 31 - x.countLeadingZeroBits()
+        private fun floorLog2(x: Int): Int = 31 - x.countLeadingZeroBits()
+
+        /**
+         * The CDF update of `read_symbol` after [symbol] of [n], with its counter: shared with the encoder's
+         * [Av1SymbolWriter] and [Av1SymbolCounter], so both sides adapt alike (#176).
+         */
+        fun adapt(cdf: IntArray, offset: Int, n: Int, symbol: Int) {
+            val count = cdf[offset + n]
+            val rate = 3 + (if (count > 15) 1 else 0) + (if (count > 31) 1 else 0) + minOf(floorLog2(n), 2)
+            var tmp = 0
+            for (i in 0 until n - 1) {
+                if (i == symbol) tmp = 1 shl 15
+                val c = cdf[offset + i]
+                cdf[offset + i] = if (tmp < c) c - ((c - tmp) shr rate) else c + ((tmp - c) shr rate)
+            }
+            if (count < 32) cdf[offset + n] = count + 1
+        }
     }
 }

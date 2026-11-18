@@ -134,9 +134,9 @@ internal object Av1Cdef {
         return yDir to variance
     }
 
-    private fun constrain(diff: Int, threshold: Int, damping: Int): Int {
+    /** `constrain` with its damping adjustment, `Max(0, damping - FloorLog2(threshold))`, worked out once a block. */
+    private fun constrain(diff: Int, threshold: Int, dampingAdj: Int): Int {
         if (threshold == 0) return 0
-        val dampingAdj = maxOf(0, damping - floorLog2(threshold))
         val ad = kotlin.math.abs(diff)
         val v = (threshold - (ad shr dampingAdj)).coerceIn(0, ad)
         return if (diff < 0) -v else v
@@ -158,6 +158,8 @@ internal object Av1Cdef {
         val priTaps = Av1Tables.cdefPriTaps
         val secTaps = Av1Tables.cdefSecTaps
         val tapSet = (priStr shr coeffShift) and 1
+        val priAdj = if (priStr == 0) 0 else maxOf(0, damping - floorLog2(priStr))
+        val secAdj = if (secStr == 0) 0 else maxOf(0, damping - floorLog2(secStr))
         for (i in 0 until h) for (j in 0 until w) {
             var sum = 0
             val x = src[(y0 + i - top) * stride + x0 + j].toInt()
@@ -179,8 +181,8 @@ internal object Av1Cdef {
                         val candC = (xx shl subX) shr Av1.MI_SIZE_LOG2
                         if (candC >= 0 && candC < f.miCols && candR >= 0 && candR < f.miRows) {
                             val p = src[(yy - top) * stride + xx].toInt()
-                            sum += if (t == 0) priTaps[tapSet * 2 + k] * constrain(p - x, priStr, damping)
-                            else secTaps[tapSet * 2 + k] * constrain(p - x, secStr, damping)
+                            sum += if (t == 0) priTaps[tapSet * 2 + k] * constrain(p - x, priStr, priAdj)
+                            else secTaps[tapSet * 2 + k] * constrain(p - x, secStr, secAdj)
                             max = maxOf(p, max)
                             min = minOf(p, min)
                         }

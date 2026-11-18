@@ -40,14 +40,15 @@ internal object HeifCodecs {
         }
     }
 
-    /** Back to the built-in codecs alone, and no encoder, for tests. */
+    /** Back to the built-in codecs and encoders alone, for tests. */
     fun reset() {
         current.store(table(builtIn))
-        encoders.store(emptyMap())
+        encoders.store(builtInEncoders)
     }
 
-    /** The encoders by item type (#174). None is built in until the AV1 encoder (#176). */
-    private val encoders = AtomicReference<Map<String, HeifEncoder>>(emptyMap())
+    /** The encoders by item type (#174): AV1's is built in (#176), as AV1 is royalty-free. */
+    private val builtInEncoders: Map<String, HeifEncoder> = mapOf(Av1HeifEncoder.itemType to Av1HeifEncoder)
+    private val encoders = AtomicReference(builtInEncoders)
 
     fun registerEncoder(encoder: HeifEncoder) {
         for (t in listOf(encoder.itemType, encoder.configurationType)) {

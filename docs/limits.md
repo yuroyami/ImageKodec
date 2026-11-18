@@ -20,7 +20,8 @@ ImageKodec does not do, and the bounds it puts on hostile input.
   widened. An AVIF, HEIC or JPEG 2000 sample that converts to RGB stays inside the 8-bit level that
   `decode` rounds it to, so that `toBitmap` gives what `decode` gives: a sample of more than 8 bits
   can move by up to 255 sixteen-bit units to stay in that level.
-- There is no encoder for lossy WebP, JPEG 2000, AVIF, JPEG XL or JPEG XR. See
+- There is no encoder for lossy WebP, JPEG 2000, JPEG XL or JPEG XR. The AVIF encoder writes still
+  intra pictures only (see [AVIF](#avif)). See
   [Writing images](encoding.md#what-the-encoders-do-not-write).
 
 ## Size ceilings
@@ -68,6 +69,31 @@ and fail during the decode.
 - AV1 allows a frame coded at another size than the first. Such a frame is scaled to the size of
   the first frame.
 - Large scale tile lists, which no image uses, are refused.
+- The encoder (`encodeAvif`) writes one intra key frame a picture, 8, 10 or 12 bits, at most 65535 on
+  a side. It writes no image sequence, film grain, 128 by 128 superblock, intra block copy, delta
+  quantizer, Wiener restoration, chroma palette, or 4:1 and three-way partition.
+- The encoder is slower than libaom; see [Encoding AVIF](#encoding-avif) below.
+
+### Encoding AVIF
+
+`Av1EncoderBenchmarkTest` (run with `IMAGEKODEC_AV1_BENCHMARK=1`) encodes the six photo-like test scenes
+(0.08 to 0.2 megapixels) at 8-bit 4:2:0 and compares `encodeAvif` with libavif 1.0.4's `avifenc` (libaom
+3.8.2, one thread) at `-q 50` and `-q 80`: for each avifenc file, the size ImageKodec needs for the same
+SSIMULACRA 2 score, read between its sizes at qualities 5 apart. The table gives the mean ratio of the six
+scenes; below 1, ImageKodec's file is smaller. Times are on the JVM after a warm-up, on a 4-core Intel Xeon
+at 2.30 GHz shared with other builds, so they are slower than on an idle machine.
+
+| ImageKodec effort | Against `-s 6 -q 50` | `-s 6 -q 80` | `-s 9 -q 50` | `-s 9 -q 80` | Time per scene at `-q 50`'s score |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.40 | 1.34 | 0.99 | 1.01 | 0.36 s |
+| 2 | 1.18 | 1.11 | 0.82 | 0.86 | 0.75 s |
+| 3 | 0.98 | 0.96 | 0.71 | 0.76 | 4.9 s |
+
+avifenc takes 0.062 s a file at speed 6 and 0.025 s at speed 9, each a fresh process. So effort 2 makes files 11 to
+18 percent larger than libaom's speed 6 at equal score and 14 to 18 percent smaller than speed 9's, and takes 12 times
+as long as speed 6; effort 1 takes 6 times as long, effort 3 79 times, for files 2 to 4 percent smaller than speed
+6's. At efforts 1 to 3, ImageKodec reaches the scores of avifenc's `-q 50` and `-q 80` at qualities 48 to 50 and 79 to 80. A 256 by 256 scene takes, at efforts 1, 2 and 3, 240, 367 and 1,600 ms on the JVM, 618, 1,582 and
+10,411 ms on JS (Node), and 1,157, 2,649 and 17,206 ms on a debug linuxX64 binary (`AvifEncodeTimingTest`).
 
 ## HEIC
 

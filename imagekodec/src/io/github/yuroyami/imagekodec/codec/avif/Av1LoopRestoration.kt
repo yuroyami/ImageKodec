@@ -54,6 +54,22 @@ internal object Av1LoopRestoration {
         }
     }
 
+    /**
+     * The encoder's statistics of the self-guided filter of [set] on [plane] (#176): for each restoration unit of
+     * [unitSize] samples, over its stripes as [apply] filters them, the sums the least-squares fit of the projection
+     * needs, into [stats] at 7 a unit. With u the CDEF output and f0, f1 the two box filters' outputs, each in units of
+     * 2^4, and s the source sample: e = 2^11 s - 128 f1 (or 128 u when f1 is off), a = f0 - f1 (or f0 - u) and
+     * b = u - f1, each divided by 16; then the sums of a a, a b, b b, a e, b e and e e, and of the squared error
+     * of the CDEF output against the source. The filtered sample is (128 f1 + w0 a + w1 b) / 2^11 for the
+     * projection weights w0 = xqd[0] and w1 = xqd[1].
+     */
+    fun sgrStatistics(
+        f: Av1FrameDecoder, plane: Int, set: Int, unitSize: Int, unitRows: Int, unitCols: Int,
+        frame: ShortArray, stride: Int, saved: Map<Int, ShortArray>, source: ShortArray, stats: LongArray,
+    ) {
+        Plane(f, plane, frame, saved, stride).statistics(set, unitSize, unitRows, unitCols, source, stats)
+    }
+
     private class Plane(
         val f: Av1FrameDecoder,
         val plane: Int,
@@ -114,6 +130,75 @@ internal object Av1LoopRestoration {
                         }
                         else -> {}
                     }
+                }
+                stripeNum++
+            }
+        }
+
+        /** See [sgrStatistics]: the same walk over stripes and units as [run], gathering instead of filtering. */
+        fun statistics(set: Int, unitSize: Int, unitRows: Int, unitCols: Int, src: ShortArray, stats: LongArray) {
+            val params = Av1Tables.sgrParams
+            val r0 = params[set * 4]
+            val r1 = params[set * 4 + 2]
+            var stripeNum = 0
+            while (true) {
+                stripeStartY = (-8 + stripeNum * 64) shr subY
+                if (stripeStartY > planeEndY) break
+                stripeEndY = stripeStartY + (64 shr subY) - 1
+                val y0 = maxOf(0, stripeStartY)
+                val y1 = minOf(planeEndY, stripeEndY)
+                val n = (y1 - y0 + 1) * stride
+                if (cdef.size < n) cdef = ShortArray(n)
+                out.copyInto(cdef, 0, y0 * stride, (y1 + 1) * stride)
+                stripeTop = y0
+                val lumaY = maxOf(0, stripeNum * 64 - 8)
+                val unitRow = minOf(unitRows - 1, ((lumaY + 8) shr subY) / unitSize)
+                for (unitCol in 0 until unitCols) {
+                    val x0 = unitCol * unitSize
+                    if (x0 > planeEndX) break
+                    val x1 = if (unitCol == unitCols - 1) planeEndX else minOf(planeEndX, x0 + unitSize - 1)
+                    val w = x1 - x0 + 1
+                    val h = y1 - y0 + 1
+                    prepare(x0, y0, w, h)
+                    val flt0 = if (r0 != 0) boxFilter(x0, y0, w, h, set, 0) else null
+                    val flt1 = if (r1 != 0) boxFilter(x0, y0, w, h, set, 1) else null
+                    val at = (unitRow * unitCols + unitCol) * 7
+                    var aa = 0L
+                    var ab = 0L
+                    var bb = 0L
+                    var ae = 0L
+                    var be = 0L
+                    var ee = 0L
+                    var none = 0L
+                    for (i in 0 until h) {
+                        val row = (y0 + i - stripeTop) * stride + x0
+                        val srow = (y0 + i) * stride + x0
+                        for (j in 0 until w) {
+                            val c = cdef[row + j].toInt()
+                            val uu = c shl SGRPROJ_RST_BITS
+                            val f0 = flt0?.get(i * w + j) ?: uu
+                            val f1 = flt1?.get(i * w + j) ?: uu
+                            val sv = src[srow + j].toInt()
+                            val e = (((sv shl 11) - 128 * f1) shr 4).toLong()
+                            val a = ((f0 - f1) shr 4).toLong()
+                            val b = ((uu - f1) shr 4).toLong()
+                            aa += a * a
+                            ab += a * b
+                            bb += b * b
+                            ae += a * e
+                            be += b * e
+                            ee += e * e
+                            val d = (sv - c).toLong()
+                            none += d * d
+                        }
+                    }
+                    stats[at] += aa
+                    stats[at + 1] += ab
+                    stats[at + 2] += bb
+                    stats[at + 3] += ae
+                    stats[at + 4] += be
+                    stats[at + 5] += ee
+                    stats[at + 6] += none
                 }
                 stripeNum++
             }
