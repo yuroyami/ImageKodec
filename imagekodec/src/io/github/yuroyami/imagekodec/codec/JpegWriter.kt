@@ -548,7 +548,7 @@ internal object JpegWriter {
      */
     fun writeDct(frame: JpegFramePlan, header: JpegHeaderPlan, coding: JpegCodingPlan, cancel: (() -> Unit)?): ByteArray {
         val comps = frame.components
-        val out = ByteArrayBuilder(frame.width * frame.height / 2 + 1024)
+        val out = ByteArrayBuilder((frame.width.toLong() * frame.height / 2).coerceAtMost(1L shl 24).toInt() + 1024)
         header(out, header)
         quantTables(out, frame.quantTables)
         val marker = when {
@@ -613,7 +613,7 @@ internal object JpegWriter {
         val sequential = !coding.progressive
         var eobRun = 0
         var corrections = ByteArray(64)           // the correction bits held for the end-of-band run
-        var held0 = 0
+        var heldInRun = 0
         val pending = IntArray(64)                // the correction bits since the last symbol of a block
         var restarts = 0
 
@@ -623,8 +623,8 @@ internal object JpegWriter {
             h.symbol(table, n shl 4)
             h.put(eobRun, n)
             eobRun = 0
-            for (b in 0 until held0) h.put(corrections[b].toInt(), 1)
-            held0 = 0
+            for (b in 0 until heldInRun) h.put(corrections[b].toInt(), 1)
+            heldInRun = 0
         }
 
         val acTable = 2 + slot(scan.comps[0])
@@ -707,8 +707,8 @@ internal object JpegWriter {
                     }
                     if (run > 0 || held > 0) {
                         eobRun++
-                        if (held0 + held > corrections.size) corrections = corrections.copyOf(maxOf(corrections.size * 2, held0 + held))
-                        for (b in 0 until held) corrections[held0++] = pending[b].toByte()
+                        if (heldInRun + held > corrections.size) corrections = corrections.copyOf(maxOf(corrections.size * 2, heldInRun + held))
+                        for (b in 0 until held) corrections[heldInRun++] = pending[b].toByte()
                         if (eobRun == 0x7FFF) flushRun(acTable)
                     }
                 }
@@ -782,7 +782,7 @@ internal object JpegWriter {
         header: JpegHeaderPlan, coding: JpegCodingPlan, cancel: (() -> Unit)?,
     ): ByteArray {
         val n = planes.size
-        val out = ByteArrayBuilder(width * height * n * (if (precision > 8) 2 else 1) / 2 + 1024)
+        val out = ByteArrayBuilder((width.toLong() * height * n * (if (precision > 8) 2 else 1) / 2).coerceAtMost(1L shl 24).toInt() + 1024)
         header(out, header)
         frameHeader(out, if (coding.arithmetic) 0xCB else 0xC3, precision, width, height, ids, IntArray(n) { 0x11 }, IntArray(n))
         val tableIds = IntArray(n) { it }
