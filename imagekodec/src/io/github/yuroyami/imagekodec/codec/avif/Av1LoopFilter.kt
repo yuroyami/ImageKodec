@@ -2,9 +2,14 @@ package io.github.yuroyami.imagekodec.codec.avif
 
 /** The AV1 loop filter process (specification section 7.14), on the frame's planes in place. */
 internal object Av1LoopFilter {
-    fun apply(f: Av1FrameDecoder) {
+    /**
+     * Filters the planes [planes] has a bit set for (bit 0 luma), all by default. Each plane is filtered from its own
+     * samples alone, so the encoder's level search (#176) filters only the plane it measures.
+     */
+    fun apply(f: Av1FrameDecoder, planes: Int = 7) {
         val fh = f.fh
         for (plane in 0 until f.numPlanes) {
+            if ((planes shr plane) and 1 == 0) continue
             if (plane == 0 || fh.loopFilterLevel[1 + plane] != 0) {
                 for (pass in 0 until 2) {
                     val rowStep = if (plane == 0) 1 else 1 shl f.subY

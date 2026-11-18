@@ -508,9 +508,9 @@ internal class Av1FilterSearch(
 
     // ---- deblocking --------------------------------------------------------------------
 
-    private fun applyDeblock(levels: IntArray) {
+    private fun applyDeblock(levels: IntArray, planes: Int = 7) {
         levels.copyInto(fh.loopFilterLevel)
-        if (levels[0] != 0 || levels[1] != 0) Av1LoopFilter.apply(d)
+        if (levels[0] != 0 || levels[1] != 0) Av1LoopFilter.apply(d, planes)
     }
 
     /**
@@ -531,9 +531,9 @@ internal class Av1FilterSearch(
             levels[1] = l
             levels[2] = 0
             levels[3] = 0
-            applyDeblock(levels)
+            applyDeblock(levels, 1)
             val e = planeError(0)
-            restore(saved)
+            saved[0].copyInto(d.frame[0])
             return e
         }
         val luma = if (effort <= 1) guess else patternSearch(guess, minStep, ::lumaError)
@@ -544,9 +544,9 @@ internal class Av1FilterSearch(
             for (p in 1..2) {
                 fun chromaError(l: Int): Long {
                     levels[p + 1] = l
-                    applyDeblock(levels)
+                    applyDeblock(levels, 1 shl p)
                     val e = planeError(p)
-                    restore(saved)
+                    saved[p].copyInto(d.frame[p])
                     return e
                 }
                 levels[p + 1] = if (effort <= 1) luma else patternSearch(luma, minStep, ::chromaError)
