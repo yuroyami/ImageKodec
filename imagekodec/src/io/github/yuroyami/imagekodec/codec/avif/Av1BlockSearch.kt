@@ -32,6 +32,12 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * from the key frame larger and slower, so it stays out of both. Effort 1 prices both of its types: one alone made
  * the night scene's file at avifenc's `-q 50` score 9 percent larger.
  *
+ * Effort 2 also decides from figures the search already has (#176): it does not code a 64 by 64 block of a still
+ * picture whole where the gradient energies of the mode ranking show a busy source ([busy]), and does not split the
+ * transform of a block whose luma at the largest transform ends after fewer scan positions than the block has 4x4
+ * blocks. Each took about 5 percent off its time within 0.2 percent of the size at equal score. At efforts 1 and 2 the
+ * commit codes each transform block with the levels the search kept for it, where its inputs still match.
+ *
  * Effort 2 was set by measuring, on the photo scenes of the tests, what each step of effort 3 brought against its
  * time, as the size at equal SSIMULACRA 2 score (#176). Kept: 4 by 4 blocks (4.6 percent smaller for 9 percent more
  * time), the identity and the mode's own type while searching and every type at the commit (together about 3.5
@@ -86,6 +92,8 @@ internal class Av1BlockSearch(
     private lateinit var current: Av1BlockChoice
     private val chosen = HashMap<Long, Av1BlockChoice>()
     private var nonZero = 0
+    /** The sum of the luma transform blocks' ends of block in the last trial. */
+    private var lumaEobs = 0
 
     // ---- Av1Coding ---------------------------------------------------------------------
 
@@ -139,6 +147,7 @@ internal class Av1BlockSearch(
         checkResidual = null
         val eob = choose(plane, startX, startY, txSz)
         if (eob > 0) nonZero++
+        if (plane == 0) lumaEobs += eob
         if (mode == Mode.COMMIT) {
             val type = if (plane == 0) txType else d.computeTxType(plane, txSz, startX shr 2, startY shr 2)
             record.add(type)
@@ -176,6 +185,7 @@ internal class Av1BlockSearch(
         chosen.clear()
         // The last superblock's commit adapted the CDFs that every kept result was priced on.
         memo.forget()
+        if (checkReuse) startCdf = d.cdf.copy()
         if (effort <= 2 && !lossless) directionEnergies(r, c)
         sbSaved.save(r, c, Av1.BLOCK_64X64)
         mode = Mode.SEARCH
@@ -227,8 +237,11 @@ internal class Av1BlockSearch(
         var best = -1
         var last = -1
         var noneSkipped = false
+        // A 64 by 64 block of a still picture at effort 2 whose source is busy is not coded whole ([busy], #176).
+        val noneLeft = bSize == Av1.BLOCK_64X64 && hasRows && hasCols && still && effort == 2 && !lossless && busy(r, c, bSize)
         for (k in 0 until n) {
             val p = options[k]
+            if (p == Av1.PARTITION_NONE && noneLeft) continue
             if (p != Av1.PARTITION_NONE && noneSkipped && effort < 3) continue
             saved.restore()
             var j = 0L
@@ -317,6 +330,25 @@ internal class Av1BlockSearch(
         return deviation * 256 < lambda256 * w * h
     }
 
+    /**
+     * Whether the source luma of the block of [bSize] at ([r], [c]) changes by 3 sqrt(lambda) or more a sample, by
+     * the gradient energies [directionEnergies] summed for the mode ranking. On the photo scenes at effort 2, no
+     * 64 by 64 block so busy was coded whole, and leaving such blocks out of the search took about 5 percent off its
+     * time (#176).
+     */
+    private fun busy(r: Int, c: Int, bSize: Int): Boolean {
+        var energy = 0L
+        val u0 = r - unitRow
+        val v0 = c - unitCol
+        for (u in u0 until minOf(16, u0 + Av1.num4x4High[bSize])) for (v in v0 until minOf(16, v0 + Av1.num4x4Wide[bSize])) {
+            val at = (u * 16 + v) * 8
+            for (i in 0 until 8) energy += unitEnergy[at + i]
+        }
+        val area = (minOf(Av1.blockWidth[bSize], src.width - c * 4) * minOf(Av1.blockHeight[bSize], src.height - r * 4)).toLong()
+        // energy / area >= 3 sqrt(lambda), where sqrtLambda256 is 256 sqrt(lambda).
+        return energy * 256 >= 3 * area * sqrtLambda256
+    }
+
     /** Whether a block of [size] has a chroma block at this subsampling. */
     private fun valid(size: Int): Boolean = d.numPlanes == 1 || Av1.subsampledSize(size, d.subX, d.subY) != Av1.BLOCK_INVALID
 
@@ -364,6 +396,7 @@ internal class Av1BlockSearch(
         val keep = minOf(n, if (lossless) 3 else if (effort <= 2) 1 else 5)
         // Each kept mode at the largest transform; then the transform splits of the best mode alone.
         var bestCode = lumaCand[0]
+        var largestEobs = 0
         for (step in 0..txDepths) {
             val modes = if (step == 0) keep else 1
             for (k in 0 until modes) {
@@ -377,7 +410,12 @@ internal class Av1BlockSearch(
                 var tx = if (lossless) Av1.TX_4X4 else maxTx
                 for (i in 0 until step) tx = Av1Tables.splitTxSize[tx]
                 ch.txSize = tx
+                // At effort 2 the transform is not split where the luma at the largest one ends its blocks after
+                // fewer scan positions, all told, than the block has 4x4 blocks: a residual so sparse seldom gains
+                // from smaller transforms (#176).
+                if (step == 1 && effort == 2 && largestEobs < Av1.num4x4Wide[bSize] * Av1.num4x4High[bSize]) break
                 val j = trial(r, c, bSize, ch, saved)
+                if (step == 0) largestEobs = lumaEobs
                 if (j < bestJ) {
                     bestJ = j
                     best.copyFrom(ch)
@@ -712,6 +750,7 @@ internal class Av1BlockSearch(
         current = ch
         trialSink.cost = 0
         nonZero = 0
+        lumaEobs = 0
         d.decodeBlock(r, c, bSize)
         val dist = blockError(r, c, bSize)
         return (dist shl 8) + (lambda256 * trialSink.cost shr 8)
@@ -1542,27 +1581,34 @@ internal class Av1BlockSearch(
         val memoExtra = (if (d.isInter) 1 shl 20 else 0) or ((if (d.useFilterIntra) Av1Tables.filterIntraModeToIntraDir[d.filterIntraMode] else d.yMode) shl 8)
         val w4 = w shr 2
         val h4 = h shr 2
-        if (mode != Mode.COMMIT) {
-            val ctx = memoCtx
-            for (i in 0 until w4) {
-                ctx[i] = d.aboveLevelContext[plane][x4 + i]
-                ctx[w4 + i] = d.aboveDcContext[plane][x4 + i]
+        // At efforts 1 and 2 the commit too takes a kept result, priced on the CDFs of the superblock's start, rather
+        // than choosing the levels again on the CDFs its own symbols adapt (#176): the search's reconstruction stays
+        // the one its decisions were made on, the files were no larger on the photo scenes, and the encoder 5 percent
+        // faster. Effort 3 chooses them again, as before.
+        val ctx = memoCtx
+        for (i in 0 until w4) {
+            ctx[i] = d.aboveLevelContext[plane][x4 + i]
+            ctx[w4 + i] = d.aboveDcContext[plane][x4 + i]
+        }
+        for (i in 0 until h4) {
+            ctx[2 * w4 + i] = d.leftLevelContext[plane][y4 + i]
+            ctx[2 * w4 + h4 + i] = d.leftDcContext[plane][y4 + i]
+        }
+        val eob = if (mode == Mode.COMMIT && effort >= 3) -1 else recall(memoKey, memoExtra, w * h, 2 * (w4 + h4), types)
+        if (eob >= 0) {
+            if (!checkReuse) return eob
+            // Computed afresh below and compared; the decoder makes the kept residual again. In the commit, afresh
+            // on the CDFs the kept result was priced on.
+            if (mode == Mode.COMMIT) {
+                liveCdf = d.cdf
+                d.cdf = startCdf!!
             }
-            for (i in 0 until h4) {
-                ctx[2 * w4 + i] = d.leftLevelContext[plane][y4 + i]
-                ctx[2 * w4 + h4 + i] = d.leftDcContext[plane][y4 + i]
-            }
-            val eob = recall(memoKey, memoExtra, w * h, 2 * (w4 + h4), types)
-            if (eob >= 0) {
-                if (!checkReuse) return eob
-                // Computed afresh below and compared; the decoder makes the kept residual again.
-                hitEob = eob
-                hitType = txType
-                levels.copyInto(hitLevels, 0, 0, tw * th)
-                if (known != null) {
-                    checkResidual = known
-                    known = null
-                }
+            hitEob = eob
+            hitType = txType
+            levels.copyInto(hitLevels, 0, 0, tw * th)
+            if (known != null) {
+                checkResidual = known
+                known = null
             }
         }
         // No residual: the prediction's error, and the price of all_zero.
@@ -1679,6 +1725,8 @@ internal class Av1BlockSearch(
         }
         txType = bestType
         if (hitEob >= 0) {
+            liveCdf?.let { d.cdf = it }
+            liveCdf = null
             check(bestEob == hitEob && (bestEob == 0 || bestType == hitType)) { "a kept result of plane $plane at ($startX, $startY) differs from a fresh one: end $hitEob, type $hitType; afresh $bestEob, $bestType" }
             if (bestEob > 0) for (k in 0 until n) check(levels[k] == hitLevels[k]) { "a kept level of plane $plane at ($startX, $startY) differs from a fresh one at $k" }
             hitEob = -1
@@ -1693,6 +1741,10 @@ internal class Av1BlockSearch(
     private var hitEob = -1
     private var hitType = 0
     private val hitLevels = IntArray(1024)
+
+    /** Under [checkReuse], the CDFs at the superblock's start, and the commit's own while a hit is computed afresh. */
+    private var startCdf: Av1Cdfs? = null
+    private var liveCdf: Av1Cdfs? = null
 
     // ---- results of [choose] kept for a repeat -----------------------------------------
 
@@ -1906,7 +1958,6 @@ internal class Av1BlockSearch(
         private val STEPS_3 = intArrayOf(32, 16, 8, 4, 2, 1)
         /** The eight neighbours of a point, the four nearest first: row and column steps. */
         private val SQUARE = intArrayOf(-1, 0, 0, -1, 0, 1, 1, 0, -1, -1, -1, 1, 1, -1, 1, 1)
-        val PRUNE = LongArray(4)
         /** How many directional modes [strongestDirections] keeps at efforts 1 and 2. */
         private const val DIRECTIONS = 3
         /** The floor of the square root of [x], by Newton's method in integers. */
