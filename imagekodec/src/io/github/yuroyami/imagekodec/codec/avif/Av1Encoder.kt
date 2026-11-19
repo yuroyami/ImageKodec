@@ -107,7 +107,7 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         lastBlockSearch = block
         for (tile in 0 until fh1.tileCols * fh1.tileRows) block.tile(tile)
         // The filters on the reconstruction, then the final header.
-        val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration, settings.checkReuse)
+        val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration, settings.checkReuse, still = !sequence)
         lastFilterSearch = filterSearch
         val filters = filterSearch.search(search, stream)
         chosenFilters = filters

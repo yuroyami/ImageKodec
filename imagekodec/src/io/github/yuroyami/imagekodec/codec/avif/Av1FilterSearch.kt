@@ -10,8 +10,8 @@ package io.github.yuroyami.imagekodec.codec.avif
  * CDEF filters the deblocked frame once for each of a set of strength pairs, keeps each 64 by 64 block's squared
  * error under each, and picks the 1, 2, 4 or 8 pairs, and each block's choice among them, that cost least with
  * `cdef_idx` priced at its bits. Loop restoration then weighs the self-guided and Wiener filters on the CDEF output
- * ([restoration]), which the frames the CDEF search kept put together without filtering again. At effort 2 both
- * the deblocking and the CDEF search measure on half the picture ([deblock], [cdef]).
+ * ([restoration]), which the frames the CDEF search kept put together without filtering again. In a still picture
+ * at effort 2 both the deblocking and the CDEF search measure on half the picture ([deblock], [cdef]).
  */
 internal class Av1FilterSearch(
     private val d: Av1FrameDecoder,
@@ -26,6 +26,8 @@ internal class Av1FilterSearch(
     private val forceRestoration: Boolean = false,
     /** Whether the CDEF output put together from the search's passes is checked against filtering the frame. */
     private val checkReuse: Boolean = false,
+    /** Whether the frame is a still picture, whose search at effort 2 measures on half of it. */
+    private val still: Boolean = true,
 ) {
     /** How many times [checkReuse] compared the CDEF output put together with the frame filtered. */
     var cdefChecks = 0
@@ -582,7 +584,7 @@ internal class Av1FilterSearch(
      * The loop filter levels by the squared error they leave: luma both ways, then each chroma plane, each by a
      * pattern search from a guess that grows with the quantizer, as the filter's thresholds do: the level and its
      * neighbours a step away, moving to the best and halving the step, down to a step of 4 at effort 2 and of 1 at 3.
-     * Effort 1 keeps the guess. At effort 2, in a picture of more than one band of 64 rows, each level is measured on
+     * Effort 1 keeps the guess. In a still picture at effort 2 of more than one band of 64 rows, each level is measured on
      * the even bands alone, which the odd ones leave as they are (#176): the files kept their size at equal score on
      * the photo scenes, for half the filtering.
      */
@@ -591,7 +593,7 @@ internal class Av1FilterSearch(
         val levels = IntArray(4)
         val guess = (fh.baseQIdx * 3 / 32).coerceIn(0, 63)
         val minStep = if (effort >= 3) 1 else 4
-        val bands = effort == 2 && d.miRows > 16
+        val bands = effort == 2 && still && d.miRows > 16
         // Luma.
         fun lumaError(l: Int): Long {
             if (l == 0) return planeError(0)
@@ -678,7 +680,7 @@ internal class Av1FilterSearch(
 
     /**
      * The CDEF strengths by the error they leave. With [keepOutputs], when the frame is no larger than [KEEP_SAMPLES],
-     * the frame each strength pair leaves is kept for [applyCdef]. At effort 2 each pair filters and is measured on
+     * the frame each strength pair leaves is kept for [applyCdef]. In a still picture at effort 2 each pair filters and is measured on
      * half the 8x8 blocks, a checkerboard, its error doubled, and [applyCdef] filters the other half once with the
      * chosen pairs (#176): the files kept their size at equal score on the photo scenes, for a quarter less filtering.
      */
@@ -695,7 +697,7 @@ internal class Av1FilterSearch(
         val errY = Array(luma.size) { LongArray(sbRows * sbCols) }
         val errUv = Array(luma.size) { LongArray(sbRows * sbCols) }
         val outputs = if (keepOutputs && d.planeWidth[0].toLong() * d.planeHeight[0] <= KEEP_SAMPLES) arrayOfNulls<Array<ShortArray>>(luma.size) else null
-        val half = effort == 2
+        val half = effort == 2 && still
         fh.cdefDamping = damping
         fh.cdefBits = 0
         for (k in luma.indices) {

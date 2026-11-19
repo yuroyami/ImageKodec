@@ -35,8 +35,9 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * Effort 2 also decides from figures the search already has (#176): it does not code a 64 by 64 block of a still
  * picture whole where the gradient energies of the mode ranking show a busy source ([busy]), nor split the
  * transform of one whose luma at the largest transform ends after fewer scan positions than the block has 4x4
- * blocks. Each took about 5 percent off its time within 0.2 percent of the size at equal score. At efforts 1 and 2 the
- * commit codes each transform block with the levels the search kept for it, where its inputs still match.
+ * blocks. Each took about 5 percent off its time within 0.2 percent of the size at equal score. In a still picture
+ * at efforts 1 and 2 the commit codes each transform block with the levels the search kept for it, where its inputs
+ * still match.
  *
  * Effort 2 was set by measuring, on the photo scenes of the tests, what each step of effort 3 brought against its
  * time, as the size at equal SSIMULACRA 2 score (#176). Kept: 4 by 4 blocks (4.6 percent smaller for 9 percent more
@@ -77,8 +78,8 @@ internal class Av1BlockSearch(
     private val trialSink = Av1SymbolCounter(adapt = false)
     private val commitSink = Av1SymbolCounter(adapt = true)
     private val costSink = Av1SymbolCounter(adapt = false)
-    // Butterflies at effort 2 (#176); efforts 1 and 3 keep the basis sums, whose files their measures were taken on.
-    private val fwd = Av1ForwardTransform(bitDepth, butterflies = effort == 2)
+    // Butterflies in stills at effort 2 (#176); elsewhere the basis sums, whose files their measures were taken on.
+    private val fwd = Av1ForwardTransform(bitDepth, butterflies = effort == 2 && still)
     private val dcQ = Av1Transform.dcQ(bitDepth, qIndex)
     private val acQ = Av1Transform.acQ(bitDepth, qIndex)
 
@@ -1582,10 +1583,10 @@ internal class Av1BlockSearch(
         val memoExtra = (if (d.isInter) 1 shl 20 else 0) or ((if (d.useFilterIntra) Av1Tables.filterIntraModeToIntraDir[d.filterIntraMode] else d.yMode) shl 8)
         val w4 = w shr 2
         val h4 = h shr 2
-        // At efforts 1 and 2 the commit too takes a kept result, priced on the CDFs of the superblock's start, rather
-        // than choosing the levels again on the CDFs its own symbols adapt (#176): the search's reconstruction stays
-        // the one its decisions were made on, the files were no larger on the photo scenes, and the encoder 5 percent
-        // faster. Effort 3 chooses them again, as before.
+        // In a still picture at efforts 1 and 2 the commit too takes a kept result, priced on the CDFs of the
+        // superblock's start, rather than choosing the levels again on the CDFs its own symbols adapt (#176): the
+        // search's reconstruction stays the one its decisions were made on, the files were no larger on the photo
+        // scenes, and the encoder 5 percent faster. Effort 3 and a sequence choose them again, as before.
         val ctx = memoCtx
         for (i in 0 until w4) {
             ctx[i] = d.aboveLevelContext[plane][x4 + i]
@@ -1595,7 +1596,7 @@ internal class Av1BlockSearch(
             ctx[2 * w4 + i] = d.leftLevelContext[plane][y4 + i]
             ctx[2 * w4 + h4 + i] = d.leftDcContext[plane][y4 + i]
         }
-        val eob = if (mode == Mode.COMMIT && effort >= 3) -1 else recall(memoKey, memoExtra, w * h, 2 * (w4 + h4), types)
+        val eob = if (mode == Mode.COMMIT && (effort >= 3 || !still)) -1 else recall(memoKey, memoExtra, w * h, 2 * (w4 + h4), types)
         if (eob >= 0) {
             if (!checkReuse) return eob
             // Computed afresh below and compared; the decoder makes the kept residual again. In the commit, afresh

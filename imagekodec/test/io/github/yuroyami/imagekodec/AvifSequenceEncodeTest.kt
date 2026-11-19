@@ -163,7 +163,7 @@ class AvifSequenceEncodeTest {
         /** The MD5 of each file, written on the JVM; every other target must write the same bytes. */
         val EXPECTED = listOf(
             "f2be3b466699bbc93437c09e6cd93dec",
-            "291a0ffb8574a47756f6d02ee936fe53",
+            "201251ae378e0d74bd7500bd43538473",
             "ed114b491ba7f3dd537c126f2abb1075",
             "1e3d58903b35634ac0607c44d87f67d9",
         )
