@@ -138,7 +138,7 @@ class AvifEncodeTest {
         /** The MD5 of each file, written on the JVM; every other target must write the same bytes. */
         val EXPECTED = listOf(
             "09473960c0121a90380cc50332bc26a4",
-            "030363baf405f5cbd0046a387706e3cd",
+            "00485b3bd9d493e803629080b113871b",
             "f871e971453e11b1d677a15d55ba106a",
             "0a02a9e27160c4c81846950096e103fd",
             "819aab2cf7089fa993612b293f3268d1",

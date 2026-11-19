@@ -33,8 +33,8 @@ import io.github.yuroyami.imagekodec.codec.avif.Av1Cdfs.Companion as C
  * the night scene's file at avifenc's `-q 50` score 9 percent larger.
  *
  * Effort 2 also decides from figures the search already has (#176): it does not code a 64 by 64 block of a still
- * picture whole where the gradient energies of the mode ranking show a busy source ([busy]), and does not split the
- * transform of a block whose luma at the largest transform ends after fewer scan positions than the block has 4x4
+ * picture whole where the gradient energies of the mode ranking show a busy source ([busy]), nor split the
+ * transform of one whose luma at the largest transform ends after fewer scan positions than the block has 4x4
  * blocks. Each took about 5 percent off its time within 0.2 percent of the size at equal score. At efforts 1 and 2 the
  * commit codes each transform block with the levels the search kept for it, where its inputs still match.
  *
@@ -77,7 +77,8 @@ internal class Av1BlockSearch(
     private val trialSink = Av1SymbolCounter(adapt = false)
     private val commitSink = Av1SymbolCounter(adapt = true)
     private val costSink = Av1SymbolCounter(adapt = false)
-    private val fwd = Av1ForwardTransform(bitDepth)
+    // Butterflies at effort 2 (#176); efforts 1 and 3 keep the basis sums, whose files their measures were taken on.
+    private val fwd = Av1ForwardTransform(bitDepth, butterflies = effort == 2)
     private val dcQ = Av1Transform.dcQ(bitDepth, qIndex)
     private val acQ = Av1Transform.acQ(bitDepth, qIndex)
 
@@ -410,10 +411,10 @@ internal class Av1BlockSearch(
                 var tx = if (lossless) Av1.TX_4X4 else maxTx
                 for (i in 0 until step) tx = Av1Tables.splitTxSize[tx]
                 ch.txSize = tx
-                // At effort 2 the transform is not split where the luma at the largest one ends its blocks after
-                // fewer scan positions, all told, than the block has 4x4 blocks: a residual so sparse seldom gains
-                // from smaller transforms (#176).
-                if (step == 1 && effort == 2 && largestEobs < Av1.num4x4Wide[bSize] * Av1.num4x4High[bSize]) break
+                // In a still picture at effort 2 the transform is not split where the luma at the largest one ends
+                // its blocks after fewer scan positions, all told, than the block has 4x4 blocks: a residual so
+                // sparse seldom gains from smaller transforms (#176).
+                if (step == 1 && effort == 2 && still && largestEobs < Av1.num4x4Wide[bSize] * Av1.num4x4High[bSize]) break
                 val j = trial(r, c, bSize, ch, saved)
                 if (step == 0) largestEobs = lumaEobs
                 if (j < bestJ) {

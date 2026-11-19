@@ -7,17 +7,25 @@ package io.github.yuroyami.imagekodec.codec.avif
  * n / 2 (its DC basis vector is 1 / sqrt(2) in each of n samples), so the transpose divided by that gain inverts it,
  * and the row and column shifts of the inverse are multiplied back.
  *
- * The DCT and the ADST of 8 and 16 points run as butterflies, the inverse's own steps transposed ([run]), which take
- * an eighth to a half of the products of a sum over the basis; the ADST of 4 points and the identity are sums over the
- * basis that [Av1Transform.basis] tabulates. The two agree within a few units of the last place, as the butterflies
- * round each rotation and the basis entries are rounded products of the same rotations.
+ * With [butterflies], the DCT and the ADST of 8 and 16 points run as the inverse's own steps transposed ([run]),
+ * which take an eighth to a half of the products of a sum over the basis; the ADST of 4 points and the identity, and
+ * without [butterflies] every kind, are sums over the basis that [Av1Transform.basis] tabulates. The two agree within
+ * a few units of the last place, as the butterflies round each rotation and the basis entries are rounded products
+ * of the same rotations.
  *
  * The output is in the units of the decoder's dequantized coefficients, the `Dequant` of section 7.12.3, which a
  * level times its quantizer step, divided by the size's `dqDenom`, reconstructs. Everything runs in `Int`: the row
  * pass sums at most 64 products of a 13-bit residual and a 4096-scaled basis entry, or rotates values that stay as
  * far below 2^31, and its result is shifted down by just enough that the column pass stays below 2^31 too.
  */
-internal class Av1ForwardTransform(private val bitDepth: Int) {
+internal class Av1ForwardTransform(
+    private val bitDepth: Int,
+    /**
+     * Whether the DCT and ADST run as butterflies; without, as sums over the basis, the DCT's halved by its symmetry
+     * ([partialDct]), which give the coefficients of the transform the encoder used before (#176).
+     */
+    private val butterflies: Boolean = true,
+) {
 
     /** The row pass of the current block under each of three row kinds and two horizontal flips, made when first asked. */
     private val rows = Array(6) { IntArray(64 * 32) }
@@ -79,6 +87,13 @@ internal class Av1ForwardTransform(private val bitDepth: Int) {
                 }
             } else for (i in 0 until h) {
                 val src = i * w
+                if (rowKind == 0) {
+                    val x = vec
+                    if (flipLR) for (j in 0 until w) x[j] = residual[src + w - 1 - j] else residual.copyInto(x, 0, src, src + w)
+                    partialDct(x, log2W, tw, res)
+                    for (k in 0 until tw) rs[i * 32 + k] = (res[k] + half1) shr s1
+                    continue
+                }
                 for (k in 0 until tw) {
                     var sum = 0
                     if (rowKind == 2) {
@@ -119,6 +134,13 @@ internal class Av1ForwardTransform(private val bitDepth: Int) {
             return
         }
         for (k in 0 until tw) {
+            if (colKind == 0) {
+                val x = vec
+                if (flipUD) for (i in 0 until h) x[i] = rs[(h - 1 - i) * 32 + k] else for (i in 0 until h) x[i] = rs[i * 32 + k]
+                partialDct(x, log2H, th, res)
+                for (m in 0 until th) out[m * tw + k] = if (rect) roundShift(roundShift(res[m], e - 1) * 181, 8) else roundShift(res[m], e)
+                continue
+            }
             for (m in 0 until th) {
                 var sum = 0
                 if (colKind == 2) {
@@ -141,6 +163,48 @@ internal class Av1ForwardTransform(private val bitDepth: Int) {
     /** The values the butterflies of a block's rows or columns work on, all of them at once. */
     private val work = IntArray(64 * 64)
 
+    /** Scratch of [partialDct]: a row or column, the sums handed down, the differences and the outputs, by level. */
+    private val vec = IntArray(64)
+    private val sums = Array(7) { IntArray(64) }
+    private val odd = Array(7) { IntArray(32) }
+    private val evenOut = Array(7) { IntArray(64) }
+    private val res = IntArray(64)
+
+    /**
+     * The first [count] outputs of the DCT basis of 2^[log2n] points applied to [x] (destroyed), into [out]: the sum
+     * over j of basis[k][j] x[j], exactly. Even and odd outputs split (a partial butterfly): the even ones are the
+     * half-size DCT of x[j] + x[n-1-j], whose basis is the even rows of this one, and the odd ones take the
+     * differences x[j] - x[n-1-j] against the first half of their rows. About a third of the products of the direct
+     * sum, and the same Int bound, as each level doubles the values and halves their count.
+     */
+    private fun partialDct(x: IntArray, log2n: Int, count: Int, out: IntArray) {
+        val n = 1 shl log2n
+        val b = basis(0, log2n)
+        if (log2n == 2) {
+            for (k in 0 until count) out[k] = b[k * 4] * x[0] + b[k * 4 + 1] * x[1] + b[k * 4 + 2] * x[2] + b[k * 4 + 3] * x[3]
+            return
+        }
+        val half = n shr 1
+        val e = sums[log2n - 1]
+        val o = odd[log2n]
+        for (j in 0 until half) {
+            e[j] = x[j] + x[n - 1 - j]
+            o[j] = x[j] - x[n - 1 - j]
+        }
+        var k = 1
+        while (k < count) {
+            var sum = 0
+            val row = k * n
+            for (j in 0 until half) sum += b[row + j] * o[j]
+            out[k] = sum
+            k += 2
+        }
+        val evens = (count + 1) shr 1
+        val up = evenOut[log2n]
+        partialDct(e, log2n - 1, evens, up)
+        for (m in 0 until evens) out[2 * m] = up[m]
+    }
+
     /**
      * A one-dimensional forward transform as butterflies. Its [steps] take 7 values each: 0 and two places for a sum
      * and difference, or 1, two places and the four weights, in 1/4096, of a rotation. Input j goes first to place
@@ -149,7 +213,7 @@ internal class Av1ForwardTransform(private val bitDepth: Int) {
     private class Graph(val steps: IntArray, val load: IntArray?, val negate: BooleanArray?, val coef: IntArray)
 
     /** The butterflies of [kind] (0 DCT, 1 ADST, 2 identity) at 2^[log2n] points, or null where the basis sums serve. */
-    private fun graph(kind: Int, log2n: Int): Graph? = when (kind) {
+    private fun graph(kind: Int, log2n: Int): Graph? = if (!butterflies) null else when (kind) {
         0 -> DCT[log2n]
         1 -> if (log2n >= 3) ADST[log2n] else null
         else -> null

@@ -10,12 +10,12 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * The AV1 encoder's forward transform (#176) runs the DCT, and the ADST of 8 and 16 points, as butterflies, the
- * inverse's steps transposed, rather than as sums over the decoder's basis. Its coefficients are held here to those
- * sums, worked out exactly, within one and a half units of an 8-bit coefficient and 1/1024 of the block's largest, for
- * every size and type the encoder codes, at 8 and 12 bits: on noise, and on the residual that drives a coefficient to
- * its largest value, where a product past an Int would show as a wrong coefficient. The sums over the basis that the
- * transform used before met the same bound.
+ * The AV1 encoder's forward transform (#176) runs the DCT, and the ADST of 8 and 16 points, as butterflies at effort
+ * 2, the inverse's steps transposed, rather than as sums over the decoder's basis. Its coefficients are held here to
+ * those sums, worked out exactly, within one and a half units of an 8-bit coefficient and 1/1024 of the block's
+ * largest, for every size and type the encoder codes, at 8 and 12 bits: on noise, and on the residual that drives a
+ * coefficient to its largest value, where a product past an Int would show as a wrong coefficient. The basis sums
+ * that efforts 1 and 3 keep are held to the same bound.
  */
 class Av1ForwardTransformTest {
 
@@ -68,7 +68,11 @@ class Av1ForwardTransformTest {
     }
 
     private fun check(bitDepth: Int, txSz: Int, type: Int, residual: IntArray, what: String) {
-        val fwd = Av1ForwardTransform(bitDepth)
+        for (butterflies in listOf(true, false)) check(bitDepth, txSz, type, residual, what, butterflies)
+    }
+
+    private fun check(bitDepth: Int, txSz: Int, type: Int, residual: IntArray, what: String, butterflies: Boolean) {
+        val fwd = Av1ForwardTransform(bitDepth, butterflies)
         fwd.newBlock()
         val got = IntArray(1024)
         fwd.forward(residual, txSz, type, got)
@@ -77,7 +81,7 @@ class Av1ForwardTransformTest {
         for (v in want) largest = maxOf(largest, abs(v))
         for (i in want.indices) {
             val e = abs(got[i] - want[i])
-            assertTrue(e <= 1.5 * (1 shl (bitDepth - 8)) + largest / 1024, "$bitDepth bits, size $txSz, type $type, $what: coefficient $i is ${got[i]}, the basis sums give ${want[i]}")
+            assertTrue(e <= 1.5 * (1 shl (bitDepth - 8)) + largest / 1024, "${if (butterflies) "butterflies" else "basis sums"}, $bitDepth bits, size $txSz, type $type, $what: coefficient $i is ${got[i]}, the basis sums give ${want[i]}")
         }
     }
 
