@@ -435,11 +435,11 @@ What the encoder writes:
   type costs least. The Wiener filter makes the files of the photo scenes, and of the same scenes blurred, 0.5
   percent smaller at equal SSIMULACRA 2 score at effort 2 (`Av1ToolGainTest`).
 - `effort` 1 tries one luma and one chroma mode at their own transform size, ranking only the three
-  directional modes whose lines the block's source follows most, square partitions down to 8 by 8
-  but no split of a block that varies little and keeps its largest transform, and of the DCT and the
-  mode's own transform type the one whose coefficients have the least magnitude; 2 adds one transform
-  split, 4 by 4 blocks, the identity type to choose from, the level search, Wiener restoration and intra
-  block copy; 3 adds a second luma and chroma mode, every direction with its angle deltas, filter intra,
+  directional modes whose lines the block's source follows most, square partitions down to 8 by 8, and
+  the DCT and the mode's own transform type, each priced; 2 adds one transform split below 64 by 64,
+  4 by 4 blocks, the level search, Wiener restoration and intra block copy, but no split of a block of a
+  still picture that varies little and keeps its largest transform, and prices only the one of the DCT,
+  the identity and the mode's own type whose coefficients have the least magnitude; 3 adds a second luma and chroma mode, every direction with its angle deltas, filter intra,
   rectangular partitions, two transform splits, every transform type of the set priced in full, the
   self-guided filter and more filter strengths. Effort 2 was set by measuring what each step of effort 3
   brings against its time; see [Limits](limits.md#encoding-avif).
