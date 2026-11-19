@@ -189,14 +189,18 @@ reviewable in the diff.
   requires. Effort 2 takes under a third of the time it did when first written, for files no larger at equal
   score: it ranks only the intra directions the block's source follows, prices one transform type, keeps the
   levels it chose and the residual they make for a repeat, puts the best luma back before ranking chroma rather
-  than coding it again, keeps the largest transform of a 64 by 64 block, prunes splits of smooth blocks in
-  stills, and restores with the Wiener filter alone;
-  CDEF filters a block whose taps are all inside the frame without checking each, in the decoder too. It runs the
+  than coding it again, keeps the largest transform of a 64 by 64 block, and restores with the Wiener filter
+  alone; in stills it also prunes splits of smooth blocks, the transform split of a sparse residual and the whole
+  of a busy 64 by 64 block, commits the levels its search kept, measures the loop filter and CDEF strengths on
+  half the picture, and runs the forward DCT and ADST as butterflies. CDEF filters a block whose taps are all
+  inside the frame without checking each, and reads only the taps of a strength that is not 0, in the decoder
+  too. It runs the
   core's AV1 decoder in a coding mode, so its reconstruction is the decoder's; dav1d and ImageKodec decode
   every stream of `Av1EncoderOracleTest` to it sample for sample, and libavif, libheif and exiftool read
   the files in `AvifEncodeOracleTest`. A picture wider than 4096 with no tile size codes as AV1 tiles.
-  The AV1 decoder's inverse transform skips the rows that hold only zeros and CDEF works out its damping
-  once a block, which leaves its output unchanged.
+  The AV1 decoder's inverse transform skips the rows that hold only zeros, CDEF works out its damping
+  once a block, and the loop filter works out no strength for an edge it leaves, which leaves its output
+  unchanged.
 - `ImageKodec.encodeAvif(animation, options, metadata, cancellationCheck)` writes an animated AVIF: an AV1
   image sequence track of every frame with its delay (timescale 1000), the loop count in an edit list as
   libavif reads it, an alpha track auxiliary to it when a frame has alpha, and the first frame also as the

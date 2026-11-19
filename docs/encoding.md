@@ -438,8 +438,11 @@ What the encoder writes:
   directional modes whose lines the block's source follows most, square partitions down to 8 by 8, and
   the DCT and the mode's own transform type, each priced; 2 adds one transform split below 64 by 64,
   4 by 4 blocks, the level search, Wiener restoration and intra block copy, but no split of a block of a
-  still picture that varies little and keeps its largest transform, and prices only the one of the DCT,
-  the identity and the mode's own type whose coefficients have the least magnitude; 3 adds a second luma and chroma mode, every direction with its angle deltas, filter intra,
+  still picture that varies little and keeps its largest transform, nor a transform split where its
+  luma at the largest transform is sparse, and no 64 by 64 block of a still picture coded whole where its
+  source is busy, and prices only the one of the DCT, the identity and the mode's own type whose
+  coefficients have the least magnitude; in a still picture it measures the loop filter levels and CDEF
+  strengths on half the picture; 3 adds a second luma and chroma mode, every direction with its angle deltas, filter intra,
   rectangular partitions, two transform splits, every transform type of the set priced in full, the
   self-guided filter and more filter strengths. Effort 2 was set by measuring what each step of effort 3
   brings against its time; see [Limits](limits.md#encoding-avif).

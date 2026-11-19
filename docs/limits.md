@@ -202,18 +202,27 @@ at 2.30 GHz shared with other builds.
 
 | ImageKodec effort | Against `-s 6 -q 50` | `-s 6 -q 80` | `-s 9 -q 50` | `-s 9 -q 80` | Time of the six scenes at quality 50 | Times `-s 6` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.41 | 1.28 | 0.99 | 0.96 | 0.94 s | 3.2 |
+| 2 | 1.15 | 1.05 | 0.83 | 0.82 | 1.18 s | 4.0 |
+| 3 | 0.97 | 0.95 | 0.71 | 0.75 | 24.4 s | 82 |
+
+avifenc took 0.296 s for the six scenes at speed 6 and 0.092 s at speed 9, each file a fresh process, start
+included; ImageKodec's times are the CPU time of its thread, the least of three runs. So effort 2 makes files 5 to
+15 percent larger than libaom's speed 6 at equal score and 17 to 18 percent smaller than speed 9's, and takes 4.0
+times as long as speed 6 (3.97); effort 1 takes 3.2 times as long, for files 28 to 41 percent larger; effort 3 makes
+files 3 to 5 percent smaller than speed 6's in 82 times its time. At efforts 1 to 3, ImageKodec reaches the scores of avifenc's
+`-q 50` and `-q 80` at qualities 48 to 51 and 79 to 80. This machine ran slower in this session than in the second
+round's: avifenc took a fifth longer, and effort 3, whose files and code path are the second round's, a quarter.
+
+The figures of the second round of #176's speed work, in another session (avifenc then 0.248 s and 0.078 s):
+
+| ImageKodec effort | Against `-s 6 -q 50` | `-s 6 -q 80` | `-s 9 -q 50` | `-s 9 -q 80` | Time of the six scenes at quality 50 | Times `-s 6` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1 | 1.41 | 1.29 | 1.00 | 0.97 | 0.85 s | 3.4 |
 | 2 | 1.17 | 1.05 | 0.84 | 0.83 | 1.17 s | 4.7 |
 | 3 | 0.97 | 0.95 | 0.71 | 0.75 | 19.6 s | 79 |
 
-avifenc took 0.248 s for the six scenes at speed 6 and 0.078 s at speed 9, each file a fresh process, start
-included; ImageKodec's times are the CPU time of its thread, the least of three runs. So effort 2 makes files 5 to
-17 percent larger than libaom's speed 6 at equal score and 16 percent smaller than speed 9's, and takes 4.7 times as
-long as speed 6; effort 1 takes 3.4 times as long, for files 29 to 41 percent larger; effort 3 makes files 3 to 5
-percent smaller than speed 6's in 79 times its time. At efforts 1 to 3, ImageKodec reaches the scores of avifenc's
-`-q 50` and `-q 80` at qualities 48 to 51 and 79 to 80.
-
-The figures of the first round of #176's speed work, in another session (avifenc then 0.231 s and 0.077 s):
+of the first round, in another session (avifenc then 0.231 s and 0.077 s):
 
 | ImageKodec effort | Against `-s 6 -q 50` | `-s 6 -q 80` | `-s 9 -q 50` | `-s 9 -q 80` | Time of the six scenes at quality 50 | Times `-s 6` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -262,6 +271,34 @@ timings themselves spread by about 5 percent on this shared machine):
 | The best luma is put back before chroma is ranked, not coded again; the chroma ranking leaves the coded chroma as it was | -3 % | -4 % | within 0.1 % |
 | A 64 by 64 block keeps its largest transform at effort 2 | | -6 to -14 % | -0.2 to -0.4 % |
 | Effort 1 prices both of its transform types again | +3 % | | `-s 6 -q 50` column 1.45 to 1.41 |
+| Third round, each left out of the whole in turn: the forward DCT and the 8- and 16-point ADST as butterflies, the inverse's steps transposed, at effort 2 | | -8 % | +0.3 % |
+| The commit codes the levels the search kept, in stills at efforts 1 and 2 | -4 % | -5 % | -0.6 % at effort 1, +0.3 % at effort 2 |
+| No 64 by 64 block coded whole where the source's gradients pass 3 sqrt(lambda) a sample, in stills at effort 2 | | -5 % | -0.1 % |
+| No transform split where the luma at the largest transform ends after fewer scan positions than the block has 4x4 blocks, in stills at effort 2 | | -5 % | +0.15 % |
+| CDEF strengths measured on a checkerboard of half the 8x8 blocks, in stills at effort 2 | | -2 % | within 0.1 % |
+| Loop filter levels measured on the even bands of 64 rows, in stills at effort 2 | | -5 % | within 0.1 % |
+| All six together at effort 2, against the second round's choices with the decoder's speed-ups below | | -20 % | within 0.1 % |
+
+The third round's figures come from one session, each change left out of the whole in turn, interleaved, the least
+of eight runs; they spread by about 3 percent, so the parts do not add up to the whole. The butterflies at effort 1
+measured 7 percent faster but its files 1 percent larger at equal score, and in the benchmark they made effort 1's
+`-s 6 -q 80` column 1.34, where the landscape and bokeh scenes reach avifenc's score in a stretch of qualities whose
+score hardly moves; at effort 3 they made the night scene 6 percent larger at `-s 6 -q 50`. So efforts 1 and 3
+keep the sums over the basis, and effort 3 writes the second round's bytes. The commit's reuse of kept levels at effort 3 turned
+every switchable restoration unit of `Av1EncoderOracleTest.wienerRestoration` to the self-guided filter, so effort
+3 chooses its levels again as before. In sequences the round-three changes made effort 2's files up to 5 percent
+larger against libaom at equal score for no time measurably saved (inter frames spend their time in the motion
+search), so a sequence codes as before. Two changes leave the output as it was and run in the decoder as well:
+CDEF reads only the taps of a strength that is not 0, the other kind adding nothing and the clip to the taps' range
+then changing nothing, and the loop filter works out no strength for an edge it leaves; both were in both sides of
+the comparisons above.
+
+Tried in the third round and left out, measured on top of the rest: a split given up once its first children cost
+more than their share of the whole block, with a margin of two (`j > 2 (q + 1) J_none / 4` after child q), spared 2
+percent of children for nothing measurable in time or size; coding a 64 by 64 block's split first and its whole only
+when fewer than two of its children split spared 26 percent of those blocks within 0.1 percent of J, but measured
+5 percent faster and 1 percent larger alone, and nothing faster with the rest, as the split it codes in full is the
+split the whole block's cost cut short before.
 
 Until the second round the chroma ranking left its last prediction in the block's chroma, and a block whose ranked
 chroma mode was the one already coded kept it there for the search of the blocks after it; the commit pass coded
@@ -282,20 +319,21 @@ little to try: a split given up once its first children cost more than their sha
 32 by 32 (up to 0.4 percent larger, no time measurably saved) and chroma ranking only DC, chroma from luma and the luma's
 mode (0.4 to 0.5 percent larger, likewise).
 
-The aim of #176, effort 2 within 4 times speed 6, is not met: effort 2 takes 4.7 times as long. Its time now goes 76
-percent to the block search, of which coding candidates through the decoder takes 45 points (choosing levels 32, of
-it forward transforms 18, half of it the DCT's; inverse transforms 8; intra prediction 16 over the whole search),
-ranking luma modes 12 and chroma modes 9; and 20 percent to the filter search (CDEF 10, deblocking 5). Each block
-still codes its candidates at every partition size the pruning leaves, about three a sample. What is left: a faster
-forward DCT (its passes are a partial butterfly, a third of the direct sum's products, where a full butterfly needs
-fewer still), and partition decisions that pay for their own estimate, which needs an estimate
-that reuses what the exact search computes rather than a pass of its own.
+The aim of #176, effort 2 within 4 times speed 6, is met, by a hair: 3.97 times in this session, where the second
+round's choices, measured beside it, took a quarter longer, about 4.9 times. Its time now goes 76 percent to the block
+search, of which coding candidates through the decoder takes 49 points (choosing levels 26, of it the forward
+transform 13, its butterflies 4; inverse transforms 7; writing levels into the counter 9; intra prediction 17 over the
+whole search), ranking luma modes 13 and chroma modes 10; and 20 percent to the filter search (CDEF 10, of it the
+search 7 and the final half 4; restoration 5; deblocking about 3). Each block still codes its candidates at every
+partition size the pruning leaves. What is left: the chroma and luma ranking, which predicts every mode it ranks over
+the whole block, and the partitions, whose cheaper signals measured too little to pay.
 
-On JS (Node, `AvifEncodeTimingTest`, the faster of two runs), a 256 by 256 scene at quality 50 takes 404, 513 and
-9,732 ms at efforts 1, 2 and 3, where the first round's code took 614, 896 and 11,067 ms in the same session, and the
-code before any speed work 834, 1,392 and 12,466 ms in an earlier one. Effort 3 gains least there: the decoder's
-inverse transform and CDEF direction search, which the encoder runs for every candidate, and the Wiener filter's
-least squares work in Long arithmetic, which JS does in software.
+On JS (Node, `AvifEncodeTimingTest`, the faster of two runs), a 256 by 256 scene at quality 50 takes 399, 421 and
+8,492 ms at efforts 1, 2 and 3, where the second round's code took 421, 506 and 9,122 ms in the same session (404,
+513 and 9,732 ms in its own); the first round's took 614, 896 and 11,067 ms in another, and the code before any
+speed work 834, 1,392 and 12,466 ms. Effort 3 gains least there: the decoder's inverse transform and CDEF direction
+search, which the encoder runs for every candidate, and the Wiener filter's least squares work in Long arithmetic,
+which JS does in software.
 
 The encoder as #176 first committed it (the speed work since, the Wiener filter, chroma palette and intra block
 copy not yet in) took 1.52 s at effort 1 (5.2 times speed 6, which took 0.294 s in that run), 4.03 s at effort 2
@@ -338,6 +376,10 @@ After the second round of that work, in another session, effort 2 measured 1.02,
 first round's measured 1.02, 1.04 and 1.03 in 5.5 s, and effort 1 2.11, 1.63 and 1.32 in 1.6 s where it measured
 1.97, 1.56 and 1.33 in 1.9 s. Effort 1's city scene at CRF 30 is the one that grew, 2.93 times libaom's size where it
 was 2.56, at the end of its quality range where reading between qualities 10 apart is least sure.
+
+The third round leaves a sequence's bytes as the second round wrote them (`AvifSequenceEncodeTest`'s hashes are
+unchanged): its changes made effort 2's files up to 5 percent larger at CRF 30 for no time measurably saved, so
+they are kept to still pictures.
 
 ## HEIC
 

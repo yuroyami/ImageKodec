@@ -143,13 +143,14 @@ class Av1EncoderBenchmarkTest {
     }
 
     companion object {
-        /** The regression bound on the mean size ratio at effort 2 against avifenc -s 6 -q 50, which measured 1.17. */
-        const val RATIO_BOUND = 1.21
+        /** The regression bound on the mean size ratio at effort 2 against avifenc -s 6 -q 50, which measured 1.15. */
+        const val RATIO_BOUND = 1.19
 
         /**
          * The regression bound on the time of effort 2 against avifenc -s 6, loose for a machine doing other work: it
-         * measured 4.7 (#176), 5.4 and 6.1 before the second round of speed work, and 10.8 before the first.
+         * measured 4.0 (#176), 4.7 before the third round of speed work, 5.4 and 6.1 before the second, and 10.8 before
+         * the first.
          */
-        const val TIME_BOUND = 7.0
+        const val TIME_BOUND = 6.0
     }
 }
