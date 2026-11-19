@@ -54,7 +54,17 @@ internal class Av1BlockSearch(
     private val compound: Boolean = true,
     /** Whether the frame is a still picture rather than a frame of a sequence, which the split pruning is for. */
     private val still: Boolean = true,
+    /**
+     * Whether each result [choose] takes from its memo is computed afresh as well, and each residual kept with it made
+     * again by the decoder, with an [IllegalStateException] where they differ: for tests (#176).
+     */
+    private val checkReuse: Boolean = false,
 ) : Av1Coding() {
+
+    /** How many reused levels and residuals [checkReuse] compared. */
+    var reuseChecks = 0
+        private set
+
 
     private val bitDepth = d.bitDepth
     private val lossless = qIndex == 0
@@ -99,21 +109,34 @@ internal class Av1BlockSearch(
     private var known: IntArray? = null
 
     /** The entry [remember] made or [recall] took without a residual, which the decoder's residual completes. */
-    private var pending: Memo? = null
+    private var pending: Av1LevelMemo.Entry? = null
 
     override fun madeResidual(residual: LongArray, txSz: Int) {
+        val against = checkResidual
+        if (against != null) {
+            checkResidual = null
+            for (i in 0 until Av1.txWidth[txSz] * Av1.txHeight[txSz]) {
+                check(against[i].toLong() == residual[i]) { "a kept residual differs from the decoder's at $i: ${against[i]}, ${residual[i]}" }
+            }
+            reuseChecks++
+            return
+        }
         val m = pending ?: return
         pending = null
         val n = Av1.txWidth[txSz] * Av1.txHeight[txSz]
-        if (m.residual2.size < n) m.residual2 = IntArray(n)
+        if (m.reconstructed.size < n) m.reconstructed = IntArray(n)
         // Each value is the inverse transform's output, which a conformant block holds to 8 + bitDepth bits.
-        for (i in 0 until n) m.residual2[i] = residual[i].toInt()
-        m.hasResidual2 = true
+        for (i in 0 until n) m.reconstructed[i] = residual[i].toInt()
+        m.hasReconstructed = true
     }
+
+    /** Under [checkReuse], the kept residual the decoder's next one has to equal. */
+    private var checkResidual: IntArray? = null
 
     override fun coefficients(d: Av1FrameDecoder, plane: Int, startX: Int, startY: Int, txSz: Int): Int {
         known = null
         pending = null
+        checkResidual = null
         val eob = choose(plane, startX, startY, txSz)
         if (eob > 0) nonZero++
         if (mode == Mode.COMMIT) {
@@ -152,7 +175,7 @@ internal class Av1BlockSearch(
         d.startSuperblock(r, c)
         chosen.clear()
         // The last superblock's commit adapted the CDFs that every kept result was priced on.
-        forgetMemo()
+        memo.forget()
         if (effort <= 2 && !lossless) directionEnergies(r, c)
         sbSaved.save(r, c, Av1.BLOCK_64X64)
         mode = Mode.SEARCH
@@ -1530,7 +1553,17 @@ internal class Av1BlockSearch(
                 ctx[2 * w4 + h4 + i] = d.leftDcContext[plane][y4 + i]
             }
             val eob = recall(memoKey, memoExtra, w * h, 2 * (w4 + h4), types)
-            if (eob >= 0) return eob
+            if (eob >= 0) {
+                if (!checkReuse) return eob
+                // Computed afresh below and compared; the decoder makes the kept residual again.
+                hitEob = eob
+                hitType = txType
+                levels.copyInto(hitLevels, 0, 0, tw * th)
+                if (known != null) {
+                    checkResidual = known
+                    known = null
+                }
+            }
         }
         // No residual: the prediction's error, and the price of all_zero.
         var zeroError = 0L
@@ -1645,93 +1678,39 @@ internal class Av1BlockSearch(
             }
         }
         txType = bestType
+        if (hitEob >= 0) {
+            check(bestEob == hitEob && (bestEob == 0 || bestType == hitType)) { "a kept result of plane $plane at ($startX, $startY) differs from a fresh one: end $hitEob, type $hitType; afresh $bestEob, $bestType" }
+            if (bestEob > 0) for (k in 0 until n) check(levels[k] == hitLevels[k]) { "a kept level of plane $plane at ($startX, $startY) differs from a fresh one at $k" }
+            hitEob = -1
+            reuseChecks++
+            return bestEob
+        }
         if (mode != Mode.COMMIT) remember(memoKey, memoExtra, w * h, 2 * (w4 + h4), types, n, bestEob, bestType)
         return bestEob
     }
 
+    /** Under [checkReuse], the end of block, type and levels the memo gave, until the fresh result is compared. */
+    private var hitEob = -1
+    private var hitType = 0
+    private val hitLevels = IntArray(1024)
+
     // ---- results of [choose] kept for a repeat -----------------------------------------
 
-    /**
-     * What [choose] found for one transform block, with everything it read: the residual, the coefficient contexts
-     * beside the block, the types it tried, and the block's size and intra direction, which the symbols' contexts read.
-     * Once the decoder has reconstructed its levels, also the residual its inverse transform made of them
-     * ([residual2]), which a repeat adds to the prediction without transforming again (#176).
-     */
-    private class Memo {
-        var extra = 0
-        var residual = IntArray(16)
-        val ctx = IntArray(64)
-        val types = IntArray(17)
-        var levels = IntArray(16)
-        var n = 0
-        var eob = 0
-        var type = 0
-        var residual2 = IntArray(16)
-        var hasResidual2 = false
-    }
-
-    /**
-     * [choose] is a function of what [Memo] keeps and of the CDFs, which stay frozen while a superblock is searched.
-     * The search codes one transform block with the same inputs many times over: the chroma of each luma candidate,
-     * the luma of each chroma candidate, and the winners again when a partition is replayed. So each result is kept
-     * until the superblock is committed, the last [MEMO_WAYS] for each place and size, and a call whose inputs match
-     * one exactly takes its result, which is the result it would compute.
-     */
-    private val memo = HashMap<Int, ArrayList<Memo>>()
-    private val memoFree = ArrayList<Memo>()
+    private val memo = Av1LevelMemo()
     private val memoCtx = IntArray(64)
-
-    private fun forgetMemo() {
-        for (list in memo.values) memoFree.addAll(list)
-        memo.clear()
-    }
 
     /** The end of block a kept result gives, its levels into [levels] and its type into [txType]; -1 for none. */
     private fun recall(key: Int, extra: Int, size: Int, ctxSize: Int, types: IntArray): Int {
-        val list = memo[key]
-        if (list != null) {
-            next@ for (k in list.indices.reversed()) {
-                val m = list[k]
-                if (m.extra != extra) continue
-                var t = 0
-                while (true) {
-                    if (m.types[t] != types[t]) continue@next
-                    if (types[t] < 0) break
-                    t++
-                }
-                for (i in 0 until ctxSize) if (m.ctx[i] != memoCtx[i]) continue@next
-                val res = m.residual
-                for (i in 0 until size) if (res[i] != residual[i]) continue@next
-                m.levels.copyInto(levels, 0, 0, m.n)
-                txType = m.type
-                if (m.hasResidual2) known = m.residual2 else if (m.eob > 0) pending = m
-                return m.eob
-            }
-        }
-        return -1
+        val m = memo.recall(key, extra, residual, size, memoCtx, ctxSize, types) ?: return -1
+        m.levels.copyInto(levels, 0, 0, m.n)
+        txType = m.type
+        if (m.hasReconstructed) known = m.reconstructed else if (m.eob > 0) pending = m
+        return m.eob
     }
 
     private fun remember(key: Int, extra: Int, size: Int, ctxSize: Int, types: IntArray, n: Int, eob: Int, type: Int) {
-        val list = memo.getOrPut(key) { ArrayList(MEMO_WAYS) }
-        val m = if (list.size == MEMO_WAYS) list.removeAt(0) else if (memoFree.isNotEmpty()) memoFree.removeAt(memoFree.size - 1) else Memo()
-        m.extra = extra
-        if (m.residual.size < size) m.residual = IntArray(size)
-        residual.copyInto(m.residual, 0, 0, size)
-        memoCtx.copyInto(m.ctx, 0, 0, ctxSize)
-        var t = 0
-        while (true) {
-            m.types[t] = types[t]
-            if (types[t] < 0) break
-            t++
-        }
-        if (m.levels.size < n) m.levels = IntArray(n)
-        levels.copyInto(m.levels, 0, 0, n)
-        m.n = n
-        m.eob = eob
-        m.type = type
-        m.hasResidual2 = false
+        val m = memo.remember(key, extra, residual, size, memoCtx, ctxSize, types, levels, n, eob, type)
         pending = if (eob > 0) m else null
-        list += m
     }
 
     /** Whether the levels go through [optimize]: from effort 2, and in lossy coding. */
@@ -1930,8 +1909,6 @@ internal class Av1BlockSearch(
         val PRUNE = LongArray(4)
         /** How many directional modes [strongestDirections] keeps at efforts 1 and 2. */
         private const val DIRECTIONS = 3
-        /** How many results of [choose] are kept for each place and size of transform block. */
-        private const val MEMO_WAYS = 4
         /** The floor of the square root of [x], by Newton's method in integers. */
         fun isqrt(x: Long): Long {
             if (x <= 0) return 0

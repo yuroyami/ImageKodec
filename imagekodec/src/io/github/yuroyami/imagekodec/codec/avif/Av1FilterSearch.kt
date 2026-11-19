@@ -23,7 +23,13 @@ internal class Av1FilterSearch(
     private val selfGuided: Boolean = true,
     /** Whether every restoration unit takes a filter whatever it costs, so tests see each filter in every unit. */
     private val forceRestoration: Boolean = false,
+    /** Whether the CDEF output put together from the search's passes is checked against filtering the frame. */
+    private val checkReuse: Boolean = false,
 ) {
+    /** How many times [checkReuse] compared the CDEF output put together with the frame filtered. */
+    var cdefChecks = 0
+        private set
+
     /** A restoration unit's choice: its type, and its self-guided set and weights, or for Wiener its unit's index. */
     private class Unit(val type: Int, val set: Int, val w0: Int, val w1: Int)
 
@@ -101,6 +107,7 @@ internal class Av1FilterSearch(
         }
         // CDEF filters each block from the deblocked samples alone, so each 64 by 64 block's samples are those the
         // search's pass with its strengths left: what filtering the frame once more would give (#176).
+        val deblocked = if (checkReuse) copyFrame() else null
         for (b in 0 until sbRows * sbCols) {
             val r = (b / sbCols) * 16
             val col = (b % sbCols) * 16
@@ -118,6 +125,15 @@ internal class Av1FilterSearch(
                 val y1 = minOf(d.planeHeight[p], ((r * 4) shr sy) + (64 shr sy))
                 for (y in (r * 4) shr sy until y1) from.copyInto(d.frame[p], y * stride + x0, y * stride + x0, y * stride + x1)
             }
+        }
+        if (deblocked != null) {
+            val together = copyFrame()
+            restore(deblocked)
+            Av1Cdef.apply(d)
+            for (p in 0 until d.numPlanes) {
+                check(together[p].contentEquals(d.frame[p])) { "plane $p: the CDEF output put together from the search's passes is not the frame filtered" }
+            }
+            cdefChecks++
         }
     }
 

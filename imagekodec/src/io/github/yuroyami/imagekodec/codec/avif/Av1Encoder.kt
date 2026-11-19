@@ -25,6 +25,12 @@ internal class Av1EncodeSettings(
     val chromaPalette: Boolean = true,
     /** Whether blocks of inter frames may average two references: null for from effort 2 (#177); tests turn it off. */
     val compound: Boolean? = null,
+    /**
+     * Whether the searches check what they reuse against a fresh computation, and throw where the two differ: each
+     * result of a transform block's levels kept for a repeat, each residual kept with it, and the CDEF output put
+     * together from the CDEF search's passes (#176). Tests turn it on; it takes about twice the time.
+     */
+    val checkReuse: Boolean = false,
 )
 
 /** A coded AV1 still picture: the sequence header OBU, and the item's data (the sequence header and the frame OBU). */
@@ -97,10 +103,11 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
         val record = Av1Record()
         lastRecord = record
         val compound = settings.compound ?: (effort >= 2)
-        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort, if (intrabc) hash else null, settings.chromaPalette, compound, still = !sequence)
+        val block = Av1BlockSearch(d, source, record, settings.qIndex, effort, if (intrabc) hash else null, settings.chromaPalette, compound, still = !sequence, checkReuse = settings.checkReuse)
+        lastBlockSearch = block
         for (tile in 0 until fh1.tileCols * fh1.tileRows) block.tile(tile)
         // The filters on the reconstruction, then the final header.
-        val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration)
+        val filterSearch = Av1FilterSearch(d, source, record, effort, settings.wiener, settings.selfGuided, settings.forceRestoration, settings.checkReuse)
         lastFilterSearch = filterSearch
         val filters = filterSearch.search(search, stream)
         chosenFilters = filters
@@ -167,6 +174,13 @@ internal class Av1Encoder(private val planes: HeifPlanes, private val settings: 
 
     private var lastRecord: Av1Record? = null
     private var lastFilterSearch: Av1FilterSearch? = null
+    private var lastBlockSearch: Av1BlockSearch? = null
+
+    /**
+     * How many reused results the last frame's searches checked under [Av1EncodeSettings.checkReuse]: transform
+     * blocks' levels and residuals, and CDEF outputs. For tests that check the checks ran.
+     */
+    fun reuseChecks(): Pair<Int, Int> = (lastBlockSearch?.reuseChecks ?: 0) to (lastFilterSearch?.cdefChecks ?: 0)
 
     /** The restoration type of each unit of each plane in the last [encode], null for a plane with none: for tests. */
     fun restorationUnits(): Array<IntArray?> = lastFilterSearch?.unitTypes ?: arrayOfNulls(3)
