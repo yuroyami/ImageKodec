@@ -10,7 +10,8 @@ package io.github.yuroyami.imagekodec.codec.avif
  * CDEF filters the deblocked frame once for each of a set of strength pairs, keeps each 64 by 64 block's squared
  * error under each, and picks the 1, 2, 4 or 8 pairs, and each block's choice among them, that cost least with
  * `cdef_idx` priced at its bits. Loop restoration then weighs the self-guided and Wiener filters on the CDEF output
- * ([restoration]), which the frames the CDEF search kept put together without filtering again.
+ * ([restoration]), which the frames the CDEF search kept put together without filtering again. At effort 2 both
+ * the deblocking and the CDEF search measure on half the picture ([deblock], [cdef]).
  */
 internal class Av1FilterSearch(
     private val d: Av1FrameDecoder,
@@ -108,6 +109,9 @@ internal class Av1FilterSearch(
         // CDEF filters each block from the deblocked samples alone, so each 64 by 64 block's samples are those the
         // search's pass with its strengths left: what filtering the frame once more would give (#176).
         val deblocked = if (checkReuse) copyFrame() else null
+        // A search on half the blocks filtered the other half with none of its strengths: they are filtered now, from
+        // the deblocked frame, before the searched half is put beside them.
+        if (c.half) Av1Cdef.apply(d, 1)
         for (b in 0 until sbRows * sbCols) {
             val r = (b / sbCols) * 16
             val col = (b % sbCols) * 16
@@ -123,7 +127,20 @@ internal class Av1FilterSearch(
                 val x0 = (col * 4) shr sx
                 val x1 = minOf(stride, x0 + (64 shr sx))
                 val y1 = minOf(d.planeHeight[p], ((r * 4) shr sy) + (64 shr sy))
-                for (y in (r * 4) shr sy until y1) from.copyInto(d.frame[p], y * stride + x0, y * stride + x0, y * stride + x1)
+                if (!c.half) {
+                    for (y in (r * 4) shr sy until y1) from.copyInto(d.frame[p], y * stride + x0, y * stride + x0, y * stride + x1)
+                    continue
+                }
+                // The blocks of parity 0 alone, as the search filtered them.
+                val bw = 8 shr sx
+                for (y in (r * 4) shr sy until y1) {
+                    var x = x0 + ((((y shl sy) shr 3) and 1) * bw)
+                    while (x < x1) {
+                        val at = y * stride + x
+                        from.copyInto(d.frame[p], at, at, at + minOf(bw, x1 - x))
+                        x += 2 * bw
+                    }
+                }
             }
         }
         if (deblocked != null) {
@@ -556,22 +573,25 @@ internal class Av1FilterSearch(
 
     // ---- deblocking --------------------------------------------------------------------
 
-    private fun applyDeblock(levels: IntArray, planes: Int = 7) {
+    private fun applyDeblock(levels: IntArray, planes: Int = 7, evenBands: Boolean = false) {
         levels.copyInto(fh.loopFilterLevel)
-        if (levels[0] != 0 || levels[1] != 0) Av1LoopFilter.apply(d, planes)
+        if (levels[0] != 0 || levels[1] != 0) Av1LoopFilter.apply(d, planes, evenBands)
     }
 
     /**
      * The loop filter levels by the squared error they leave: luma both ways, then each chroma plane, each by a
      * pattern search from a guess that grows with the quantizer, as the filter's thresholds do: the level and its
      * neighbours a step away, moving to the best and halving the step, down to a step of 4 at effort 2 and of 1 at 3.
-     * Effort 1 keeps the guess.
+     * Effort 1 keeps the guess. At effort 2, in a picture of more than one band of 64 rows, each level is measured on
+     * the even bands alone, which the odd ones leave as they are (#176): the files kept their size at equal score on
+     * the photo scenes, for half the filtering.
      */
     private fun deblock(): IntArray {
         val saved = copyFrame()
         val levels = IntArray(4)
         val guess = (fh.baseQIdx * 3 / 32).coerceIn(0, 63)
         val minStep = if (effort >= 3) 1 else 4
+        val bands = effort == 2 && d.miRows > 16
         // Luma.
         fun lumaError(l: Int): Long {
             if (l == 0) return planeError(0)
@@ -579,7 +599,7 @@ internal class Av1FilterSearch(
             levels[1] = l
             levels[2] = 0
             levels[3] = 0
-            applyDeblock(levels, 1)
+            applyDeblock(levels, 1, bands)
             val e = planeError(0)
             saved[0].copyInto(d.frame[0])
             return e
@@ -592,7 +612,7 @@ internal class Av1FilterSearch(
             for (p in 1..2) {
                 fun chromaError(l: Int): Long {
                     levels[p + 1] = l
-                    applyDeblock(levels, 1 shl p)
+                    applyDeblock(levels, 1 shl p, bands)
                     val e = planeError(p)
                     saved[p].copyInto(d.frame[p])
                     return e
@@ -635,7 +655,7 @@ internal class Av1FilterSearch(
      */
     private class Cdef(
         val damping: Int, val bits: Int, val y: IntArray, val uv: IntArray,
-        val presets: List<Int>? = null, val outputs: Array<Array<ShortArray>?>? = null,
+        val presets: List<Int>? = null, val outputs: Array<Array<ShortArray>?>? = null, val half: Boolean = false,
     )
 
     /**
@@ -658,7 +678,9 @@ internal class Av1FilterSearch(
 
     /**
      * The CDEF strengths by the error they leave. With [keepOutputs], when the frame is no larger than [KEEP_SAMPLES],
-     * the frame each strength pair leaves is kept for [applyCdef].
+     * the frame each strength pair leaves is kept for [applyCdef]. At effort 2 each pair filters and is measured on
+     * half the 8x8 blocks, a checkerboard, its error doubled, and [applyCdef] filters the other half once with the
+     * chosen pairs (#176): the files kept their size at equal score on the photo scenes, for a quarter less filtering.
      */
     private fun cdef(keepOutputs: Boolean): Cdef? {
         val sbRows = (d.miRows + 15) shr 4
@@ -673,18 +695,19 @@ internal class Av1FilterSearch(
         val errY = Array(luma.size) { LongArray(sbRows * sbCols) }
         val errUv = Array(luma.size) { LongArray(sbRows * sbCols) }
         val outputs = if (keepOutputs && d.planeWidth[0].toLong() * d.planeHeight[0] <= KEEP_SAMPLES) arrayOfNulls<Array<ShortArray>>(luma.size) else null
+        val half = effort == 2
         fh.cdefDamping = damping
         fh.cdefBits = 0
         for (k in luma.indices) {
             if (luma[k] == 0) {
                 // Strengths of 0 leave every sample as it is: the deblocked frame's errors, with no pass.
-                blockErrors(errY[k], errUv[k], sbRows, sbCols)
+                if (half) halfBlockErrors(errY[k], errUv[k], sbRows, sbCols, 0) else blockErrors(errY[k], errUv[k], sbRows, sbCols)
                 if (outputs != null) outputs[k] = saved
                 continue
             }
             setStrength(0, luma[k], luma[k])
-            Av1Cdef.apply(d)
-            blockErrors(errY[k], errUv[k], sbRows, sbCols)
+            Av1Cdef.apply(d, if (half) 0 else -1)
+            if (half) halfBlockErrors(errY[k], errUv[k], sbRows, sbCols, 0) else blockErrors(errY[k], errUv[k], sbRows, sbCols)
             if (outputs != null) outputs[k] = copyFrame()
             restore(saved)
         }
@@ -707,7 +730,7 @@ internal class Av1FilterSearch(
             val j = (total shl 8) + (lambda256 * (codedCount.toLong() * bits * 256) shr 8)
             if (j < bestJ) {
                 bestJ = j
-                best = Cdef(damping, bits, IntArray(8) { if (it < size) luma[pickY[it]] else 0 }, IntArray(8) { if (it < size) luma[pickUv[it]] else 0 }, luma, outputs)
+                best = Cdef(damping, bits, IntArray(8) { if (it < size) luma[pickY[it]] else 0 }, IntArray(8) { if (it < size) luma[pickUv[it]] else 0 }, luma, outputs, half)
             }
         }
         val chosen = best!!
@@ -739,6 +762,42 @@ internal class Av1FilterSearch(
         fh.cdefYSecStrength[i] = (y and 3).let { if (it == 3) 4 else it }
         fh.cdefUvPriStrength[i] = uv shr 2
         fh.cdefUvSecStrength[i] = (uv and 3).let { if (it == 3) 4 else it }
+    }
+
+    /**
+     * Twice the squared error of the 8x8 blocks of [parity] in each 64 by 64 block, as [Av1Cdef.apply] takes the
+     * checkerboard, luma into [y] and chroma into [uv].
+     */
+    private fun halfBlockErrors(y: LongArray, uv: LongArray, sbRows: Int, sbCols: Int, parity: Int) {
+        y.fill(0)
+        uv.fill(0)
+        for (p in 0 until d.numPlanes) {
+            val sx = if (p > 0) d.subX else 0
+            val sy = if (p > 0) d.subY else 0
+            val stride = d.planeWidth[p]
+            val w = src.shownWidth(p, d)
+            val h = src.shownHeight(p, d)
+            val a = src.planes[p]
+            val f = d.frame[p]
+            val out = if (p == 0) y else uv
+            val bw = 8 shr sx
+            for (yy in 0 until h) {
+                val ly = yy shl sy
+                val br = ly shr 6
+                // The first block of the row's parity, then every other one.
+                var x0 = ((((ly shr 3) + parity) and 1) * bw)
+                while (x0 < w) {
+                    val x1 = minOf(w, x0 + bw)
+                    var row = 0
+                    for (xx in x0 until x1) {
+                        val e = a[yy * stride + xx] - f[yy * stride + xx]
+                        row += e * e
+                    }
+                    out[br * sbCols + ((x0 shl sx) shr 6)] += row.toLong() shl 1
+                    x0 += 2 * bw
+                }
+            }
+        }
     }
 
     /** The squared error of each 64 by 64 block, luma into [y] and chroma into [uv]. */

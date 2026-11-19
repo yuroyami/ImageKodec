@@ -27,17 +27,24 @@ internal object Av1Cdef {
         var variance = 0
     }
 
-    fun apply(f: Av1FrameDecoder) {
+    /**
+     * Filters the frame. With a [parity] of 0 or 1, only the 8x8 blocks whose row and column, counted in 8x8 blocks,
+     * add up to a number of that parity, a checkerboard: the encoder's strength search (#176) measures each strength
+     * on half the blocks. Each block reads only unfiltered samples, so the two halves filtered apart, each from the
+     * unfiltered frame, make the whole.
+     */
+    fun apply(f: Av1FrameDecoder, parity: Int = -1) {
         val bands = Array(f.numPlanes) { p -> Band(f.planeWidth[p], 8 shr (if (p > 0) f.subY else 0)) }
         val scratch = Scratch()
         var r = 0
         while (r < f.miRows) {
             for (p in 0 until f.numPlanes) load(f, p, bands[p], (r * Av1.MI_SIZE) shr (if (p > 0) f.subY else 0))
-            var c = 0
+            var c = if (parity < 0) 0 else (((r shr 1) + parity) and 1) shl 1
+            val step = if (parity < 0) 2 else 4
             while (c < f.miCols) {
                 val idx = f.cdefIdx[f.mi(r and 15.inv(), c and 15.inv())]
                 block(f, bands, r, c, idx, scratch)
-                c += 2
+                c += step
             }
             r += 2
         }
@@ -210,6 +217,10 @@ internal object Av1Cdef {
         src: ShortArray, dst: ShortArray, x0: Int, y0: Int, w: Int, h: Int, top: Int, stride: Int, offsets: IntArray,
         p0: Int, p1: Int, s0: Int, s1: Int, priStr: Int, secStr: Int, priAdj: Int, secAdj: Int,
     ) {
+        if (secStr == 0 || priStr == 0) {
+            oneKind(src, dst, x0, y0, w, h, top, stride, offsets, secStr == 0, p0, p1, s0, s1, priStr, secStr, priAdj, secAdj)
+            return
+        }
         for (i in 0 until h) {
             val row = (y0 + i - top) * stride + x0
             val out = (y0 + i) * stride + x0
@@ -253,6 +264,45 @@ internal object Av1Cdef {
                 }
                 val v = x + ((8 + sum - (if (sum < 0) 1 else 0)) shr 4)
                 dst[out + j] = (if (v < min) min else if (v > max) max else v).toShort()
+            }
+        }
+    }
+
+    /**
+     * [interior] when one of the strengths is 0, whose taps add nothing: only the other kind's taps are read. The
+     * clip to the taps' least and greatest sample leaves the result as it is then, so it is left out. The taps of one
+     * kind weigh 12/16 in all (primary 4 + 2 or 3 + 3 a side, secondary 2 + 1 at four places), and each constrained
+     * difference lies between 0 and the tap's own difference, so x plus the rounded sum stays between x and the tap
+     * samples: within the clip of every tap, both kinds' included, as the full filter takes it.
+     */
+    private fun oneKind(
+        src: ShortArray, dst: ShortArray, x0: Int, y0: Int, w: Int, h: Int, top: Int, stride: Int, offsets: IntArray, primary: Boolean,
+        p0: Int, p1: Int, s0: Int, s1: Int, priStr: Int, secStr: Int, priAdj: Int, secAdj: Int,
+    ) {
+        for (i in 0 until h) {
+            val row = (y0 + i - top) * stride + x0
+            val out = (y0 + i) * stride + x0
+            for (j in 0 until w) {
+                val at = row + j
+                val x = src[at].toInt()
+                var sum = 0
+                if (primary) {
+                    val op0 = offsets[0]
+                    val op1 = offsets[1]
+                    sum += p0 * (constrain(src[at - op0] - x, priStr, priAdj) + constrain(src[at + op0] - x, priStr, priAdj))
+                    sum += p1 * (constrain(src[at - op1] - x, priStr, priAdj) + constrain(src[at + op1] - x, priStr, priAdj))
+                } else {
+                    for (k in 0 until 2) {
+                        val st = if (k == 0) s0 else s1
+                        val os1 = offsets[2 + k]
+                        val os2 = offsets[4 + k]
+                        sum += st * (
+                            constrain(src[at - os1] - x, secStr, secAdj) + constrain(src[at - os2] - x, secStr, secAdj) +
+                                constrain(src[at + os1] - x, secStr, secAdj) + constrain(src[at + os2] - x, secStr, secAdj)
+                            )
+                    }
+                }
+                dst[out + j] = (x + ((8 + sum - (if (sum < 0) 1 else 0)) shr 4)).toShort()
             }
         }
     }
