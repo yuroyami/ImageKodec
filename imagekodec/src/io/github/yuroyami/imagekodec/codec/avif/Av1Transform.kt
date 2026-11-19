@@ -269,25 +269,20 @@ internal class Av1Transform {
     fun reconstruct(d: Av1FrameDecoder, plane: Int, x: Int, y: Int, txSz: Int) {
         val residual = residual(d, plane, txSz)
         d.enc?.madeResidual(residual, txSz)
-        val w = 1 shl Av1.txWidthLog2[txSz]
-        val h = 1 shl Av1.txHeightLog2[txSz]
-        val type = d.planeTxType
-        val flipUD = flipsRows(type)
-        val flipLR = flipsColumns(type)
-        val buf = d.frame[plane]
-        val stride = d.planeWidth[plane]
-        val max = (1 shl d.bitDepth) - 1
-        for (i in 0 until h) for (j in 0 until w) {
-            val xx = if (flipLR) w - j - 1 else j
-            val yy = if (flipUD) h - i - 1 else i
-            val at = (y + yy) * stride + x + xx
-            buf[at] = (buf[at] + residual[i * w + j]).coerceIn(0, max.toLong()).toInt().toShort()
-        }
+        val n = Av1.txWidth[txSz] * Av1.txHeight[txSz]
+        val out = residualInt
+        // A conformant block's residual fits 8 + bitDepth bits. A hostile one is held to 2^20, past which every sum
+        // with a sample of at most 16 bits clips to the same value.
+        for (i in 0 until n) out[i] = residual[i].coerceIn(-RESIDUAL_LIMIT, RESIDUAL_LIMIT).toInt()
+        add(d, plane, x, y, txSz, out)
     }
 
+    private val residualInt = IntArray(64 * 64)
+    private val RESIDUAL_LIMIT = 1L shl 20
+
     /**
-     * The last step of [reconstruct] alone: adds [known], a residual the encoder kept from an earlier [residual] of the
-     * same levels and type, to the prediction (#176).
+     * The last step of [reconstruct]: adds [known], the residual of the levels, to the prediction under the type's
+     * flips. The encoder calls it alone with a residual it kept from an earlier [residual] of the same levels (#176).
      */
     fun add(d: Av1FrameDecoder, plane: Int, x: Int, y: Int, txSz: Int, known: IntArray) {
         val w = 1 shl Av1.txWidthLog2[txSz]
@@ -303,7 +298,7 @@ internal class Av1Transform {
             val row = (y + yy) * stride + x
             for (j in 0 until w) {
                 val xx = if (flipLR) w - j - 1 else j
-                val v = buf[row + xx] + known[i * w + j]
+                val v = (buf[row + xx].toInt() and 0xFFFF) + known[i * w + j]
                 buf[row + xx] = (if (v < 0) 0 else if (v > max) max else v).toShort()
             }
         }
