@@ -89,13 +89,16 @@ class GifPlaybackSceneTest {
             assertTrue(animBefore.red > 0.5f && animBefore.blue < 0.5f, "frame 0 should be red, got $animBefore")
             assertTrue(staticBefore.green > 0.5f, "static tile should be green")
 
-            // Advance past the 100 ms frame delay (with margin).
-            repeat(20) {
+            // Advance past the 100 ms frame delay. The next frame is decoded on Dispatchers.Default, which a busy
+            // CI runner can delay past 20 renders, so keep rendering until it shows, for at most 300 renders.
+            var after = px
+            var renders = 0
+            while (renders < 300 && (renders < 20 || after[32, 32].blue <= 0.5f)) {
                 Thread.sleep(4)
                 t += 16_000_000L
-                scene.render(t)
+                after = scene.render(t).toComposeImageBitmap().toPixelMap()
+                renders++
             }
-            val after = scene.render(t).toComposeImageBitmap().toPixelMap()
             val animAfter = after[32, 32]
             val staticAfter = after[96, 32]
 

@@ -168,20 +168,22 @@ class AvifSequenceOracleTest {
         )
         assertEquals(0, code, "$label: dav1d could not decode track $stream: $lastError")
         val bytes = if (first.bitDepth > 8) 2 else 1
-        var expected = 0L
-        for (c in coded) for (plane in c.picture.planes.indices) {
-            val p = c.picture
-            val pw = if (plane == 0) p.width else (p.width + p.subX) shr p.subX
-            val ph = if (plane == 0) p.height else (p.height + p.subY) shr p.subY
-            expected += pw.toLong() * ph * bytes
+        // The size of plane [plane] of [p] when the frame is [w] by [h].
+        fun planeSize(p: Av1Picture, plane: Int, w: Int, h: Int): Pair<Int, Int> =
+            if (plane == 0) w to h else ((w + p.subX) shr p.subX) to ((h + p.subY) shr p.subY)
+        fun total(w: Int, h: Int): Long = coded.sumOf { c ->
+            c.picture.planes.indices.sumOf { plane -> planeSize(c.picture, plane, w, h).let { (pw, ph) -> pw.toLong() * ph * bytes } }
         }
-        assertEquals(expected, raw.size.toLong(), "$label: dav1d's output of track $stream has another number of frames")
+        // ffmpeg 8.0.1 (Ubuntu 26.04) writes an odd-sized 4:2:0 track cropped to even width and height;
+        // ffmpeg 8.0 writes it whole. Either way the samples it does write must equal the coded ones.
+        val (w, h) = listOf(first.width to first.height, (first.width and 1.inv()) to (first.height and 1.inv()))
+            .firstOrNull { (w, h) -> total(w, h) == raw.size.toLong() }
+            ?: error("$label: dav1d's output of track $stream has another number of frames: ${raw.size} bytes, ${total(first.width, first.height)} expected")
         var at = 0
         for ((f, c) in coded.withIndex()) {
             val p = c.picture
             for (plane in p.planes.indices) {
-                val pw = if (plane == 0) p.width else (p.width + p.subX) shr p.subX
-                val ph = if (plane == 0) p.height else (p.height + p.subY) shr p.subY
+                val (pw, ph) = planeSize(p, plane, w, h)
                 for (y in 0 until ph) for (x in 0 until pw) {
                     val v = if (bytes == 1) raw[at].toInt() and 0xFF else (raw[at].toInt() and 0xFF) or ((raw[at + 1].toInt() and 0xFF) shl 8)
                     val e = p.planes[plane][y * p.strides[plane] + x].toInt()
