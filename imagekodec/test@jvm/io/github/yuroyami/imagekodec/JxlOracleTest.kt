@@ -537,6 +537,13 @@ class JxlOracleTest {
             val name = file.path.removePrefix("../reference/")
             val data = file.readBytes()
             val described = run(Tools.require("jxlinfo").path, "-v", file.path).second
+            // djxl 0.11.1 drops the black channel of a CMYK file: in cmyk_layers it writes white where the
+            // conformance ref.png is near black. Such a file is held to its ref.png instead.
+            if (described.contains("type: Black")) {
+                checkCmykAgainstRef(name, file, data)
+                ran++
+                continue
+            }
             val premultiplied = described.contains("alpha_premultiplied: 1")
             // A lossy file with only an ICC profile: this decoder gives sRGB, and djxl the profile unless it is told.
             val space = when {
@@ -549,6 +556,28 @@ class JxlOracleTest {
             ran++
         }
         assertTrue(ran >= 40, "only $ran conformance files were found")
+    }
+
+    /**
+     * A CMYK conformance file against the `ref.png` next to it. The reference converts through another
+     * colour engine, so single samples may differ by up to 40 levels, and the mean by up to 2. djxl
+     * 0.11.1 is off by up to 224 levels on the same file.
+     */
+    private fun checkCmykAgainstRef(name: String, file: File, jxl: ByteArray) {
+        val ref = File(file.parentFile, "ref.png")
+        assertTrue(ref.isFile, "$name has no ref.png")
+        val want = ImageKodec.decode(ref.readBytes())
+        val got = ImageKodec.decode(jxl, applyOrientation = true)
+        assertEquals(want.width to want.height, got.width to got.height, "$name shape")
+        var worst = 0
+        var sum = 0L
+        for (i in want.argb.indices) for (shift in intArrayOf(0, 8, 16, 24)) {
+            val d = abs(((want.argb[i] ushr shift) and 255) - ((got.argb[i] ushr shift) and 255))
+            worst = maxOf(worst, d)
+            sum += d
+        }
+        val mean = sum.toDouble() / (want.argb.size * 4)
+        assertTrue(worst <= 40 && mean <= 2.0, "$name: $worst levels at worst and %.3f on average from ref.png".format(mean))
     }
 
     @Test

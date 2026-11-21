@@ -5,6 +5,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import io.github.yuroyami.imagekodec.codec.jxl.JxlColorEncoding
 import io.github.yuroyami.imagekodec.codec.jxl.JxlDecoder
+import io.github.yuroyami.imagekodec.internal.color.IccCurve
 import io.github.yuroyami.imagekodec.internal.color.IccProfile
 import org.junit.Assume.assumeTrue
 import kotlin.math.abs
@@ -426,8 +427,11 @@ class JxlColorOracleTest {
             }
             val ours = assertNotNull(ourProfile.curve("rTRC"))
             val theirs = assertNotNull(libjxl.curve("rTRC"))
+            // Compared at libjxl's own samples: 4096 in 0.7, 64 in 0.11. Between 64 samples its
+            // interpolation leaves the curve by up to 180 of 65535, which says nothing of this profile.
+            val nodes = ((theirs as? IccCurve.Table)?.size ?: 4096) - 1
             var curve = 0.0
-            for (i in 0..4095) curve = maxOf(curve, abs(ours.eval(i / 4095.0) - theirs.eval(i / 4095.0)) * 65535)
+            for (i in 0..nodes) curve = maxOf(curve, abs(ours.eval(i.toDouble() / nodes) - theirs.eval(i.toDouble() / nodes)) * 65535)
             reports += "$name, profile against libjxl's: colorants %.6f, curve %.2f of 65535".format(colorant, curve)
             println(reports.last())
             // s15Fixed16 colorants of the same matrix.

@@ -56,7 +56,7 @@ class AvifSequenceOracleTest {
     private fun temp(ext: String) = File.createTempFile("kite-avis", ext).apply { deleteOnExit() }
 
     private fun tools(): Boolean {
-        if (!Tools.hasAll("ffmpeg", "cc", "timeout")) return false
+        if (!Tools.hasAll("ffmpeg", "ffprobe", "cc", "timeout")) return false
         val decoders = run(Tools.require("ffmpeg").path, "-hide_banner", "-decoders").second.decodeToString()
         if ("libdav1d" !in decoders) {
             if (System.getenv(Tools.REQUIRE_ENV) == "1") error("ffmpeg lacks libdav1d, and ${Tools.REQUIRE_ENV}=1 forbids skipping")
@@ -147,6 +147,18 @@ class AvifSequenceOracleTest {
         return if (depth == 8) base else "$base${depth}le"
     }
 
+    /** The video streams of [file] that ffprobe counts more than one frame in, in order. */
+    private fun trackStreams(file: File): List<Int> {
+        val (code, out) = run(Tools.require("ffprobe").path, "-v", "error", "-select_streams", "v",
+            "-show_entries", "stream=index,nb_frames", "-of", "csv=p=0", file.path)
+        assertEquals(0, code, "ffprobe failed: $lastError")
+        return out.decodeToString().lines().mapNotNull { line ->
+            val parts = line.trim().split(',')
+            val frames = parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+            if (frames > 1) parts[0].toInt() else null
+        }
+    }
+
     /** dav1d's frames of track [stream] of [file], checked sample for sample against [coded]. */
     private fun checkDav1d(label: String, file: File, stream: Int, coded: List<Coded>, identity: Boolean) {
         val first = coded[0].picture
@@ -156,6 +168,14 @@ class AvifSequenceOracleTest {
         )
         assertEquals(0, code, "$label: dav1d could not decode track $stream: $lastError")
         val bytes = if (first.bitDepth > 8) 2 else 1
+        var expected = 0L
+        for (c in coded) for (plane in c.picture.planes.indices) {
+            val p = c.picture
+            val pw = if (plane == 0) p.width else (p.width + p.subX) shr p.subX
+            val ph = if (plane == 0) p.height else (p.height + p.subY) shr p.subY
+            expected += pw.toLong() * ph * bytes
+        }
+        assertEquals(expected, raw.size.toLong(), "$label: dav1d's output of track $stream has another number of frames")
         var at = 0
         for ((f, c) in coded.withIndex()) {
             val p = c.picture
@@ -242,11 +262,14 @@ class AvifSequenceOracleTest {
         val colour = recording.tracks[0]
         assertEquals(c.frames, colour.size, "${c.name}: colour frames coded")
         val identity = c.options.lossless && !c.gray
-        checkDav1d(c.name, file, 0, colour, identity)
+        // ffmpeg may list the still item before the tracks, so the tracks are the streams of many frames.
+        val tracks = trackStreams(file)
+        assertEquals(if (c.alpha) 2 else 1, tracks.size, "${c.name}: ffprobe's tracks $tracks")
+        checkDav1d(c.name, file, tracks[0], colour, identity)
         val use = checkOwnDecoder(c.name, colour)
         if (c.alpha) {
             val alpha = recording.tracks[1]
-            checkDav1d("${c.name} alpha", file, 1, alpha, false)
+            checkDav1d("${c.name} alpha", file, tracks[1], alpha, false)
             checkOwnDecoder("${c.name} alpha", alpha)
         } else {
             assertEquals(1, recording.tracks.size, "${c.name}: an alpha track for opaque frames")

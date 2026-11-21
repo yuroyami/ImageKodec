@@ -144,6 +144,9 @@ internal sealed class IccCurve {
      * samples around it interpolated in its 16.16 fixed point (cmsintrp.c LinLerp1D).
      */
     class Table(private val samples: IntArray) : IccCurve() {
+        /** The number of samples. */
+        val size: Int get() = samples.size
+
         override fun eval(x: Double): Double {
             val v = IccLut.quickSaturateWord(x * 65535.0)
             val domain = samples.size - 1

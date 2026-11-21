@@ -5,7 +5,6 @@ import io.github.yuroyami.imagekodec.codec.jxl.JxlEncoder
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
-import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -19,10 +18,10 @@ import kotlin.test.fail
  * The djxl 0.7 here has no colour engine: it writes the stored samples, the colour channels
  * (with alpha) to one file and the black to another named `-ec1`, and ImageKodec's ink must be
  * their complement exactly. `IccOracleTest.cmykJxlConvertsThroughItsProfile` holds the picture to
- * lcms2. djxl 0.11, which CI runs, converts through its colour engine; there the test holds its
- * sRGB PNG to `ColorTarget.Srgb(RelativeColorimetric)` within 3 levels of 255. That branch has
- * not been run here: what djxl 0.11 writes for a CMYK file, and how near its engine comes, is
- * unverified. Skips without djxl, cc or lcms2.
+ * lcms2. djxl 0.11 converts through its colour engine and drops the black channel: on the
+ * conformance file cmyk_layers it writes white where the reference is near black. So djxl 0.11
+ * is no oracle for CMYK, and `JxlOracleTest` holds CMYK conformance files to their `ref.png`.
+ * Skips without djxl, cc or lcms2.
  */
 class JxlCmykOracleTest {
 
@@ -146,30 +145,5 @@ class JxlCmykOracleTest {
             compared += color.size + black.size
         }
         println("JxlCmykOracleTest: $files files, $compared samples of djxl's equal to ImageKodec's stored samples")
-    }
-
-    /** djxl 0.11's picture of a CMYK file, through its colour engine. Not run here: see the class comment. */
-    @Test
-    fun djxlWithAColourEngineConvertsAsColorTargetSrgb() {
-        Tools.require("djxl")
-        if (!current) return
-        val w = 40
-        val h = 28
-        val (b, _) = JxrCmykFixtures.ink(w, h, 3, alpha = false)
-        val ink = IntArray(b.size) { b[it].toInt() and 0xFF }
-        val jxl = JxlEncoder.encodeCmyk(w, h, 8, ink, null, profile, JxlEncodeOptions(lossless = true), ImageMetadata(), null)
-        val input = File(dir, "c11.jxl").apply { writeBytes(jxl) }
-        val png = File(dir, "c11.png")
-        val (code, _) = run(Tools.require("djxl").path, input.path, png.path, "--color_space=RGB_D65_SRG_Rel_SRG")
-        assertEquals(0, code, "djxl failed")
-        val reference = javax.imageio.ImageIO.read(png)
-        val ours = ImageKodec.decode(jxl, colorTarget = ColorTarget.Srgb(RenderingIntent.RelativeColorimetric))
-        var worst = 0
-        for (y in 0 until h) for (x in 0 until w) for (c in 0 until 3) {
-            val shift = 16 - 8 * c
-            worst = maxOf(worst, abs(((reference.getRGB(x, y) shr shift) and 0xFF) - ((ours[x, y] shr shift) and 0xFF)))
-        }
-        println("JxlCmykOracleTest: djxl 0.11's sRGB of CMYK is at most $worst levels from ColorTarget.Srgb")
-        assertTrue(worst <= 3, "djxl's sRGB of a CMYK file is $worst levels from ImageKodec's")
     }
 }
