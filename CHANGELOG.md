@@ -12,6 +12,8 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-22
+
 ### Added
 
 - TIFF decoding reads strips and tiles compressed with Zstandard (compression 50000) and with
@@ -335,41 +337,6 @@ reviewable in the diff.
   a module supply the codec of a HEIF item type. The shared HEIF reader joins grids, applies alpha,
   crops and turns, and converts to RGB; a codec only turns coded samples into planes. AV1 is the
   built-in codec (#137).
-
-### Changed
-
-- `encodeHeic`'s `quality` now means what it means to libheif's `heif-enc -q` (x265): equal quality gives
-  about equal SSIMULACRA 2 scores, as `encodeAvif`'s follows `avifenc -q`. The QP is 46 less half the quality,
-  rounded up, and at least 1, where it was 51 less half the quality, so every lossy file is larger and better
-  at the same quality: at quality 50, 0.646 bits a pixel at a mean score of 80.5 on the photo scenes, where
-  it was 0.270 at 71.6 and heif-enc gives 0.687 at 80.6 (#176).
-
-- A HEIF file with both an image sequence and a primary item shows what libavif shows: the primary
-  item when the major brand is `avif`, the track when it is `avis`, and for any other brand the track.
-  Before, the track was shown whatever the brand, and only an AV1 track of handler `pict` counted
-  (#157).
-- `ImageFormat` has a new value, `HEIC`, so an exhaustive `when` over `ImageFormat` in caller code
-  needs a branch for it (#138).
-
-### Fixed
-
-- The Coil and Compose bindings decode a still at the size they draw it at through
-  `decodeDownscaledTo`, where only a JPEG or JPEG 2000 did in Coil and nothing did in Compose, so a
-  HEIC or AVIF grid, and a JPEG XR, reduce while they decode. A cancelled request or a composable
-  that leaves composition stops a still at the decoder's next step, such as a HEIC tile. The Coil
-  factory claims a HEIC or AVIF file whose `meta` box runs past its 64 KiB peek, by reading the
-  top-level boxes to the end of that box. `KiteImage` decodes once it has been laid out, and again
-  when its box grows. The KDoc says that HEIC needs `ImageKodecHeic.install()` (#170).
-- `decodeAnimation` runs its cancellation check for a still: an AVIF or HEIC still, and a format
-  that cannot animate, check as `decode` does (#170).
-- A HEIF item whose coded picture is larger than its `ispe` in both directions shows the `ispe`
-  size, from its top left. Sony's HEIC thumbnails code 1664 by 1088 samples under an `ispe` of 1616
-  by 1080 with no conformance window, and showed 48 columns of padding (#150).
-
-## [0.4.0] - 2026-11-10
-
-### Added
-
 - `encodeJpeg(bitmap, quality, JpegEncoderKind.Jpegli)`, and the overload with metadata, write a
   JPEG with a port of Google's Jpegli encoder at the settings its library gives by default: its
   quantization matrices scaled by the distance the quality maps to, adaptive quantization, 4:2:0
@@ -438,6 +405,18 @@ reviewable in the diff.
 
 ### Changed
 
+- `encodeHeic`'s `quality` now means what it means to libheif's `heif-enc -q` (x265): equal quality gives
+  about equal SSIMULACRA 2 scores, as `encodeAvif`'s follows `avifenc -q`. The QP is 46 less half the quality,
+  rounded up, and at least 1, where it was 51 less half the quality, so every lossy file is larger and better
+  at the same quality: at quality 50, 0.646 bits a pixel at a mean score of 80.5 on the photo scenes, where
+  it was 0.270 at 71.6 and heif-enc gives 0.687 at 80.6 (#176).
+
+- A HEIF file with both an image sequence and a primary item shows what libavif shows: the primary
+  item when the major brand is `avif`, the track when it is `avis`, and for any other brand the track.
+  Before, the track was shown whatever the brand, and only an AV1 track of handler `pict` counted
+  (#157).
+- `ImageFormat` has a new value, `HEIC`, so an exhaustive `when` over `ImageFormat` in caller code
+  needs a branch for it (#138).
 - The core artifact now depends on `io.github.yuroyami:archivekodec:0.2.0` for DEFLATE, zlib,
   CRC-32, LZW, PackBits and Huffman code lengths, instead of its own copy of that code. PNG,
   TIFF, APNG and the ICC and text chunks inflate and deflate through ArchiveKodec. GIF and TIFF
@@ -476,6 +455,18 @@ reviewable in the diff.
 
 ### Fixed
 
+- The Coil and Compose bindings decode a still at the size they draw it at through
+  `decodeDownscaledTo`, where only a JPEG or JPEG 2000 did in Coil and nothing did in Compose, so a
+  HEIC or AVIF grid, and a JPEG XR, reduce while they decode. A cancelled request or a composable
+  that leaves composition stops a still at the decoder's next step, such as a HEIC tile. The Coil
+  factory claims a HEIC or AVIF file whose `meta` box runs past its 64 KiB peek, by reading the
+  top-level boxes to the end of that box. `KiteImage` decodes once it has been laid out, and again
+  when its box grows. The KDoc says that HEIC needs `ImageKodecHeic.install()` (#170).
+- `decodeAnimation` runs its cancellation check for a still: an AVIF or HEIC still, and a format
+  that cannot animate, check as `decode` does (#170).
+- A HEIF item whose coded picture is larger than its `ispe` in both directions shows the `ispe`
+  size, from its top left. Sony's HEIC thumbnails code 1664 by 1088 samples under an `ispe` of 1616
+  by 1080 with no conformance window, and showed 48 columns of padding (#150).
 - A gray ICC profile whose PCS is Lab, such as `Gray-CIE_L.icc` of icc-profiles-free, converts to
   sRGB as lcms2 converts it: its curve gives L*, not luminance. Its mid gray came out up to 79
   levels too light (#110).

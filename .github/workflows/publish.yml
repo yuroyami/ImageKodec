@@ -31,6 +31,27 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      # settings.publishing.version of library.module-template.yaml, the version of every module.
+      - name: Read the version
+        id: version
+        run: |
+          version=$(awk '/^  publishing:/ { found = 1 } found && /^    version:/ { print $2; exit }' library.module-template.yaml)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ImageKodec $version"
+
+      # A release whose tag does not name the version would publish another version than the tag says.
+      - name: Check that the tag names the version
+        if: ${{ github.event_name == 'release' }}
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ "$TAG" != "$VERSION" ] && [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::the release tag $TAG does not name version $VERSION of library.module-template.yaml"
+            exit 1
+          fi
+
       # The klib check reads the klibs of every native and web platform, which a Mac builds.
       - name: Check the public API has not drifted
         run: |
