@@ -269,23 +269,22 @@ class TiffOracleTest {
     }
 
     @Test
-    fun blankZstdStripPassesTheRatioLimit() {
-        // One 1024 x 1024 white strip: 3 MiB that zstd stores in about 100 bytes, past 10,000:1.
-        // 1024 x 1024 is the pixel count the input-size guard always allows.
+    fun blankZstdAndLzmaStripsDecode() {
+        // One 2000 x 2000 white strip: 12 MB that zstd stores in about 400 bytes, past 10,000:1, and
+        // past the 4,096:1 that the input-size guard allows DEFLATE. libtiff reads both files.
         assumeTrue("TIFF tools not installed", tools())
         val src = temp("blank", ".tif")
-        assertEquals(0, run(magick.path, "-size", "1024x1024", "xc:white", "-type", "TrueColor", "-depth", "8",
+        assertEquals(0, run(magick.path, "-size", "2000x2000", "xc:white", "-type", "TrueColor", "-depth", "8",
             "-compress", "none", src.path))
         for (codec in listOf("zstd", "lzma")) {
             val out = temp("blank-$codec", ".tif")
-            assertEquals(0, run(tiffcp.path, "-c", codec, "-r", "1024", src.path, out.path), "tiffcp -c $codec")
-            val bytes = out.readBytes()
+            assertEquals(0, run(tiffcp.path, "-c", codec, "-r", "2000", src.path, out.path), "tiffcp -c $codec")
             if (codec == "zstd") {
                 val strip = stripByteCount(out)
-                assertTrue(strip < 3 * 1024 * 1024 / 10_000, "zstd: a strip of $strip bytes is not past 10,000:1")
+                assertTrue(strip < 12_000_000 / 10_000, "zstd: a strip of $strip bytes is not past 10,000:1")
             }
-            val bitmap = ImageKodec.decode(bytes)
-            assertEquals(1024, bitmap.width)
+            val bitmap = ImageKodec.decode(out.readBytes())
+            assertEquals(2000, bitmap.width)
             assertTrue(bitmap.argb.all { it == -1 }, "$codec: not all white")
         }
     }

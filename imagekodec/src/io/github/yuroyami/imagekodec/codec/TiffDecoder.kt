@@ -298,7 +298,9 @@ internal object TiffDecoder {
         predictorRefusal(predictor, bits, format, compression)?.let { throw UnsupportedImageException("TIFF: $it is not supported") }
         // A T.6 reference row can be represented by one bit, regardless of its
         // width. Other compression paths expand stored bytes, including packing.
-        if (compression !in 2..4 && !Budget.fits(width, height, data.size, bits * spp)) {
+        // Zstandard and LZMA expand much further than DEFLATE, so they get their own bound.
+        val expansion = if (compression == 34925 || compression == 50000) Budget.EXPANSION_ZSTD_LZMA else Budget.EXPANSION
+        if (compression !in 2..4 && !Budget.fits(width, height, data.size, bits * spp, expansion)) {
             err("${width}x$height cannot come from ${data.size} bytes at ${bits * spp} bits per pixel")
         }
         if (compression in 2..4 && (bits != 1 || spp != 1)) err("CCITT requires one bilevel sample")

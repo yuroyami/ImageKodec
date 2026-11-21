@@ -10,11 +10,10 @@ KitePDF authors under the Apache License, Version 2.0. They were adapted from
 KitePDF in commit 24bee5954a0e44f09f606400b05446a8380f416c. Their format references
 are ITU-T T.800 (JPEG 2000 and MQ), T.88 (JBIG2 and MQ), and T.4/T.6 (CCITT).
 
-The PNG inflate path is an altered Kotlin translation of Mark Adler's puff
-(2002-2013), vendored from ArchiveKodec via KiteTorrent and libtorrent. puff is
-zlib-licensed; Inflate.kt retains the original copyright and license notice.
-The DEFLATE encoder's length-limited Huffman construction follows zlib's trees.c
-(Jean-loup Gailly and Mark Adler). Deflate.kt retains the zlib notice.
+DEFLATE, zlib, CRC-32, LZW, PackBits, Zstandard, LZMA and the length-limited
+Huffman codes of the lossless WebP encoder come from the ArchiveKodec library
+(io.github.yuroyami:archivekodec) under the Apache License, Version 2.0. The
+NOTICE of ArchiveKodec lists the origins of that code.
 
 The JPEG decoder's arithmetic decoding follows libjpeg-turbo 3.1.0's jdarith.c
 (developed 1997-2015 by Guido Vollbeding; libjpeg-turbo modifications Copyright

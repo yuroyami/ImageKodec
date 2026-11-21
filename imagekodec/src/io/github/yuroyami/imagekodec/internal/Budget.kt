@@ -17,15 +17,21 @@ internal object Budget {
     /** Loose byte expansion bound; DEFLATE copies at most 258 bytes per symbol. */
     const val EXPANSION: Long = 4096
 
+    /**
+     * Expansion bound for Zstandard and LZMA. A zstd RLE block writes 128 KiB from 4 bytes, so
+     * 32,768:1 is its limit. LZMA stays below about 7,500:1.
+     */
+    const val EXPANSION_ZSTD_LZMA: Long = 32768
+
     /** Packed samples smaller than a byte represent several pixels per decoded byte. */
-    fun pixelCap(inputBytes: Int, bitsPerPixel: Int = 8): Long {
-        require(inputBytes >= 0 && bitsPerPixel > 0)
-        val expansion = EXPANSION * 8 / minOf(bitsPerPixel, 8)
-        return minOf(MAX_PIXELS, maxOf(MIN_PIXELS, inputBytes.toLong() * expansion))
+    fun pixelCap(inputBytes: Int, bitsPerPixel: Int = 8, expansion: Long = EXPANSION): Long {
+        require(inputBytes >= 0 && bitsPerPixel > 0 && expansion > 0)
+        val perByte = expansion * 8 / minOf(bitsPerPixel, 8)
+        return minOf(MAX_PIXELS, maxOf(MIN_PIXELS, inputBytes.toLong() * perByte))
     }
 
-    fun fits(width: Int, height: Int, inputBytes: Int, bitsPerPixel: Int = 8): Boolean =
-        width > 0 && height > 0 && width.toLong() * height <= pixelCap(inputBytes, bitsPerPixel)
+    fun fits(width: Int, height: Int, inputBytes: Int, bitsPerPixel: Int = 8, expansion: Long = EXPANSION): Boolean =
+        width > 0 && height > 0 && width.toLong() * height <= pixelCap(inputBytes, bitsPerPixel, expansion)
 
     fun fitsAbsolute(width: Int, height: Int): Boolean =
         width > 0 && height > 0 && width.toLong() * height <= MAX_PIXELS

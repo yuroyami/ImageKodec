@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <imagekodec-heic>
+// Library unique name: <io.github.yuroyami:imagekodec-heic>
 final object io.github.yuroyami.imagekodec.heic/ImageKodecHeic { // io.github.yuroyami.imagekodec.heic/ImageKodecHeic|null[0]
     final fun install() // io.github.yuroyami.imagekodec.heic/ImageKodecHeic.install|install(){}[0]
 }

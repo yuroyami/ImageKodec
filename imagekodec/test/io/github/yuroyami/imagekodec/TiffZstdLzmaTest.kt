@@ -52,6 +52,28 @@ class TiffZstdLzmaTest {
         assertFailsWith<ImageDecodeException> { ImageKodec.decode(tiffBlock(50000, twice)) }
     }
 
+    @Test
+    fun sizesNoCodecCanReachAreRefused() {
+        // 16384 x 16384 gray from a 30-byte strip needs 8.9 million to 1; zstd cannot pass 32,768 to 1.
+        val tiff = tiffBlock(50000, zstd)
+        setLong(tiff, 256, 16384)
+        setLong(tiff, 257, 16384)
+        val e = assertFailsWith<ImageDecodeException> { ImageKodec.decode(tiff) }
+        assertTrue("cannot come from" in e.message.orEmpty(), e.message)
+    }
+
+    /** Set the value of the LONG entry [tag] in the first directory of a [tiffBlock] file. */
+    private fun setLong(tiff: ByteArray, tag: Int, value: Int) {
+        val count = (tiff[8].toInt() and 0xFF) or ((tiff[9].toInt() and 0xFF) shl 8)
+        for (i in 0 until count) {
+            val at = 10 + i * 12
+            if (((tiff[at].toInt() and 0xFF) or ((tiff[at + 1].toInt() and 0xFF) shl 8)) != tag) continue
+            for (k in 0 until 4) tiff[at + 8 + k] = (value ushr (k * 8)).toByte()
+            return
+        }
+        error("tag $tag not found")
+    }
+
     private fun assertGray(tiff: ByteArray) {
         val bitmap = ImageKodec.decode(tiff)
         assertEquals(8, bitmap.width)

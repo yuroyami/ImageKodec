@@ -18,6 +18,9 @@ reviewable in the diff.
   LZMA2 in an xz stream (compression 34925), the two codecs libtiff writes with `tiffcp -c zstd`
   and `-c lzma`. ArchiveKodec decodes both, with or without the horizontal predictor. `probe`
   reports such files as decodable.
+- A TIFF compressed with Zstandard or LZMA may expand up to 32,768 times its file size, the
+  most a zstd stream can expand. Other compressions keep the 4,096:1 bound. Before, a large
+  blank Zstandard page, which libtiff reads, failed as too large for its input.
 - TIFF decodes unsigned samples of 1 to 32 bits, signed samples, and IEEE floats of 16, 24, 32 and 64
   bits, which `decode16` gives at 16 bits, as ImageMagick reads them: floats as a fraction of full scale,
   signed samples moved up by half their range. The floating-point predictor (3) and the horizontal
