@@ -135,20 +135,27 @@ internal object UltraHdr {
      * ratio is left out together with the HDR fields of the XMP packet, so that no reader looks
      * for a gain map that is not there.
      */
-    fun encode(bitmap: KiteBitmap, quality: Int, metadata: ImageMetadata, kind: JpegEncoderKind): ByteArray {
-        val gainMap = metadata.gainMap?.takeIf { covers(it, bitmap) }
+    fun encode(bitmap: KiteBitmap, quality: Int, metadata: ImageMetadata, kind: JpegEncoderKind): ByteArray =
+        encode(bitmap.width, bitmap.height, metadata, JpegEncoder.headerEnd(kind)) { JpegEncoder.encodeWith(bitmap, quality, it, kind) }
+
+    /**
+     * The main image of [width] by [height] that [write] makes with the segments it is given
+     * placed at [segmentsAt], with [metadata] as [encode] above places it.
+     */
+    fun encode(width: Int, height: Int, metadata: ImageMetadata, segmentsAt: Int, write: (ByteArray) -> ByteArray): ByteArray {
+        val gainMap = metadata.gainMap?.takeIf { covers(it, width, height) }
         val xmp = metadata.xmp?.let { if (gainMap != null) withDirectory(it, gainMap.jpeg.size) else withoutHdr(it) }
         val head = ByteArrayBuilder(256)
         head.append(MetadataIo.jpegSegments(ImageMetadata(metadata.exif, xmp, metadata.icc)))
-        if (gainMap == null) return JpegEncoder.encodeWith(bitmap, quality, head.toByteArray(), kind)
+        if (gainMap == null) return write(head.toByteArray())
         gainMap.primaryIso?.takeIf { it.size + 2 <= 0xFFFF }?.let {
             head.append(byteArrayOf(0xFF.toByte(), 0xE2.toByte(), ((it.size + 2) ushr 8).toByte(), (it.size + 2).toByte()))
             head.append(it)
         }
         head.append(mpf(0, 0, 0))
         val segments = head.toByteArray()
-        val primary = JpegEncoder.encodeWith(bitmap, quality, segments, kind)
-        val at = JpegEncoder.headerEnd(kind) + segments.size - MPF_SEGMENT
+        val primary = write(segments)
+        val at = segmentsAt + segments.size - MPF_SEGMENT
         val tiff = at + 4 + MPF.size
         mpf(primary.size, primary.size - tiff, gainMap.jpeg.size).copyInto(primary, at)
         return primary + gainMap.jpeg
@@ -159,8 +166,8 @@ internal object UltraHdr {
      * a reader scales it to the main image (Ultra HDR 1.0, "Gain map"). A turned or cropped
      * image has another one.
      */
-    private fun covers(gainMap: GainMap, bitmap: KiteBitmap): Boolean =
-        kotlin.math.abs(gainMap.width.toLong() * bitmap.height - gainMap.height.toLong() * bitmap.width) <= bitmap.width.toLong() + bitmap.height
+    private fun covers(gainMap: GainMap, width: Int, height: Int): Boolean =
+        kotlin.math.abs(gainMap.width.toLong() * height - gainMap.height.toLong() * width) <= width.toLong() + height
 
     /** The MPF segment of a main image of [primary] bytes and a gain map of [size] bytes at [offset] from its TIFF header. */
     private fun mpf(primary: Int, offset: Int, size: Int): ByteArray {

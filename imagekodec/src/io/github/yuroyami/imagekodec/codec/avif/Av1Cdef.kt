@@ -18,16 +18,33 @@ internal object Av1Cdef {
         var top = 0
     }
 
-    fun apply(f: Av1FrameDecoder) {
+    /** The working arrays of one [apply], so that threads filtering frames at once share none. */
+    private class Scratch {
+        val cost = LongArray(8)
+        val partial = Array(8) { LongArray(15) }
+        val offsets = IntArray(6)
+        var direction = 0
+        var variance = 0
+    }
+
+    /**
+     * Filters the frame. With a [parity] of 0 or 1, only the 8x8 blocks whose row and column, counted in 8x8 blocks,
+     * add up to a number of that parity, a checkerboard: the encoder's strength search (#176) measures each strength
+     * on half the blocks. Each block reads only unfiltered samples, so the two halves filtered apart, each from the
+     * unfiltered frame, make the whole.
+     */
+    fun apply(f: Av1FrameDecoder, parity: Int = -1) {
         val bands = Array(f.numPlanes) { p -> Band(f.planeWidth[p], 8 shr (if (p > 0) f.subY else 0)) }
+        val scratch = Scratch()
         var r = 0
         while (r < f.miRows) {
             for (p in 0 until f.numPlanes) load(f, p, bands[p], (r * Av1.MI_SIZE) shr (if (p > 0) f.subY else 0))
-            var c = 0
+            var c = if (parity < 0) 0 else (((r shr 1) + parity) and 1) shl 1
+            val step = if (parity < 0) 2 else 4
             while (c < f.miCols) {
                 val idx = f.cdefIdx[f.mi(r and 15.inv(), c and 15.inv())]
-                block(f, bands, r, c, idx)
-                c += 2
+                block(f, bands, r, c, idx, scratch)
+                c += step
             }
             r += 2
         }
@@ -55,7 +72,7 @@ internal object Av1Cdef {
         b.top = y0 - 2
     }
 
-    private fun block(f: Av1FrameDecoder, bands: Array<Band>, r: Int, c: Int, idx: Int) {
+    private fun block(f: Av1FrameDecoder, bands: Array<Band>, r: Int, c: Int, idx: Int, scratch: Scratch) {
         // A block with no parameters keeps its samples.
         if (idx == -1) return
         val fh = f.fh
@@ -63,28 +80,33 @@ internal object Av1Cdef {
         val skip = f.skips[f.mi(r, c)] != 0 && f.skips[f.mi(r + 1, c)] != 0 &&
             f.skips[f.mi(r, c + 1)] != 0 && f.skips[f.mi(r + 1, c + 1)] != 0
         if (skip) return
-        val (yDir, variance) = direction(f, bands[0], r, c)
+        direction(f, bands[0], r, c, scratch)
+        val yDir = scratch.direction
+        val variance = scratch.variance
         var priStr = fh.cdefYPriStrength[idx] shl coeffShift
         var secStr = fh.cdefYSecStrength[idx] shl coeffShift
         var dir = if (priStr == 0) 0 else yDir
         val varStr = if ((variance shr 6) != 0) minOf(floorLog2(variance shr 6), 12) else 0
         priStr = if (variance != 0) (priStr * (4 + varStr) + 8) shr 4 else 0
         var damping = fh.cdefDamping + coeffShift
-        filter(f, bands[0], 0, r, c, priStr, secStr, damping, dir)
+        filter(f, bands[0], 0, r, c, priStr, secStr, damping, dir, scratch.offsets)
         if (f.numPlanes == 1) return
         priStr = fh.cdefUvPriStrength[idx] shl coeffShift
         secStr = fh.cdefUvSecStrength[idx] shl coeffShift
         dir = if (priStr == 0) 0 else Av1Tables.cdefUvDir[(f.subX * 2 + f.subY) * 8 + yDir]
         damping = fh.cdefDamping + coeffShift - 1
-        filter(f, bands[1], 1, r, c, priStr, secStr, damping, dir)
-        filter(f, bands[2], 2, r, c, priStr, secStr, damping, dir)
+        filter(f, bands[1], 1, r, c, priStr, secStr, damping, dir, scratch.offsets)
+        filter(f, bands[2], 2, r, c, priStr, secStr, damping, dir, scratch.offsets)
     }
 
     private fun floorLog2(x: Int): Int = 31 - x.countLeadingZeroBits()
 
-    private fun direction(f: Av1FrameDecoder, b: Band, r: Int, c: Int): Pair<Int, Int> {
-        val cost = LongArray(8)
-        val partial = Array(8) { LongArray(15) }
+    /** The cdef direction process: the block's direction and variance into [s]. */
+    private fun direction(f: Av1FrameDecoder, b: Band, r: Int, c: Int, s: Scratch) {
+        val cost = s.cost
+        val partial = s.partial
+        cost.fill(0)
+        for (row in partial) row.fill(0)
         val x0 = c shl Av1.MI_SIZE_LOG2
         val y0 = r shl Av1.MI_SIZE_LOG2
         val buf = b.rows
@@ -130,19 +152,28 @@ internal object Av1Cdef {
                 yDir = k
             }
         }
-        val variance = ((bestCost - cost[(yDir + 4) and 7]) shr 10).toInt()
-        return yDir to variance
+        s.direction = yDir
+        s.variance = ((bestCost - cost[(yDir + 4) and 7]) shr 10).toInt()
     }
 
-    private fun constrain(diff: Int, threshold: Int, damping: Int): Int {
+    /** `constrain` with its damping adjustment, `Max(0, damping - FloorLog2(threshold))`, worked out once a block. */
+    private fun constrain(diff: Int, threshold: Int, dampingAdj: Int): Int {
         if (threshold == 0) return 0
-        val dampingAdj = maxOf(0, damping - floorLog2(threshold))
-        val ad = kotlin.math.abs(diff)
-        val v = (threshold - (ad shr dampingAdj)).coerceIn(0, ad)
+        val ad = if (diff < 0) -diff else diff
+        var v = threshold - (ad shr dampingAdj)
+        if (v < 0) v = 0 else if (v > ad) v = ad
         return if (diff < 0) -v else v
     }
 
-    private fun filter(f: Av1FrameDecoder, b: Band, plane: Int, r: Int, c: Int, priStr: Int, secStr: Int, damping: Int, dir: Int) {
+    /**
+     * The cdef filter process for one 8x8 block (or its chroma) of [plane]. A block whose taps all lie inside the
+     * frame, as all but those at its edges do, reads them at offsets worked out once, into [offsets]: the primary
+     * taps, then the secondary ones of each side, for k 0 and 1. A block at an edge checks each tap's availability
+     * as the specification does. Both give the same samples.
+     */
+    private fun filter(f: Av1FrameDecoder, b: Band, plane: Int, r: Int, c: Int, priStr: Int, secStr: Int, damping: Int, dir: Int, offsets: IntArray) {
+        // With both strengths 0 every tap adds 0, and a sample clipped to a range that holds it keeps its value.
+        if (priStr == 0 && secStr == 0) return
         val coeffShift = f.bitDepth - 8
         val subX = if (plane > 0) f.subX else 0
         val subY = if (plane > 0) f.subY else 0
@@ -158,6 +189,132 @@ internal object Av1Cdef {
         val priTaps = Av1Tables.cdefPriTaps
         val secTaps = Av1Tables.cdefSecTaps
         val tapSet = (priStr shr coeffShift) and 1
+        val priAdj = if (priStr == 0) 0 else maxOf(0, damping - floorLog2(priStr))
+        val secAdj = if (secStr == 0) 0 else maxOf(0, damping - floorLog2(secStr))
+        // A tap is available when its 4x4 block is inside the frame (is_inside of the specification), so a block
+        // whose taps reach at most two samples past it on every side, all inside, needs no check.
+        val limitX = (f.miCols * Av1.MI_SIZE) shr subX
+        val limitY = (f.miRows * Av1.MI_SIZE) shr subY
+        if (x0 >= 2 && y0 >= 2 && x0 + w + 2 <= limitX && y0 + h + 2 <= limitY) {
+            for (k in 0 until 2) {
+                for (t in 0 until 3) {
+                    val d = when (t) {
+                        0 -> dir
+                        1 -> (dir - 2) and 7
+                        else -> (dir + 2) and 7
+                    }
+                    offsets[t * 2 + k] = directions[(d * 2 + k) * 2] * stride + directions[(d * 2 + k) * 2 + 1]
+                }
+            }
+            interior(src, dst, x0, y0, w, h, top, stride, offsets, priTaps[tapSet * 2], priTaps[tapSet * 2 + 1], secTaps[tapSet * 2], secTaps[tapSet * 2 + 1], priStr, secStr, priAdj, secAdj)
+            return
+        }
+        edge(f, src, dst, plane, x0, y0, w, h, top, stride, subX, subY, dir, tapSet, priStr, secStr, priAdj, secAdj)
+    }
+
+    /** [filter] of a block whose taps are all available, at the tap [offsets] worked out for it. */
+    private fun interior(
+        src: ShortArray, dst: ShortArray, x0: Int, y0: Int, w: Int, h: Int, top: Int, stride: Int, offsets: IntArray,
+        p0: Int, p1: Int, s0: Int, s1: Int, priStr: Int, secStr: Int, priAdj: Int, secAdj: Int,
+    ) {
+        if (secStr == 0 || priStr == 0) {
+            oneKind(src, dst, x0, y0, w, h, top, stride, offsets, secStr == 0, p0, p1, s0, s1, priStr, secStr, priAdj, secAdj)
+            return
+        }
+        for (i in 0 until h) {
+            val row = (y0 + i - top) * stride + x0
+            val out = (y0 + i) * stride + x0
+            for (j in 0 until w) {
+                val at = row + j
+                val x = src[at].toInt()
+                var max = x
+                var min = x
+                var sum = 0
+                for (k in 0 until 2) {
+                    val pt = if (k == 0) p0 else p1
+                    val st = if (k == 0) s0 else s1
+                    val op = offsets[k]
+                    val os1 = offsets[2 + k]
+                    val os2 = offsets[4 + k]
+                    // Each tap on both sides: sign -1 then +1, as the specification sums them.
+                    var a = src[at - op].toInt()
+                    sum += pt * constrain(a - x, priStr, priAdj)
+                    if (a > max) max = a
+                    if (a < min) min = a
+                    a = src[at - os1].toInt()
+                    sum += st * constrain(a - x, secStr, secAdj)
+                    if (a > max) max = a
+                    if (a < min) min = a
+                    a = src[at - os2].toInt()
+                    sum += st * constrain(a - x, secStr, secAdj)
+                    if (a > max) max = a
+                    if (a < min) min = a
+                    a = src[at + op].toInt()
+                    sum += pt * constrain(a - x, priStr, priAdj)
+                    if (a > max) max = a
+                    if (a < min) min = a
+                    a = src[at + os1].toInt()
+                    sum += st * constrain(a - x, secStr, secAdj)
+                    if (a > max) max = a
+                    if (a < min) min = a
+                    a = src[at + os2].toInt()
+                    sum += st * constrain(a - x, secStr, secAdj)
+                    if (a > max) max = a
+                    if (a < min) min = a
+                }
+                val v = x + ((8 + sum - (if (sum < 0) 1 else 0)) shr 4)
+                dst[out + j] = (if (v < min) min else if (v > max) max else v).toShort()
+            }
+        }
+    }
+
+    /**
+     * [interior] when one of the strengths is 0, whose taps add nothing: only the other kind's taps are read. The
+     * clip to the taps' least and greatest sample leaves the result as it is then, so it is left out. The taps of one
+     * kind weigh 12/16 in all (primary 4 + 2 or 3 + 3 a side, secondary 2 + 1 at four places), and each constrained
+     * difference lies between 0 and the tap's own difference, so x plus the rounded sum stays between x and the tap
+     * samples: within the clip of every tap, both kinds' included, as the full filter takes it.
+     */
+    private fun oneKind(
+        src: ShortArray, dst: ShortArray, x0: Int, y0: Int, w: Int, h: Int, top: Int, stride: Int, offsets: IntArray, primary: Boolean,
+        p0: Int, p1: Int, s0: Int, s1: Int, priStr: Int, secStr: Int, priAdj: Int, secAdj: Int,
+    ) {
+        for (i in 0 until h) {
+            val row = (y0 + i - top) * stride + x0
+            val out = (y0 + i) * stride + x0
+            for (j in 0 until w) {
+                val at = row + j
+                val x = src[at].toInt()
+                var sum = 0
+                if (primary) {
+                    val op0 = offsets[0]
+                    val op1 = offsets[1]
+                    sum += p0 * (constrain(src[at - op0] - x, priStr, priAdj) + constrain(src[at + op0] - x, priStr, priAdj))
+                    sum += p1 * (constrain(src[at - op1] - x, priStr, priAdj) + constrain(src[at + op1] - x, priStr, priAdj))
+                } else {
+                    for (k in 0 until 2) {
+                        val st = if (k == 0) s0 else s1
+                        val os1 = offsets[2 + k]
+                        val os2 = offsets[4 + k]
+                        sum += st * (
+                            constrain(src[at - os1] - x, secStr, secAdj) + constrain(src[at - os2] - x, secStr, secAdj) +
+                                constrain(src[at + os1] - x, secStr, secAdj) + constrain(src[at + os2] - x, secStr, secAdj)
+                            )
+                    }
+                }
+                dst[out + j] = (x + ((8 + sum - (if (sum < 0) 1 else 0)) shr 4)).toShort()
+            }
+        }
+    }
+
+    /** [filter] of a block at the frame's edge, each tap's availability checked as the specification does. */
+    private fun edge(
+        f: Av1FrameDecoder, src: ShortArray, dst: ShortArray, plane: Int, x0: Int, y0: Int, w: Int, h: Int, top: Int, stride: Int,
+        subX: Int, subY: Int, dir: Int, tapSet: Int, priStr: Int, secStr: Int, priAdj: Int, secAdj: Int,
+    ) {
+        val directions = Av1Tables.cdefDirections
+        val priTaps = Av1Tables.cdefPriTaps
+        val secTaps = Av1Tables.cdefSecTaps
         for (i in 0 until h) for (j in 0 until w) {
             var sum = 0
             val x = src[(y0 + i - top) * stride + x0 + j].toInt()
@@ -179,8 +336,8 @@ internal object Av1Cdef {
                         val candC = (xx shl subX) shr Av1.MI_SIZE_LOG2
                         if (candC >= 0 && candC < f.miCols && candR >= 0 && candR < f.miRows) {
                             val p = src[(yy - top) * stride + xx].toInt()
-                            sum += if (t == 0) priTaps[tapSet * 2 + k] * constrain(p - x, priStr, damping)
-                            else secTaps[tapSet * 2 + k] * constrain(p - x, secStr, damping)
+                            sum += if (t == 0) priTaps[tapSet * 2 + k] * constrain(p - x, priStr, priAdj)
+                            else secTaps[tapSet * 2 + k] * constrain(p - x, secStr, secAdj)
                             max = maxOf(p, max)
                             min = minOf(p, min)
                         }

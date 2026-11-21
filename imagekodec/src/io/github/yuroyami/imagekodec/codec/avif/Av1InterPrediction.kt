@@ -41,12 +41,12 @@ internal class Av1InterPrediction(private val d: Av1FrameDecoder) {
     private var stepX = 0
     private var stepY = 0
 
-    /** compute_prediction( ) for the block being decoded. */
-    fun computePrediction() {
+    /** compute_prediction( ) for the block being decoded; the encoder asks for luma alone ([lumaOnly]) as it searches (#177). */
+    fun computePrediction(lumaOnly: Boolean = false) {
         val sbMask = d.sbMask
         val subBlockMiRow = d.miRow and sbMask
         val subBlockMiCol = d.miCol and sbMask
-        for (plane in 0 until 1 + (if (d.hasChroma) 2 else 0)) {
+        for (plane in 0 until if (lumaOnly) 1 else 1 + (if (d.hasChroma) 2 else 0)) {
             val subX = if (plane > 0) d.subX else 0
             val subY = if (plane > 0) d.subY else 0
             val planeSz = Av1.subsampledSize(d.miSize, subX, subY)

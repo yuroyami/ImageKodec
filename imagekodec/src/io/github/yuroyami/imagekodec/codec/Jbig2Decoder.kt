@@ -114,6 +114,12 @@ public object Jbig2Decoder {
     /** The pattern pixels any halftone grid may draw, however small its region. */
     private const val HALFTONE_SLACK = 1L shl 20
 
+    /**
+     * The context that codes SLTP, whether a row repeats the row above, under typical prediction
+     * (T.88 6.2.5.7, Figures 8 to 11), by template. [Jbig2Encoder] codes with the same contexts.
+     */
+    internal val TPGDON_CONTEXTS: IntArray = intArrayOf(0x9B25, 0x0795, 0x00E5, 0x0195)
+
     private fun newCx() = IntArray(1 shl 16)
     private fun newIntCx() = IntArray(512)
 
@@ -280,8 +286,7 @@ public object Jbig2Decoder {
         for (y in 0 until h) {
             if ((y and 63) == 0) cancel?.invoke()
             if (tpgdon) {
-                val ctxTp = when (template) { 0 -> 0x9B25; 1 -> 0x0795; 2 -> 0x00E5; else -> 0x0195 }
-                ltp = ltp xor mq.bit(cx, ctxTp)
+                ltp = ltp xor mq.bit(cx, TPGDON_CONTEXTS[template])
                 if (ltp == 1) { // copy previous row
                     if (y > 0) for (x in 0 until w) bmp.bits[y * w + x] = bmp.bits[(y - 1) * w + x]
                     continue
@@ -376,6 +381,8 @@ public object Jbig2Decoder {
     private class Segment(
         val number: Long, val type: Int, val refs: LongArray, val pageAssoc: Long,
         val data: ByteArray, val start: Int, val end: Int,
+        /** The row count that ends a segment of unknown length (7.2.7), or -1. */
+        val rowCount: Int = -1,
     )
 
     /** [cancel] runs before each segment, and every 64 rows of a generic region (#123). */
@@ -504,7 +511,9 @@ public object Jbig2Decoder {
 
         private fun decodeGenericRegionSeg(s: Segment) {
             val r = R(s.data, s.start)
-            val ri = readRegionInfo(r)
+            val declared = readRegionInfo(r)
+            // 7.4.6.4: a region of unknown length gives its true height in the row count at its end.
+            val ri = if (s.rowCount < 0) declared else RegionInfo(declared.w, s.rowCount, declared.x, declared.y, declared.combOp)
             val flags = r.u8()
             val mmr = flags and 1
             val template = (flags shr 1) and 3
@@ -732,6 +741,10 @@ public object Jbig2Decoder {
             for (ref in s.refs) symbolsBySegment[ref]?.let { input.addAll(it) }
 
             if (huff == 1) {
+                // A Huffman dictionary that refines (SDREFAGG = 1) is refused: jbig2dec 0.20, the only
+                // other reader here, draws the same symbol whatever its refinement data holds and stops
+                // at its aggregates with a broken symbol ID table, and no encoder writes one, so
+                // nothing could check a reading.
                 if (refAgg == 1) throw UnsupportedImageException("JBIG2: Huffman refinement dictionaries are not supported")
                 return decodeSymbolDictHuffman(s, r, flags, input, numExSyms, numNewSyms)
             }
@@ -739,6 +752,10 @@ public object Jbig2Decoder {
             val mq = MqDecoder(s.data, r.pos, s.end)
             val iadh = newIntCx(); val iadw = newIntCx(); val iaex = newIntCx(); val iaai = newIntCx()
             val iardx = newIntCx(); val iardy = newIntCx()
+            // The text region contexts an aggregate symbol codes with, shared by the whole dictionary
+            // (Table 17), the refinement ones with the single-instance refinements above.
+            val iadt = newIntCx(); val iafs = newIntCx(); val iads = newIntCx(); val iait = newIntCx()
+            val iari = newIntCx(); val iardw = newIntCx(); val iardh = newIntCx()
             val genCx = newCx()
             val refCx = newCx()
             val totalSyms = input.size + numNewSyms
@@ -780,7 +797,25 @@ public object Jbig2Decoder {
                                 ),
                             )
                         } else {
-                            throw UnsupportedImageException("JBIG2: multi-instance symbol aggregation is not supported")
+                            // 6.5.8.2.1: the symbol is a text region of nInst instances of the symbols
+                            // known so far, each of which may be refined.
+                            val io = TextIo(
+                                exhausted = { mq.exhausted },
+                                dt = { decodeInt(mq, iadt) },
+                                fs = { decodeInt(mq, iafs) },
+                                ds = { decodeInt(mq, iads) },
+                                curt = { decodeInt(mq, iait) ?: 0 },
+                                symId = { decodeIAID(mq, iaid, symCodeLen) },
+                                ri = { decodeInt(mq, iari) ?: 0 },
+                                refine = { sym ->
+                                    val rdw = decodeInt(mq, iardw) ?: 0
+                                    val rdh = decodeInt(mq, iardh) ?: 0
+                                    val rdx = decodeInt(mq, iardx) ?: 0
+                                    val rdy = decodeInt(mq, iardy) ?: 0
+                                    refineSymbol(mq, refCx, sym, rdw, rdh, rdx, rdy, rTemplate, refAt)
+                                },
+                            )
+                            newSyms.add(aggregate(io, nInst, maxOf(1, symWidth), maxOf(1, hcHeight), input, newSyms))
                         }
                     }
                 }
@@ -789,6 +824,19 @@ public object Jbig2Decoder {
             val exported = exportFlags(input, newSyms, numExSyms) { if (mq.exhausted) null else decodeInt(mq, iaex) }
             // Fall back to the trailing new symbols if export flags were degenerate.
             return if (exported.isNotEmpty()) exported else newSyms
+        }
+
+        /**
+         * An aggregate symbol (6.5.8.2.1): a [w] by [h] text region of [instances] instances read
+         * through [io], with one strip, the reference corner at the top left, OR, and no offset, over
+         * the [input] symbols followed by the [newSyms] decoded so far (Table 17).
+         */
+        private fun aggregate(io: TextIo, instances: Int, w: Int, h: Int, input: List<Bitmap>, newSyms: List<Bitmap>): Bitmap {
+            if (instances < 1) throw ImageDecodeException("JBIG2: an aggregate of $instances instances")
+            val region = Bitmap(w, h)
+            val syms = ArrayList<Bitmap>(input.size + newSyms.size).apply { addAll(input); addAll(newSyms) }
+            runTextRegion(region, io, instances, 1, syms, transposed = false, refCorner = 1, combOp = 0, dsOffset = 0, finalOob = true)
+            return region
         }
 
         /**
@@ -957,25 +1005,7 @@ public object Jbig2Decoder {
             val io: TextIo
             if (huff == 1) {
                 val hr = HuffReader(s.data, r.pos, s.end)
-                // 7.4.3.1.7: 35 runcode lengths of 4 bits, then per-symbol code lengths.
-                val numSyms = maxOf(1, syms.size)
-                val runLines = ArrayList<HuffLine>(35)
-                for (i in 0 until 35) runLines.add(HuffLine(hr.bits(4), 0, i))
-                val runTable = HuffTable(runLines, oob = false, lowHigh = false)
-                val symLens = IntArray(numSyms)
-                var idx = 0
-                var prevLen = 0
-                while (idx < numSyms) {
-                    val c = runTable.decode(hr) ?: throw ImageDecodeException("JBIG2: out-of-band run code")
-                    when {
-                        c < 32 -> { symLens[idx++] = c; prevLen = c }
-                        c == 32 -> { val n = hr.bits(2) + 3; repeat(n) { if (idx < numSyms) symLens[idx++] = prevLen } }
-                        c == 33 -> { val n = hr.bits(3) + 3; repeat(n) { if (idx < numSyms) symLens[idx++] = 0 } }
-                        else -> { val n = hr.bits(7) + 11; repeat(n) { if (idx < numSyms) symLens[idx++] = 0 } }
-                    }
-                }
-                hr.align()
-                val symTable = HuffTable(List(numSyms) { HuffLine(symLens[it], 0, it) }, oob = false, lowHigh = false)
+                val symTable = symbolIdTable(hr, maxOf(1, syms.size))
                 io = TextIo(
                     exhausted = { false },
                     dt = { tDT!!.decode(hr) },
@@ -1026,6 +1056,27 @@ public object Jbig2Decoder {
             blit(region, ri)
         }
 
+        /** The symbol ID Huffman table of 7.4.3.1.7 for [numSyms] symbols: 35 runcode lengths of 4 bits, then each symbol's code length. */
+        private fun symbolIdTable(hr: HuffReader, numSyms: Int): HuffTable {
+            val runLines = ArrayList<HuffLine>(35)
+            for (i in 0 until 35) runLines.add(HuffLine(hr.bits(4), 0, i))
+            val runTable = HuffTable(runLines, oob = false, lowHigh = false)
+            val symLens = IntArray(numSyms)
+            var idx = 0
+            var prevLen = 0
+            while (idx < numSyms) {
+                val c = runTable.decode(hr) ?: throw ImageDecodeException("JBIG2: out-of-band run code")
+                when {
+                    c < 32 -> { symLens[idx++] = c; prevLen = c }
+                    c == 32 -> { val n = hr.bits(2) + 3; repeat(n) { if (idx < numSyms) symLens[idx++] = prevLen } }
+                    c == 33 -> { val n = hr.bits(3) + 3; repeat(n) { if (idx < numSyms) symLens[idx++] = 0 } }
+                    else -> { val n = hr.bits(7) + 11; repeat(n) { if (idx < numSyms) symLens[idx++] = 0 } }
+                }
+            }
+            hr.align()
+            return HuffTable(List(numSyms) { HuffLine(symLens[it], 0, it) }, oob = false, lowHigh = false)
+        }
+
         /** Refine a text-region symbol (6.4.11, Table 12). */
         private fun refineSymbol(
             mq: MqDecoder, cx: IntArray, sym: Bitmap, rdw: Int, rdh: Int, rdx: Int, rdy: Int,
@@ -1040,7 +1091,7 @@ public object Jbig2Decoder {
         /** The 6.4.5 instance loop, shared by the arithmetic and Huffman paths. */
         private fun runTextRegion(
             region: Bitmap, io: TextIo, numInstances: Int, strips: Int, syms: List<Bitmap>,
-            transposed: Boolean, refCorner: Int, combOp: Int, dsOffset: Int,
+            transposed: Boolean, refCorner: Int, combOp: Int, dsOffset: Int, finalOob: Boolean = false,
         ) {
             var stripT = -(io.dt() ?: return) * strips
             var firstS = 0
@@ -1083,7 +1134,12 @@ public object Jbig2Decoder {
                     if (!transposed && refCorner < 2) curS += sym.w - 1
                     else if (transposed && (refCorner and 1) == 1) curS += sym.h - 1
                     placed++
-                    if (placed >= numInstances) break
+                    if (placed >= numInstances) {
+                        // 6.4.5 ends every strip with an OOB, the last included. A text region segment
+                        // has nothing after it, but an aggregate symbol has the rest of its dictionary.
+                        if (finalOob) io.ds()
+                        break
+                    }
                 }
             }
         }
@@ -1111,7 +1167,10 @@ public object Jbig2Decoder {
                 val pageAssoc = if (pageAssocSize == 4) r.u32() else r.u8().toLong()
                 val dataLen = r.u32()
                 if (dataLen == 0xFFFFFFFFL) {
-                    throw UnsupportedImageException("JBIG2: unknown-length segments are not supported")
+                    out.add(unknownLength(data, number, type, refs, pageAssoc, r.pos))
+                    r.pos = out.last().end + 6
+                    if (r.pos >= data.size) break
+                    continue
                 }
                 val start = r.pos
                 // Long: a length of 0xFFFFFFF5 is -11 as an Int, which put the cursor back on this header
@@ -1122,6 +1181,31 @@ public object Jbig2Decoder {
                 if (end >= data.size) break
             }
             return out
+        }
+
+        /**
+         * A segment whose data length is 0xFFFFFFFF (7.2.7), which only an immediate generic region
+         * may have: its data runs to the end marker, 0xFF 0xAC after arithmetic data and 0x00 0x00
+         * after MMR data, which a 4-byte row count follows. The marker is found as jbig2dec finds it,
+         * by the first such pair after the region's header; the segment ends before the marker.
+         */
+        private fun unknownLength(data: ByteArray, number: Long, type: Int, refs: LongArray, pageAssoc: Long, start: Int): Segment {
+            if (type != 38 && type != 39) throw ImageDecodeException("JBIG2: segment type $type of unknown length")
+            // Region information (17 bytes) and the generic region flags.
+            if (data.size - start < 18) throw ImageDecodeException("JBIG2: a generic region of unknown length is cut off")
+            val mmr = data[start + 17].toInt() and 1
+            val first = if (mmr == 1) 0x00 else 0xFF
+            val second = if (mmr == 1) 0x00 else 0xAC
+            var at = start + 18
+            while (at <= data.size - 6) {
+                if ((data[at].toInt() and 0xFF) == first && (data[at + 1].toInt() and 0xFF) == second) {
+                    val rows = R(data, at + 2).u32()
+                    if (rows > Int.MAX_VALUE) throw ImageDecodeException("JBIG2: a row count of $rows")
+                    return Segment(number, type, refs, pageAssoc, data, start, at, rows.toInt())
+                }
+                at++
+            }
+            throw ImageDecodeException("JBIG2: a generic region of unknown length has no end marker")
         }
     }
 

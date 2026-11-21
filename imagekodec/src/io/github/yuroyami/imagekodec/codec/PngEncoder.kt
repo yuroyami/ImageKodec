@@ -10,12 +10,12 @@ import kotlin.math.abs
 /**
  * PNG and APNG encoder (lodepng as the structural reference, libpng's filter heuristic).
  *
- * Output shape: 8-bit truecolor; color type 6 (RGBA) when any pixel carries
- * alpha, color type 2 (RGB) otherwise. Palette/gray optimization is deliberately
- * out of scope for v1: every decoder reads truecolor, and correctness beats
- * bytes here. Per row, all five filters are tried and the one with the minimal
- * sum of absolute differences wins (the classic libpng "MSAD" heuristic) before
- * the stream goes through ArchiveKodec's zlib deflate.
+ * Output shape of the calls without options: 8-bit truecolor; color type 6 (RGBA)
+ * when any pixel carries alpha, color type 2 (RGB) otherwise. Per row, all five
+ * filters are tried and the one with the minimal sum of absolute differences wins
+ * (the classic libpng "MSAD" heuristic) before the stream goes through ArchiveKodec's
+ * zlib deflate. That output is pinned byte for byte; [PngWriter] writes every other
+ * colour type, depth and interlace when a caller passes options (#182).
  *
  * An animation is written as APNG (PNG Third Edition): the first frame is the default
  * image, so a reader without APNG support shows it, and every later frame is the
@@ -24,8 +24,13 @@ import kotlin.math.abs
 internal object PngEncoder {
 
     private const val DISPOSE_NONE = 0
-    private const val BLEND_SOURCE = 0
-    private const val BLEND_OVER = 1
+    const val BLEND_SOURCE = 0
+    const val BLEND_OVER = 1
+
+    /** The filter strategy that picks a filter a row, by [filterRows]. */
+    const val ADAPTIVE = 5
+
+    val SIGNATURE: ByteArray get() = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
 
     fun encode(bitmap: KiteBitmap, metadata: io.github.yuroyami.imagekodec.ImageMetadata? = null): ByteArray {
         val alpha = bitmap.hasTransparency()
@@ -95,7 +100,7 @@ internal object PngEncoder {
     }
 
     private fun header(out: ByteArrayBuilder, w: Int, h: Int, alpha: Boolean) {
-        out.append(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A))
+        out.append(SIGNATURE)
         val ihdr = ByteArray(13)
         writeBe32(ihdr, 0, w)
         writeBe32(ihdr, 4, h)
@@ -105,7 +110,7 @@ internal object PngEncoder {
     }
 
     /** The smallest box holding every pixel that differs, or one pixel when none does, as a frame cannot be empty. */
-    private fun changedBox(previous: IntArray, pixels: IntArray, width: Int, height: Int): IntArray {
+    internal fun changedBox(previous: IntArray, pixels: IntArray, width: Int, height: Int): IntArray {
         var top = -1
         var bottom = -1
         var left = width
@@ -131,7 +136,7 @@ internal object PngEncoder {
     }
 
     /** Whether drawing the box over the previous frame, unchanged pixels transparent, gives the frame exactly. */
-    private fun overIsExact(previous: IntArray, pixels: IntArray, width: Int, box: IntArray): Boolean {
+    internal fun overIsExact(previous: IntArray, pixels: IntArray, width: Int, box: IntArray): Boolean {
         val (x0, y0, w, h) = box
         for (y in y0 until y0 + h) for (x in x0 until x0 + w) {
             val i = y * width + x
@@ -141,7 +146,7 @@ internal object PngEncoder {
     }
 
     /** fcTL: the frame's size, offset, delay to the millisecond where it fits, and how it is drawn. */
-    private fun frameControl(sequence: Int, w: Int, h: Int, x: Int, y: Int, delayMillis: Int, blend: Int): ByteArray {
+    internal fun frameControl(sequence: Int, w: Int, h: Int, x: Int, y: Int, delayMillis: Int, blend: Int): ByteArray {
         val d = ByteArray(26)
         writeBe32(d, 0, sequence)
         writeBe32(d, 4, w)
@@ -184,58 +189,86 @@ internal object PngEncoder {
             }
         }
 
-        // Filter each row with the minimum-sum-of-absolute-differences choice.
         val filtered = ByteArray(h * (1 + rowBytes))
+        filterRows(raw, 0, h, rowBytes, bpp, ADAPTIVE, filtered, 0, null)
+        return Zlib.compress(filtered)
+    }
+
+    /**
+     * The [rows] rows of [rowBytes] bytes at [rawAt] of [raw], each with its filter type byte
+     * before it, into [out] at [outAt] (PNG, Third Edition, 9.2). [unit] is the bytes a pixel, or
+     * 1 below 8 bits. A [strategy] of 0 to 4 puts that filter on every row; [ADAPTIVE] tries all
+     * five on each row and keeps the one of least sum of absolute differences, the heuristic of
+     * PNG, Third Edition, 12.8, ties going to the lower type.
+     */
+    internal fun filterRows(
+        raw: ByteArray, rawAt: Int, rows: Int, rowBytes: Int, unit: Int, strategy: Int,
+        out: ByteArray, outAt: Int, cancel: (() -> Unit)?,
+    ) {
         val candidate = ByteArray(rowBytes)
         val best = ByteArray(rowBytes)
-        for (y in 0 until h) {
-            val rowOfs = y * rowBytes
+        for (y in 0 until rows) {
+            cancel?.invoke()
+            val rowOfs = rawAt + y * rowBytes
             val prevOfs = rowOfs - rowBytes
+            val dst = outAt + y * (1 + rowBytes)
+            if (strategy != ADAPTIVE) {
+                filterRow(strategy, raw, rowOfs, prevOfs, y > 0, rowBytes, unit, out, dst + 1)
+                out[dst] = strategy.toByte()
+                continue
+            }
             var bestFilter = 0
             var bestScore = Long.MAX_VALUE
             for (filter in 0..4) {
-                var score = 0L
-                for (i in 0 until rowBytes) {
-                    val x = raw[rowOfs + i].toInt() and 0xFF
-                    val a = if (i >= bpp) raw[rowOfs + i - bpp].toInt() and 0xFF else 0
-                    val b = if (y > 0) raw[prevOfs + i].toInt() and 0xFF else 0
-                    val c = if (y > 0 && i >= bpp) raw[prevOfs + i - bpp].toInt() and 0xFF else 0
-                    val v = when (filter) {
-                        0 -> x
-                        1 -> (x - a) and 0xFF
-                        2 -> (x - b) and 0xFF
-                        3 -> (x - ((a + b) ushr 1)) and 0xFF
-                        else -> {
-                            val p = a + b - c
-                            val pa = abs(p - a); val pb = abs(p - b); val pc = abs(p - c)
-                            val pred = if (pa <= pb && pa <= pc) a else if (pb <= pc) b else c
-                            (x - pred) and 0xFF
-                        }
-                    }
-                    candidate[i] = v.toByte()
-                    // MSAD treats bytes as signed deltas around 0/256.
-                    score += if (v < 128) v.toLong() else (256 - v).toLong()
-                }
+                val score = filterRow(filter, raw, rowOfs, prevOfs, y > 0, rowBytes, unit, candidate, 0)
                 if (score < bestScore) {
                     bestScore = score
                     bestFilter = filter
                     candidate.copyInto(best)
                 }
             }
-            filtered[y * (1 + rowBytes)] = bestFilter.toByte()
-            best.copyInto(filtered, y * (1 + rowBytes) + 1)
+            out[dst] = bestFilter.toByte()
+            best.copyInto(out, dst + 1)
         }
-        return Zlib.compress(filtered)
     }
 
-    private fun writeBe32(d: ByteArray, at: Int, v: Int) {
+    /** One row through [filter] into [out] at [at], returning its sum of absolute differences, bytes read as signed. */
+    private fun filterRow(
+        filter: Int, raw: ByteArray, rowOfs: Int, prevOfs: Int, hasPrev: Boolean, rowBytes: Int, unit: Int,
+        out: ByteArray, at: Int,
+    ): Long {
+        var score = 0L
+        for (i in 0 until rowBytes) {
+            val x = raw[rowOfs + i].toInt() and 0xFF
+            val a = if (i >= unit) raw[rowOfs + i - unit].toInt() and 0xFF else 0
+            val b = if (hasPrev) raw[prevOfs + i].toInt() and 0xFF else 0
+            val c = if (hasPrev && i >= unit) raw[prevOfs + i - unit].toInt() and 0xFF else 0
+            val v = when (filter) {
+                0 -> x
+                1 -> (x - a) and 0xFF
+                2 -> (x - b) and 0xFF
+                3 -> (x - ((a + b) ushr 1)) and 0xFF
+                else -> {
+                    val p = a + b - c
+                    val pa = abs(p - a); val pb = abs(p - b); val pc = abs(p - c)
+                    val pred = if (pa <= pb && pa <= pc) a else if (pb <= pc) b else c
+                    (x - pred) and 0xFF
+                }
+            }
+            out[at + i] = v.toByte()
+            score += if (v < 128) v.toLong() else (256 - v).toLong()
+        }
+        return score
+    }
+
+    internal fun writeBe32(d: ByteArray, at: Int, v: Int) {
         d[at] = (v ushr 24).toByte()
         d[at + 1] = (v ushr 16).toByte()
         d[at + 2] = (v ushr 8).toByte()
         d[at + 3] = v.toByte()
     }
 
-    private fun appendChunk(out: ByteArrayBuilder, type: String, data: ByteArray) {
+    internal fun appendChunk(out: ByteArrayBuilder, type: String, data: ByteArray) {
         val len = ByteArray(4)
         writeBe32(len, 0, data.size)
         out.append(len)

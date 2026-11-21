@@ -72,10 +72,18 @@ class Jp2ColorTest {
         assertEquals("DeviceGray", JpxDecoder.decodeForFacade(Jp2ColorFixtures.iccGray, 1).colorSpace)
     }
 
+    /** [file] with the enumerated colour space of its colr box set to [space]. */
+    private fun withEnumerated(file: ByteArray, space: Int): ByteArray {
+        val at = (0..file.size - 4).first { file.copyOfRange(it, it + 4).decodeToString() == "colr" }
+        return file.copyOf().also { for (k in 0 until 4) it[at + 7 + k] = (space ushr (24 - 8 * k)).toByte() }
+    }
+
     @Test
     fun aColourSpaceThisDecoderCannotConvertIsRefusedByName() {
+        // CIELab converts since #187.
+        assertTrue(ImageKodec.probe(Jp2ColorFixtures.lab).isDecodable)
         for ((bytes, reason) in listOf(
-            Jp2ColorFixtures.lab to "JPEG 2000 with the enumerated colour space 14 (CIELab)",
+            withEnumerated(Jp2ColorFixtures.lab, 19) to "JPEG 2000 with the enumerated colour space 19 (CIEJab)",
             Jp2ColorFixtures.iccLab to "JPEG 2000 with an ICC profile of colour space 'Lab'",
         )) {
             val info = ImageKodec.probe(bytes)

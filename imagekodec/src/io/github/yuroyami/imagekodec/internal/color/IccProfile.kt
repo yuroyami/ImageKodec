@@ -123,7 +123,20 @@ internal sealed class IccCurve {
     }
 
     class Gamma(private val g: Double) : IccCurve() {
-        override fun eval(x: Double): Double = if (x <= 0.0) 0.0 else x.pow(g)
+        override fun eval(x: Double): Double = power(x, g)
+    }
+
+    companion object {
+        /**
+         * [x] to the [g], as lcms2 evaluates a pure power (cmsgamma.c, parametric type 1): zero below
+         * zero, except that a gamma within 0.0001 of 1 passes a negative value through, as a B2A
+         * table's PCS side can see one.
+         */
+        fun power(x: Double, g: Double): Double = when {
+            x >= 0.0 -> if (x == 0.0) 0.0 else x.pow(g)
+            kotlin.math.abs(g - 1.0) < 0.0001 -> x
+            else -> 0.0
+        }
     }
 
     /**
@@ -161,7 +174,7 @@ internal sealed class IccCurve {
             val g = p[0]
             fun power(v: Double) = if (v <= 0.0) 0.0 else v.pow(g)
             return when (type) {
-                0 -> power(x)
+                0 -> power(x, g)
                 1 -> if (x >= -p[2] / p[1]) power(p[1] * x + p[2]) else 0.0
                 2 -> if (x >= -p[2] / p[1]) power(p[1] * x + p[2]) + p[3] else p[3]
                 3 -> if (x >= p[4]) power(p[1] * x + p[2]) else p[3] * x

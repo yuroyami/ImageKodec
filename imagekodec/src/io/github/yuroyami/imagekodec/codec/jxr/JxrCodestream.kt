@@ -232,10 +232,10 @@ internal object JxrCodestream {
     }
 
     /** idxCC of strcodec.c: where sample (row, column) of a macroblock sits among its 16 blocks of 16. */
-    private val IDX_CC = IntArray(256) { at -> blockOrder(at shr 4, at and 15, 6) }
+    val IDX_CC = IntArray(256) { at -> blockOrder(at shr 4, at and 15, 6) }
 
     /** idxCC_420: the same for the 8 by 8 chroma of a 4:2:0 macroblock. */
-    private val IDX_CC_420 = IntArray(64) { at -> blockOrder(at shr 3, at and 7, 5) }
+    val IDX_CC_420 = IntArray(64) { at -> blockOrder(at shr 3, at and 7, 5) }
 
     private fun blockOrder(r: Int, c: Int, columnShift: Int): Int {
         val inBlock = ((c xor (c shr 1)) and 1) or ((c shr 1 and 1) shl 2) or
@@ -490,6 +490,10 @@ internal object JxrCodestream {
                 }
                 return
             }
+            if (cfExt == JxrColor.CMYK) {
+                cmyk(mbRow, r0, r1)
+                return
+            }
             if (bd == JxrDepth.BD_1) {
                 val threshold = if (shift > 0) 1 shl (shift - 1) else 1
                 for (r in r0 until r1) {
@@ -526,6 +530,52 @@ internal object JxrCodestream {
                         }
                         o += slots
                     }
+                }
+            }
+        }
+
+        /**
+         * The CMYK case of outputMBRow: Y, U, V and K back to cyan, magenta, yellow and black
+         * (_ICC_CMYK, T.832's InvColorFmtConvert3 with the bias of its AddBias), at 8 or 16 bits.
+         */
+        private fun cmyk(mbRow: Int, r0: Int, r1: Int) {
+            if (plane.channels != 4) jxrFail("CMYK from ${plane.channels} channels")
+            val out = raster.samples
+            val slots = raster.slots
+            val bd = format.bitDepth
+            val bias1 = when (bd) {
+                JxrDepth.BD_8 -> 128 shl shift
+                JxrDepth.BD_16 -> ((1 shl 15) shr len) shl shift
+                else -> jxrFail("CMYK samples of bit depth $bd")
+            }
+            val round = if (bd == JxrDepth.BD_8) bias2 else if (shift == 0) 0 else 1 shl (shift - 1)
+            val max = if (bd == JxrDepth.BD_8) 255 else 65535
+            val up = if (bd == JxrDepth.BD_8) 0 else len
+            val sy = plane.buf[0]
+            val su = plane.buf[1]
+            val sv = plane.buf[2]
+            val sk = plane.buf[3]
+            val ay = plane.a0(0)
+            val au = plane.a0(1)
+            val av = plane.a0(2)
+            val ak = plane.a0(3)
+            for (r in r0 until r1) {
+                var o = ((mbRow * 16 + r - image.extraTop) * raster.width) * slots + format.leadingPadding
+                for (c in image.extraLeft until image.extraLeft + raster.width) {
+                    val i = cc(c, r)
+                    var m = -sy[ay + i] + bias1
+                    var cy = su[au + i]
+                    var ye = -sv[av + i]
+                    var k = sk[ak + i] + round
+                    k -= (m + 1) shr 1
+                    m -= (cy shr 1) - k
+                    cy -= ((ye + 1) shr 1) - m
+                    ye += cy
+                    out[o] = clip((cy shr shift) shl up, 0, max)
+                    out[o + 1] = clip((m shr shift) shl up, 0, max)
+                    out[o + 2] = clip((ye shr shift) shl up, 0, max)
+                    out[o + 3] = clip((k shr shift) shl up, 0, max)
+                    o += slots
                 }
             }
         }

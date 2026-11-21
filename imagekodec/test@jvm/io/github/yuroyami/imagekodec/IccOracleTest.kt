@@ -215,6 +215,95 @@ class IccOracleTest {
         }
     }
 
+    /**
+     * A CMYK JPEG XR file (#189) carrying a CMYK profile converts its ink through it, as lcms2
+     * converts the same ink, at 8 and 16 bits, and a reduced decode reduces the ink first. The
+     * files are lossless, so their ink is the input.
+     */
+    @Test
+    fun cmykJxrConvertsThroughItsProfile() {
+        assumeTrue("cc or lcms2 is not installed", Tools.hasAll("cc") && oracle != null)
+        val random = Random(189)
+        val w = 37
+        val h = 23
+        val ink = ByteArray(w * h * 4) { random.nextInt(256).toByte() }
+        val ink16 = ShortArray(w * h * 4) { random.nextInt(65536).toShort() }
+        withProfiles("cmyk-v2", "cmyk-v4") { profiles ->
+            for ((kind, file) in profiles) {
+                val icc = file.readBytes()
+                val lossless = JxrEncodeOptions(lossless = true)
+                val jxr = ImageKodec.encodeJxrCmyk(w, h, ink, lossless, ImageMetadata(icc = icc))
+                val jxr16 = ImageKodec.encodeJxrCmyk(w, h, ink16, lossless, ImageMetadata(icc = icc))
+                assertEquals("CMYK", ImageKodec.probe(jxr).colorProfile?.iccColorSpace)
+                for ((code, intent) in RenderingIntent.entries.withIndex()) {
+                    val target = ColorTarget.Srgb(intent)
+                    val worst = worst8(ImageKodec.decode(jxr, colorTarget = target).argb, lcms(file, code, 4, ink))
+                    assertTrue(worst <= 1, "$kind, $intent: an 8-bit JPEG XR sample is $worst levels from lcms2's")
+                    val ours16 = ImageKodec.decode16(jxr16, colorTarget = target)
+                    assertEquals(3, ours16.channels)
+                    val worst16 = worst16(ours16, lcms16(file, code, 4, ink16))
+                    assertTrue(worst16 <= 4, "$kind, $intent: a 16-bit JPEG XR sample is $worst16 levels from lcms2's")
+                }
+                val reduced = ImageKodec.decodeReduced(jxr, 4, colorTarget = ColorTarget.Srgb())
+                assertEquals((w + 3) / 4, reduced.width)
+                val block = ByteArray(4) { c -> ((0 until 4).sumOf { y -> (0 until 4).sumOf { x -> ink[(y * w + x) * 4 + c].toInt() and 0xFF } } + 8).div(16).toByte() }
+                assertEquals(ImageKodec.convertCmykToSrgb(1, 1, block, ColorProfile(icc = icc))!!.argb[0], reduced.argb[0], "$kind, reduced")
+                // Without a target, the profile changes nothing: the ink draws as a TIFF's does.
+                assertContentEquals(ImageKodec.decode(ImageKodec.encodeJxrCmyk(w, h, ink, lossless)).argb, ImageKodec.decode(jxr).argb)
+            }
+        }
+    }
+
+    /**
+     * A CMYK JPEG XL file (#189) applies its black through its CMYK profile, as libjxl converts
+     * CMYK through its colour engine: with `ColorTarget.Srgb` at each intent, as lcms2 converts the
+     * same ink, at 8 and 16 bits; without a target, at the intent the profile's header names. The
+     * files are lossless, so their ink is the input. `JxlCmykOracleTest` holds the stored samples
+     * to djxl.
+     */
+    @Test
+    fun cmykJxlConvertsThroughItsProfile() {
+        assumeTrue("cc or lcms2 is not installed", Tools.hasAll("cc") && oracle != null)
+        val random = Random(1189)
+        val w = 37
+        val h = 23
+        val ink = IntArray(w * h * 4) { random.nextInt(256) }
+        val ink16 = IntArray(w * h * 4) { random.nextInt(65536) }
+        val alpha = IntArray(w * h) { random.nextInt(256) }
+        withProfiles("cmyk-v2", "cmyk-v4") { profiles ->
+            for ((kind, file) in profiles) {
+                val icc = file.readBytes()
+                val lossless = JxlEncodeOptions(lossless = true)
+                val jxl = io.github.yuroyami.imagekodec.codec.jxl.JxlEncoder.encodeCmyk(w, h, 8, ink, null, icc, lossless, ImageMetadata(), null)
+                val jxl16 = io.github.yuroyami.imagekodec.codec.jxl.JxlEncoder.encodeCmyk(w, h, 16, ink16, null, icc, lossless, ImageMetadata(), null)
+                assertEquals("CMYK", ImageKodec.probe(jxl).colorProfile?.iccColorSpace)
+                val bytes = ByteArray(ink.size) { ink[it].toByte() }
+                val shorts = ShortArray(ink16.size) { ink16[it].toShort() }
+                for ((code, intent) in RenderingIntent.entries.withIndex()) {
+                    val target = ColorTarget.Srgb(intent)
+                    val worst = worst8(ImageKodec.decode(jxl, colorTarget = target).argb, lcms(file, code, 4, bytes))
+                    assertTrue(worst <= 1, "$kind, $intent: an 8-bit JPEG XL sample is $worst levels from lcms2's")
+                    val ours16 = ImageKodec.decode16(jxl16, colorTarget = target)
+                    assertEquals(3, ours16.channels)
+                    val worst16 = worst16(ours16, lcms16(file, code, 4, shorts))
+                    assertTrue(worst16 <= 4, "$kind, $intent: a 16-bit JPEG XL sample is $worst16 levels from lcms2's")
+                }
+                // Without a target, the profile's own intent.
+                val own = ColorTarget.Srgb(RenderingIntent.entries[icc[67].toInt() and 3])
+                assertContentEquals(ImageKodec.decode(jxl, colorTarget = own).argb, ImageKodec.decode(jxl).argb, "$kind: decode")
+                assertContentEquals(ImageKodec.decode16(jxl16, colorTarget = own).samples, ImageKodec.decode16(jxl16).samples, "$kind: decode16")
+                // Alpha rides along, straight.
+                val withAlpha = io.github.yuroyami.imagekodec.codec.jxl.JxlEncoder.encodeCmyk(w, h, 8, ink, alpha, icc, lossless, ImageMetadata(), null)
+                val opaque = ImageKodec.decode(jxl)
+                val translucent = ImageKodec.decode(withAlpha)
+                for (i in 0 until w * h) assertEquals((alpha[i] shl 24) or (opaque.argb[i] and 0xFFFFFF), translucent.argb[i], "$kind, alpha at pixel $i")
+                val reduced = ImageKodec.decodeReduced(jxl, 4, colorTarget = ColorTarget.Srgb())
+                val block = ByteArray(4) { c -> ((0 until 4).sumOf { y -> (0 until 4).sumOf { x -> ink[(y * w + x) * 4 + c] } } + 8).div(16).toByte() }
+                assertEquals(ImageKodec.convertCmykToSrgb(1, 1, block, ColorProfile(icc = icc))!!.argb[0], reduced.argb[0], "$kind, reduced")
+            }
+        }
+    }
+
     /** [jpeg] with [icc] in APP2 ICC_PROFILE segments after its SOI, as many as it needs. */
     private fun withIccApp2(jpeg: ByteArray, icc: ByteArray): ByteArray {
         val parts = icc.toList().chunked(65000)

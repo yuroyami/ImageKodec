@@ -29,15 +29,30 @@ KiteImage(
 )
 ```
 
-The decode runs on `Dispatchers.Default` and runs again when `data` changes. It stops at the next
-frame once the composable leaves composition, so a list scrolled past animated images does not
-keep decoding them. Frames become `ImageBitmap`s on `Dispatchers.Default` too, ahead of playback,
+The decode runs on `Dispatchers.Default` after the first layout, and runs again when `data`
+changes. A still decodes at the size it draws at in that layout, as `contentScale` fits it, through
+`ImageKodec.decodeDownscaledTo`: a JPEG, JPEG 2000 or JPEG XR reduces inside its inverse transform,
+and a HEIC or AVIF grid one row of tiles at a time, so a large photo in a small slot never exists
+at full size. A larger box later decodes it again at the new size; a smaller one keeps the pixels
+it has. `ContentScale.None` decodes the full size, and so does a PNG, as before.
+
+The decode stops once the composable leaves composition: a still at the decoder's next step, such
+as a row of JPEG blocks or a HEIC tile, and an animation at the next frame. A list scrolled past
+large images does not keep decoding them. Frames become `ImageBitmap`s on `Dispatchers.Default` too, ahead of playback,
 so the thread that draws never copies a frame. The composable holds its layout slot and draws
 nothing until the first frame is ready.
 
 `KiteImage` applies the EXIF orientation, which `ImageKodec.decode` does not do by default. It also
 converts the colors to sRGB as a browser does. Pass `colorTarget = ColorTarget.Source` to draw the
 samples as stored.
+
+## HEIC
+
+The core reads HEIF files, and decodes AVIF on its own. HEIC holds HEVC pictures, whose decoder is
+in the `imagekodec-heic` module. Neither binding depends on it: add it and call
+`ImageKodecHeic.install()` once at startup, before the first decode. Without it, `KiteImage`
+reports an `UnsupportedImageException` to `onError`, and `KiteImageDecoder.Factory` leaves the file
+to the platform decoder of Coil.
 
 Three more declarations are public, for code that runs its own decode:
 
@@ -78,6 +93,9 @@ classpath. `imagekodec-compose` and the other Coil artifacts arrive at runtime o
   with any other image chunk, so Coil can choose its platform decoder.
 - It claims TIFF and JP2 even when the probe fails. The IFD of a TIFF (the record that describes a
   page) is often further into the file than 64 KiB, and no platform decoder handles either format.
+- For HEIC and AVIF whose `meta` box runs past 64 KiB, it reads the top-level boxes up to the end
+  of that box, at most 16 MiB and never into `mdat`, and probes them. It claims the file when a
+  codec reads its image: AVIF always, HEIC once `ImageKodecHeic.install()` has run.
 
 The decoder converts every image to sRGB, as the platform decoders of Coil do.
 `KiteImageDecoder.Factory(colorTarget = ColorTarget.Source)` keeps the samples as stored.
@@ -101,4 +119,6 @@ rest while that frame stays up.
 `ContentScale.None`. `Fit` and `Inside` request `Scale.FIT`, and the other content scales request
 `Scale.FILL`. A size and a scale set on the request take precedence. The decoder follows the sizing
 rules of Coil, including one defined side and `maxBitmapSize`. It box-filters still images and
-every animation frame to those dimensions, and it never upscales.
+every animation frame to those dimensions, and it never upscales. A still goes through
+`ImageKodec.decodeDownscaledTo` at that size, so a JPEG, JPEG 2000, JPEG XR or HEIC or AVIF grid
+reduces while it decodes, and a cancelled request stops it at the decoder's next step.

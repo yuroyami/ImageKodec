@@ -55,6 +55,15 @@ internal class JxrPixelFormat(
     val premultiplied: Boolean = false,
     val bgr: Boolean = false,
 ) {
+    /** The samples of colour a pixel holds besides alpha: 1 for gray, 4 for CMYK, the count of an N-channel format, else 3. */
+    val colorChannels: Int
+        get() = when (colorFormat) {
+            JxrColor.Y_ONLY -> 1
+            JxrColor.CMYK -> 4
+            JxrColor.NCOMPONENT -> bitsPerPixel / bitsPerSample - (if (alpha) 1 else 0)
+            else -> 3
+        }
+
     companion object {
         /** The GUIDs that do not share the 6fddc324-4e03-4bfe-b185-3d77768dc9xx family of the others. */
         private val OTHER = mapOf(

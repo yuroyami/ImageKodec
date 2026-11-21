@@ -1,6 +1,7 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
 import io.github.yuroyami.imagekodec.ImageDecodeException
+import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.UnsupportedImageException
 import io.github.yuroyami.imagekodec.codec.ColorChunks
 
@@ -15,6 +16,8 @@ internal sealed class AvifProperty {
         val subX: Int,
         val subY: Int,
         val configObus: ByteArray,
+        /** The whole payload, as a codec reads it. */
+        val payload: ByteArray,
     ) : AvifProperty() {
         val bitDepth: Int get() = if (twelveBit) 12 else if (highBitdepth) 10 else 8
     }
@@ -37,8 +40,8 @@ internal sealed class AvifProperty {
     /** `colr` of type `prof` or `rICC`: an ICC profile. */
     class Icc(val profile: ByteArray) : AvifProperty()
 
-    /** `auxC`: the kind of auxiliary image, as a URN. */
-    class AuxType(val urn: String) : AvifProperty()
+    /** `auxC`: the kind of auxiliary image, as a URN, and the [subtype] bytes after it, unparsed. */
+    class AuxType(val urn: String, val subtype: ByteArray = ByteArray(0)) : AvifProperty()
 
     /** `irot`: a turn of [angle] times 90 degrees anticlockwise. */
     class Rotation(val angle: Int) : AvifProperty()
@@ -58,8 +61,11 @@ internal sealed class AvifProperty {
     /** `lsel`: the spatial layer to show, or 0xFFFF for the highest. */
     class LayerSelector(val layer: Int) : AvifProperty()
 
-    /** Any other property: [known] when its meaning needs no action from a reader that shows the image. */
-    class Other(val type: Int, val known: Boolean) : AvifProperty()
+    /**
+     * Any other property, with its [payload]: [known] when its meaning needs no action from a reader
+     * that shows the image, or when it configures a registered codec.
+     */
+    class Other(val type: Int, val known: Boolean, val payload: ByteArray = ByteArray(0)) : AvifProperty()
 }
 
 /** Where an item's bytes are (`iloc`, ISO/IEC 14496-12 section 8.11.3). */
@@ -72,6 +78,9 @@ internal class AvifItem(val id: Long, val type: Int, val hidden: Boolean) {
     /** The essential properties this reader does not know, which make the item undecodable. */
     val unknownEssential = ArrayList<Int>()
     var location: AvifLocation? = null
+
+    /** The content type of a `mime` item, such as `application/rdf+xml` for XMP. */
+    var contentType: String? = null
 
     inline fun <reified T : AvifProperty> property(): T? = properties.firstOrNull { it is T } as T?
 }
@@ -96,6 +105,12 @@ internal class AvifTrack(
     val offsets: LongArray,
     val sizes: LongArray,
     val durations: LongArray,
+    /**
+     * The composition time of each sample, in decoding order: its decoding time, the sum of the
+     * `stts` durations before it, plus its `ctts` offset (ISO/IEC 14496-12 8.6.1). A track whose
+     * pictures show in another order than they decode, as HEVC with B pictures does, needs them.
+     */
+    val compositionTimes: LongArray,
     val sync: Set<Int>?,
     /**
      * How many times the sequence plays, 0 for ever: an edit list that repeats plays as many times
@@ -104,7 +119,26 @@ internal class AvifTrack(
      * with no edit list, which leaves it open, a sequence loops, as browsers play it.
      */
     val playCount: Long,
-)
+) {
+    /** The samples in presentation order: by composition time, and in decoding order where two tie. */
+    val presentationOrder: IntArray by lazy {
+        sizes.indices.sortedWith(compareBy<Int> { compositionTimes[it] }.thenBy { it }).toIntArray()
+    }
+
+    /**
+     * The duration of the frame shown [rank]th: the time to the next frame's composition, and for the
+     * last frame its own `stts` duration, as a player shows it until the track ends.
+     */
+    fun presentedDuration(rank: Int): Long {
+        val order = presentationOrder
+        val sample = order[rank]
+        if (rank + 1 < order.size) return compositionTimes[order[rank + 1]] - compositionTimes[sample]
+        return durations[sample]
+    }
+
+    /** Whether this track is an auxiliary one, such as alpha, rather than one of pictures to show. */
+    val isAuxiliary: Boolean get() = auxType != null || references.any { it.type == AvifContainer.AUXL }
+}
 
 /**
  * The structure of an AVIF file (AV1 Image File Format 1.1, over HEIF and ISO base media):
@@ -122,6 +156,23 @@ internal class AvifContainer(
     val tracks: List<AvifTrack>,
     private val idat: IsoBox?,
 ) {
+    /**
+     * What the decoder learned of each item, by its id and depth, so that a file that names one
+     * item many times costs the work of that item once (#166).
+     */
+    val checked = HashMap<Long, String?>()
+    val framesChecked = HashMap<Long, String?>()
+    val decoded = HashMap<Long, AvifPlanes>()
+
+    private val uses: Map<Long, Int> by lazy {
+        val out = HashMap<Long, Int>()
+        for (r in references) if (r.type == DIMG) for (id in r.to) out[id] = (out[id] ?: 0) + 1
+        out
+    }
+
+    /** How many times derived images name item [id] as an input. */
+    fun inputUses(id: Long): Int = uses[id] ?: 0
+
     fun referencesFrom(id: Long, type: Int): List<Long> =
         references.filter { it.type == type && it.from == id }.flatMap { it.to.toList() }
 
@@ -202,40 +253,110 @@ internal class AvifContainer(
         val TMAP = fourcc("tmap")
         val SATO = fourcc("sato")
         val PICT = fourcc("pict")
+        val VIDE = fourcc("vide")
         val AUXV = fourcc("auxv")
         val AUXL = fourcc("auxl")
         val DIMG = fourcc("dimg")
         val PREM = fourcc("prem")
+        val CDSC = fourcc("cdsc")
+        val THMB = fourcc("thmb")
+        val IDEN = fourcc("iden")
+        val JPEG = fourcc("jpeg")
+        val MIAF = fourcc("miaf")
+        val MIME = fourcc("mime")
+        val EXIF = fourcc("Exif")
         val ALTR = fourcc("altr")
+        val HVC1 = fourcc("hvc1")
+        val HEV1 = fourcc("hev1")
+        val LHV1 = fourcc("lhv1")
+        val HVCC = fourcc("hvcC")
 
-        const val ALPHA_URN = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
-        const val ALPHA_URN_HEVC = "urn:mpeg:hevc:2015:auxid:1"
+        /** The brands of HEVC images and sequences (ISO/IEC 23008-12 Annex B). */
+        private val HEVC_BRANDS = listOf("heic", "heix", "heim", "heis", "hevc", "hevx", "hevm", "hevs").map { fourcc(it) }.toSet()
 
-        /**
-         * True when [data] starts with an `ftyp` box naming the `avif` or `avis` brand, as its major
-         * brand or among its compatible brands, as libavif checks. A box cut short is read as far as
-         * it goes, so the first bytes of a file are enough when the major brand says it.
-         */
-        fun isAvif(data: ByteArray): Boolean {
+        /** The HEVC brands of multi-view and scalable coding, which need layered HEVC. */
+        val LAYERED_BRANDS = listOf("heim", "heis", "hevm", "hevs").map { fourcc(it) }.toSet()
+
+        /** The structural brands of HEIF, which name no codec. */
+        private val HEIF_BRANDS = listOf("mif1", "msf1", "miaf", "mif2").map { fourcc(it) }.toSet()
+
+        /** The major brand, then the compatible brands, of the `ftyp` box [data] starts with, as far as [data] holds them. */
+        fun brands(data: ByteArray): List<Int>? {
             fun u32(at: Int): Long {
                 var v = 0L
                 for (i in 0 until 4) v = (v shl 8) or (data[at + i].toLong() and 0xFF)
                 return v
             }
-            if (data.size < 12 || u32(4).toInt() != FTYP) return false
-            val major = u32(8).toInt()
-            if (major == AVIF || major == AVIS) return true
+            if (data.size < 12 || u32(4).toInt() != FTYP) return null
+            val out = arrayListOf(u32(8).toInt())
             val size = u32(0)
-            if (size < 16) return false
             val end = minOf(size, data.size.toLong()).toInt()
             var at = 16
             while (at + 4 <= end) {
-                val brand = u32(at).toInt()
-                if (brand == AVIF || brand == AVIS) return true
+                out += u32(at).toInt()
                 at += 4
             }
-            return false
+            return out
         }
+
+        /**
+         * AVIF or HEIC for a HEIF file, from its brands: an AVIF brand alone means AVIF, an HEVC brand
+         * alone means HEIC. A file that names both, or only `mif1` or `msf1`, is classified by the type
+         * of the image it shows, when [data] holds its `meta` box, and else by its brands.
+         */
+        fun heifFormat(data: ByteArray): ImageFormat? {
+            val brands = brands(data) ?: return null
+            val avif = AVIF in brands || AVIS in brands
+            val hevc = brands.any { it in HEVC_BRANDS }
+            if (avif != hevc) return if (avif) ImageFormat.AVIF else ImageFormat.HEIC
+            if (!avif && brands.none { it in HEIF_BRANDS }) return null
+            val shown = try {
+                shownType(parse(data))
+            } catch (_: ImageDecodeException) {
+                null
+            }
+            return when {
+                shown == AV01 -> ImageFormat.AVIF
+                shown != null -> ImageFormat.HEIC
+                avif -> ImageFormat.AVIF
+                else -> ImageFormat.HEIC
+            }
+        }
+
+        /**
+         * The track of pictures [c] shows instead of its primary item, as libavif chooses: the major
+         * brand `avif` shows the primary item, `avis` the track, and any other brand the track when
+         * the file has one (libavif's avifDecoderReset with AVIF_DECODER_SOURCE_AUTO). The track is
+         * the first one of handler `pict` or `vide` whose samples a registered codec reads, or that
+         * is HEVC, which names the module it needs, and that is not an auxiliary track.
+         */
+        fun shownTrack(c: AvifContainer): AvifTrack? {
+            if (c.majorBrand == AVIF && c.primary != null) return null
+            return c.tracks.firstOrNull {
+                (it.handler == PICT || it.handler == VIDE) && it.sizes.isNotEmpty() && !it.isAuxiliary &&
+                    (HeifCodecs.forSampleEntry(it.sampleEntry) != null || it.sampleEntry == HVC1 || it.sampleEntry == HEV1)
+            }
+        }
+
+        /** The coded type of what [c] shows: its track's sample entry, else the primary item's, through derived images. */
+        private fun shownType(c: AvifContainer): Int? {
+            shownTrack(c)?.let { return it.sampleEntry }
+            var item = c.primary?.let { c.items[it] } ?: return null
+            repeat(8) {
+                if (item.type != GRID && item.type != IOVL && item.type != TMAP && item.type != SATO) return item.type
+                item = c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] } ?: return null
+            }
+            return null
+        }
+
+        /** The chroma format and the luma and chroma bit depths in the fixed header of `hvcC` (ISO/IEC 14496-15 section 8.3.2.1). */
+        fun hevcConfigDepths(hvcC: ByteArray): IntArray? {
+            if (hvcC.size < 23) return null
+            return intArrayOf(hvcC[16].toInt() and 3, (hvcC[17].toInt() and 7) + 8, (hvcC[18].toInt() and 7) + 8)
+        }
+
+        const val ALPHA_URN = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
+        const val ALPHA_URN_HEVC = "urn:mpeg:hevc:2015:auxid:1"
 
         /** The descriptive properties whose meaning a reader that shows the image may leave aside. */
         private val KNOWN_DESCRIPTIVE = setOf(
@@ -330,7 +451,13 @@ internal class AvifContainer(
                 ir.u16()
                 val type = ir.fourcc()
                 if (id in items) ir.fail("declares item $id twice")
-                items[id] = AvifItem(id, type, (flags and 1) != 0)
+                val item = AvifItem(id, type, (flags and 1) != 0)
+                // ISO/IEC 23008-12 9.2: a mime item names its content type after the item name.
+                if (type == MIME && ir.remaining > 0) {
+                    ir.string()
+                    if (ir.remaining > 0) item.contentType = ir.string()
+                }
+                items[id] = item
             }
         }
 
@@ -418,6 +545,7 @@ internal class AvifContainer(
                     val b1 = r.u8()
                     val b2 = r.u8()
                     r.u8()
+                    val payload = data.copyOfRange(box.start, box.end)
                     AvifProperty.Av1Config(
                         profile = b1 ushr 5,
                         highBitdepth = (b2 and 0x40) != 0,
@@ -426,6 +554,7 @@ internal class AvifContainer(
                         subX = (b2 ushr 3) and 1,
                         subY = (b2 ushr 2) and 1,
                         configObus = r.bytes(r.remaining),
+                        payload = payload,
                     )
                 }
                 "ispe" -> {
@@ -456,7 +585,7 @@ internal class AvifContainer(
                 }
                 "auxC" -> {
                     r.fullBox()
-                    AvifProperty.AuxType(r.string())
+                    AvifProperty.AuxType(r.string(), r.bytes(r.remaining))
                 }
                 "irot" -> AvifProperty.Rotation(r.u8() and 3)
                 "imir" -> AvifProperty.Mirror(r.u8() and 1)
@@ -466,7 +595,11 @@ internal class AvifContainer(
                 )
                 "a1op" -> AvifProperty.OperatingPoint(r.u8())
                 "lsel" -> AvifProperty.LayerSelector(r.u16())
-                else -> AvifProperty.Other(box.type, known = box.type in KNOWN_DESCRIPTIVE)
+                else -> AvifProperty.Other(
+                    box.type,
+                    known = box.type in KNOWN_DESCRIPTIVE || box.type == HVCC || HeifCodecs.isConfiguration(box.type),
+                    payload = if (box.type == HVCC || HeifCodecs.isConfiguration(box.type)) data.copyOfRange(box.start, box.end) else ByteArray(0),
+                )
             }
         }
 
@@ -542,7 +675,9 @@ internal class AvifContainer(
             var auxType: String? = null
             var width = 0
             var height = 0
-            if (entry.type == AV01) {
+            // An HEVC entry is read without its codec too, so that probe gives the size of a sequence
+            // whose module is missing.
+            if (HeifCodecs.forSampleEntry(entry.type) != null || entry.type == HVC1 || entry.type == HEV1) {
                 val er = IsoReader(data, entry)
                 // The VisualSampleEntry fields up to its child boxes, with the size among them.
                 er.skip(24)
@@ -653,6 +788,33 @@ internal class AvifContainer(
                     }
                 }
             }
+            // Composition offsets are signed in version 1 and unsigned in version 0, which ffmpeg and
+            // libheif read as signed all the same; a composition time before 0 is refused either way.
+            val compositionTimes = LongArray(sizes.size)
+            var decodingTime = 0L
+            for (i in sizes.indices) {
+                compositionTimes[i] = decodingTime
+                decodingTime += durations[i]
+            }
+            child(data, stbl, "ctts")?.let {
+                val r = IsoReader(data, it)
+                r.fullBox()
+                val n = r.u32()
+                if (n > r.remaining / 8) r.fail("lists $n runs")
+                var s = 0L
+                for (i in 0 until n.toInt()) {
+                    val count = r.u32()
+                    val offset = r.s32().toLong()
+                    if (count > sizes.size - s) throw ImageDecodeException("AVIF: 'ctts' of track $id gives offsets to more than its ${sizes.size} samples")
+                    for (k in 0 until count.toInt()) {
+                        val at = (s + k).toInt()
+                        compositionTimes[at] += offset
+                        if (compositionTimes[at] < 0) throw ImageDecodeException("AVIF: sample $at of track $id is composed before the track starts")
+                    }
+                    s += count
+                }
+                if (s != sizes.size.toLong()) throw ImageDecodeException("AVIF: 'ctts' of track $id gives offsets to $s of its ${sizes.size} samples")
+            }
             val sync = child(data, stbl, "stss")?.let {
                 val r = IsoReader(data, it)
                 r.fullBox()
@@ -660,7 +822,7 @@ internal class AvifContainer(
                 if (n > r.remaining / 4) r.fail("lists $n sync samples")
                 (0 until n.toInt()).map { r.u32().toInt() - 1 }.toSet()
             }
-            return AvifTrack(id, handler, timescale, entry.type, width, height, properties, auxType, references, offsets, sizes, durations, sync, playCount)
+            return AvifTrack(id, handler, timescale, entry.type, width, height, properties, auxType, references, offsets, sizes, durations, compositionTimes, sync, playCount)
         }
     }
 }

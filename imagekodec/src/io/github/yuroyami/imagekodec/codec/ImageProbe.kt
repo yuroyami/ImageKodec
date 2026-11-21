@@ -36,13 +36,26 @@ internal object ImageProbe {
 
     fun probe(data: ByteArray): ImageInfo = when (ImageFormat.sniff(data)) {
         ImageFormat.PNG -> png(data)
-        ImageFormat.JPEG -> jpeg(data)
+        ImageFormat.JPEG -> jpeg(data).also { info ->
+            // The EXIF thumbnail's size, from its own frame header (#150).
+            jpegThumbnail(data)?.let { t ->
+                val size = try {
+                    jpeg(t)
+                } catch (_: ImageDecodeException) {
+                    null
+                }
+                if (size != null) {
+                    info.thumbnailWidth = size.width
+                    info.thumbnailHeight = size.height
+                }
+            }
+        }
         ImageFormat.GIF -> gif(data)
         ImageFormat.BMP -> bmp(data)
         ImageFormat.TIFF -> tiff(data)
         ImageFormat.JP2 -> jp2(data)
         ImageFormat.WEBP -> webp(data)
-        ImageFormat.AVIF -> AvifDecoder.probe(data)
+        ImageFormat.AVIF, ImageFormat.HEIC -> AvifDecoder.probe(data)
         ImageFormat.JXL -> JxlDecoder.probe(data)
         ImageFormat.JXR -> JxrDecoder.probe(data)
         null -> throw ImageDecodeException(
@@ -62,8 +75,8 @@ internal object ImageProbe {
         var hasTrns = false
         var frames = 1
         var loops = 1L
-        var apple = false
         var sawIhdr = false
+        var cgbi = false
         var limit: String? = null
         val color = ColorChunks.Png()
 
@@ -73,7 +86,7 @@ internal object ImageProbe {
             val type = r.bytes(4).decodeToString()
             val n = len.toInt()
             when (type) {
-                "CgBI" -> { apple = true; r.skip(minOf(n, r.remaining)) }
+                "CgBI" -> { cgbi = true; r.skip(minOf(n, r.remaining)) }
                 "IHDR" -> {
                     if (n != 13) throw ImageDecodeException("PNG: IHDR length $n")
                     val h = ByteReader(r.bytes(13))
@@ -111,8 +124,8 @@ internal object ImageProbe {
         if (frames < 1) frames = 1
         val channels = when (colorType) { 0, 3 -> 1; 2 -> 3; 4 -> 2; 6 -> 4; else -> 0 }
         val reason = when {
-            apple -> "Apple CgBI PNG (Xcode-crushed, raw deflate + swapped channels)"
             limit != null -> limit
+            cgbi && (colorType == 2 || colorType == 6) && depth != 8 -> "PNG: a CgBI file of $depth-bit colour (Xcode writes 8 bits only)"
             // A colour type or depth the decoder refuses as damaged leaves nothing to weigh here.
             channels > 0 && depth in 1..16 -> PngDecoder.budgetRefusal(width, height, depth * channels, data.size)
             else -> null
@@ -134,6 +147,9 @@ internal object ImageProbe {
     }
 
     // --- JPEG -------------------------------------------------------------------
+
+    /** The JPEG thumbnail in the EXIF block of the JPEG [data], or null. */
+    fun jpegThumbnail(data: ByteArray): ByteArray? = MetadataIo.read(data).exif?.let { Exif.thumbnailFromTiff(it) }
 
     private fun jpeg(data: ByteArray): ImageInfo {
         val r = ByteReader(data, pos = 2)
@@ -365,10 +381,10 @@ internal object ImageProbe {
         var compression = 1
         var photometric = -1
         var planar = 1
-        var tileWidth = 0
+        // YCbCrSubSampling defaults to 2 by 2.
+        var subsampled = true
         var jpegProc = 1
         var predictor = 1
-        var t4Options = 0
         var inkSet = 1
         var inks = 4
         var sampleFormats: IntArray? = null
@@ -426,9 +442,8 @@ internal object ImageProbe {
                 274 -> orientation = Orientation.fromExif(scalar())
                 277 -> spp = scalar()
                 284 -> planar = single() ?: planar
-                322 -> tileWidth = single() ?: tileWidth
+                530 -> subsampled = n == 2 && type == 3 && (u16(at + 8) != 1 || u16(at + 10) != 1)
                 512 -> jpegProc = single() ?: jpegProc
-                292 -> t4Options = single() ?: t4Options
                 317 -> predictor = single() ?: predictor
                 332 -> inkSet = single() ?: inkSet
                 334 -> inks = single() ?: inks
@@ -472,21 +487,21 @@ internal object ImageProbe {
         if (sampleFormats != null && sampleFormats.size != spp) {
             throw ImageDecodeException("TIFF: SampleFormat requires $spp values, got ${sampleFormats.size}")
         }
-        val sampleFormat = sampleFormats?.firstOrNull { it != 1 && it != 4 } ?: 1
-        val reason = tiffUnsupported(bits, compression, photometric, planar, predictor, t4Options, sampleFormat)
+        val sampleFormat = TiffDecoder.sampleFormat(sampleFormats?.map { it.toLong() } ?: listOf(1L))
+        val reason = tiffUnsupported(bits, compression, photometric, predictor, sampleFormat)
             ?: when {
                 photometric != 5 -> null
                 inkSet != 1 -> "TIFF InkSet $inkSet (inks other than CMYK)"
                 inks != 4 -> "TIFF with $inks inks (CMYK only)"
-                bits != 8 && bits != 16 -> "TIFF CMYK with $bits-bit samples (8 or 16)"
                 else -> null
             }
             ?: when {
                 compression != 6 -> null
-                planar == 2 && spp > 1 -> "TIFF old-style JPEG in separate planes"
                 jpegProc == 14 -> "TIFF old-style lossless JPEG"
                 spp != 1 && spp != 3 -> "TIFF old-style JPEG with $spp samples per pixel (1 or 3)"
-                tileWidth in 1 until width -> "TIFF old-style JPEG in more than one column of tiles"
+                // The decoder trusts the stream's sampling over the tag; the probe has only the tag.
+                planar == 2 && spp > 1 && photometric == 6 && subsampled ->
+                    "TIFF old-style JPEG in separate planes with subsampled samples"
                 else -> null
             }
         return ImageInfo(
@@ -521,26 +536,17 @@ internal object ImageProbe {
         bits: Int,
         compression: Int,
         photometric: Int,
-        planar: Int,
         predictor: Int,
-        t4Options: Int,
         sampleFormat: Int,
     ): String? = when {
-        bits !in intArrayOf(1, 2, 4, 8, 16) ->
-            "TIFF with $bits bits per sample (1, 2, 4, 8 and 16 are decodable)"
-        sampleFormat != 1 -> "TIFF SampleFormat $sampleFormat (unsigned integer samples only)"
-        compression == 6 && bits != 8 -> "TIFF old-style JPEG with $bits-bit samples (8-bit only)"
-        compression == 7 && bits != 8 -> "TIFF JPEG with $bits-bit samples (8-bit only)"
-        compression == 7 && photometric == 6 && planar == 2 -> "TIFF JPEG YCbCr in separate planes"
-        photometric == 6 && bits != 8 -> "TIFF YCbCr with $bits-bit samples (8-bit only)"
-        compression !in intArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 32773, 32946, 34925, 50000) -> "TIFF compression $compression"
-        compression == 3 && (t4Options and 2) != 0 -> "TIFF CCITT G3 uncompressed mode (T4Options bit 1)"
-        predictor !in intArrayOf(1, 2) -> "TIFF predictor $predictor"
-        // Horizontal differencing is only implemented for whole-byte samples.
-        predictor == 2 && bits != 8 && bits != 16 -> "TIFF predictor 2 with $bits-bit samples"
-        photometric >= 0 && photometric !in intArrayOf(0, 1, 2, 3, 5, 6) ->
-            "TIFF photometric interpretation $photometric"
-        else -> null
+        bits < 1 -> null
+        else -> TiffDecoder.sampleRefusal(bits, sampleFormat, photometric, compression)?.let { "TIFF $it" }
+            ?: TiffDecoder.predictorRefusal(predictor, bits, sampleFormat, compression)?.let { "TIFF $it" }
+            ?: when {
+                compression !in intArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 32773, 32946, 34925, 50000) -> "TIFF compression $compression"
+                photometric >= 0 && photometric !in intArrayOf(0, 1, 2, 3, 5, 6) -> "TIFF photometric interpretation $photometric"
+                else -> null
+            }
     }
 
     // --- JPEG 2000 --------------------------------------------------------------
@@ -638,6 +644,8 @@ internal object ImageProbe {
                 if (segmentEnd > stream.end || (inTile >= 0 && segmentEnd > tileEnd)) return null
                 r.end = segmentEnd.toInt()
                 when (marker) {
+                    0xFF50 -> Jp2Headers.readCap(r)
+                    0xFF59 -> Jp2Headers.readCpf(r)
                     0xFF52 -> {
                         val cod = Jp2Headers.readCod(r)
                         if (inTile >= 0) tileCod[inTile] = cod else mainCod = cod

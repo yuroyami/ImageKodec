@@ -25,7 +25,7 @@ class Jbig2UnsupportedTest {
     }
 
     @Test
-    fun unknownLengthCannotExposeABlankOrPartialPage() {
+    fun anUnknownLengthWithoutItsEndMarkerCannotExposeABlankOrPartialPage() {
         val unknown = segment(3,38,byteArrayOf(),length = -1)
         assertNull(Jbig2Decoder.decode(page() + unknown,null,8,2))
         assertNull(Jbig2Decoder.decode(page() + mmr() + unknown,null,8,2))
@@ -38,10 +38,10 @@ class Jbig2UnsupportedTest {
     }
 
     @Test
-    fun multiInstanceAggregatePrefixIsRefused() {
+    fun aMultiInstanceAggregateCutAfterItsCountIsDamage() {
         // jbig2enc's Apache-2.0 arithmetic encoder at d0dfca46216c98f11312a9c9f15615ed490cd7b3:
         // IADH=1, IADW=1, IAAI=2, then finalization. This prefix declares two
-        // instances; refusal must happen before an unsupported aggregate body.
+        // instances and holds none.
         assertNull(Jbig2Decoder.decode(page() + dictionary(0x1002,1,hex("94efffac")),null,8,2))
     }
 

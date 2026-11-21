@@ -231,14 +231,14 @@ class Jp2DecoderTest {
     }
 
     @Test
-    fun probeRejectsHighThroughputCodeBlocks() {
+    fun probeRejectsMixedHighThroughputCodeBlocks() {
         val cs = codestream()
         // COD: marker(2) Lcod(2) Scod SGcod(4), then the SPcod code-block style byte.
         val patched = cs.copyOf()
-        patched[indexOfMarker(cs, 0xFF52) + 12] = 0x40   // HTJ2K, Part 15
+        patched[indexOfMarker(cs, 0xFF52) + 12] = 0xC0.toByte()   // HTJ2K MIXED, Part 15 (#187)
         val info = ImageKodec.probe(patched)
         assertFalse(info.isDecodable)
-        assertTrue(info.unsupportedReason!!.contains("high-throughput"), info.unsupportedReason)
+        assertTrue(info.unsupportedReason!!.contains("MIXED"), info.unsupportedReason)
         assertFailsWith<UnsupportedImageException> { ImageKodec.decode(patched) }
     }
 }

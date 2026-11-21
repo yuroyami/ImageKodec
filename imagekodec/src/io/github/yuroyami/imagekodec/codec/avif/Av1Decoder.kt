@@ -35,7 +35,8 @@ internal class Av1Inspection(val seq: Av1SequenceHeader, val width: Int, val hei
  */
 internal class Av1Decoder(private val operatingPoint: Int = 0) {
     private var seq: Av1SequenceHeader? = null
-    private val refs = Av1RefSlots()
+    /** The reference slots; the encoder keeps them as a decoder of its stream would (#177). */
+    internal val refs = Av1RefSlots()
     private var frameHeader: Av1FrameHeader? = null
     private var frame: Av1FrameDecoder? = null
     private var frameSpatialId = 0
@@ -207,6 +208,14 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
             if (fh.tileCols * fh.tileRows > 1) use.add("tiles")
             if (fh.filmGrain.applyGrain && !fh.frameIsIntra) use.add("film grain inter frame")
             if (!fh.showFrame) use.add("hidden frame")
+            if (fh.allowIntrabc) use.add("intra block copy allowed")
+            for (plane in 0 until s.numPlanes) {
+                when (fh.frameRestorationType[plane]) {
+                    Av1FrameHeader.RESTORE_WIENER -> use.add("wiener restoration frame")
+                    Av1FrameHeader.RESTORE_SGRPROJ -> use.add("self-guided restoration frame")
+                    Av1FrameHeader.RESTORE_SWITCHABLE -> use.add("switchable restoration frame")
+                }
+            }
         }
     }
 
@@ -259,6 +268,18 @@ internal class Av1Decoder(private val operatingPoint: Int = 0) {
         if (fh.showFrame && picture != null) output(fh, picture)
         frameHeader = null
         frame = null
+    }
+
+    /**
+     * For the encoder (#177): the end of frame [f], which the encoder coded under [fh] against these [refs], as a decoder
+     * of the stream ends it: the post filters, then the reference update. Returns the picture the frame shows.
+     */
+    fun endCodedFrame(fh: Av1FrameHeader, f: Av1FrameDecoder): Av1Picture {
+        val s = fh.seq
+        Av1PostFilter.apply(f)
+        val picture = Av1Picture(fh.upscaledWidth, fh.frameHeight, s.bitDepth, s.subsamplingX, s.subsamplingY, f.outputPlanes(), f.outputStrides(), s)
+        update(fh, f, picture)
+        return picture
     }
 
     /** The reference frame update process (specification section 7.20), for the slots [fh] refreshes. */

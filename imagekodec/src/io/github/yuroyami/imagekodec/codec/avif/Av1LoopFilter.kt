@@ -2,15 +2,26 @@ package io.github.yuroyami.imagekodec.codec.avif
 
 /** The AV1 loop filter process (specification section 7.14), on the frame's planes in place. */
 internal object Av1LoopFilter {
-    fun apply(f: Av1FrameDecoder) {
+    /**
+     * Filters the planes [planes] has a bit set for (bit 0 luma), all by default. Each plane is filtered from its own
+     * samples alone, so the encoder's level search (#176) filters only the plane it measures. With [evenBands], only
+     * the even bands of 64 luma rows, and in them no horizontal edge on a band's first row, whose taps reach the band
+     * above: the level search measures its levels on that half, where the picture has more than one band.
+     */
+    fun apply(f: Av1FrameDecoder, planes: Int = 7, evenBands: Boolean = false) {
         val fh = f.fh
         for (plane in 0 until f.numPlanes) {
+            if ((planes shr plane) and 1 == 0) continue
             if (plane == 0 || fh.loopFilterLevel[1 + plane] != 0) {
                 for (pass in 0 until 2) {
                     val rowStep = if (plane == 0) 1 else 1 shl f.subY
                     val colStep = if (plane == 0) 1 else 1 shl f.subX
                     var row = 0
                     while (row < f.miRows) {
+                        if (evenBands && ((row shr 4) and 1 == 1 || (pass == 1 && row and 15 == 0))) {
+                            row += rowStep
+                            continue
+                        }
                         var col = 0
                         while (col < f.miCols) {
                             edge(f, plane, pass, row, col)
@@ -59,13 +70,15 @@ internal object Av1LoopFilter {
             isBlockEdge || skip == 0 || isIntra -> true
             else -> false
         }
+        // An edge the filter skips needs no strength, which has no effect of its own.
+        if (!applyFilter) return
         // The filter size process.
         val baseSize = if (pass == 0) minOf(Av1.txWidth[prevTxSz], Av1.txWidth[txSz]) else minOf(Av1.txHeight[prevTxSz], Av1.txHeight[txSz])
         val filterSize = if (plane == 0) minOf(16, baseSize) else minOf(8, baseSize)
         var strength = strength(f, row, col, plane, pass)
         if (strength[0] == 0) strength = strength(f, prevRow, prevCol, plane, pass)
         val lvl = strength[0]
-        if (!applyFilter || lvl <= 0) return
+        if (lvl <= 0) return
         for (i in 0 until Av1.MI_SIZE) {
             sample(f, xP + dy * i, yP + dx * i, plane, strength[1], strength[2], strength[3], dx, dy, filterSize)
         }

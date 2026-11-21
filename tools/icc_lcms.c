@@ -8,6 +8,7 @@
  *   ./icc_lcms make-rgb RX RY GX GY BX BY WX WY GAMMA > profile.icc
  *   ./icc_lcms convert-rgb RX RY GX GY BX BY WX WY GAMMA INTENT BYTES < samples > rgb
  *   ./icc_lcms convert profile.icc INTENT CHANNELS [BYTES] < samples > rgb
+ *   ./icc_lcms convert-lab < lab > rgb
  *
  * make writes a profile of KIND:
  *
@@ -30,10 +31,28 @@
  *   rgb-xyz-v2     an RGB input profile of lut16Type tables with an XYZ PCS
  *   rgb-mab-v4     an RGB display profile of lutAToBType tables with a Lab PCS
  *
+ * The two-way kinds hold an A2B0 and a B2A0 table of one colour space, wide primaries with a
+ * gamma of 2.2, each the other's inverse, so a picture can be coded into the profile and read
+ * back. Each table's curves are undone in its grid, so the curves and the grid both count:
+ *
+ *   io-lut8-v2     lut8Type (mft1), Lab PCS
+ *   io-lut16-v2    lut16Type (mft2), Lab PCS in v2's encoding
+ *   io-xyz-v2      lut16Type, XYZ PCS, the B2A table with a matrix ahead of its curves
+ *   io-mab-v4      lutAToBType and lutBToAType, Lab PCS: curves, grid, curves
+ *   io-mab-xyz-v4  the same with an XYZ PCS and every element: curves, matrix with an offset,
+ *                  curves, grid, curves
+ *   io-gray-v4     a gray profile of lutAToBType and lutBToAType, Lab PCS
+ *
+ * to-profile reads linear sRGB floats, three a pixel, and writes the profile's device values
+ * as floats, relative colorimetric with no black point compensation.
+ *
  * convert reads CHANNELS samples a pixel from stdin (1 gray, 3 RGB, 4 CMYK ink), each
  * of BYTES bytes, 1 (the default) or 2 in the machine's byte order, and writes three
  * float32 sRGB values a pixel, 0 to 1, in the machine's byte order. INTENT is
  * 0 perceptual, 1 relative colorimetric, 2 saturation, 3 absolute colorimetric.
+ *
+ * convert-lab reads L*, a* and b* as three float64 values a pixel and converts them through a
+ * D50 Lab profile (cmsCreateLab4Profile), relative colorimetric, to float32 sRGB as convert does.
  */
 #include <lcms2.h>
 #include <math.h>
@@ -180,6 +199,220 @@ static cmsHPROFILE lutProfile(cmsColorSpaceSignature space, cmsProfileClassSigna
     return h;
 }
 
+/* ---- Two-way table profiles: an analytic space and its inverse, each through a grid. ---- */
+
+/* Linear RGB of wide primaries (Adobe RGB's, adapted to D50) to D50 XYZ. */
+static const double IO_M[9] = {
+    0.6097559, 0.2052401, 0.1492240,
+    0.3111242, 0.6256560, 0.0632197,
+    0.0194811, 0.0608902, 0.7448387,
+};
+
+typedef struct {
+    int toPcs;       /* A2B, else B2A */
+    int lab, v2;     /* the PCS, and v2's Lab encoding */
+    int gray;
+    int devCurves;   /* gamma curves on the device side, 1 + 0.1 i */
+    int pcsCurves;   /* gamma curves on the PCS side, 1 - 0.05 i */
+    int matrix;      /* a matrix on the PCS side: 1.9 v + offset into the grid of a B2A table, 0.5 v out of an A2B one */
+    double offset;   /* 0.02 for a lutBToAType; a lut16Type's matrix has none */
+    int mCurves;     /* gamma curves between that matrix and the grid, 1.2 */
+} IoCargo;
+
+static double devGamma(int i) { return 1.0 + 0.1 * i; }
+static double pcsGamma(int i) { return 1.0 - 0.05 * i; }
+
+/* D50 XYZ of device values. */
+static void ioForward(const IoCargo *c, const double d[3], cmsCIEXYZ *xyz) {
+    if (c->gray) {
+        double y = pow(d[0], 2.2);
+        xyz->X = 0.9642 * y; xyz->Y = y; xyz->Z = 0.8249 * y;
+        return;
+    }
+    double l[3];
+    for (int i = 0; i < 3; i++) l[i] = pow(d[i], 2.2);
+    xyz->X = IO_M[0] * l[0] + IO_M[1] * l[1] + IO_M[2] * l[2];
+    xyz->Y = IO_M[3] * l[0] + IO_M[4] * l[1] + IO_M[5] * l[2];
+    xyz->Z = IO_M[6] * l[0] + IO_M[7] * l[1] + IO_M[8] * l[2];
+}
+
+/* Device values of D50 XYZ, clipped to the gamut. */
+static void ioInverse(const IoCargo *c, const cmsCIEXYZ *xyz, double d[3]) {
+    double l[3];
+    if (c->gray) {
+        l[0] = xyz->Y;
+    } else {
+        const double *m = IO_M;
+        double t[9] = {
+            m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
+            m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
+            m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3],
+        };
+        double det = m[0] * t[0] + m[1] * t[3] + m[2] * t[6], v[3] = { xyz->X, xyz->Y, xyz->Z };
+        for (int i = 0; i < 3; i++) l[i] = (t[3 * i] * v[0] + t[3 * i + 1] * v[1] + t[3 * i + 2] * v[2]) / det;
+    }
+    for (int i = 0; i < (c->gray ? 1 : 3); i++) {
+        double x = l[i] < 0 ? 0 : l[i] > 1 ? 1 : l[i];
+        d[i] = pow(x, 1 / 2.2);
+    }
+}
+
+/* The PCS of [xyz] in the 0 to 1 encoding a pipeline carries, and back. */
+static void pcsEncode(const IoCargo *c, const cmsCIEXYZ *xyz, double v[3]) {
+    if (c->lab) {
+        cmsCIELab lab;
+        cmsXYZ2Lab(NULL, &lab, xyz);
+        double f = c->v2 ? 65280.0 / 65535.0 : 1.0;
+        v[0] = lab.L / 100 * f; v[1] = (lab.a + 128) / 255 * f; v[2] = (lab.b + 128) / 255 * f;
+    } else {
+        double s = 1 + 32767.0 / 32768.0;
+        v[0] = xyz->X / s; v[1] = xyz->Y / s; v[2] = xyz->Z / s;
+    }
+}
+
+static void pcsDecode(const IoCargo *c, const double v[3], cmsCIEXYZ *xyz) {
+    if (c->lab) {
+        double f = c->v2 ? 65535.0 / 65280.0 : 1.0;
+        cmsCIELab lab = { v[0] * f * 100, v[1] * f * 255 - 128, v[2] * f * 255 - 128 };
+        cmsLab2XYZ(NULL, xyz, &lab);
+    } else {
+        double s = 1 + 32767.0 / 32768.0;
+        xyz->X = v[0] * s; xyz->Y = v[1] * s; xyz->Z = v[2] * s;
+    }
+}
+
+static double clip01(double x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+
+/*
+ * A grid node: its inputs back through the curves and matrix before the grid to the table's
+ * input, the analytic conversion, then forward through nothing but the inverse of what follows.
+ */
+static int ioSampler(const cmsUInt16Number in[], cmsUInt16Number out[], void *cargo) {
+    const IoCargo *c = cargo;
+    int devN = c->gray ? 1 : 3;
+    double u[3], d[3] = { 0, 0, 0 }, v[3];
+    cmsCIEXYZ xyz;
+    if (c->toPcs) {
+        for (int i = 0; i < devN; i++) {
+            u[i] = in[i] / 65535.0;
+            d[i] = c->devCurves ? pow(u[i], 1 / devGamma(i)) : u[i];
+        }
+        ioForward(c, d, &xyz);
+        pcsEncode(c, &xyz, v);
+        for (int i = 0; i < 3; i++) {
+            if (c->pcsCurves) v[i] = pow(clip01(v[i]), 1 / pcsGamma(i));
+            if (c->matrix) v[i] = v[i] / 0.5;
+            if (c->mCurves) v[i] = pow(clip01(v[i]), 1 / 1.2);
+            out[i] = (cmsUInt16Number) floor(clip01(v[i]) * 65535 + 0.5);
+        }
+    } else {
+        for (int i = 0; i < 3; i++) {
+            v[i] = in[i] / 65535.0;
+            if (c->mCurves) v[i] = pow(v[i], 1 / 1.2);
+            if (c->matrix) v[i] = (v[i] - c->offset) / 1.9;
+            if (c->pcsCurves) v[i] = pow(clip01(v[i]), 1 / pcsGamma(i));
+        }
+        pcsDecode(c, v, &xyz);
+        ioInverse(c, &xyz, d);
+        for (int i = 0; i < devN; i++) {
+            double y = c->devCurves ? pow(d[i], 1 / devGamma(i)) : d[i];
+            out[i] = (cmsUInt16Number) floor(clip01(y) * 65535 + 0.5);
+        }
+    }
+    return 1;
+}
+
+/* Gamma curves, tabulated at one length for a lut8Type or lut16Type, else parametric. */
+static cmsStage *gammaCurves(int n, double (*gamma)(int), int tabulated, int eightBit) {
+    cmsToneCurve *curves[3];
+    for (int i = 0; i < n; i++) {
+        double g = gamma(i);
+        if (!tabulated) {
+            curves[i] = para(1, g, 0, 0, 0, 0, 0, 0);
+            continue;
+        }
+        int len = eightBit ? 256 : 1024;
+        cmsUInt16Number t[1024];
+        for (int k = 0; k < len; k++) t[k] = (cmsUInt16Number) floor(pow(k / (len - 1.0), g) * 65535 + 0.5);
+        curves[i] = cmsBuildTabulatedToneCurve16(NULL, len, t);
+    }
+    return cmsStageAllocToneCurves(NULL, n, curves);
+}
+
+static double mGamma(int i) { (void) i; return 1.2; }
+
+static cmsPipeline *ioTable(IoCargo c, int grid, int legacy, int eightBit) {
+    int devN = c.gray ? 1 : 3;
+    int in = c.toPcs ? devN : 3, out = c.toPcs ? 3 : devN;
+    cmsPipeline *p = cmsPipelineAlloc(NULL, in, out);
+    /* A lut8Type or lut16Type has curves on both sides of its grid, and a matrix only ahead of them. */
+    if (c.toPcs) {
+        if (c.devCurves) cmsPipelineInsertStage(p, cmsAT_END, gammaCurves(devN, devGamma, legacy, eightBit));
+    } else {
+        /* A lut16Type's matrix comes before its curves; a lutBToAType's after its B curves. */
+        double m[9] = { 1.9, 0, 0, 0, 1.9, 0, 0, 0, 1.9 }, o[3] = { c.offset, c.offset, c.offset };
+        if (c.matrix && legacy) cmsPipelineInsertStage(p, cmsAT_END, cmsStageAllocMatrix(NULL, 3, 3, m, NULL));
+        if (c.pcsCurves) cmsPipelineInsertStage(p, cmsAT_END, gammaCurves(3, pcsGamma, legacy, eightBit));
+        if (c.matrix && !legacy) cmsPipelineInsertStage(p, cmsAT_END, cmsStageAllocMatrix(NULL, 3, 3, m, o));
+        if (c.mCurves) cmsPipelineInsertStage(p, cmsAT_END, gammaCurves(3, mGamma, 0, 0));
+    }
+    cmsStage *clut = cmsStageAllocCLut16bit(NULL, grid, in, out, NULL);
+    cmsStageSampleCLut16bit(clut, ioSampler, &c, 0);
+    cmsPipelineInsertStage(p, cmsAT_END, clut);
+    if (c.toPcs) {
+        if (c.mCurves) cmsPipelineInsertStage(p, cmsAT_END, gammaCurves(3, mGamma, 0, 0));
+        if (c.matrix) {
+            double m[9] = { 0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5 }, o[3] = { 0, 0, 0 };
+            cmsPipelineInsertStage(p, cmsAT_END, cmsStageAllocMatrix(NULL, 3, 3, m, o));
+        }
+        if (c.pcsCurves) cmsPipelineInsertStage(p, cmsAT_END, gammaCurves(3, pcsGamma, legacy, eightBit));
+    } else if (c.devCurves) {
+        cmsPipelineInsertStage(p, cmsAT_END, gammaCurves(devN, devGamma, legacy, eightBit));
+    }
+    if (eightBit) cmsPipelineSetSaveAs8bitsFlag(p, TRUE);
+    return p;
+}
+
+static cmsHPROFILE ioProfile(const char *kind) {
+    IoCargo c = { 0 };
+    int legacy = 1, eightBit = 0, grid = 17;
+    double version = 2.1;
+    if (!strcmp(kind, "io-lut8-v2")) {
+        c.lab = 1; c.devCurves = 1; c.pcsCurves = 1; eightBit = 1;
+    } else if (!strcmp(kind, "io-lut16-v2")) {
+        c.lab = 1; c.v2 = 1; c.devCurves = 1; c.pcsCurves = 1;
+    } else if (!strcmp(kind, "io-xyz-v2")) {
+        c.devCurves = 1; c.pcsCurves = 1; c.matrix = 1;
+    } else if (!strcmp(kind, "io-mab-v4")) {
+        c.lab = 1; c.devCurves = 1; c.pcsCurves = 1; legacy = 0; version = 4.3;
+    } else if (!strcmp(kind, "io-mab-xyz-v4")) {
+        c.devCurves = 1; c.pcsCurves = 1; c.matrix = 1; c.mCurves = 1; legacy = 0; version = 4.3;
+    } else if (!strcmp(kind, "io-gray-v4")) {
+        c.lab = 1; c.gray = 1; c.devCurves = 1; c.pcsCurves = 1; legacy = 0; version = 4.3; grid = 33;
+    } else {
+        return NULL;
+    }
+    cmsHPROFILE h = cmsCreateProfilePlaceholder(NULL);
+    cmsSetProfileVersion(h, version);
+    cmsSetDeviceClass(h, cmsSigDisplayClass);
+    cmsSetColorSpace(h, c.gray ? cmsSigGrayData : cmsSigRgbData);
+    cmsSetPCS(h, c.lab ? cmsSigLabData : cmsSigXYZData);
+    cmsSetHeaderRenderingIntent(h, INTENT_PERCEPTUAL);
+    /* A lut16Type holds a matrix ahead of its device curves only, so the A2B table of io-xyz-v2 has none. */
+    IoCargo a = c;
+    a.toPcs = 1;
+    if (legacy) a.matrix = 0;
+    cmsPipeline *a2b = ioTable(a, grid, legacy, eightBit);
+    c.offset = legacy ? 0 : 0.02;
+    cmsPipeline *b2a = ioTable(c, grid, legacy, eightBit);
+    cmsWriteTag(h, cmsSigAToB0Tag, a2b);
+    cmsWriteTag(h, cmsSigBToA0Tag, b2a);
+    cmsPipelineFree(a2b);
+    cmsPipelineFree(b2a);
+    cmsWriteTag(h, cmsSigMediaWhitePointTag, cmsD50_XYZ());
+    return h;
+}
+
 /* Writes [h] to stdout and closes it. */
 static int emit(cmsHPROFILE h) {
     cmsUInt32Number size = 0;
@@ -248,7 +481,7 @@ static int make(const char *kind) {
         h = lutProfile(cmsSigRgbData, cmsSigInputClass, cmsSigXYZData, 2.1, 17, 1, 0);
     } else if (!strcmp(kind, "rgb-mab-v4")) {
         h = lutProfile(cmsSigRgbData, cmsSigDisplayClass, cmsSigLabData, 4.3, 17, 1, 0);
-    } else {
+    } else if ((h = ioProfile(kind)) == NULL) {
         fprintf(stderr, "unknown profile kind %s\n", kind);
         return 2;
     }
@@ -293,7 +526,50 @@ static cmsHPROFILE rgbOf(char **v) {
     return rgb(atof(v[6]), atof(v[7]), p, curve, 4.3);
 }
 
+static int convertLab(void) {
+    cmsHPROFILE in = cmsCreateLab4Profile(NULL);
+    cmsHPROFILE out = cmsCreate_sRGBProfile();
+    cmsHTRANSFORM x = cmsCreateTransform(in, TYPE_Lab_DBL, out, TYPE_RGB_FLT, INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE);
+    if (x == NULL) return 4;
+    double lab[3];
+    float rgb[3];
+    while (fread(lab, sizeof(double), 3, stdin) == 3) {
+        cmsDoTransform(x, lab, rgb, 1);
+        fwrite(rgb, sizeof(float), 3, stdout);
+    }
+    cmsDeleteTransform(x);
+    cmsCloseProfile(in);
+    cmsCloseProfile(out);
+    return 0;
+}
+
+/*
+ * Linear sRGB floats on stdin, three a pixel, to the device values of PROFILE as floats, one a pixel
+ * for gray and three for RGB, relative colorimetric: the way a JPEG XL decoder writes a lossy picture
+ * into the profile it comes with.
+ */
+static int toProfile(const char *path, int channels) {
+    cmsHPROFILE out = cmsOpenProfileFromFile(path, "r");
+    if (out == NULL) return 3;
+    const double p[6] = { 0.64, 0.33, 0.30, 0.60, 0.15, 0.06 };
+    cmsHPROFILE in = rgb(0.3127, 0.3290, p, para(1, 1.0, 0, 0, 0, 0, 0, 0), 4.3);
+    cmsHTRANSFORM x = cmsCreateTransform(in, TYPE_RGB_FLT, out, channels == 1 ? TYPE_GRAY_FLT : TYPE_RGB_FLT,
+        INTENT_RELATIVE_COLORIMETRIC, cmsFLAGS_NOOPTIMIZE | cmsFLAGS_NOCACHE);
+    if (x == NULL) return 4;
+    float v[3], o[3];
+    while (fread(v, sizeof(float), 3, stdin) == 3) {
+        cmsDoTransform(x, v, o, 1);
+        fwrite(o, sizeof(float), channels, stdout);
+    }
+    cmsDeleteTransform(x);
+    cmsCloseProfile(in);
+    cmsCloseProfile(out);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 4 && !strcmp(argv[1], "to-profile")) return toProfile(argv[2], atoi(argv[3]));
+    if (argc == 2 && !strcmp(argv[1], "convert-lab")) return convertLab();
     if (argc == 3 && !strcmp(argv[1], "make")) return make(argv[2]);
     if (argc == 11 && !strcmp(argv[1], "make-rgb")) return emit(rgbOf(argv + 2));
     // Saving a profile rounds its colorants to s15Fixed16, so this converts through it unsaved.
@@ -303,6 +579,6 @@ int main(int argc, char **argv) {
         if (bytes != 1 && bytes != 2) return 2;
         return convert(argv[2], atoi(argv[3]), atoi(argv[4]), bytes);
     }
-    fprintf(stderr, "usage: %s make KIND | make-rgb RX RY GX GY BX BY WX WY GAMMA | convert-rgb ... GAMMA INTENT BYTES | convert PROFILE INTENT CHANNELS [BYTES]\n", argv[0]);
+    fprintf(stderr, "usage: %s make KIND | make-rgb RX RY GX GY BX BY WX WY GAMMA | convert-rgb ... GAMMA INTENT BYTES | convert PROFILE INTENT CHANNELS [BYTES] | to-profile PROFILE CHANNELS\n", argv[0]);
     return 2;
 }

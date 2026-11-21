@@ -1,4 +1,5 @@
-# Settings that the three published libraries share. Each module.yaml applies this file.
+# Settings that the library modules share: the published libraries, the HEIC module and the test kit.
+# Each of their module.yaml files applies this file; a module that is not published turns publishing off.
 
 # `./kotlin publish mavenLocal -m <module>` puts a build into ~/.m2 for tests in other projects.
 repositories:

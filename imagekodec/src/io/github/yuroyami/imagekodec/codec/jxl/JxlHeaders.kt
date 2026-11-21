@@ -5,6 +5,8 @@
 
 package io.github.yuroyami.imagekodec.codec.jxl
 
+import io.github.yuroyami.imagekodec.internal.color.IccInverse
+
 /** How samples are stored: unsigned integers of [bits] bits, or floats with [exponentBits] of exponent. */
 internal class JxlBitDepth(val floatingPoint: Boolean, val bits: Int, val exponentBits: Int) {
     companion object {
@@ -217,6 +219,12 @@ internal class JxlImageHeader(
     val upsampling8Weights: DoubleArray?,
 ) {
     val havePreview: Boolean get() = previewWidth != 0
+
+    /**
+     * For a lossy picture whose colour is an ICC profile alone, the way from linear sRGB into that
+     * profile, when it is one of matrix and curves; set once the profile is read.
+     */
+    var iccInverse: IccInverse? = null
 
     /** The index of the first alpha channel among the extra channels, or -1. */
     val alphaChannel: Int get() = extraChannels.indexOfFirst { it.type == JxlExtraChannel.ALPHA }

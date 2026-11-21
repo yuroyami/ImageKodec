@@ -69,3 +69,23 @@ The reduction is 1, 2, 4 or 8.
   of pixels rather than their average, and at a quarter or an eighth no first transform stage at
   all. A size jxrlib would round otherwise decodes in full and averages.
 - Other formats decode in full, then average each block of pixels.
+
+## Use the thumbnail the file carries
+
+A camera often stores a small copy of the photo beside it: HEIC and AVIF files as `thmb` items,
+JPEG files in their EXIF. `decodeThumbnail` decodes that copy without touching the full image, which
+is the cheapest preview of a large photo.
+
+```kotlin
+val preview = ImageKodec.decodeThumbnail(bytes, maxWidth = 300, maxHeight = 200)
+    ?: ImageKodec.decodeReduced(bytes, reduction = 8)
+```
+
+- Of several thumbnails, it gives the smallest that reaches the box in one side, else the largest.
+  A Sony HEIC with thumbnails of 1616x1080, 320x212 and 160x120 gives 320x212 for a box of 300 by
+  200.
+- The thumbnail is not scaled to the box. `scaled` fits it exactly.
+- It returns null when the file carries no thumbnail. `ImageInfo.thumbnailWidth` and
+  `thumbnailHeight` give the size of the largest one, or 0, from `probe`.
+- A HEIF thumbnail with no decoder in this build is skipped. A HEIC thumbnail needs the
+  `imagekodec-heic` module, as the image does.

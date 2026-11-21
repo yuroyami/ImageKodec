@@ -1102,8 +1102,8 @@ internal class JxrPlane(
     companion object {
         const val SHIFT_ZERO = 1
         const val QP_FRAC_BITS = 2
-        private const val ORIENT_WEIGHT = 4
-        private const val AVG_NDIFF = 3
+        const val ORIENT_WEIGHT = 4
+        const val AVG_NDIFF = 3
 
         /** cblkChromas: blocks of 16 samples in a chroma macroblock of each colour format. */
         private val CHROMA_BLOCKS = intArrayOf(0, 4, 8, 16, 16, 16, 16, 0, 0)
@@ -1114,30 +1114,30 @@ internal class JxrPlane(
         val BLOCK_OFFSET_UV_422 = intArrayOf(0, 64, 16, 80, 32, 96, 48, 112)
 
         /** dctIndex[2]: where each lowpass coefficient goes among the DCs of the 16 blocks. */
-        private val DC_INDEX = intArrayOf(0, 128, 64, 208, 32, 240, 48, 224, 16, 192, 80, 144, 112, 176, 96, 160)
+        val DC_INDEX = intArrayOf(0, 128, 64, 208, 32, 240, 48, 224, 16, 192, 80, 144, 112, 176, 96, 160)
 
         /** dequantizeBlock4x2: where the lowpass coefficients of a 4:2:2 chroma macroblock go. */
         private val LP_422 = intArrayOf(0, 64, 16, 80, 32, 96, 48, 112)
 
         /** The chroma lowpass coefficients of 4:2:2 (from 0) and 4:2:0 (from 1) in DecodeMacroblockLowpass's order. */
-        private val CHROMA_REMAP = intArrayOf(4, 1, 2, 3, 5, 6, 7)
+        val CHROMA_REMAP = intArrayOf(4, 1, 2, 3, 5, 6, 7)
 
         /** The blocks that predictAC predicts from the block above. */
-        private val AC_TOP_BLOCKS = intArrayOf(1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15)
+        val AC_TOP_BLOCKS = intArrayOf(1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15)
 
-        private val PATTERN_TAB = intArrayOf(6, 9, 10, 12)
-        private val FLC0 = intArrayOf(0, 2, 1, 2, 2, 0)
-        private val FLC_OFF0 = intArrayOf(0, 4, 2, 8, 12, 1)
-        private val FLC_OUT0 = intArrayOf(0, 15, 3, 12, 1, 2, 4, 8, 5, 6, 9, 10, 7, 11, 13, 14)
+        val PATTERN_TAB = intArrayOf(6, 9, 10, 12)
+        val FLC0 = intArrayOf(0, 2, 1, 2, 2, 0)
+        val FLC_OFF0 = intArrayOf(0, 4, 2, 8, 12, 1)
+        val FLC_OUT0 = intArrayOf(0, 15, 3, 12, 1, 2, 4, 8, 5, 6, 9, 10, 7, 11, 13, 14)
         private val SHIFT_422 = intArrayOf(0, 1, 4, 5)
 
         /** gSignificantRunBin, gSignificantRunFixedLength and DecodeSignificantRun's aRemap. */
-        private val SIGNIFICANT_RUN_BIN = intArrayOf(-1, -1, -1, -1, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0)
-        private val SIGNIFICANT_RUN_FIXED_LENGTH = intArrayOf(0, 0, 1, 1, 3, 0, 0, 1, 1, 2, 0, 0, 0, 0, 1)
-        private val RUN_REMAP = intArrayOf(1, 2, 3, 5, 7, 1, 2, 3, 5, 7, 1, 2, 3, 4, 5)
+        val SIGNIFICANT_RUN_BIN = intArrayOf(-1, -1, -1, -1, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0)
+        val SIGNIFICANT_RUN_FIXED_LENGTH = intArrayOf(0, 0, 1, 1, 3, 0, 0, 1, 1, 2, 0, 0, 0, 0, 1)
+        val RUN_REMAP = intArrayOf(1, 2, 3, 5, 7, 1, 2, 3, 5, 7, 1, 2, 3, 4, 5)
 
-        private val LEVEL_REMAP = intArrayOf(2, 3, 4, 6, 10, 14)
-        private val LEVEL_FIXED_LENGTH = intArrayOf(0, 0, 1, 2, 2, 2)
+        val LEVEL_REMAP = intArrayOf(2, 3, 4, 6, 10, 14)
+        val LEVEL_FIXED_LENGTH = intArrayOf(0, 0, 1, 2, 2, 2)
 
         /** remapQP: the quantization step of index [index] (T.832 8.6.1). */
         fun remapQP(index: Int, shift: Int, scaled: Boolean): Int {
@@ -1156,9 +1156,9 @@ internal class JxrPlane(
         /** dquantBits: the bits of a macroblock's quantizer index among [count]. */
         fun dquantBits(count: Int): Int = if (count < 2) 0 else if (count < 4) 1 else if (count < 6) 2 else if (count < 10) 3 else 4
 
-        private fun ones(v: Int): Int = (v and 0xFFFF).countOneBits()
+        fun ones(v: Int): Int = (v and 0xFFFF).countOneBits()
 
         /** SATURATE32 of strPredQuantDec.c. */
-        private fun saturate32(x: Int): Int = if (x + 16 < 0 || x + 16 >= 32) (if (x < 0) -16 else 15) else x
+        fun saturate32(x: Int): Int = if (x + 16 < 0 || x + 16 >= 32) (if (x < 0) -16 else 15) else x
     }
 }

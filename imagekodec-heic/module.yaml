@@ -1,0 +1,77 @@
+product:
+  type: kmp/lib
+  # Every platform of the core, so a HEIC photo decodes wherever the core runs.
+  platforms:
+    - jvm
+    - android
+    - iosArm64
+    - iosSimulatorArm64
+    - iosX64
+    - macosArm64
+    - tvosArm64
+    - tvosSimulatorArm64
+    - watchosArm32
+    - watchosArm64
+    - watchosDeviceArm64
+    - watchosSimulatorArm64
+    - androidNativeArm32
+    - androidNativeArm64
+    - androidNativeX64
+    - androidNativeX86
+    - linuxX64
+    - linuxArm64
+    - mingwX64
+    - js
+    - wasmJs
+    - wasmWasi
+
+# The HEVC decoder of HEIC, written from ITU-T H.265. It is a module of its own so that an app
+# that reads no HEIC carries none of its code, and so that the patents on HEVC stay out of the core.
+
+aliases:
+  - jvmAndAndroid: [ jvm, android ]
+
+apply:
+  - //library.module-template.yaml
+
+# The codec registers with the core's registry, so an app needs the core's API with it.
+dependencies:
+  - //imagekodec: exported
+
+test-dependencies:
+  - //imagekodec-testkit
+
+settings:
+  kotlin:
+    optIns: [ kotlin.RequiresOptIn, io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi ]
+  android:
+    namespace: io.github.yuroyami.imagekodec.heic
+    compileSdk:
+      apiLevel: 37
+      minorApiLevel: 2
+    minSdk: 21
+  # Not published until the owner decides on the patent question (#136). The toolchain needs both.
+  publishing:
+    enabled: false
+    mavenCentral:
+      enabled: false
+
+# The same heap as the core's tests, so a size guard and not the allocator rejects a large header.
+test-settings@jvm:
+  jvm:
+    test:
+      freeJvmArgs: [ -Xmx3g ]
+
+plugins:
+  abi-check:
+    enabled: true
+    # `./kotlin check klibAbi` needs a `./kotlin build` of each of these platforms first.
+    klibPlatforms: [ iosArm64, iosSimulatorArm64, iosX64, macosArm64, tvosArm64, tvosSimulatorArm64, watchosArm32, watchosArm64, watchosDeviceArm64, watchosSimulatorArm64, androidNativeArm32, androidNativeArm64, androidNativeX64, androidNativeX86, linuxX64, linuxArm64, mingwX64, js, wasmJs, wasmWasi ]
+  dokka:
+    enabled: true
+    moduleName: imagekodec-heic
+    includes: [ Module.md ]
+    customStyleSheets: [ ../docs/api-theme/kite.css ]
+    templatesDir: ../dokka-templates
+    footerMessage: Apache-2.0 · ImageKodec is part of the Kite family.
+    sourceLinkUrl: https://github.com/yuroyami/ImageKodec/blob/main/imagekodec-heic/src

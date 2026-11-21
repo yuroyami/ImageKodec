@@ -23,7 +23,13 @@ class TiffExtendedTest {
 
     @Test
     fun unsupportedSampleFormatsAreTypedRefusals() {
-        for (format in listOf(2, 3, 5, 6, 65535)) {
+        // Signed and floating-point samples decode (#189): the most negative signed value is black,
+        // and a float is a fraction of full scale.
+        val signed = ImageKodec.decode16(sampleFormatTiff(intArrayOf(2)))
+        assertEquals(listOf(0, 16384, 32768, 65535), signed.samples.map { it.toInt() and 0xFFFF })
+        val half = ImageKodec.decode16(sampleFormatTiff(intArrayOf(3), stored = intArrayOf(0, 0x3400, 0x3800, 0x3C00)))
+        assertEquals(listOf(0, 16384, 32768, 65535), half.samples.map { it.toInt() and 0xFFFF })
+        for (format in listOf(5, 6, 65535)) {
             val stored = if (format == 3) intArrayOf(0, 0x3400, 0x3800, 0x3C00)
                 else intArrayOf(0x8000, 0xC000, 0, 0x7FFF)
             val bytes = sampleFormatTiff(intArrayOf(format), stored = stored)
@@ -522,11 +528,11 @@ class TiffExtendedTest {
         val cases = listOf(
             "16-bit JPEG" to greyTiff(short(259, 7), short(258, 16)),
             "old-style lossless JPEG" to greyTiff(short(259, 6), short(512, 14)),
-            "32-bit samples" to greyTiff(short(258, 32)),
-            "floating-point predictor" to greyTiff(short(317, 3)),
+            "64-bit integer samples" to greyTiff(short(258, 64)),
+            "floating-point predictor over integers" to greyTiff(short(317, 3)),
             "predictor 2 at 4 bits" to greyTiff(short(317, 2), short(258, 4)),
             "multi-ink separations" to greyTiff(short(262, 5), short(332, 2)),
-            "CCITT G3 uncompressed mode" to greyTiff(short(259, 3), long(292, 2)),
+            "complex samples" to greyTiff(short(339, 5)),
             "16-bit YCbCr" to greyTiff(short(262, 6), short(258, 16), short(277, 3)),
         )
         for ((name, bytes) in cases) {

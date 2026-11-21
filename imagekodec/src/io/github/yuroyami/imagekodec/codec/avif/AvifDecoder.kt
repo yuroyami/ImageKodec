@@ -1,6 +1,14 @@
 package io.github.yuroyami.imagekodec.codec.avif
 
+import io.github.yuroyami.imagekodec.AuxiliaryImage
+import io.github.yuroyami.imagekodec.BandScaler
 import io.github.yuroyami.imagekodec.ColorProfile
+import io.github.yuroyami.imagekodec.ExperimentalHeifCodecApi
+import io.github.yuroyami.imagekodec.HeifCodec
+import io.github.yuroyami.imagekodec.HeifCodecInfo
+import io.github.yuroyami.imagekodec.HeifCodecSession
+import io.github.yuroyami.imagekodec.HeifGainMap
+import io.github.yuroyami.imagekodec.HeifPlanes
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.ImageFormat
 import io.github.yuroyami.imagekodec.ImageInfo
@@ -10,27 +18,34 @@ import io.github.yuroyami.imagekodec.KiteBitmap16
 import io.github.yuroyami.imagekodec.KiteFrame
 import io.github.yuroyami.imagekodec.Orientation
 import io.github.yuroyami.imagekodec.UnsupportedImageException
+import io.github.yuroyami.imagekodec.codec.AppleMakerNote
+import io.github.yuroyami.imagekodec.codec.MetadataIo
 import io.github.yuroyami.imagekodec.internal.Budget
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALPHA_URN
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALPHA_URN_HEVC
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.ALTR
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.AUXL
-import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.AV01
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.DIMG
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.GRID
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVC1
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.HVCC
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IDEN
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.MIAF
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.LHV1
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.IOVL
-import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PICT
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.PREM
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.SATO
+import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.THMB
 import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.TMAP
 
 /**
- * AVIF (AV1 Image File Format 1.1): picks what to show, decodes its AV1 data, builds a derived
- * image from its inputs, converts it to RGB and joins its alpha.
+ * AVIF (AV1 Image File Format 1.1) and HEIC: picks what to show, decodes its coded data, builds a
+ * derived image from its inputs, converts it to RGB and joins its alpha.
  *
- * What to show follows libavif: the first frame of an AV1 image sequence when the file has
- * one, else the primary item, or the first item of the primary item's `altr` group this reader
- * can show. A `grid` joins its tiles before the conversion to RGB, as libavif and libheif do; a
+ * What to show follows libavif: the major brand `avif` shows the primary item, `avis` the image
+ * sequence, and any other brand the sequence when the file has one ([AvifContainer.shownTrack]).
+ * Of the primary item, it shows the first item of the primary item's `altr` group this reader can
+ * show. A `grid` joins its tiles before the conversion to RGB, as libavif and libheif do; a
  * sample transform (`sato`) computes its samples from its inputs'; a tone-mapped image (`tmap`)
  * shows its base image, as a reader that does not tone map does; and an overlay (`iovl`) draws
  * its inputs in RGB on its canvas.
@@ -39,6 +54,7 @@ import io.github.yuroyami.imagekodec.codec.avif.AvifContainer.Companion.TMAP
  * AVIF what the EXIF orientation is to a JPEG, so they are reported as [ImageInfo.orientation]
  * and applied when a caller asks. All three apply in the order MIAF fixes: crop, rotate, mirror.
  */
+@OptIn(ExperimentalHeifCodecApi::class)
 internal object AvifDecoder {
 
     /** What [decode] shows, and what [probe] says of it. */
@@ -63,10 +79,77 @@ internal object AvifDecoder {
         val masteringDisplay: IntArray? = null,
     )
 
-    fun probe(data: ByteArray): ImageInfo {
+    fun probe(data: ByteArray): ImageInfo = labelled(data) {
         val p = plan(data, probing = true)
+        val pages = if (p.track != null) emptyList() else pageItems(p.c)
+        info(data, p, maxOf(1, pages.size)).also { info ->
+            stereoPair(p.c, pages)?.let { (left, right) ->
+                info.stereoLeftPage = left
+                info.stereoRightPage = right
+            }
+        }
+    }
+
+    /** What [probe] says of page [page], a top-level image of the file (#168). */
+    fun probePage(data: ByteArray, page: Int): ImageInfo = labelled(data) {
+        if (page == 0) return@labelled probe(data)
+        val c = AvifContainer.parse(data)
+        val pages = pageItems(c)
+        require(page < pages.size) { "page $page asked of a HEIF file of ${maxOf(1, pages.size)} pages" }
+        info(data, itemPlan(c, base(c, pages[page], 0)), pages.size)
+    }
+
+    /** Page [page] of [data]: the primary image for 0, else another top-level image (#168). */
+    fun decodePage(data: ByteArray, page: Int, wide: Boolean, cancel: (() -> Unit)?): Pair<KiteBitmap, KiteBitmap16?> = labelled(data) {
+        val p = if (page == 0) {
+            plan(data, probing = false)
+        } else {
+            val c = AvifContainer.parse(data)
+            val pages = pageItems(c)
+            require(page < pages.size) { "page $page asked of a HEIF file of ${maxOf(1, pages.size)} pages" }
+            itemPlan(c, base(c, pages[page], 0))
+        }
+        val r = render(p, wide, cancel)
+        r.bitmap to r.wide
+    }
+
+    /**
+     * The top-level images of a HEIF file, the primary first: image items that are not hidden and
+     * that no thumbnail, auxiliary, description or derivation reference uses, and of an `altr`
+     * group only the member the primary is (#168).
+     */
+    private fun pageItems(c: AvifContainer): List<AvifItem> {
+        val used = HashSet<Long>()
+        for (r in c.references) {
+            when (r.type) {
+                THMB, AUXL, AvifContainer.CDSC -> used += r.from
+                DIMG -> used.addAll(r.to.toList())
+            }
+        }
+        for (g in c.groups) if (g.type == ALTR) used.addAll(g.entities.filter { it != c.primary })
+        val images = c.items.values.filter { item ->
+            !item.hidden && item.id !in used &&
+                (item.type in DERIVED_TYPES || codecOf(item) != null || item.type == HVC1 || item.type == LHV1)
+        }
+        val primary = images.firstOrNull { it.id == c.primary }
+        return listOfNotNull(primary) + images.filter { it !== primary }.sortedBy { it.id }
+    }
+
+    /** The pages of the left and right images of a `ster` entity group, ISO/IEC 23008-12 6.8.6.2. */
+    private fun stereoPair(c: AvifContainer, pages: List<AvifItem>): Pair<Int, Int>? {
+        val group = c.groups.firstOrNull { it.type == STER && it.entities.size == 2 } ?: return null
+        val left = pages.indexOfFirst { it.id == group.entities[0] }
+        val right = pages.indexOfFirst { it.id == group.entities[1] }
+        return if (left >= 0 && right >= 0) left to right else null
+    }
+
+    private val STER = fourcc("ster")
+
+    /** The description [probe] gives of plan [p]. */
+    private fun info(data: ByteArray, p: Plan, pageCount: Int): ImageInfo {
+        val thumb = p.item?.let { thumbnails(p.c, it) }?.maxByOrNull { it.second.first.toLong() * it.second.second }
         return ImageInfo(
-            format = ImageFormat.AVIF,
+            format = AvifContainer.heifFormat(data) ?: ImageFormat.AVIF,
             width = p.crop?.get(2) ?: p.width,
             height = p.crop?.get(3) ?: p.height,
             bitDepth = p.bitDepth,
@@ -76,6 +159,7 @@ internal object AvifDecoder {
             orientation = p.orientation,
             isDecodable = p.unsupported == null,
             unsupportedReason = p.unsupported,
+            pageCount = pageCount,
             colorProfile = if (p.icc != null || p.cicp != null || p.contentLight != null || p.masteringDisplay != null) {
                 ColorProfile(
                     icc = p.icc, cicp = p.cicp?.toIntArray(),
@@ -84,26 +168,58 @@ internal object AvifDecoder {
             } else {
                 null
             },
-        )
+        ).also { info ->
+            if (thumb != null) {
+                info.thumbnailWidth = thumb.second.first
+                info.thumbnailHeight = thumb.second.second
+            }
+        }
     }
 
     /** [cancel] runs once a row of superblocks of each AV1 picture the image is made of (#123). */
-    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap = render(plan(data, probing = false), wide = false, cancel).bitmap
+    fun decode(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap = labelled(data) { render(plan(data, probing = false), wide = false, cancel).bitmap }
 
-    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 = render(plan(data, probing = false), wide = true, cancel).wide!!
+    fun decode16(data: ByteArray, cancel: (() -> Unit)? = null): KiteBitmap16 = labelled(data) { render(plan(data, probing = false), wide = true, cancel).wide!! }
+
+    /** The reason [unsupported] gives a HEVC item while no codec reads it. */
+    const val NEEDS_HEIC_MODULE = "HEIC item of type 'hvc1' needs the imagekodec-heic module: add it and call ImageKodecHeic.install()"
+
+    /** The reason [unsupported] gives a HEVC image sequence while no codec reads it. */
+    const val NEEDS_HEIC_MODULE_TRACK = "HEIC image sequence of sample entry 'hvc1' needs the imagekodec-heic module: add it and call ImageKodecHeic.install()"
 
     /**
-     * Every frame of an AV1 image sequence with its duration, or a still image as one frame. The
-     * frames decode in order from the first sample, as each predicts from the ones before it, and
-     * the alpha track decodes beside them sample by sample. A frame coded at another size than
-     * the first, which AV1 allows mid-sequence, is scaled to the first frame's size, as a player
-     * shows every frame in one window.
+     * Runs [block] and names the format of a HEIC file in its errors. The reader is shared with
+     * AVIF, whose name its messages start with.
      */
-    fun decodeAnimation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation {
+    private inline fun <T> labelled(data: ByteArray, block: () -> T): T {
+        try {
+            return block()
+        } catch (e: ImageDecodeException) {
+            val message = e.message ?: throw e
+            if (!message.startsWith("AVIF") || AvifContainer.heifFormat(data) != ImageFormat.HEIC) throw e
+            val text = "HEIC" + message.removePrefix("AVIF")
+            throw if (e is UnsupportedImageException) UnsupportedImageException(text, e) else ImageDecodeException(text, e)
+        }
+    }
+
+    /**
+     * Every frame of an image sequence with its duration, or a still image as one frame. The samples
+     * decode in decoding order from the first, as each predicts from the ones before it, and the
+     * codec gives their pictures in output order, which for HEVC with B pictures is not the decoding
+     * order. The [rank]th picture out is the [rank]th sample by composition time (`ctts`), whose
+     * timing it takes. The alpha track decodes beside the colour track picture by picture. A frame
+     * coded at another size than the first, which AV1 allows mid-sequence, is scaled to the first
+     * frame's size, as a player shows every frame in one window.
+     */
+    fun decodeAnimation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation =
+        labelled(data) { animation(data, maxFrames, cancellationCheck) }
+
+    private fun animation(data: ByteArray, maxFrames: Int, cancellationCheck: (() -> Unit)?): KiteAnimation {
         val p = plan(data, probing = false)
         val track = p.track
         if (track == null) {
-            val still = render(p, wide = false).bitmap
+            // A still checks as decode does, once a row of superblocks of each picture it is made of (#170).
+            val still = render(p, wide = false, cancellationCheck).bitmap
             return KiteAnimation(still.width, still.height, listOf(KiteFrame(still, delayMillis = 0, delayRawCentiseconds = 0)), loopCount = 1)
         }
         p.unsupported?.let { throw UnsupportedImageException(it) }
@@ -114,44 +230,132 @@ internal object AvifDecoder {
         if (!Budget.framesFitAbsolute(width, height, count)) {
             throw ImageDecodeException("AVIF: $count frames of ${width}x$height exceed the output safety limit")
         }
-        val color = sequenceDecoder(track)
-        val alphaTrack = p.alphaTrack
-        val alpha = alphaTrack?.let { sequenceDecoder(it) }
-        val frames = ArrayList<KiteFrame>(count)
-        for (i in 0 until count) {
-            val colorPlanes = sample(color, c, track, i)
-            val alphaPlanes = if (alphaTrack != null && alpha != null) {
-                if (i >= alphaTrack.sizes.size) throw ImageDecodeException("AVIF: the alpha track has ${alphaTrack.sizes.size} samples for ${track.sizes.size} frames")
-                sample(alpha, c, alphaTrack, i)
-            } else null
+        val color = TrackReader(c, track, cancellationCheck)
+        val alpha = p.alphaTrack?.let { TrackReader(c, it, null) }
+        val bitmaps = ArrayList<KiteBitmap>(count)
+        var skipped = 0
+        for (rank in 0 until count) {
+            val colorPlanes = color.next()
+            if (colorPlanes == null) {
+                // A stream that starts at a CRA picture drops its RASL pictures, as H.265 8.1.3 allows.
+                // They come before the CRA in output order, so the pictures shown are the last ones by
+                // composition time. A track that shows no picture at all is damaged.
+                // Only HEVC skips pictures this way; an AV1 sample that shows no frame is damage.
+                if (rank == 0 || track.sampleEntry == AV01_ENTRY) {
+                    throw ImageDecodeException("AVIF: the ${track.sizes.size} samples of track ${track.id} show $rank frames")
+                }
+                skipped = track.sizes.size - rank
+                break
+            }
+            val alphaPlanes = alpha?.let {
+                it.next() ?: throw ImageDecodeException("AVIF: the alpha track has ${it.track.sizes.size} samples for ${track.sizes.size} frames")
+            }
             var bitmap = convert(colorPlanes, alphaPlanes, p.premultiplied, p.cicp ?: AvifCicp(2, 2, 2, colorPlanes.fullRange), wide = false).bitmap
             if (bitmap.width != p.width || bitmap.height != p.height) bitmap = resampled(bitmap, p.width, p.height)
             p.crop?.let { bitmap = cropped(bitmap, it) }
-            val timescale = if (track.timescale > 0) track.timescale else 1L
-            val duration = if (i < track.durations.size) track.durations[i] else 0L
+            bitmaps += bitmap
+        }
+        val timescale = if (track.timescale > 0) track.timescale else 1L
+        val frames = bitmaps.mapIndexed { rank, bitmap ->
+            val duration = track.presentedDuration(rank + skipped)
             val millis = ((duration * 1000 + timescale / 2) / timescale).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-            frames += KiteFrame(
+            KiteFrame(
                 bitmap,
                 // A duration of 0 means as fast as possible; clamp it as browsers do.
                 delayMillis = if (millis <= 10) 100 else millis,
                 delayRawCentiseconds = ((duration * 100 + timescale / 2) / timescale).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
             )
-            if (i + 1 < count) cancellationCheck?.invoke()
         }
         return KiteAnimation(width, height, frames, p.loopCount)
     }
 
-    /** An AV1 decoder for the samples of [track], configured by its `av1C`. */
-    private fun sequenceDecoder(track: AvifTrack): Av1Decoder {
-        val config = track.properties.firstOrNull { it is AvifProperty.Av1Config } as AvifProperty.Av1Config?
-        return Av1Decoder().also { d -> config?.configObus?.takeIf { it.isNotEmpty() }?.let { d.configure(it) } }
+    /**
+     * The pictures of [track] in output order: it hands the codec one sample at a time in decoding
+     * order, and the codec's pictures wait in a queue, which holds no more than the codec's reorder
+     * delay. [cancel] runs before each sample after the first, so once a frame.
+     */
+    private class TrackReader(private val c: AvifContainer, val track: AvifTrack, private val cancel: (() -> Unit)?) {
+        private val session = sequenceDecoder(track)
+        private val queue = ArrayDeque<HeifPlanes>()
+        private var nextSample = 0
+        private var flushed = false
+
+        /** The next picture in output order, or null when the track has no more. */
+        fun next(): AvifPlanes? {
+            while (queue.isEmpty()) {
+                if (nextSample < track.sizes.size) {
+                    if (nextSample > 0) cancel?.invoke()
+                    queue.addAll(session.decodeInOutputOrder(c.sampleData(track, nextSample), null))
+                    nextSample++
+                } else if (!flushed) {
+                    flushed = true
+                    queue.addAll(session.flush())
+                } else {
+                    return null
+                }
+            }
+            return planesOf(queue.removeFirst())
+        }
     }
 
-    /** The planes of the frame sample [index] of [track] shows. */
-    private fun sample(decoder: Av1Decoder, c: AvifContainer, track: AvifTrack, index: Int): AvifPlanes {
-        val pic = decoder.decodeTemporalUnit(c.sampleData(track, index))
-            ?: throw ImageDecodeException("AVIF: sample $index of track ${track.id} shows no frame")
-        return AvifPlanes(pic.width, pic.height, pic.bitDepth, pic.subX, pic.subY, pic.planes, pic.strides, pic.seq.colorRange)
+    /** A codec session for the samples of [track], configured by its configuration property. */
+    private fun sequenceDecoder(track: AvifTrack): HeifCodecSession {
+        val codec = trackCodec(track)
+        return codec.open(configuration(track.properties, codec))
+    }
+
+    // ---- codecs -----------------------------------------------------------------------
+
+    /** The registered codec of [item]'s type, or null for a derived image or an unknown type. */
+    private fun codecOf(item: AvifItem): HeifCodec? = HeifCodecs.forItem(item.type)
+
+    private fun trackCodec(track: AvifTrack): HeifCodec = HeifCodecs.forSampleEntry(track.sampleEntry)
+        ?: throw UnsupportedImageException("AVIF track of sample entry '${fourccName(track.sampleEntry)}'")
+
+    /** The payload of the property among [properties] that configures [codec], or null. */
+    private fun configuration(properties: List<AvifProperty>, codec: HeifCodec): ByteArray? {
+        val type = fourcc(codec.configurationType)
+        for (p in properties) {
+            if (p is AvifProperty.Av1Config && type == AV1C) return p.payload
+            if (p is AvifProperty.Other && p.type == type) return p.payload
+        }
+        return null
+    }
+
+    private val AV1C = fourcc("av1C")
+    private val AV01_ENTRY = fourcc("av01")
+
+    /** What [codec] reads from [item]'s configuration and data, or null when the data is cut off. */
+    private fun inspect(c: AvifContainer, item: AvifItem, codec: HeifCodec): HeifCodecInfo? {
+        val data = c.itemDataOrNull(item) ?: return null
+        return codec.inspect(configuration(item.properties, codec), data)
+    }
+
+    private fun HeifCodecInfo.cicp(): AvifCicp? = matrixCoefficients?.let {
+        AvifCicp(colorPrimaries ?: 2, transferCharacteristics ?: 2, it, fullRange ?: false)
+    }
+
+    /**
+     * [p] as the planes the container reader works on. A chroma depth that differs from the luma
+     * depth, which Main 10 allows, is scaled to the luma depth.
+     */
+    private fun planesOf(p: HeifPlanes): AvifPlanes {
+        if (p.width <= 0 || p.height <= 0 || p.width.toLong() * p.height > Budget.MAX_PIXELS) {
+            throw ImageDecodeException("AVIF: a codec gave a picture of ${p.width} by ${p.height}")
+        }
+        val planes = if (p.planes.size == 3 && p.bitDepthChroma != p.bitDepthLuma) {
+            val shift = p.bitDepthLuma - p.bitDepthChroma
+            arrayOf(p.planes[0]) + Array(2) { k ->
+                val src = p.planes[k + 1]
+                ShortArray(src.size) { i ->
+                    val v = src[i].toInt() and 0xFFFF
+                    (if (shift > 0) v shl shift else v ushr -shift).toShort()
+                }
+            }
+        } else {
+            p.planes
+        }
+        return AvifPlanes(p.width, p.height, p.bitDepthLuma, p.subX, p.subY, planes, p.strides, p.fullRange)
     }
 
     /** [b] resampled to [w] by [h], bilinearly, with the sample centres aligned. */
@@ -181,6 +385,143 @@ internal object AvifDecoder {
         return KiteBitmap(w, h, out)
     }
 
+    // ---- thumbnails ----------------------------------------------------------------
+
+    /** The thumbnail [decodeThumbnail] gives: its picture, its own orientation and colour. */
+    class Thumbnail(val bitmap: KiteBitmap, val orientation: Orientation, val icc: ByteArray?, val cicp: IntArray?)
+
+    /** The items that a `thmb` reference names as thumbnails of [item], each with its size after its clean aperture. */
+    private fun thumbnails(c: AvifContainer, item: AvifItem): List<Pair<AvifItem, Pair<Int, Int>>> =
+        c.referencesTo(item.id, THMB).mapNotNull { c.items[it] }.mapNotNull { t ->
+            val size = try {
+                val (w, h) = itemSize(c, t, 0)
+                val crop = geometry(c, t, w, h).first
+                if (crop != null) crop[2] to crop[3] else w to h
+            } catch (_: ImageDecodeException) {
+                return@mapNotNull null
+            }
+            t to size
+        }
+
+    /**
+     * The thumbnail of the primary item to show for a box of [maxWidth] by [maxHeight]: the smallest
+     * that reaches the box in one side, else the largest, among those this build decodes (#150).
+     * Null when the file has none; [UnsupportedImageException] when it has only ones it cannot decode.
+     */
+    fun thumbnail(data: ByteArray, maxWidth: Int, maxHeight: Int, cancel: (() -> Unit)?): Thumbnail? = labelled(data) {
+        val c = AvifContainer.parse(data)
+        val primary = c.primary?.let { c.items[it] } ?: return@labelled null
+        val all = thumbnails(c, primary)
+        if (all.isEmpty()) return@labelled null
+        val plans = all.map { (t, _) -> itemPlan(c, t) }
+        val usable = plans.filter { it.unsupported == null }
+        if (usable.isEmpty()) throw UnsupportedImageException(plans.first().unsupported!!)
+        fun w(p: Plan) = p.crop?.get(2) ?: p.width
+        fun h(p: Plan) = p.crop?.get(3) ?: p.height
+        val covering = usable.filter { w(it) >= maxWidth || h(it) >= maxHeight }
+        val chosen = covering.minByOrNull { w(it).toLong() * h(it) } ?: usable.maxBy { w(it).toLong() * h(it) }
+        val shown = render(chosen, wide = false, cancel).bitmap
+        Thumbnail(shown, chosen.orientation, chosen.icc, chosen.cicp?.toIntArray())
+    }
+
+    // ---- auxiliary images and gain maps (#153, #154) ---------------------------------
+
+    const val APPLE_GAIN_MAP_URN = "urn:com:apple:photo:2020:aux:hdrgainmap"
+
+    /**
+     * The auxiliary images of [c]'s primary item, in the order of the `auxl` references that tie
+     * them to it: items with an `auxC` property, the primary item itself left out. A tone-mapped
+     * primary item shows its base image, so the base image's auxiliary images are its own too.
+     */
+    private fun auxiliaryItems(c: AvifContainer): List<AvifItem> {
+        val primary = c.primary?.let { c.items[it] } ?: return emptyList()
+        val owners = linkedSetOf(primary.id)
+        if (primary.type == TMAP) c.referencesFrom(primary.id, DIMG).firstOrNull()?.let { owners += it }
+        val out = LinkedHashMap<Long, AvifItem>()
+        for (owner in owners) {
+            for (id in c.referencesTo(owner, AUXL)) {
+                if (id in owners || id in out) continue
+                val item = c.items[id] ?: continue
+                if (item.property<AvifProperty.AuxType>() != null) out[id] = item
+            }
+        }
+        return out.values.toList()
+    }
+
+    /** What [io.github.yuroyami.imagekodec.ImageKodec.auxiliaryImages] lists. */
+    fun auxiliaryImages(data: ByteArray): List<AuxiliaryImage> = labelled(data) {
+        val c = AvifContainer.parse(data)
+        auxiliaryItems(c).map { item ->
+            val aux = item.property<AvifProperty.AuxType>()!!
+            val (w, h) = itemSize(c, item, 0)
+            AuxiliaryImage(aux.urn, w, h, itemDepth(c, item, 0), aux.subtype.copyOf())
+        }
+    }
+
+    /** Auxiliary image [index] of [data]: the first plane of its item, each sample widened to 16 bits. */
+    fun decodeAuxiliary(data: ByteArray, index: Int, cancel: (() -> Unit)?): KiteBitmap16 = labelled(data) {
+        val c = AvifContainer.parse(data)
+        val items = auxiliaryItems(c)
+        require(index in items.indices) { "auxiliary image $index asked of a file with ${items.size}" }
+        val item = items[index]
+        (unsupported(c, item, 0) ?: frames(c, item, 0))?.let { throw UnsupportedImageException(it) }
+        widened(planes(c, item, 0, cancel))
+    }
+
+    /** Plane 0 of [p] at 16 bits, an n-bit sample `v` as `v * 65535 / (2^n - 1)` rounded to the nearest. */
+    private fun widened(p: AvifPlanes): KiteBitmap16 {
+        if (p.depth !in 1..16) throw ImageDecodeException("AVIF: a picture of ${p.depth} bits")
+        val max = (1L shl p.depth) - 1
+        val plane = p.planes[0]
+        val stride = p.strides[0]
+        val out = ShortArray(p.width * p.height)
+        for (y in 0 until p.height) for (x in 0 until p.width) {
+            val v = minOf((plane[y * stride + x].toInt() and 0xFFFF).toLong(), max)
+            out[y * p.width + x] = ((v * 65535 + max / 2) / max).toInt().toShort()
+        }
+        return KiteBitmap16(p.width, p.height, 1, out)
+    }
+
+    /**
+     * The gain map of [data]'s primary image: that of a `tmap` item that is the primary item or
+     * that has the primary item as its base image, else the Apple auxiliary image, else null.
+     */
+    fun gainMap(data: ByteArray, cancel: (() -> Unit)?): HeifGainMap? = labelled(data) {
+        val c = AvifContainer.parse(data)
+        val primary = c.primary?.let { c.items[it] } ?: return@labelled null
+        val tmap = if (primary.type == TMAP) {
+            primary
+        } else {
+            c.items.values.firstOrNull { it.type == TMAP && c.referencesFrom(it.id, DIMG).firstOrNull() == primary.id }
+        }
+        if (tmap != null) {
+            val ids = c.referencesFrom(tmap.id, DIMG)
+            // ISO/IEC 23008-12 6.6.2.4: the base image, then the gain map image.
+            if (ids.size != 2) throw ImageDecodeException("AVIF: tone-mapped item ${tmap.id} has ${ids.size} inputs, not a base image and a gain map")
+            val map = c.items[ids[1]] ?: throw ImageDecodeException("AVIF: tone-mapped item ${tmap.id} refers to a missing item ${ids[1]}")
+            if (map.id == tmap.id) throw ImageDecodeException("AVIF: tone-mapped item ${tmap.id} is its own gain map")
+            val metadata = AvifToneMap.read(c.itemData(tmap))
+            return@labelled HeifGainMap(HeifGainMap.Form.Iso21496, gainMapBitmap(c, map, cancel), metadata, null, null, null)
+        }
+        val apple = auxiliaryItems(c).firstOrNull { it.property<AvifProperty.AuxType>()?.urn == APPLE_GAIN_MAP_URN } ?: return@labelled null
+        val bitmap = gainMapBitmap(c, apple, cancel)
+        val tags = MetadataIo.read(data).exif?.let { AppleMakerNote.tags(it, setOf(33, 48)) } ?: emptyMap()
+        val m33 = tags[33]
+        val m48 = tags[48]
+        val headroom = if (m33 != null && m48 != null) AppleMakerNote.headroom(m33, m48) else null
+        HeifGainMap(HeifGainMap.Form.Apple, bitmap, null, m33, m48, headroom)
+    }
+
+    /** The samples of gain map image [item], converted as [decode16] converts a picture: one channel for a monochrome image. */
+    private fun gainMapBitmap(c: AvifContainer, item: AvifItem, cancel: (() -> Unit)?): KiteBitmap16 {
+        (unsupported(c, item, 0) ?: frames(c, item, 0))?.let { throw UnsupportedImageException(it) }
+        val p = planes(c, item, 0, cancel)
+        val out16 = ShortArray(p.width * p.height * 3)
+        AvifColor.convert(p, itemCicp(c, item, 0) ?: AvifCicp(2, 2, 2, p.fullRange), null, false, IntArray(p.width * p.height), out16)
+        if (!p.monochrome) return KiteBitmap16(p.width, p.height, 3, out16)
+        return KiteBitmap16(p.width, p.height, 1, ShortArray(p.width * p.height) { out16[it * 3] })
+    }
+
     // ---- choosing what to show ------------------------------------------------------
 
     /**
@@ -189,8 +530,7 @@ internal object AvifDecoder {
      */
     private fun plan(data: ByteArray, probing: Boolean): Plan {
         val c = AvifContainer.parse(data)
-        val track = c.tracks.firstOrNull { it.sampleEntry == AV01 && it.handler == PICT && it.sizes.isNotEmpty() }
-        if (track != null) return trackPlan(c, track, probing)
+        AvifContainer.shownTrack(c)?.let { return trackPlan(c, it, probing) }
         val primaryId = c.primary ?: throw ImageDecodeException("AVIF: no primary item and no image sequence")
         val primary = c.items[primaryId] ?: throw ImageDecodeException("AVIF: the primary item $primaryId is not described in 'iinf'")
         // An 'altr' group lists alternatives in order of preference: show the first this reader can.
@@ -211,23 +551,40 @@ internal object AvifDecoder {
 
     private const val MAX_DEPTH = 8
 
-    private val KNOWN_TYPES = setOf(AV01, GRID, IOVL, SATO, TMAP)
+    private val DERIVED_TYPES = setOf(GRID, IOVL, SATO, TMAP, IDEN)
 
     private fun inputs(c: AvifContainer, item: AvifItem): List<AvifItem> =
         c.referencesFrom(item.id, DIMG).map { id ->
             c.items[id] ?: throw ImageDecodeException("AVIF: derived item ${item.id} refers to a missing item $id")
         }
 
-    /** Why [item] cannot be shown, from its description in the container. */
+    /** Why [item] cannot be shown, from its description in the container. Each item and depth is checked once. */
     private fun unsupported(c: AvifContainer, item: AvifItem, depth: Int): String? {
+        val key = item.id * (MAX_DEPTH + 2) + depth
+        if (c.checked.containsKey(key)) return c.checked[key]
+        return uncheckedReason(c, item, depth).also { c.checked[key] = it }
+    }
+
+    private fun uncheckedReason(c: AvifContainer, item: AvifItem, depth: Int): String? {
         if (depth > MAX_DEPTH) return "AVIF derived images nested more than $MAX_DEPTH deep"
-        if (item.type !in KNOWN_TYPES) return "AVIF item of type '${fourccName(item.type)}'"
+        val codec = codecOf(item)
+        if (item.type == HVC1 && codec == null) return NEEDS_HEIC_MODULE
+        if (item.type == LHV1) return "HEIC with layered HEVC ('lhv1')"
+        if (item.type !in DERIVED_TYPES && codec == null) return "AVIF item of type '${fourccName(item.type)}'"
         item.unknownEssential.firstOrNull()?.let { return "AVIF item property '${fourccName(it)}' marked essential" }
+        if (codec != null) {
+            // A JPEG item may carry its tables in the stream, so 'jpgC' is optional (ISO/IEC 23008-12 H.3).
+            return if (configuration(item.properties, codec) == null && codec !== JpegItemCodec) {
+                "AVIF item ${item.id} of type '${codec.itemType}' without '${codec.configurationType}'"
+            } else {
+                null
+            }
+        }
         return when (item.type) {
-            AV01 -> if (item.property<AvifProperty.Av1Config>() == null) "AVIF AV1 item ${item.id} without 'av1C'" else null
-            GRID, IOVL, SATO, TMAP -> {
+            GRID, IOVL, SATO, TMAP, IDEN -> {
                 val ids = c.referencesFrom(item.id, DIMG)
                 if (ids.isEmpty()) return "AVIF derived item ${item.id} without inputs"
+                if (item.type == IDEN && ids.size != 1) return "AVIF identity item ${item.id} with ${ids.size} inputs"
                 if (item.type == TMAP) {
                     return c.items[ids[0]]?.let { unsupported(c, it, depth + 1) } ?: "AVIF tone-mapped item without its base image"
                 }
@@ -254,14 +611,14 @@ internal object AvifDecoder {
         if (reason == null && alpha != null) reason = unsupported(c, alpha, 0)
         val size = itemSize(c, item, 0)
         val cicp = itemCicp(c, item, 0)
-        if (reason == null) reason = cicp?.let { AvifColor.unsupported(it.matrix) }
+        if (reason == null) reason = cicp?.let { AvifColor.unsupported(it.matrix, it.transfer) }
         if (reason == null) reason = frames(c, item, 0)
         if (reason == null && alpha != null) reason = frames(c, alpha, 0)
         val premultiplied = alpha != null && alpha.id in c.referencesFrom(item.id, PREM)
-        val crop = item.property<AvifProperty.CleanAperture>()?.let { cleanAperture(it, size.first, size.second) }
+        val (crop, orientation) = geometry(c, item, size.first, size.second)
         return Plan(
             c, item, null, alpha, null, premultiplied, size.first, size.second, itemDepth(c, item, 0), crop,
-            orientation(item.property(), item.property()),
+            orientation,
             frameCount = 1, loopCount = 1, icc = itemIcc(c, item, 0), cicp = cicp, unsupported = reason,
             contentLight = itemProperty<AvifProperty.ContentLight>(c, item)?.let { intArrayOf(it.maxContent * 10000, it.maxFrameAverage * 10000) },
             masteringDisplay = itemProperty<AvifProperty.MasteringDisplay>(c, item)?.values,
@@ -269,29 +626,29 @@ internal object AvifDecoder {
     }
 
     private fun trackPlan(c: AvifContainer, track: AvifTrack, probing: Boolean): Plan {
-        val config = track.properties.firstOrNull { it is AvifProperty.Av1Config } as AvifProperty.Av1Config?
+        val codec = HeifCodecs.forSampleEntry(track.sampleEntry) ?: return missingCodecPlan(c, track)
+        val config = configuration(track.properties, codec)
         val alpha = c.tracks.firstOrNull { t ->
-            t !== track && t.sampleEntry == AV01 && (t.auxType == ALPHA_URN || t.auxType == ALPHA_URN_HEVC) &&
+            t !== track && HeifCodecs.forSampleEntry(t.sampleEntry) != null && (t.auxType == ALPHA_URN || t.auxType == ALPHA_URN_HEVC) &&
                 t.references.any { it.type == AUXL && track.id in it.to }
         }
         val first = c.sampleDataOrNull(track, 0)
         if (first == null && !probing) throw ImageDecodeException("AVIF: the first frame of track ${track.id} extends past the end of the file")
-        val headers = first?.let { Av1Decoder.inspect(config?.configObus, it) }
+        val headers = first?.let { codec.inspect(config, it) }
         val nclx = track.properties.firstOrNull { it is AvifProperty.Nclx } as AvifProperty.Nclx?
-        val cicp = nclx?.let { AvifCicp(it.primaries, it.transfer, it.matrix, it.fullRange) }
-            ?: headers?.seq?.let { AvifCicp(it.colorPrimaries, it.transferCharacteristics, it.matrixCoefficients, it.colorRange) }
+        val cicp = nclx?.let { AvifCicp(it.primaries, it.transfer, it.matrix, it.fullRange) } ?: headers?.cicp()
         // A sequence's first frame is a key frame: what follows it is what decodeAnimation reads.
-        val reason = headers?.unsupported ?: cicp?.let { AvifColor.unsupported(it.matrix) }
+        val reason = headers?.unsupportedReason ?: cicp?.let { AvifColor.unsupported(it.matrix, it.transfer) }
         val premultiplied = alpha != null &&
             (track.references.any { it.type == PREM && alpha.id in it.to } || alpha.references.any { it.type == PREM && track.id in it.to })
-        val width = headers?.width ?: track.width
-        val height = headers?.height ?: track.height
+        val width = headers?.width?.takeIf { it > 0 } ?: track.width
+        val height = headers?.height?.takeIf { it > 0 } ?: track.height
         if (width <= 0 || height <= 0) throw ImageDecodeException("AVIF: track ${track.id} has no size")
         val crop = (track.properties.firstOrNull { it is AvifProperty.CleanAperture } as AvifProperty.CleanAperture?)
             ?.let { cleanAperture(it, width, height) }
         return Plan(
             c, null, track, null, alpha, premultiplied, width, height,
-            headers?.seq?.bitDepth ?: config?.bitDepth ?: 8, crop,
+            headers?.bitDepthLuma ?: config?.let { codec.inspect(it, null).bitDepthLuma } ?: 8, crop,
             orientation(
                 track.properties.firstOrNull { it is AvifProperty.Rotation } as AvifProperty.Rotation?,
                 track.properties.firstOrNull { it is AvifProperty.Mirror } as AvifProperty.Mirror?,
@@ -305,13 +662,30 @@ internal object AvifDecoder {
         )
     }
 
-    /** Why the AV1 frames of [item], or of an item it is derived from, cannot be decoded. */
+    /** An HEVC track while no codec reads it: its size from its sample entry, and the module it needs. */
+    private fun missingCodecPlan(c: AvifContainer, track: AvifTrack): Plan {
+        val hvcC = track.properties.firstOrNull { it is AvifProperty.Other && it.type == HVCC } as AvifProperty.Other?
+        val depth = hvcC?.let { AvifContainer.hevcConfigDepths(it.payload) }?.get(1) ?: 8
+        return Plan(
+            c, null, track, null, null, false, track.width, track.height, depth, null, Orientation.Normal,
+            frameCount = track.sizes.size, loopCount = track.playCount, icc = null, cicp = null,
+            unsupported = NEEDS_HEIC_MODULE_TRACK.replace("'hvc1'", "'${fourccName(track.sampleEntry)}'"),
+        )
+    }
+
+    /** Why the coded data of [item], or of an item it is derived from, cannot be decoded. Each item and depth is read once. */
     private fun frames(c: AvifContainer, item: AvifItem, depth: Int): String? {
+        val key = item.id * (MAX_DEPTH + 2) + depth
+        if (c.framesChecked.containsKey(key)) return c.framesChecked[key]
+        return uncheckedFrames(c, item, depth).also { c.framesChecked[key] = it }
+    }
+
+    private fun uncheckedFrames(c: AvifContainer, item: AvifItem, depth: Int): String? {
         if (depth > MAX_DEPTH) return null
-        if (item.type == AV01) {
+        val codec = codecOf(item)
+        if (codec != null) {
             // Data a probe cannot see yet is checked when it decodes.
-            val data = c.itemDataOrNull(item) ?: return null
-            return Av1Decoder.inspect(item.property<AvifProperty.Av1Config>()?.configObus, data).unsupported
+            return inspect(c, item, codec)?.unsupportedReason
         }
         val ids = c.referencesFrom(item.id, DIMG)
         val used = if (item.type == TMAP) ids.take(1) else ids
@@ -322,6 +696,7 @@ internal object AvifDecoder {
         if (depth > MAX_DEPTH) throw UnsupportedImageException("AVIF derived images nested more than $MAX_DEPTH deep")
         when (item.type) {
             GRID -> c.itemDataOrNull(item)?.let { return AvifGrid.read(it).let { g -> g.width to g.height } }
+            IDEN -> c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] }?.let { return itemSize(c, it, depth + 1) }
             IOVL -> c.itemDataOrNull(item)?.let { return AvifOverlay.read(it, 0).let { o -> o.width to o.height } }
             TMAP -> return itemSize(c, base(c, item, depth), depth + 1)
         }
@@ -329,10 +704,14 @@ internal object AvifDecoder {
         if (ispe != null) {
             // MIAF (ISO/IEC 23000-22, 7.3.6.3) has the ispe of a coded item match its reconstructed
             // size. Where a damaged file disagrees, the frame is what decodes, so probe reports it (#124).
-            if (item.type == AV01) {
-                val data = c.itemDataOrNull(item)
-                val coded = data?.let { runCatching { Av1Decoder.inspect(item.property<AvifProperty.Av1Config>()?.configObus, it) }.getOrNull() }
-                if (coded != null && coded.width > 0 && coded.height > 0) return coded.width to coded.height
+            val codec = codecOf(item)
+            if (codec != null) {
+                val coded = try {
+                    inspect(c, item, codec)
+                } catch (_: ImageDecodeException) {
+                    null
+                }
+                if (coded != null && coded.width > 0 && coded.height > 0) return shownSize(ispe, checkedSize(item, coded))
             }
             // The same ceiling as a grid or an overlay, so probe promises no size past it.
             if (ispe.width !in 1..MAX_SIDE || ispe.height !in 1..MAX_SIDE || ispe.width * ispe.height > Budget.MAX_PIXELS) {
@@ -340,10 +719,10 @@ internal object AvifDecoder {
             }
             return ispe.width.toInt() to ispe.height.toInt()
         }
-        if (item.type == AV01) {
-            val data = c.itemDataOrNull(item) ?: throw ImageDecodeException("AVIF: item ${item.id} has no 'ispe' and its data is cut off")
-            val h = Av1Decoder.inspect(item.property<AvifProperty.Av1Config>()?.configObus, data)
-            return h.width to h.height
+        val codec = codecOf(item)
+        if (codec != null) {
+            val h = inspect(c, item, codec) ?: throw ImageDecodeException("AVIF: item ${item.id} has no 'ispe' and its data is cut off")
+            return checkedSize(item, h)
         }
         val first = c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] }
             ?: throw ImageDecodeException("AVIF: item ${item.id} has no size")
@@ -352,23 +731,64 @@ internal object AvifDecoder {
 
     private const val MAX_SIDE = 65536L
 
+    /**
+     * The size a coded item shows: its 'ispe' where the picture is larger in both directions, as Sony's
+     * HEIC thumbnails code 1664 by 1088 samples under an ispe of 1616 by 1080 with no conformance
+     * window, else the coded size (#150). The samples past the ispe are the encoder's padding.
+     */
+    private fun shownSize(ispe: AvifProperty.Extent?, coded: Pair<Int, Int>): Pair<Int, Int> {
+        if (ispe == null || ispe.width < 1 || ispe.height < 1) return coded
+        // Compared as Long: an ispe past 2^31 must not wrap to a negative size.
+        return if (ispe.width <= coded.first && ispe.height <= coded.second) ispe.width.toInt() to ispe.height.toInt() else coded
+    }
+
+    /** [p] cut to the [size] that [shownSize] gives; the planes stay, read through their strides. */
+    private fun shown(p: AvifPlanes, size: Pair<Int, Int>): AvifPlanes =
+        if (size.first == p.width && size.second == p.height) p
+        else AvifPlanes(size.first, size.second, p.depth, p.subX, p.subY, p.planes, p.strides, p.fullRange)
+
+    /** The coded size of [item], within the same ceiling as its 'ispe'. */
+    private fun checkedSize(item: AvifItem, h: HeifCodecInfo): Pair<Int, Int> {
+        if (h.width !in 1..MAX_SIDE || h.height !in 1..MAX_SIDE || h.width.toLong() * h.height > Budget.MAX_PIXELS) {
+            throw ImageDecodeException("AVIF: item ${item.id} codes a picture of ${h.width} by ${h.height}")
+        }
+        return h.width to h.height
+    }
+
     private fun itemDepth(c: AvifContainer, item: AvifItem, depth: Int): Int {
         if (depth > MAX_DEPTH) return 8
         if (item.type == SATO) item.property<AvifProperty.PixelInfo>()?.depths?.firstOrNull()?.let { return it }
-        item.property<AvifProperty.Av1Config>()?.let { return it.bitDepth }
+        codecOf(item)?.let { codec -> configuration(item.properties, codec)?.let { return codec.inspect(it, null).bitDepthLuma } }
+        // An HEVC item's depth is in the fixed header of its 'hvcC', which the core reads itself.
+        if (item.type == HVC1) {
+            item.properties.firstNotNullOfOrNull { p -> (p as? AvifProperty.Other)?.takeIf { it.type == HVCC }?.payload }
+                ?.let { AvifContainer.hevcConfigDepths(it) }?.let { return it[1] }
+        }
         val next = if (item.type == TMAP) base(c, item, depth) else c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] }
         return next?.let { itemDepth(c, it, depth + 1) } ?: 8
+    }
+
+    /**
+     * The crop and orientation of [item]'s transformative properties: MIAF's fixed order when the
+     * file has the `miaf` brand, else the order of their association (#167).
+     */
+    private fun geometry(c: AvifContainer, item: AvifItem, width: Int, height: Int): Pair<IntArray?, Orientation> {
+        val steps = if (MIAF in c.brands) {
+            listOfNotNull(item.property<AvifProperty.CleanAperture>(), item.property<AvifProperty.Rotation>(), item.property<AvifProperty.Mirror>())
+        } else {
+            item.properties.filter { it is AvifProperty.CleanAperture || it is AvifProperty.Rotation || it is AvifProperty.Mirror }
+        }
+        return HeifGeometry.fold(width, height, steps, ::cleanAperture, ::orientation)
     }
 
     /** The colour code points of [item]: its own `nclx`, else its first input's, else its AV1 sequence header's. */
     private fun itemCicp(c: AvifContainer, item: AvifItem, depth: Int): AvifCicp? {
         if (depth > MAX_DEPTH) return null
+        // A JPEG item's samples are the RGB its decoder gives, whatever an nclx says of its YCbCr.
+        if (item.type == AvifContainer.JPEG) return AvifCicp(item.property<AvifProperty.Nclx>()?.primaries ?: 2, 13, 0, true)
         item.property<AvifProperty.Nclx>()?.let { return AvifCicp(it.primaries, it.transfer, it.matrix, it.fullRange) }
-        if (item.type == AV01) {
-            val data = c.itemDataOrNull(item) ?: return null
-            val seq = Av1Decoder.inspect(item.property<AvifProperty.Av1Config>()?.configObus, data).seq
-            return AvifCicp(seq.colorPrimaries, seq.transferCharacteristics, seq.matrixCoefficients, seq.colorRange)
-        }
+        val codec = codecOf(item)
+        if (codec != null) return inspect(c, item, codec)?.cicp()
         val first = c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] } ?: return null
         return itemCicp(c, first, depth + 1)
     }
@@ -378,7 +798,7 @@ internal object AvifDecoder {
         var at = item
         repeat(MAX_DEPTH + 1) {
             at.property<T>()?.let { return it }
-            if (at.type == AV01) return null
+            if (codecOf(at) != null) return null
             at = c.referencesFrom(at.id, DIMG).firstOrNull()?.let { c.items[it] } ?: return null
         }
         return null
@@ -386,7 +806,7 @@ internal object AvifDecoder {
 
     private fun itemIcc(c: AvifContainer, item: AvifItem, depth: Int): ByteArray? {
         item.property<AvifProperty.Icc>()?.let { return it.profile }
-        if (item.type == AV01 || depth > MAX_DEPTH) return null
+        if (codecOf(item) != null || depth > MAX_DEPTH) return null
         val first = c.referencesFrom(item.id, DIMG).firstOrNull()?.let { c.items[it] } ?: return null
         return itemIcc(c, first, depth + 1)
     }
@@ -452,6 +872,121 @@ internal object AvifDecoder {
         return Rendered(cropped(out.bitmap, crop), out.wide?.let { cropped(it, crop) })
     }
 
+    // ---- reducing a grid while it decodes (#151) ------------------------------------------
+
+    /**
+     * Whether [downscaledGrid] reduces [data] band by band: a still image whose shown item is a
+     * `grid` of coded tiles, with no alpha, or an alpha item that is coded or is a grid of coded
+     * tiles laid out as the colour grid's.
+     */
+    fun reducesWhileDecoding(data: ByteArray): Boolean = try {
+        banded(plan(data, probing = false))
+    } catch (_: ImageDecodeException) {
+        false
+    }
+
+    private fun banded(p: Plan): Boolean {
+        if (p.track != null || p.alphaTrack != null || p.unsupported != null) return false
+        val item = p.item?.takeIf { it.type == GRID } ?: return false
+        val c = p.c
+        if (inputs(c, item).any { codecOf(it) == null }) return false
+        val alpha = p.alphaItem ?: return true
+        if (codecOf(alpha) != null) return true
+        if (alpha.type != GRID || inputs(c, alpha).any { codecOf(it) == null }) return false
+        val g = AvifGrid.read(c.itemData(item))
+        val a = AvifGrid.read(c.itemData(alpha))
+        return g.rows == a.rows && g.columns == a.columns && g.width == a.width && g.height == a.height
+    }
+
+    /**
+     * [data] as `decode(data).downscaledTo(width, height)` gives it, with [transform] applied to
+     * each band of rows after the conversion to RGB, as the facade converts colour before it scales.
+     * The grid decodes one row of tiles at a time, its rows convert to RGB once the chroma rows
+     * their upsampling reads are in, and they go to a [BandScaler] and are dropped, so the picture
+     * never exists at full size. With [wide], each band also comes at 16 bits a sample, as
+     * [decode16] gives it. Null when [reducesWhileDecoding] is false, when the size is not a
+     * reduction, when [grayOnly] and the picture is in colour, or when the alpha grid's tiles are
+     * not the size of the colour grid's: the caller then decodes in full.
+     */
+    fun downscaledGrid(
+        data: ByteArray,
+        width: Int,
+        height: Int,
+        wide: Boolean,
+        grayOnly: Boolean,
+        cancel: (() -> Unit)?,
+        transform: (KiteBitmap, KiteBitmap16?) -> KiteBitmap,
+    ): KiteBitmap? = labelled(data) {
+        val p = plan(data, probing = false)
+        if (!banded(p)) return@labelled null
+        val c = p.c
+        val item = p.item!!
+        val crop = p.crop ?: intArrayOf(0, 0, p.width, p.height)
+        val (cropLeft, cropTop, shownWidth, shownHeight) = crop.toList()
+        if (width !in 1..shownWidth || height !in 1..shownHeight || (width == shownWidth && height == shownHeight)) return@labelled null
+        val grid = AvifGrid.read(c.itemData(item))
+        val tiles = inputs(c, item)
+        fun tile(t: AvifItem): AvifPlanes {
+            cancel?.invoke()
+            return planes(c, t, 1, cancel)
+        }
+        val color = AvifGridWindow(grid, tiles.size, maxPlanes = 3, tile = { tile(tiles[it]) }, parallel = parallelTiles(c, tiles))
+        val alphaItem = p.alphaItem
+        val alphaGrid = alphaItem?.takeIf { it.type == GRID }?.let { a ->
+            val alphaTiles = inputs(c, a)
+            AvifGridWindow(
+                AvifGrid.read(c.itemData(a)), alphaTiles.size, maxPlanes = 1, tile = { tile(alphaTiles[it]) },
+                prepare = ::fullRangeAlpha, parallel = parallelTiles(c, alphaTiles),
+            )
+        }
+        val scaler = BandScaler(shownWidth, shownHeight, width, height)
+        val w = grid.width
+        val h = grid.height
+        var alphaWhole: AvifPlanes? = null
+        var cicp: AvifCicp? = null
+        var done = 0
+        for (row in 0 until grid.rows) {
+            color.load(row)
+            alphaGrid?.load(row)
+            val f = color.first!!
+            if (row == 0) {
+                if (grayOnly && !f.monochrome) return@labelled null
+                if (alphaGrid != null && alphaGrid.first!!.height != f.height) return@labelled null
+                cicp = p.cicp ?: AvifCicp(2, 2, 2, f.fullRange)
+            }
+            // A luma row of 4:2:0 reads the chroma row below its own when it is odd, which the next row of tiles holds.
+            val end = if (row == grid.rows - 1) h else color.loaded - (if (!f.monochrome && f.subY != 0) 1 else 0)
+            if (alphaItem != null && alphaGrid == null && alphaWhole == null) {
+                alphaWhole = fullRangeAlpha(planes(c, alphaItem, 0, cancel)).also { a ->
+                    if (a.width != w || a.height != h) {
+                        throw ImageDecodeException("AVIF: the alpha image is ${a.width} by ${a.height}, the colour image $w by $h")
+                    }
+                }
+            }
+            val alpha = alphaGrid?.view() ?: alphaWhole
+            val alphaTop = alphaGrid?.top ?: 0
+            val image = color.view()
+            val channels = if (alpha != null) 4 else 3
+            val bandRows = maxOf(1, BAND_PIXELS / w)
+            var from = maxOf(done, cropTop)
+            val until = minOf(end, cropTop + shownHeight)
+            while (from < until) {
+                val to = minOf(until, from + bandRows)
+                val out8 = IntArray(w * (to - from))
+                val out16 = if (wide) ShortArray(w * (to - from) * channels) else null
+                AvifColor.convert(image, cicp!!, alpha, p.premultiplied, out8, out16, from, to, color.top, alphaTop)
+                val band = transform(KiteBitmap(w, to - from, out8), out16?.let { KiteBitmap16(w, to - from, channels, it) })
+                for (j in from until to) scaler.add(band.argb, (j - from) * w + cropLeft)
+                from = to
+            }
+            done = end
+        }
+        scaler.result()
+    }
+
+    /** About how many pixels [downscaledGrid] converts at once: a band of rows this size or one row. */
+    private const val BAND_PIXELS = 1 shl 16
+
     private fun convert(color: AvifPlanes, alpha: AvifPlanes?, premultiplied: Boolean, cicp: AvifCicp, wide: Boolean): Rendered {
         val a = alpha?.let { fullRangeAlpha(it) }
         if (a != null && (a.width != color.width || a.height != color.height)) {
@@ -487,32 +1022,70 @@ internal object AvifDecoder {
         return KiteBitmap16(w, h, ch, out)
     }
 
+    /**
+     * The first frame of [track] as it plays. That is the picture of the first sample, unless a
+     * picture decoded after it shows before it, as a leading picture of HEVC can; then the frame
+     * comes from the sequence decoded in output order.
+     */
     private fun trackPlanes(c: AvifContainer, track: AvifTrack, cancel: (() -> Unit)? = null): AvifPlanes {
-        val config = track.properties.firstOrNull { it is AvifProperty.Av1Config } as AvifProperty.Av1Config?
-        return av1(config?.configObus, c.sampleData(track, 0), 0, 0xFFFF, cancel)
+        val codec = trackCodec(track)
+        if (track.presentationOrder[0] != 0) {
+            return TrackReader(c, track, cancel).next() ?: throw ImageDecodeException("AVIF: track ${track.id} shows no frame")
+        }
+        return still(codec, configuration(track.properties, codec), c.sampleData(track, 0), 0, 0xFFFF, cancel)
     }
 
-    private fun av1(config: ByteArray?, data: ByteArray, operatingPoint: Int, layer: Int, cancel: (() -> Unit)? = null): AvifPlanes {
-        val pic = Av1Decoder(operatingPoint).also { it.cancel = cancel }.decodeStill(config, data, layer)
-        return AvifPlanes(pic.width, pic.height, pic.bitDepth, pic.subX, pic.subY, pic.planes, pic.strides, pic.seq.colorRange)
+    /** The one picture that [data] codes, decoded by [codec]. */
+    private fun still(codec: HeifCodec, config: ByteArray?, data: ByteArray, operatingPoint: Int, layer: Int, cancel: (() -> Unit)?): AvifPlanes {
+        val session = if (codec === Av1Codec) Av1Codec.open(config, operatingPoint, layer, still = true) else codec.open(config)
+        return planesOf(session.decode(data, cancel) ?: throw ImageDecodeException("AVIF: an item of type '${codec.itemType}' shows no picture"))
     }
+
+    /**
+     * Whether the tile runner may decode [tiles] at the same time (#152): only coded items that no
+     * other input names, since those go through the shared cache of [AvifContainer.decoded] and a
+     * derived tile would hand its own inputs to the runner from inside a job.
+     */
+    private fun parallelTiles(c: AvifContainer, tiles: List<AvifItem>): Boolean =
+        tiles.all { it.type !in DERIVED_TYPES && c.inputUses(it.id) < 2 }
 
     /** The YUV or gray planes of [item], before conversion to RGB. */
     private fun planes(c: AvifContainer, item: AvifItem, depth: Int, cancel: (() -> Unit)? = null): AvifPlanes {
+        // An item that several derived images name, or one names twice, decodes once.
+        if (c.inputUses(item.id) < 2) return uncachedPlanes(c, item, depth, cancel)
+        return c.decoded.getOrPut(item.id) { uncachedPlanes(c, item, depth, cancel) }
+    }
+
+    private fun uncachedPlanes(c: AvifContainer, item: AvifItem, depth: Int, cancel: (() -> Unit)?): AvifPlanes {
         if (depth > MAX_DEPTH) throw UnsupportedImageException("AVIF derived images nested more than $MAX_DEPTH deep")
         return when (item.type) {
-            AV01 -> {
-                val config = item.property<AvifProperty.Av1Config>() ?: throw ImageDecodeException("AVIF: item ${item.id} has no 'av1C'")
-                av1(
-                    config.configObus, c.itemData(item),
+            in DERIVED_TYPES -> derivedPlanes(c, item, depth, cancel)
+            else -> {
+                val codec = codecOf(item) ?: throw UnsupportedImageException("AVIF item of type '${fourccName(item.type)}'")
+                val config = configuration(item.properties, codec)
+                if (config == null && codec !== JpegItemCodec) throw ImageDecodeException("AVIF: item ${item.id} has no '${codec.configurationType}'")
+                val data = c.itemData(item)
+                // The coded size, within the ceiling, before the codec allocates for it.
+                checkedSize(item, codec.inspect(config, data))
+                val planes = still(
+                    codec, config, data,
                     item.property<AvifProperty.OperatingPoint>()?.index ?: 0,
                     item.property<AvifProperty.LayerSelector>()?.layer ?: 0xFFFF,
                     cancel,
                 )
+                shown(planes, shownSize(item.property<AvifProperty.Extent>(), planes.width to planes.height))
             }
+        }
+    }
+
+    private fun derivedPlanes(c: AvifContainer, item: AvifItem, depth: Int, cancel: (() -> Unit)?): AvifPlanes {
+        return when (item.type) {
             GRID -> {
                 val tiles = inputs(c, item)
-                AvifGrid.assemble(AvifGrid.read(c.itemData(item)), tiles.size) { planes(c, tiles[it], depth + 1, cancel) }
+                AvifGrid.assemble(AvifGrid.read(c.itemData(item)), tiles.size, parallelTiles(c, tiles)) {
+                    cancel?.invoke()
+                    planes(c, tiles[it], depth + 1, cancel)
+                }
             }
             SATO -> {
                 val sources = inputs(c, item).map { planes(c, it, depth + 1, cancel) }
@@ -522,6 +1095,7 @@ internal object AvifDecoder {
                 AvifSampleTransform.apply(c.itemData(item), sources, bits, full)
             }
             TMAP -> planes(c, base(c, item, depth), depth + 1, cancel)
+            IDEN -> planes(c, inputs(c, item).first(), depth + 1, cancel)
             else -> throw UnsupportedImageException("AVIF item of type '${fourccName(item.type)}'")
         }
     }

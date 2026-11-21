@@ -18,6 +18,350 @@ reviewable in the diff.
   LZMA2 in an xz stream (compression 34925), the two codecs libtiff writes with `tiffcp -c zstd`
   and `-c lzma`. ArchiveKodec decodes both, with or without the horizontal predictor. `probe`
   reports such files as decodable.
+- TIFF decodes unsigned samples of 1 to 32 bits, signed samples, and IEEE floats of 16, 24, 32 and 64
+  bits, which `decode16` gives at 16 bits, as ImageMagick reads them: floats as a fraction of full scale,
+  signed samples moved up by half their range. The floating-point predictor (3) and the horizontal
+  predictor at 32 and 64 bits decode, and so do 12-bit JPEG strips, JPEG YCbCr in separate planes,
+  old-style JPEG in separate planes and in tiles of several columns, and CCITT's uncompressed mode,
+  which `CcittFax` reads too. YCbCr past 8 bits, inks other than CMYK, old-style lossless JPEG and
+  complex samples stay refused, by name, because no reader gives a picture to check against (#189).
+- JBIG2 decodes arithmetic symbol dictionaries that aggregate several instances into a symbol, and
+  immediate generic regions of unknown length that end with a row count, as jbig2dec reads them. A
+  Huffman dictionary that refines stays refused: jbig2dec misreads one, so nothing could check (#189).
+- JPEG XR decodes 32bppRGBE, sample for sample as `JxrDecApp`, its picture in linear light converted
+  to sRGB (#189).
+- JPEG XR decodes CMYK (32bppCMYK, 64bppCMYK, 40bppCMYKAlpha, 80bppCMYKAlpha) and the N-channel
+  formats of 3 to 8 channels, sample for sample as `JxrDecApp`. CMYK draws as a CMYK TIFF draws, as
+  libtiff does, or converts through its CMYK profile with `ColorTarget.Srgb()`; N channels take T.832
+  Annex C's default, sRGB for three and CMYK for the first four of more. `encodeJxrCmyk` writes
+  32bppCMYK and 64bppCMYK through T.832's reversible transform to YUVK. N-channel alpha interleaved
+  with the channels, which `JxrDecApp` fails on, and CMYKDIRECT stay refused (#189).
+- AVIF converts BT.2020 and chromaticity-derived constant luminance and ICtCp (PQ and HLG) as zimg
+  converts them, within a level of `zscale`. SMPTE ST 2085, `iloc` construction method 2, reserved sample
+  transform tokens and tile list OBUs stay refused, each with its reason in `docs/limits.md` (#189).
+- JPEG XL writes a lossy picture whose header has only an ICC profile into that profile when it is one
+  of matrix and curves, as libjxl does through a colour engine, and describes a header of its own
+  primaries with an ICC profile made from it, so `ColorTarget.Srgb` converts it as djxl does. The intensity
+  target is the peak that tone mapping takes (#189).
+- JPEG XL decodes CMYK: C, M and Y in the colour channels and K in a black extra channel, applied through
+  the file's CMYK profile at the profile's intent, as libjxl converts CMYK, or at the intent of
+  `ColorTarget.Srgb`. The stored samples equal djxl 0.7's, and the picture lcms2's within a level. A black
+  channel without a CMYK profile stays refused (#189).
+- JPEG XL writes a lossy picture whose header has only an ICC profile of lookup tables into that profile
+  too, through its B2A0 table (lut8Type, lut16Type or lutBToAType), read as lcms2 reads it, and `probe`
+  reports the profile. A header of its own primaries or white point with the PQ or HLG curve is described
+  by a profile with the curve as a table, as libjxl makes one, and `ColorTarget.Srgb` converts it with its
+  own primaries where it took BT.709's (#189).
+- PNG decodes Apple's CgBI files, which Xcode writes into iOS apps: the raw deflate stream, and BGR
+  and premultiplied BGRA samples at 8 bits, which come back as straight RGB and RGBA. A CgBI file of
+  16-bit colour, which Xcode does not write, stays refused by name (#189).
+
+- JPEG 2000 decodes HTJ2K (ITU-T T.814): the HT block coder's cleanup pass, with its MagSgn, MEL and
+  VLC streams, and its SigProp and MagRef passes, in HT tile-components alone or beside Part 1 ones.
+  The `CAP` and `CPF` segments are read, and a JPH file (`ftyp` brand `jph `) is detected and probed
+  as JPEG 2000. Everything outside the block coder is Part 1's: tier 2, the wavelets, ROI, reductions
+  and tiles. `opj_decompress` 2.5 reads every HT file the encoder writes to the same samples, at full
+  size and at every reduction. Code-block style 0x80 (MIXED) and an HT code-block of more than one HT
+  set stay refused, by name (#187).
+- `Jp2EncodeOptions(highThroughput = true)` writes HTJ2K: a `CAP` segment, code-block style 0x40 and,
+  in a JP2 file, the `jph ` brand. Each code-block is one HT set, picked by the rate control; the file
+  has one quality layer (#187).
+- The CIELab colour space of a JP2 header (enumerated 14) converts to sRGB, with its default
+  parameters or its own, as lcms2 converts a Lab profile, relative colorimetric (#187).
+
+- `readMetadata` reads EXIF, XMP and ICC from TIFF (the first page's EXIF and GPS directories
+  rebuilt as a block, tag 700, tag 34675), JPEG XL (`Exif` and `xml ` boxes, also inside Brotli
+  `brob` boxes, and the codestream's profile), JPEG XR (its EXIF, GPS, XMP and ICC tags), GIF (the
+  `XMP DataXMP` and `ICCRGBG1` `012` application extensions) and BMP (the profile a BITMAPV5HEADER
+  embeds), and the UUID boxes ExifTool writes after a JP2 codestream. `encodeTiff` with options now
+  writes the EXIF block of its metadata as directories of the first page, where it left it out
+  before. `encodeGif(bitmap, metadata, dither)` and `encodeGif(animation, metadata, dither)` write
+  the XMP and ICC extensions, and `encodeBmp(bitmap, options, metadata)` embeds the ICC profile under
+  a BITMAPV5HEADER. Every call without metadata writes the bytes it wrote before. ExifTool reads every
+  block every encoder writes, and `readMetadata` every block ExifTool writes. See
+  [Keeping a photo's metadata](docs/encoding.md#keeping-a-photos-metadata) (#186).
+
+- `imagekodec-heic` decodes the tools of the HEVC screen content coding extensions: palette mode
+  with its predictor palette and initializers, escape samples and transposition, current picture
+  referencing (intra block copy) with `use_integer_mv_flag`, the adaptive colour transform with its
+  QP offsets, and disabled intra boundary filtering. It also decodes three separate colour planes
+  (`separate_colour_plane_flag`). Every picture of the 15 SCC conformance streams of H.265.1 matches
+  its hash SEI and its package MD5, so all 211 conformance streams match (#188).
+- `imagekodec-heic` codes HEVC sequences of P and B pictures, for the image sequence tracks of #177. An
+  internal entry point (`HevcEncoder.encodeSequence`, and `HevcHeifEncoder.encodeSequence` for the HEIF
+  writer) takes frames with their durations and returns the `hvcC`, each access unit as a track sample,
+  its sync flag, decoding duration and composition offset, and the edit list's start. The pictures go in
+  groups of four by default: a P picture, then a dyadic pyramid of B pictures, with an IDR picture every
+  so many frames as an option; IPPP is a group of one. Short-term reference picture sets in the SPS,
+  temporal motion vector prediction, and the decoded picture buffer sizes come from the plan. The encoder
+  searches motion over whole, half and quarter samples through the decoder's own interpolation, weighs
+  merging candidates, skipped units, AMVP with uni- and bi-prediction, 2NxN, Nx2N and the asymmetric
+  partitions, and intra units by rate and distortion, and reconstructs through the decoder's own merging,
+  AMVP, reference lists and picture buffer. libde265 and ffmpeg decode every stream of
+  `HevcInterOracleTest` to the encoder's reconstruction and check its MD5 hash SEI. At equal mean
+  SSIMULACRA 2 the slice data measured about 0.56 of x265 medium's on three animated scenes; see
+  [HEVC sequences](docs/heic.md#hevc-sequences) (#177).
+- `encodeTiff(bitmap, TiffEncodeOptions, metadata, cancellationCheck)`, the same for pages, and
+  `encodeTiff16` with options write the layouts the TIFF decoder reads: no compression, PackBits,
+  LZW and Deflate with or without the predictor, CCITT Group 4 and Group 3 for a bi-level page
+  through the fax encoder of #185, and JPEG with JPEGTables (compression 7); strips of any height
+  or tiles; bi-level, gray, palette and RGB samples. `encodeTiffCmyk` writes CMYK separations from
+  8- or 16-bit ink. An ICC profile and an XMP packet go into the file. `encodeBmp(bitmap,
+  BmpEncodeOptions)` writes 1, 4 and 8-bit palettes, with RLE4 and RLE8 on request, and 16-bit
+  5-5-5. The calls without options write the bytes they wrote before. libtiff and ImageIO read
+  every TIFF variant to ImageKodec's samples, and ImageIO and ImageMagick every BMP variant.
+  See [Writing images](docs/encoding.md#tiff-and-bmp-layouts) (#184).
+- `encodeJpeg(bitmap, JpegEncodeOptions, metadata, cancellationCheck)` and
+  `encodeJpeg16(bitmap16, JpegEncodeOptions, ...)` write every process of ITU-T T.81 but the
+  hierarchical one: progressive files with libjpeg's default scan script, arithmetic coding with
+  the conditioning of a DAC segment, Huffman tables built for the file, restart markers, one gray
+  component, 4:4:4, 4:2:2 or 4:2:0, 12-bit DCT files, and lossless files at 2 to 16 bits with any
+  predictor and point transform, Huffman or arithmetic. Both encoders honour the options of an
+  8-bit DCT file. libjpeg-turbo 3.1 and ffmpeg read every file to the samples the coding promises.
+  The calls without options write the same bytes as before. See [Writing images](docs/encoding.md)
+  (#183).
+- PNG writes every colour type and bit depth, a palette, colour keys and Adam7 interlace (#182).
+  `encodePng(bitmap, PngEncodeOptions(...), metadata, cancellationCheck)` takes `PngColorType.Auto`,
+  the smallest type that holds the pixels exactly (gray at 1 to 16 bits, a palette of up to 256
+  colours with `tRNS`, RGB or RGBA, and a `tRNS` colour key in place of alpha where it fits), or a
+  fixed type and depth, and an `effort` from 1 to 3. `encodePng16(bitmap16, ...)` writes 16 bits a
+  sample for gray, gray and alpha, RGB and RGBA, read back by `decode16`, and `encodePng(animation,
+  options, ...)` writes APNG in the same types. At the default effort a picture that a palette or gray
+  holds is 32 to 78 percent smaller than `encodePng(bitmap)` writes it, and a photograph is no larger; effort 3 is
+  1.2 percent smaller than `optipng -o2` over the test pictures. pngcheck, ImageIO, Pillow and
+  ImageMagick read every type and depth back. `encodePng(bitmap)`, `encodePng(bitmap, metadata)` and
+  `encodePng(animation)` keep their output byte for byte. See [Writing images](docs/encoding.md).
+
+- `encodeCcitt` writes CCITT fax data, Group 4 (T.6) by default and Group 3 one- or two-dimensional
+  (T.4) with `CcittEncodeOptions`, which takes the parameters of PDF's `CCITTFaxDecode`: K, the byte
+  alignment, the polarity, EOL and EOFB or RTC. `CcittFax.encode` takes a packed page as
+  `CcittFax.decode` returns one. `encodeJbig2` writes a JBIG2 page as one generic region, with the MQ
+  coder in any of the four templates, typical prediction and MMR as `Jbig2EncodeOptions` choose, as
+  the embedded stream of PDF's `JBIG2Decode` or as a `.jb2` file. Both make a bitmap bilevel at half
+  its luma and code it losslessly. libtiff writes the same fax bytes, and jbig2enc the same generic
+  region without typical prediction; libtiff and jbig2dec read every variant back to the source page.
+  Symbol dictionaries are not written. See [Writing images](docs/encoding.md) (#185).
+- `encodeJxl(bitmap, quality)`, `encodeJxl(bitmap, JxlEncodeOptions, metadata, cancellationCheck)`,
+  `encodeJxl16` and `encodeJxl(animation, ...)` write JPEG XL, written from ISO/IEC 18181-1 and
+  18181-2: lossy VarDCT in XYB with transforms up to 32 by 32 and chroma from luma, lossless
+  Modular with a learned tree, a chosen colour transform and palettes, alpha, 16 bits, animations
+  with delays and play count, and the container with EXIF, XMP and an ICC profile. libjxl's djxl
+  reads every file; lossless files read back exactly. On photo-like scenes lossless files are 11
+  percent smaller than `cjxl -d 0 -e 7` of libjxl 0.7, and lossy ones 11 percent smaller at the
+  SSIMULACRA 2 score of `cjxl -d 1`. See [Writing images](docs/encoding.md#jpeg-xl) (#179).
+
+- `encodeJp2(bitmap, quality)`, `encodeJp2(bitmap, Jp2EncodeOptions, metadata, cancellationCheck)` and
+  `encodeJp2Wide` for a `KiteBitmap16` write JPEG 2000 Part 1, written from ITU-T T.800: lossy with the
+  9/7 wavelet, the ICT and rate control by a rate and distortion sort of code-block passes, at a
+  quality or at a compression ratio a layer, or lossless with the 5/3 wavelet and the RCT, at 1 to 16
+  bits, gray, RGB and alpha described by a channel definition box. Tiles, levels, code-block sizes,
+  precincts, layers, the five progression orders, SOP and EPH and every Part 1 code-block style are
+  options, in a JP2 file with the metadata or as a bare codestream. OpenJPEG decodes every file to the
+  samples ImageKodec's decoder gives, and on photo-like scenes the files match `opj_compress` within
+  0.05 dB at equal size. `readMetadata` now reads the XMP, EXIF and ICC profile of a JP2 file. See
+  [Writing images](docs/encoding.md) (#180).
+
+- Lossy WebP writing, written from RFC 6386 and RFC 9649: `encodeWebp(bitmap, quality)` writes a VP8
+  image at a quality with the meaning of `cwebp -q`, and `encodeWebp(bitmap, options, metadata,
+  cancellationCheck)` takes a `WebpEncodeOptions` with `lossless`, `quality`, `effort` 1 to 3 (in
+  the place of `cwebp -m 2`, `-m 4` and `-m 6`), `sharpYuv`, `alphaQuality` and a `WebpAlphaFilter`.
+  Each macroblock's modes are chosen by distortion plus bits, in four segments, and effort 3 adds a
+  trellis. Alpha goes in an `ALPH` chunk, exact by default. On the photo-like scenes of the tests the
+  files are 8.5 to 11.6 percent smaller than `cwebp -m 4`'s at the same SSIMULACRA 2 score, and
+  `dwebp` reads every file as ImageKodec does. `encodeWebp(animation, options)` writes an animated
+  WebP, lossless or lossy, each frame coded as the rectangle that changed, replaced or blended over
+  the canvas. `encodeWebp(bitmap)` writes the same lossless bytes as before. See
+  [Writing images](docs/encoding.md#lossy-and-animated-webp) (#178).
+- `encodeJxr` and `encodeJxr16` write JPEG XR, written from ITU-T T.832: lossy at a quality that
+  means what `JxrEncApp -q` means, or lossless at 8 and 16 bits, in gray, RGB and RGBA, with 4:4:4
+  or 4:2:0 chroma, the three overlap modes, planar or interleaved alpha, tiles with quantizers of
+  their own, spatial or frequency order, and the ICC profile, XMP and EXIF of an `ImageMetadata`.
+  `JxrEncodeOptions` holds the settings. On the photo scenes of the tests the files are 5 percent
+  smaller than `JxrEncApp`'s at equal SSIMULACRA 2, and every file decodes in `JxrDecApp` to the
+  samples ImageKodec's decoder gives. See [Writing images](docs/encoding.md#jpeg-xr) (#181).
+
+- `ImageKodec.encodeAvif(bitmap, quality)`, `encodeAvif(bitmap, options, metadata, cancellationCheck)` and
+  `encodeAvif16` write AVIF files with the core's own intra AV1 encoder, registered by default as the HEIF
+  encoder of `av01` items, through the HEIF writer of #174 and the same `HeifEncodeOptions` (#176). Each
+  picture is one key frame with a reduced still picture header: 8, 10 or 12 bits, 4:2:0, 4:2:2, 4:4:4 and
+  gray, alpha as an auxiliary image, lossless at base_q_idx 0 with the identity matrix in 4:4:4. The encoder
+  chooses partitions, intra modes (directional with angle deltas, smooth, Paeth, chroma from luma, filter
+  intra, and for screen content palettes of luma and of chroma and intra block copy), transform sizes and
+  types and levels by rate and distortion, and the loop filter levels, CDEF strengths and restoration
+  units, self-guided or Wiener. Intra block copy, on a picture an eighth of whose blocks repeat, makes
+  screen content 26 percent smaller at equal SSIMULACRA 2 score, and turns the loop filters off as AV1
+  requires. Effort 2 takes under a third of the time it did when first written, for files no larger at equal
+  score: it ranks only the intra directions the block's source follows, prices one transform type, keeps the
+  levels it chose and the residual they make for a repeat, puts the best luma back before ranking chroma rather
+  than coding it again, keeps the largest transform of a 64 by 64 block, and restores with the Wiener filter
+  alone; in stills it also prunes splits of smooth blocks, the transform split of a sparse residual and the whole
+  of a busy 64 by 64 block, commits the levels its search kept, measures the loop filter and CDEF strengths on
+  half the picture, and runs the forward DCT and ADST as butterflies. CDEF filters a block whose taps are all
+  inside the frame without checking each, and reads only the taps of a strength that is not 0, in the decoder
+  too. It runs the
+  core's AV1 decoder in a coding mode, so its reconstruction is the decoder's; dav1d and ImageKodec decode
+  every stream of `Av1EncoderOracleTest` to it sample for sample, and libavif, libheif and exiftool read
+  the files in `AvifEncodeOracleTest`. A picture wider than 4096 with no tile size codes as AV1 tiles.
+  The AV1 decoder's inverse transform skips the rows that hold only zeros, CDEF works out its damping
+  once a block, and the loop filter works out no strength for an edge it leaves, which leaves its output
+  unchanged.
+- `ImageKodec.encodeAvif(animation, options, metadata, cancellationCheck)` writes an animated AVIF: an AV1
+  image sequence track of every frame with its delay (timescale 1000), the loop count in an edit list as
+  libavif reads it, an alpha track auxiliary to it when a frame has alpha, and the first frame also as the
+  primary item, sharing the first sample's bytes, under the `avis` and `msf1` brands. The first frame is a
+  key frame, and the frames after it inter frames, which the frame decoder's coding mode codes as it codes
+  stills: each block chooses by rate and distortion among NEARESTMV, NEARMV, GLOBALMV, NEWMV from a motion
+  search (whole samples, then half and quarter samples through the decoder's own filters), and from effort 2
+  the frame before last and both averaged (compound), beside the intra modes. `HeifEncodeOptions` gains
+  `keyFrameInterval` for a key frame every so many frames. dav1d decodes every frame of
+  `AvifSequenceOracleTest` to the encoder's reconstruction, libavif and ffmpeg read the files, and at equal
+  mean SSIMULACRA 2 score effort 2 writes files within 5 percent of those of ffmpeg's libaom at
+  `-cpu-used 6` on two panning scenes, in 10 times its time. The AV1 decoder's motion vector stack reads its top right point only where the
+  superblock's decoded flags say it was decoded, as the specification asks, which changes no decode (#177).
+- The HEIF writer writes image sequence tracks (`moov`, `trak`, `tkhd`, `tref`, `edts`, `mdia` and the sample
+  table with `stts`, `ctts` when pictures are reordered, `stsc`, `stsz`, `stco` or `co64`, and `stss`).
+  `HeifEncoder.openSequence`, `HeifSequenceEncoder` and `HeifCodedSample`, under `ExperimentalHeifCodecApi`,
+  let a module code the pictures of a track; `encodeHeic(animation, options, metadata, cancellationCheck)`
+  goes through them, and without the `imagekodec-heic` module throws `UnsupportedImageException` that names
+  it (#177).
+- `encodeHeic(animation, options)` writes a HEIC image sequence through the HEVC sequence encoder of
+  `imagekodec-heic`, P and B pictures with an IDR picture every `keyFrameInterval` frames. The file leads with
+  the brand of its first picture (`heic` or `heix`), the primary item, and lists `hevc` or `hevx` among the
+  compatible brands, as libheif 1.17 refuses a major brand of `hevc`. Each sample's `stts` duration is that of
+  the picture it codes, as ffmpeg's muxer writes it, so B pictures take negative `ctts` offsets (version 1).
+  ffmpeg reads every frame at its time and, in a lossless file, exactly; heif-convert reads the first frame
+  (`HeicSequenceEncodeOracleTest`) (#177).
+- `ImageKodec.encodeHeic(bitmap, quality)`, `encodeHeic(bitmap, options, metadata, cancellationCheck)` and
+  `encodeHeic16` write HEIC files: a HEIF writer in the core (`ftyp`, `meta` with `hdlr`, `pitm`, `iloc`,
+  `iinf`, `iref`, `iprp` and `idat`, then `mdat`) around the intra HEVC encoder of `imagekodec-heic`, which
+  `ImageKodecHeic.install()` now registers beside the decoder. `HeifEncodeOptions` sets quality, lossless,
+  chroma subsampling (`HeifChroma`), bit depth (8, 10 or 12), effort, tile size, thumbnail size and
+  orientation. RGB converts with BT.601's matrix in full range, signalled as sRGB; lossless uses the
+  identity matrix in 4:4:4 and returns the bitmap exactly. Gray codes as 4:0:0, alpha as an auxiliary
+  image, a picture larger than the tile size (512 by default) as a `grid` whose tiles the tile runner of
+  `setTileRunner` encodes, and a subsampled picture of odd size with a `clap` crop. The ICC profile, EXIF
+  and XMP of an `ImageMetadata` go in as `colr` `prof`, `Exif` and `mime` items, a thumbnail as a `thmb`
+  item, and the orientation as `irot` and `imir`. Without the module, `encodeHeic` throws
+  `UnsupportedImageException` that names it. libheif, libde265, ffmpeg and exiftool read the files in
+  `HeicEncodeOracleTest` (#174).
+- `HeifEncoder`, `HeifEncodeParameters`, `HeifCodedPicture` and `ImageKodec.registerHeifEncoder`, under
+  `ExperimentalHeifCodecApi`: the encode side of the HEIF codec interface, through which a module adds the
+  encoder of an item type (#174).
+- `ImageKodec.setTileRunner` sets one `TileRunner` that every decode hands the tiles of a HEIC or
+  AVIF grid to, as `TileJob`s, so a caller can decode them on its own threads. Each job decodes one
+  tile with its own codec session and copies it into the picture at once, so a decode holds the
+  picture and one tile for each job running; a reduced decode hands it one row of tiles at a time.
+  The default, `TileRunner.Serial`, runs the jobs in order on the calling thread, as before, and is
+  the one to keep on JS and Wasm. The pixels and the error do not depend on the runner: the first
+  tile in tile order that fails gives the exception. A grid whose tiles are derived images, or that
+  names a tile twice, still decodes in order. On four threads a 12-megapixel grid of 48 tiles
+  decodes in 584 ms instead of 1,469 ms (#152).
+- `HeicBenchmarkTest`, `HeicNativeBenchmarkTest` and `HeicWebBenchmarkTest` measure the decode of a
+  12-megapixel HEIC grid of 48 tiles and of one 10-bit picture with wavefront rows, which x265 writes
+  at test time, on the JVM, linuxX64, JS and wasmJs, beside libde265 on one thread.
+  `docs/limits.md` has the table (#169).
+
+- `decodeAnimation` plays HEIC image sequences with the `imagekodec-heic` module: every frame of a
+  track whose sample entry is `hvc1` or `hev1` and whose handler is `pict` or `vide`, in presentation
+  order from the composition offsets of `ctts`, each with its duration, the loop count from the edit
+  list and an alpha track through `auxl`. `detect` and `probe` recognise the sequence brands `msf1`,
+  `hevc` and `hevx`, and `probe` gives the frame count and size; without the module the error names
+  it. The frames of x265 sequences with B pictures in an MP4 from ffmpeg equal ffmpeg's decode, in
+  the same order (#157).
+- `HeifCodecSession.decodeInOutputOrder` and `HeifCodecSession.flush`, under
+  `ExperimentalHeifCodecApi`, let a codec whose output order differs from its decoding order give its
+  pictures in output order. Both have default implementations, so a codec that does not reorder
+  needs neither (#157).
+
+- `ImageKodec.auxiliaryImages` lists the auxiliary images of a HEIC or AVIF file's primary image,
+  alpha, depth and gain maps among them, each with its `auxC` URN, its size, its bit depth and the
+  subtype bytes after the URN, unparsed; `decodeAuxiliaryImage` decodes one as a gray `KiteBitmap16`
+  of its coded samples, widened to 16 bits. `pug.heic`, an iPhone photo, lists its 768x576 depth
+  image and its 2016x1512 gain map, and both equal libde265's decode of their items (#154).
+- `ImageKodec.decodeGainMap` returns the HDR gain map of a HEIC or AVIF file as a `HeifGainMap`: the
+  decoded map, one or three channels at 16 bits, and its parameters. For a `tmap` item that is
+  `GainMapMetadata`, the ISO 21496-1 fields of its payload with the payload itself; for an Apple
+  photo's `urn:com:apple:photo:2020:aux:hdrgainmap` image, MakerNote tags 33 and 48 of its EXIF and,
+  when both are there, the headroom Apple's formula gives. The map is returned, not applied, and
+  `readMetadata` still decodes no picture. `HeifGainMap` is a new type beside `GainMap`, which stays
+  the gain map of an Ultra HDR JPEG and keeps its `jpeg` bytes, so no code that reads it changes
+  (#153).
+- `decodeScaled` and `decodeDownscaledTo` reduce a HEIC or AVIF grid while it decodes. The decoder
+  converts one row of tiles at a time to RGB and feeds it to the box filter, so a 48-megapixel grid
+  never exists at full size. The result equals `decode` followed by the same scale, pixel for pixel
+  (#151).
+- A HEIC or AVIF file with several top-level images has a page for each, the primary first:
+  `pageCount`, `probePage`, `decodePage` and `decode16(page =)` reach them as they reach the pages
+  of a TIFF. `ImageInfo.stereoLeftPage` and `stereoRightPage` name the two eyes of a `ster` group,
+  such as an Apple spatial photo (#168).
+- `ImageKodec.decodeThumbnail` decodes the thumbnail that a file carries: a `thmb` item of a HEIC or
+  AVIF file, or the thumbnail in the EXIF of a JPEG. Of several, it gives the smallest that reaches
+  a requested box. `ImageInfo.thumbnailWidth` and `thumbnailHeight` give the largest one's size
+  (#150).
+- `imagekodec-heic`, the module that holds the HEVC decoder of HEIC, kept out of the core so that
+  an app that reads no HEIC carries none of its code. `ImageKodecHeic.install()` registers its codec
+  for `hvc1` items and `hvc1` and `hev1` tracks; a second call changes nothing. It reads the HEVC
+  parameter sets and slice segment headers of ITU-T H.265, from `hvcC` or from the sample data, so
+  `probe` reports a HEIC file's coded size after the conformance window, its depths, chroma format
+  and VUI colour. The module is not published (#139, #140).
+- `imagekodec-heic` decodes intra HEVC pictures. It reads the CABAC slice data with wavefront rows,
+  entry points and several slices, and reconstructs 4:0:0, 4:2:0, 4:2:2 and 4:4:4 pictures with
+  scaling lists, transform skip, lossless coding and PCM (#141, #142). It applies the deblocking
+  filter and sample adaptive offset, and decodes tiles and dependent slice segments (#143, #144).
+  A screen content coding tool is named in `unsupportedReason`.
+- `imagekodec-heic` decodes the coding tools of the range extensions: transform skip rotation,
+  context and sizes above 4x4, residual DPCM, cross-component prediction, extended precision and
+  bit depths up to 16, persistent Rice adaptation, CABAC bypass alignment, disabled intra smoothing,
+  chroma QP offset lists and scaled SAO offsets (#148).
+- `imagekodec-heic` decodes P and B pictures. It derives the picture order count, the short-term
+  and long-term reference picture sets and the reference picture lists, and keeps a decoded picture
+  buffer with its output order from sample to sample. It skips the RASL pictures of a CRA picture
+  that starts the stream (#156). It derives motion with merge mode, AMVP and temporal candidates,
+  for every partition mode with the asymmetric ones (#171). It predicts samples with fractional
+  interpolation and default or explicit weighted prediction, and filters inter edges (#172).
+- Every picture of the 147 HEVC_v1 and 49 range extension conformance streams of H.265.1 matches
+  its hash SEI where it has one, and the output of each stream matches the MD5 its package gives.
+- With `imagekodec-heic` installed, `ImageKodec.decode` and `decode16` read HEIC photos end to end:
+  grids, alpha, crops, rotation, mirror, overlays and thumbnails. Colour comes from the item's `nclx`,
+  else from the VUI of the stream, also beside an ICC profile (#145).
+- `ImageFormat.HEIC`: `detect` and `probe` recognise a HEIF file whose image is not AV1, by its HEVC
+  brands, or by the type of the image it shows when it names only `mif1` or `msf1`. `probe` reports
+  its size and depth from the container. Until a codec reads its HEVC items, `isDecodable` is false
+  and the reason names the `imagekodec-heic` module (#138).
+- `ImageKodec.registerHeifCodec` and the `HeifCodec` interface, marked `ExperimentalHeifCodecApi`, let
+  a module supply the codec of a HEIF item type. The shared HEIF reader joins grids, applies alpha,
+  crops and turns, and converts to RGB; a codec only turns coded samples into planes. AV1 is the
+  built-in codec (#137).
+
+### Changed
+
+- `encodeHeic`'s `quality` now means what it means to libheif's `heif-enc -q` (x265): equal quality gives
+  about equal SSIMULACRA 2 scores, as `encodeAvif`'s follows `avifenc -q`. The QP is 46 less half the quality,
+  rounded up, and at least 1, where it was 51 less half the quality, so every lossy file is larger and better
+  at the same quality: at quality 50, 0.646 bits a pixel at a mean score of 80.5 on the photo scenes, where
+  it was 0.270 at 71.6 and heif-enc gives 0.687 at 80.6 (#176).
+
+- A HEIF file with both an image sequence and a primary item shows what libavif shows: the primary
+  item when the major brand is `avif`, the track when it is `avis`, and for any other brand the track.
+  Before, the track was shown whatever the brand, and only an AV1 track of handler `pict` counted
+  (#157).
+- `ImageFormat` has a new value, `HEIC`, so an exhaustive `when` over `ImageFormat` in caller code
+  needs a branch for it (#138).
+
+### Fixed
+
+- The Coil and Compose bindings decode a still at the size they draw it at through
+  `decodeDownscaledTo`, where only a JPEG or JPEG 2000 did in Coil and nothing did in Compose, so a
+  HEIC or AVIF grid, and a JPEG XR, reduce while they decode. A cancelled request or a composable
+  that leaves composition stops a still at the decoder's next step, such as a HEIC tile. The Coil
+  factory claims a HEIC or AVIF file whose `meta` box runs past its 64 KiB peek, by reading the
+  top-level boxes to the end of that box. `KiteImage` decodes once it has been laid out, and again
+  when its box grows. The KDoc says that HEIC needs `ImageKodecHeic.install()` (#170).
+- `decodeAnimation` runs its cancellation check for a still: an AVIF or HEIC still, and a format
+  that cannot animate, check as `decode` does (#170).
+- A HEIF item whose coded picture is larger than its `ispe` in both directions shows the `ispe`
+  size, from its top left. Sony's HEIC thumbnails code 1664 by 1088 samples under an `ispe` of 1616
+  by 1080 with no conformance window, and showed 48 columns of padding (#150).
 
 ## [0.4.0] - 2026-11-10
 

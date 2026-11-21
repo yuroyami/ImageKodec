@@ -87,7 +87,9 @@ public enum class Orientation(public val exifValue: Int) {
  *   that ends before its first image chunk, because nothing yet says what the image holds.
  * @property unsupportedReason human-readable reason when [isDecodable] is false
  * @property pageCount number of pages: every image file directory in a TIFF's
- *   main chain, and 1 for every other format. The other fields describe the page
+ *   main chain, every top-level image of a HEIC or AVIF file (its images that are
+ *   no thumbnail, auxiliary image, tile or other alternative of the primary, the
+ *   primary first), and 1 for every other format. The other fields describe the page
  *   that was probed, the first unless [ImageKodec.probePage] asked for another.
  * @property colorProfile what the file declares about its color space (an embedded
  *   ICC profile, and PNG's sRGB, gamma, chromaticity and cICP chunks), or null
@@ -122,6 +124,29 @@ public class ImageInfo(
      * A colour profile for another space than this does not fit the image and converts nothing.
      */
     public var colorChannels: Int = 0
+        internal set
+
+    /**
+     * The size of the largest thumbnail the file carries, or 0 by 0 for none: the `thmb` items of a
+     * HEIC or AVIF file, or the thumbnail in the EXIF of a JPEG. [ImageKodec.decodeThumbnail]
+     * decodes one (#150).
+     */
+    public var thumbnailWidth: Int = 0
+        internal set
+
+    /** See [thumbnailWidth]. */
+    public var thumbnailHeight: Int = 0
+        internal set
+
+    /**
+     * The page of the left-eye image of a stereo pair, such as a spatial photo, or -1: a HEIF file's
+     * `ster` entity group names its two images, and each is a page (#168).
+     */
+    public var stereoLeftPage: Int = -1
+        internal set
+
+    /** The page of the right-eye image of a stereo pair, or -1. See [stereoLeftPage]. */
+    public var stereoRightPage: Int = -1
         internal set
 
     /** [width] after [orientation] is applied: what the user will actually see. */

@@ -12,7 +12,7 @@ public open class ImageDecodeException(
 
 /**
  * The input is a well-formed image in a format, or a format feature, ImageKodec
- * doesn't decode: a CgBI PNG, a TIFF of floating-point samples. The message
+ * doesn't decode: an AVIF of SMPTE ST 2085 colour, a JPEG XR of N channels. The message
  * always names the specific feature, and `ImageKodec.probe` reports the same
  * thing up front through [ImageInfo.unsupportedReason], so a caller can route
  * the file elsewhere instead of catching this.

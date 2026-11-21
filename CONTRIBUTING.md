@@ -11,7 +11,7 @@ It downloads the toolchain, the JDKs, Kotlin/Native and Node on its first run.
 ```
 
 That command is the quickest check while you work. Before you open a pull
-request, run the JVM tests of all three modules and the public API check:
+request, run the JVM tests of every module and the public API check:
 
 ```sh
 ./kotlin test -p jvm
@@ -135,7 +135,7 @@ Every codec's tests compare its output against an independent implementation:
 
 | Codec | Reference used as the oracle |
 |---|---|
-| PNG, BMP, GIF, JPEG encode | ImageIO reads our output back |
+| PNG, BMP, GIF, JPEG encode | ImageIO reads our output back. PNG with options: `pngcheck` passes every file, and ImageIO, Pillow and ImageMagick read every colour type, depth and interlace to the samples written |
 | JPEG encode with `JpegEncoderKind.Jpegli` | pyjpegli 0.3.2 (`pyjpegli.encode`, a build of google/jpegli), on photo-like scenes: the same segments and quantization tables, the size within 1 percent and the SSIMULACRA 2 score within 0.5, with libjpeg-turbo's `djpeg` opening every file. Three of its files are carried to every platform, byte for byte |
 | JPEG decode | `stb_image`, bit-identical, through committed vectors that `tools/stb_dump.c` produced. Its header gives the commands, including the one-line correction of stb's 4:2:2 right-edge weight |
 | JPEG 2000 | OpenJPEG (`opj_compress` and `opj_decompress`) |
@@ -153,6 +153,8 @@ Every codec's tests compare its output against an independent implementation:
 | APNG encode | Pillow (`python3` with `PIL`) and ffmpeg's APNG decoder read our output back, frames, delays and loop count |
 | AV1 | dav1d through ffmpeg, sample for sample, on stills and sequences from libaom, SVT-AV1 and rav1e |
 | AVIF | libavif's float conversion through `tools/avif_rgb.c`, and libheif's `heif-convert` for crops, rotations and mirrors |
+| HEVC | x265 through ffmpeg writes intra pictures of every chroma format at 8 to 12 bits, with and without the loop filters, tiles, wavefront rows and several slices: every plane must equal the MD5 of its decoded picture hash SEI, and a set of them libde265's `dec265`, sample for sample. The H.265.1 conformance streams (`tools/heic_data.py`) match their hash SEI, their YUV file's MD5, or `dec265` |
+| HEIC | Files built in the tests around x265 items (4:0:0 to 4:4:4, 8 and 10 bits, grids, crops by size and `clap`, alpha, `irot`, `imir`, `iovl`): each coded item, extracted to Annex B, must equal `dec265` and ffmpeg sample for sample, and on 4:0:0 and 4:4:4 the RGB, turned, must be within one level of libheif's `heif-convert` (alpha on the file without its `irot`, since libheif 1.17.6 does not turn alpha), which upsamples chroma by nearest neighbour and so is not compared on 4:2:0 or 4:2:2. Every coded item of the real photos of `tools/heic_data.py` must equal `dec265`. Image sequences that ffmpeg writes from x265 into an MP4, with B pictures and with uneven durations, must give ffmpeg's decode frame by frame, in its order, after the same conversion to RGB |
 | JPEG XL | libjxl (`cjxl` writes the files and `djxl` reads them), with libjpeg-turbo's `cjpeg` for the JPEGs that cjxl recompresses. The bounds are for libjxl 0.11 or newer; an older one gets the plain cases with looser bounds |
 | JPEG XR | jxrlib (`JxrEncApp` writes the files and `JxrDecApp` reads them, from Debian's libjxr-tools): every sample equal, lossy files included |
 
@@ -161,9 +163,19 @@ skipped test reports as a pass. If you touch those codecs, install the tools and
 check the skip count, not only whether the run passed:
 
 ```sh
-brew install webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif pillow little-cms2 jpeg-xl     # macOS
-sudo apt-get install webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools   # Debian/Ubuntu
+brew install pngcheck webp libtiff imagemagick openjpeg jpeg-turbo jbig2enc jbig2dec ffmpeg libavif libheif libde265 x265 exiftool pillow little-cms2 jpeg-xl     # macOS
+sudo apt-get install pngcheck webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples libheif-plugin-x265 libheif-plugin-libde265 libde265-examples x265 hm hm-highbitdepth libimage-exiftool-perl python3-pil libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools   # Debian/Ubuntu
 ```
+
+The HEIC suites also need their test data, which is fetched and checked, never committed:
+
+```sh
+tools/heic_data.py
+```
+
+`hm` is HM, the HEVC reference software, packaged from Debian 13 and Ubuntu 26.04. On an older
+system, build HM 18.0 from source and install `TAppEncoder` and `TAppDecoder` as `TAppEncoderStatic`
+and `TAppDecoderStatic`.
 
 The Jpegli encoder suite needs pyjpegli for the `python3` on `PATH`, at the version CI installs:
 

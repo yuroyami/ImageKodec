@@ -110,7 +110,7 @@ internal object JpegDecoder {
      * bit 7 above Next_Index_LPS. Entry 113 is the fixed even estimate of the sign and refinement
      * bits, which never moves.
      */
-    private val ARITAB = intArrayOf(
+    internal val ARITAB = intArrayOf(
         0x5a1d0181, 0x2586020e, 0x11140310, 0x080b0412, 0x03d80514, 0x01da0617,
         0x00e50719, 0x006f081c, 0x0036091e, 0x001a0a21, 0x000d0b23, 0x00060c09,
         0x00030d0a, 0x00010d0c, 0x5a7f0f8f, 0x3f251024, 0x2cf21126, 0x207c1227,
@@ -133,7 +133,7 @@ internal object JpegDecoder {
     )
 
     /** The fixed statistics bin of [ARITAB] entry 113. */
-    private const val FIXED_BIN = 113
+    internal const val FIXED_BIN = 113
 
     private fun err(msg: String): Nothing = throw ImageDecodeException("JPEG: $msg")
 
@@ -2549,6 +2549,35 @@ internal object JpegDecoder {
             }
         }
         return Components(JpegComponents(outX, outSize(j.imgY, scale), n, samples, j.app14ColorTransform), colorModel(j))
+    }
+
+    /** What [decodeWideComponents] returns: [count] components a pixel at [precision] bits, interleaved. */
+    internal class WideComponents(val width: Int, val height: Int, val count: Int, val precision: Int, val samples: IntArray)
+
+    /**
+     * The components of a frame deeper than 8 bits at their own precision, upsampled as
+     * [decodeComponents] upsamples them, and with [ycbcr] the three of a colour frame converted to
+     * RGB as [decode16] converts YCbCr. A frame of 8 bits or fewer gives its size and precision and
+     * no samples, since [decodeComponents] reads it.
+     */
+    fun decodeWideComponents(input: ByteArray, ycbcr: Boolean, cancel: (() -> Unit)? = null): WideComponents {
+        val j = decodeFrame(input, 0, cancel)
+        val n = j.imgN
+        if (!wide(j)) return WideComponents(j.imgX, j.imgY, n, j.precision, IntArray(0))
+        val out = IntArray(j.imgX * j.imgY * n)
+        val rgb = IntArray(3)
+        forEachWideRow(j) { row, rows ->
+            var at = row * j.imgX * n
+            for (i in 0 until j.imgX) {
+                if (ycbcr && n == 3) {
+                    wideYcc(rows, i, j.precision, rgb)
+                    out[at++] = rgb[0]; out[at++] = rgb[1]; out[at++] = rgb[2]
+                } else {
+                    for (k in 0 until n) out[at++] = rows[k][i]
+                }
+            }
+        }
+        return WideComponents(j.imgX, j.imgY, n, j.precision, out)
     }
 
     /**

@@ -2,6 +2,10 @@ package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.archivekodec.ArchiveException
 import io.github.yuroyami.archivekodec.checksum.Crc32
+import io.github.yuroyami.archivekodec.codec.deflate.Inflate
+import io.github.yuroyami.archivekodec.codec.deflate.InflateBlockListener
+import io.github.yuroyami.archivekodec.codec.deflate.InflateOptions
+import io.github.yuroyami.archivekodec.security.ArchiveLimits
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteAnimation
 import io.github.yuroyami.imagekodec.KiteBitmap
@@ -31,8 +35,8 @@ import io.github.yuroyami.imagekodec.internal.sourceOver
  *    and the rule that decides whether the default image is also frame zero
  *
  * Adam7 interlacing is fully supported: each of the seven passes unfilters
- * independently and scatters into the final image. Apple's proprietary CgBI
- * variant is detected up front and rejected with a clear message.
+ * independently and scatters into the final image. Apple's CgBI variant, which
+ * Xcode writes into iOS apps, decodes too: see [CGBI].
  *
  * [decode] always returns the **default image** (the `IDAT` one), which is what
  * every non-APNG-aware viewer shows and what the spec asks for. [decodeAnimation]
@@ -192,7 +196,20 @@ internal object PngDecoder {
         val idat: List<ByteArray>,
         val frames: List<Frame>,
         val loopCount: Long,
+        val cgbi: Boolean = false,
     )
+
+    /**
+     * Apple's CgBI PNG, which Xcode's `pngcrush -iphone` writes. It has no public specification;
+     * this is how `pngcrush -revert-iphone-optimizations` and every reader that undoes it take it:
+     * a `CgBI` chunk comes before `IHDR`, the `IDAT` stream is raw deflate (RFC 1951) without the
+     * zlib header and Adler-32, and the samples of colour types 2 and 6 are stored blue first,
+     * BGR and BGRA, with the colour of type 6 premultiplied by its alpha. The decoder inflates the
+     * raw stream, swaps red and blue back, and divides by alpha as associated alpha is divided
+     * elsewhere here. Xcode writes 8-bit samples only, so a CgBI file of 16-bit colour, which no
+     * tool writes and nothing could be checked against, is refused.
+     */
+    private const val CGBI = "CgBI"
 
     // --- container parse --------------------------------------------------------
 
@@ -208,10 +225,12 @@ internal object PngDecoder {
 
         // --- IHDR ---------------------------------------------------------------
         var chunk = readChunkHeader(r)
-        if (chunk.type == "CgBI") {
-            throw UnsupportedImageException(
-                "Apple CgBI PNG (Xcode-crushed, raw deflate + swapped channels) is not supported",
-            )
+        val cgbi = chunk.type == CGBI
+        if (cgbi) {
+            // The CgBI chunk's flags say nothing a reader needs; its CRC is ordinary.
+            val flags = r.bytes(chunk.length)
+            verifyCrc(r, CGBI, flags)
+            chunk = readChunkHeader(r)
         }
         if (chunk.type != "IHDR" || chunk.length != 13) {
             throw ImageDecodeException("PNG: first chunk must be IHDR(13), got ${chunk.type}(${chunk.length})")
@@ -250,6 +269,9 @@ internal object PngDecoder {
         }
 
         budgetRefusal(width, height, bitDepth * channels, data.size)?.let { throw ImageDecodeException(it) }
+        if (cgbi && (colorType == 2 || colorType == 6) && bitDepth != 8) {
+            throw UnsupportedImageException("PNG: a CgBI file of $bitDepth-bit colour (Xcode writes 8 bits only)")
+        }
 
         // --- remaining chunks ---------------------------------------------------
         var palette: IntArray? = null            // 0xFFRRGGBB entries
@@ -421,7 +443,7 @@ internal object PngDecoder {
         return Png(
             width, height, bitDepth, colorType, channels, interlace,
             palette, paletteAlpha, trnsGray, trnsR, trnsG, trnsB,
-            idat, resolved, loopCount,
+            idat, resolved, loopCount, cgbi,
         )
     }
 
@@ -516,7 +538,16 @@ internal object PngDecoder {
         }
         if (expected > MAX_ARRAY) throw ImageDecodeException("PNG: $expected inflated bytes do not fit in one array")
         val inflated = try {
-            Zlib.decompress(compressed, maximumSize = expected, cancel = cancel)
+            if (png.cgbi) {
+                Inflate.inflate(compressed, InflateOptions {
+                    limits = ArchiveLimits { maxUncompressedBytes = expected }
+                    sizeHint = expected
+                    allowTrailingData = true
+                    if (cancel != null) onBlock = InflateBlockListener { _, _ -> cancel() }
+                }).output
+            } else {
+                Zlib.decompress(compressed, maximumSize = expected, cancel = cancel, checkAdler = false)
+            }
         } catch (e: ArchiveException) {
             throw ImageDecodeException("PNG: IDAT inflate failed: ${e.message}", e)
         }
@@ -531,6 +562,7 @@ internal object PngDecoder {
         if (png.interlace == 0) {
             val rowBytes = rowBytesFor(width)
             unfilter(inflated, 0, height, rowBytes, fUnit, cancel)
+            if (png.cgbi) cgbiToRgb(png, inflated, 0, width, height, rowBytes)
             region(inflated, 0, width, height, rowBytes) { x, y -> y * width + x }
         } else {
             // Adam7: each pass unfilters + expands independently, scattering its
@@ -542,6 +574,7 @@ internal object PngDecoder {
                 if (wp == 0 || hp == 0) continue
                 val rb = rowBytesFor(wp)
                 unfilter(inflated, ofs, hp, rb, fUnit, cancel)
+                if (png.cgbi) cgbiToRgb(png, inflated, ofs, wp, hp, rb)
                 val x0 = PASS_X_START[p]; val xs = PASS_X_STEP[p]
                 val y0 = PASS_Y_START[p]; val ys = PASS_Y_STEP[p]
                 region(inflated, ofs, wp, hp, rb) { x, y -> (y0 + y * ys) * width + (x0 + x * xs) }
@@ -549,6 +582,38 @@ internal object PngDecoder {
             }
         }
     }
+
+    /**
+     * The unfiltered rows of a CgBI region at [base] made ordinary: BGR and BGRA become RGB and
+     * RGBA, and premultiplied colour is divided by its alpha, rounded, with no colour under an
+     * alpha of 0. Filters run on the stored bytes, so this follows the unfiltering.
+     */
+    private fun cgbiToRgb(png: Png, d: ByteArray, base: Int, width: Int, height: Int, rowBytes: Int) {
+        if (png.colorType != 2 && png.colorType != 6) return
+        val n = png.channels
+        val alpha = png.colorType == 6
+        for (y in 0 until height) {
+            var at = base + y * (1 + rowBytes) + 1
+            repeat(width) {
+                val b = d[at].toInt() and 0xFF
+                var g = d[at + 1].toInt() and 0xFF
+                var r = d[at + 2].toInt() and 0xFF
+                var blue = b
+                if (alpha) {
+                    val a = d[at + 3].toInt() and 0xFF
+                    r = unpremultiply(r, a)
+                    g = unpremultiply(g, a)
+                    blue = unpremultiply(blue, a)
+                }
+                d[at] = r.toByte()
+                d[at + 1] = g.toByte()
+                d[at + 2] = blue.toByte()
+                at += n
+            }
+        }
+    }
+
+    private fun unpremultiply(v: Int, a: Int): Int = if (a == 0) 0 else minOf(255, (v * 255 + a / 2) / a)
 
     // Adam7 pass geometry (PNG spec §8.2).
     private val PASS_X_START = intArrayOf(0, 4, 0, 2, 0, 1, 0)

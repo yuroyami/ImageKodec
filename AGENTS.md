@@ -13,7 +13,7 @@ being true.
   suites skip themselves when their binary is missing, and a skipped test reports as a pass,
   so read the skip count and not only the green run. CI sets
   `IMAGEKODEC_REQUIRE_ORACLES=1` to fail instead; set it locally to check the same (#14).
-- Ubuntu's ImageMagick is version 6, which has no `magick` command, only
+- Ubuntu 24.04's ImageMagick is version 6, which has no `magick` command, only
   `convert`. `Tools.find("magick")` falls back to it; before it did, the TIFF
   oracle suite skipped on every Ubuntu machine, CI included (#14).
 - A format with no file in the `FuzzTest` corpus is not fuzzed at all. JPEG 2000
@@ -63,6 +63,12 @@ being true.
 - GitHub keeps 10 GB of caches for a repository and drops the oldest past that. A cache
   key with the commit in it adds an entry on every push, so the toolchain caches of CI
   are keyed on the build files alone.
+- Homebrew's libaom, unlike Ubuntu's, used no distance weighted compound in two macOS runs, and the
+  dual filter in only the first of them, so the macOS AV1 job sets
+  `IMAGEKODEC_AV1_TOOL_COVERAGE=report` and lists missing tools; frames still have to match dav1d (#110).
+- A runner that runs out of memory stops with exit code 143 and "The runner has received a shutdown
+  signal", which reads like a fault of GitHub's. One `./kotlin build` of every non-Apple platform did
+  this once the HEIC module was in, so CI builds the native platforms one at a time.
 - Two release framework links at once do not fit in the 7 GB of a macOS runner and take
   three times as long, so `tools/apple_frameworks.py` links them one after the other.
 - Kotlin/JS does 64-bit arithmetic in software, and the AV1 inverse transform uses it for
@@ -119,6 +125,11 @@ being true.
 - ffmpeg 6 misreads the lossless difference -32768 (category 16, no extra bits) and
   reads a three-component 4:4:4 lossless file as RGB; its `ljpeg` encoder writes BGR
   through a private 9-bit transform no other decoder knows (#19).
+- ffmpeg 6 shifts a gray lossless JPEG's samples up to fill its 8- or 16-bit format but gives an
+  RGB one's unshifted, and reads every 9-bit RGB file through that private transform (#183).
+- libjpeg-turbo 3.1 reads lossless JPEG with Huffman coding only ("arithmetic coding is not
+  implemented" for SOF11), and ffmpeg reads no arithmetic coding at all, so an arithmetic lossless
+  file has no oracle here but the T.81 reference software (#183).
 - lcms2 interpolates every CLUT an ICC profile holds in 16-bit fixed point, even inside a
   floating-point transform (`EvaluateCLUTfloatIn16`), and its `LinearInterp` works in
   unsigned 32 bits, which a two-entry table overflows in signed arithmetic. A port in
@@ -146,7 +157,7 @@ being true.
 - Ubuntu 24.04 has libjxl 0.7.0: no `jxl_from_tree`, `--photon_noise` where 0.11 has
   `--photon_noise_iso`, other rounding, and a PNG writer that refuses a 16-bit picture
   with alpha. `JxlOracleTest` gives it the plain cases at a bound of two levels, so the
-  tight bounds run only where libjxl is 0.11 or newer, which CI is not (#42).
+  tight bounds run only where libjxl is 0.11 or newer, which CI is since it moved to 26.04 (#42).
 - cjxl 0.7.0 reads a PNM file wrong when its samples are not of 8 or 16 bits, so the
   oracle cases for other depths run only where libjxl is 0.11 or newer (#42).
 - cjxl keeps neither a GIF's nor an APNG's play count, and `jxl_from_tree` writes none,
@@ -157,6 +168,8 @@ being true.
 - A JPEG decoder clips Y, Cb and Cr after the inverse transform, and libjxl clips only
   the RGB they give. A recompressed JPEG therefore reads up to 94 levels away from the
   JPEG decoder's picture at a hard edge, and 1 on average, in djxl as well (#42).
+- HEVC samples of 16 bits do not fit a signed `Short`: read them with `and 0xFFFF`. Luma deblocking once
+  took a sample past 32767 as negative, and only the 16-bit WAVETILES conformance stream showed it (#148).
 - The C2 compiler of JDK 11 on x64 vectorises a loop that reverses the bits of each byte of
   an array in place, and the vector code gives wrong bytes. arm64 and JDK 21 are not
   affected, so the fault shows only on the Java 11 job of CI. Reverse bits through a table,
@@ -167,3 +180,66 @@ being true.
 - `JxrEncApp` writes the size of the whole file as a planar alpha plane's AlphaByteCount, and it
   writes only codec subversion 1. Rewriting the subversion nibble of its codestreams gives HD
   Photo's 0 and the hard tiles of 9, which `JxrDecApp` reads as the new subversion asks (#125).
+- x265 3.5, given a scaling list file whose inter lists equal its intra ones, writes an SPS that
+  ffmpeg 6 refuses ("Invalid delta in scaling list data"). `HevcHeaderOracleTest` gives every list
+  its own values; the conformance streams cover predicted lists (#140).
+- x265 moves the QP of an I picture by `ipratio` (1.4), so `qp=51` gives a SliceQpY of 48 and `qp=1`
+  of 0. Add `ipratio=1` to pin it (#142).
+- ffmpeg's `trace_headers` names two HEVC elements otherwise than H.265 does: `matrix_coefficients`
+  for `matrix_coeffs` and `scaling_list_delta_coeff` for `scaling_list_delta_coef` (#140).
+- ffmpeg splits `-x265-params` at every colon, so x265's `deblock=tC:beta` arrives as `deblock=tC` and
+  sets both offsets to tC. Write `deblock=-3,2`. x265 writes several slices only with WPP on (#143).
+- x265 3.5 hangs for good, deaf to SIGTERM, on some small pictures with `no-deblock=1` and SAO on
+  (72x56 and 80x48 4:4:4 12 bits, 256x192 4:2:0 with `slices=3`). Kill it with SIGKILL (#143).
+- ffmpeg encodes at the time base of the frame rate unless told `-enc_time_base`, so `setpts` timestamps
+  between frames round to whole frames. Uneven durations in an MP4 need `settb=1/1000` and
+  `-enc_time_base 1:1000` as well as `-fps_mode passthrough` (#157).
+- libde265 1.0's dec265 aborts with `std::bad_alloc` on a 4:0:0 stream above 8 bits that has a conformance
+  window, x265's 66x38 `gray10le` included, so the encoder's oracle test checks those streams with ffmpeg (#175).
+- libde265 1.0's dec265 fails the MD5 SEI of an x265 picture with several slices and SAO on, so the
+  sample-for-sample comparisons with it use one slice; the hash SEI covers several (#143).
+- libheif 1.17.6 turns the colour of an image with alpha by its `irot` but not the alpha, so `HeicOracleTest`
+  holds the alpha of a turned file to heif-convert's reading of the same file with `irot` set to 0 (#145).
+- libheif 1.17.6 converts a grid by its tiles' colour properties, not the grid item's, so a grid whose nclx
+  only the grid item carries reads up to 54 levels away; the synthetic tiles carry the grid's nclx too (#145).
+- `cwebp -q` does not order SSIMULACRA 2 scores: on the city scene of `PhotoScenes`, quality 75 scores 53 and quality 50
+  scores 68. `WebpLossyEncodeOracleTest` reads cwebp's size at a score off the front of files no smaller file beats (#178).
+- H.265's 8-86 and 8-87 size the 8x8 bi-prediction restriction of current picture referencing by the coding unit, which
+  also takes in the blocks of a 16x16 AMP unit; the SCC conformance streams want the prediction block's own size (#188).
+- 8-13 with 8-69 and 8-70 as printed transpose a palette unit twice, which is no transposition; the SCC conformance
+  streams want the index map transposed once, as the 4:2:2 escape rule of 7.3.8.13 implies (#188).
+- `PictureDecoder.flags` is a `ByteArray` in which `FLAG_CODED` makes a unit's `Byte` negative, so test a bit above 7 only
+  after `and 0xFF`: sign extension once kept every coded unit from the deblocking filter as if it were a palette unit (#188).
+- x265 3.5 aborts with heap corruption on a 48x32 `gray10le` sequence with B pictures; 64x48 works (#188).
+- OpenJPEG 2.5.0 refuses the MIXED style 0x80 and an HT segment of more than three coding passes, and
+  reads passes after the third in later segments as empty, where ffmpeg 6.1 moves the cleanup pass down
+  by them; ffmpeg also differs from both on some lossless files. So HTJ2K is checked against
+  `opj_decompress` alone, and neither MIXED nor placeholder passes are decoded (#187).
+- OpenJPEG 2.5.0's `opj_decompress` converts a CIELab JP2 to colours far from any L*a*b* reading of its
+  samples, so CIELab is checked against lcms2 through `tools/icc_lcms.c convert-lab` (#187).
+- ImageMagick 6 moves a signed TIFF sample up by half its range only in 16-bit gray, and reads signed RGB and
+  8-bit or 32-bit signed gray as unsigned, so only signed 16-bit gray is held to it (#189).
+- ImageIO reads a JPEG YCbCr TIFF in separate planes without converting it, and puts each subsampled chroma
+  strip in the corner of a full-size band, so it checks one strip of such a page alone (#189).
+- cjpeg writes the Huffman tables of a later non-interleaved scan just before that scan, so an old-style JPEG
+  TIFF built from a `-scans` stream needs them moved to JPEGInterchangeFormat (#189).
+- jbig2dec 0.20 draws the same symbol whatever the refinement data of a Huffman symbol dictionary holds, and
+  stops at its aggregates with a broken symbol ID table; it reads arithmetic ones right (#189).
+- jxrlib's JxrEncApp stops with exit code 150 (WMP_errUnsupportedFormat) on every CMYK TIFF, and JxrDecApp's
+  24bppRGB of an RGBE file does not follow from its own RGBE samples (#189).
+- zimg converts constant luminance to light through the curve's OETF and gives the light back through BT.1886's
+  gamma of 2.4, and HLG's ICtCp takes BT.2100's HLG matrix and the OOTF on L, M and S one at a time (#189).
+- CI's `ubuntu-latest` became Ubuntu 26.04 in November 2026: ImageMagick 7.1.2 and libjxl 0.11.1 where a
+  24.04 machine has 6.9 and 0.7, so an oracle test can pass locally and fail in CI. ImageMagick 7 does not
+  move signed 16-bit gray by half its range as 6 does, so the test moves its samples itself (#189).
+- libheif 1.17 refuses a file whose major brand is `hevc` ("unsupported HEIF/AVIF file type"), so a HEIC
+  sequence leads with `heic` or `heix` and lists `hevc` as compatible (#177).
+- A sample's `stts` duration is the duration of the picture it codes, as ffmpeg's muxer writes it, so a track
+  with B pictures needs negative `ctts` offsets (version 1). Readers take the last frame's duration from its
+  own sample's `stts`; ffprobe's start times alone do not show a wrong one (#177).
+- lcms2 passes a negative value through a parametric gamma within 0.0001 of 1, so a B2A table's PCS side
+  sees negatives, and it interpolates a Lab-indexed grid trilinearly (#189).
+- Ubuntu 24.04's djxl 0.7 has no colour engine: it writes a lossy file with only an ICC profile as linear sRGB, and
+  converts to another space with `--color_space` only into an 8-bit PNG (#189).
+- djxl 0.7 writes a CMYK file's stored samples, never converted, whatever `--color_space` asks: to `out.ppm` it writes
+  the colour (with alpha) as `out-ec0.ppm` and the black as `out-ec1.pgm` (#189).

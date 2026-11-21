@@ -576,7 +576,7 @@ internal class JxlVarDct(
         }
     }
 
-    private companion object {
+    internal companion object {
         const val GLOBAL_SCALE_DENOM = 1 shl 16
         const val QUANT_MAX = 256
         const val DEFAULT_COLOR_FACTOR = 84

@@ -144,11 +144,15 @@ jobs:
           echo "$HOME/oracle-tools-jxl" >> "$GITHUB_PATH"
           export PATH="$HOME/oracle-tools:$HOME/oracle-tools-jxl:$PATH"
           sudo apt-get update
-          sudo apt-get install -y webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples python3-pil python3-numpy libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools
+          sudo apt-get install -y pngcheck webp libtiff-tools imagemagick libopenjp2-tools libjpeg-turbo-progs jbig2 jbig2dec ffmpeg libavif-bin libavif-dev libheif-examples libheif-plugin-x265 libheif-plugin-libde265 libde265-examples x265 hm hm-highbitdepth libimage-exiftool-perl python3-pil python3-numpy libjpeg-turbo8-dev liblcms2-dev icc-profiles-free libjxl-tools libjxr-tools
           missing=0
-          for t in cwebp dwebp tiffcp opj_compress opj_decompress cjpeg djpeg jpegtran tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert cc cjxl djxl ssimulacra2 JxrEncApp JxrDecApp t81jpeg cjpeg3 djpeg3; do
+          for t in pngcheck cwebp dwebp tiffcp opj_compress opj_decompress cjpeg djpeg jpegtran tiff2rgba jbig2 jbig2dec ffmpeg avifenc heif-convert heif-enc x265 exiftool TAppEncoderStatic TAppDecoderStatic TAppDecoderStaticHighBitDepth cc cjxl djxl ssimulacra2 JxrEncApp JxrDecApp t81jpeg cjpeg3 djpeg3; do
             command -v "$t" >/dev/null || { echo "::error::oracle tool $t not on PATH"; missing=1; }
           done
+          command -v dec265 >/dev/null || command -v libde265-dec265 >/dev/null || { echo "::error::libde265's dec265 not on PATH"; missing=1; }
+          # libheif only suggests its HEVC plugins, so a heif-enc without them exists and cannot encode.
+          ffmpeg -loglevel error -f lavfi -i testsrc2=size=64x64 -frames:v 1 /tmp/probe.png
+          heif-enc -q 50 /tmp/probe.png -o /tmp/probe.heic && heif-convert /tmp/probe.heic /tmp/probe-back.png > /dev/null || { echo "::error::libheif cannot encode or decode HEVC"; missing=1; }
           command -v magick >/dev/null || command -v convert >/dev/null || { echo "::error::ImageMagick not on PATH"; missing=1; }
           [ -f /usr/include/avif/avif.h ] || { echo "::error::libavif headers missing"; missing=1; }
           [ -f /usr/include/jpeglib.h ] || { echo "::error::libjpeg headers missing"; missing=1; }
@@ -159,7 +163,19 @@ jobs:
           python3 -c "import pyjpegli" || { echo "::error::pyjpegli missing"; missing=1; }
           exit $missing
 
-      - name: Core, Compose and Coil tests
+      # The HEVC conformance packages and the public HEIC samples state no licence, so they are
+      # fetched, checked against tools/heic_data.manifest and never committed (#165).
+      - name: Restore the HEIC test data
+        id: heic-data
+        uses: actions/cache@v6
+        with:
+          path: reference/heic
+          key: heic-data-${{ hashFiles('tools/heic_data.manifest') }}
+
+      - name: Fetch the HEIC test data
+        run: python3 tools/heic_data.py
+
+      - name: Core, Compose, Coil and HEIC tests
         if: matrix.java == 21
         run: ./kotlin test -p jvm
 
@@ -170,10 +186,10 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      - name: Core, Compose and Coil tests
+      - name: Core, Compose, Coil and HEIC tests
         if: matrix.java == 11
         run: |
-          ./kotlin build -p jvm -m imagekodec -m imagekodec-compose -m imagekodec-coil
+          ./kotlin build -p jvm -m imagekodec -m imagekodec-compose -m imagekodec-coil -m imagekodec-heic
           tools/java11_tests.py --java "${{ steps.java11.outputs.path }}/bin/java"
 
   # The common suite runs on the JVM as Android host tests.
@@ -206,14 +222,19 @@ jobs:
       - uses: ./.github/actions/setup
 
       - name: Link the tests
-        run: ./kotlin task :imagekodec:linkJsTest
+        run: |
+          ./kotlin task :imagekodec:linkJsTest
+          ./kotlin task :imagekodec-heic:linkJsTest
 
-      # A tar file keeps the links and the permission to run that an artifact loses.
+      # A tar file keeps the links and the permission to run that an artifact loses. Both test
+      # programs are in folders named kotlin-output, so the HEIC one is packed as heic-output.
       - name: Pack the tests with mocha
         run: |
           npm install --prefix "$RUNNER_TEMP/mocha" --no-save --no-package-lock mocha@11.7.5
+          cp -R "$GITHUB_WORKSPACE/build/artifacts/CompiledWebArtifact/imagekodec-heicjsTestrelease/kotlin-output" "$RUNNER_TEMP/heic-output"
           tar -I 'zstd -T0' -cf js-tests.tar.zst \
             -C "$GITHUB_WORKSPACE/build/artifacts/CompiledWebArtifact/imagekodecjsTestrelease" kotlin-output \
+            -C "$RUNNER_TEMP" heic-output \
             -C "$RUNNER_TEMP/mocha" node_modules \
             -C "$GITHUB_WORKSPACE/tools" run-shards.sh
 
@@ -250,6 +271,12 @@ jobs:
           cd kotlin-output
           ../run-shards.sh ${{ matrix.shards }}/8 node ../node_modules/mocha/bin/mocha.js \
             imagekodec_test.mjs --timeout 600s --reporter dot
+          # The HEIC suite takes seconds and has no fuzz mutants to share, so one machine runs it whole.
+          if [ "${{ matrix.shards }}" = 0-1 ]; then
+            cd ../heic-output
+            ../run-shards.sh 1 node ../node_modules/mocha/bin/mocha.js \
+              imagekodec-heic_test.mjs --timeout 600s --reporter dot
+          fi
 
   test-wasm:
     name: wasmJs and wasmWasi tests
@@ -270,9 +297,11 @@ jobs:
         run: |
           ./kotlin task :imagekodec:linkWasmJsTestDebug
           ./kotlin task :imagekodec:linkWasmWasiTestDebug
+          ./kotlin task :imagekodec-heic:linkWasmJsTestDebug
+          ./kotlin task :imagekodec-heic:linkWasmWasiTestDebug
 
       # Node loads each test module and calls startUnitTests. Each target runs as two
-      # processes, so four run at once.
+      # processes, so four run at once. The HEIC suites take seconds and run after them.
       - name: Run the tests
         run: |
           start='import { pathToFileURL } from "node:url"; const tests = await import(pathToFileURL(process.argv[1]).href); tests.startUnitTests();'
@@ -290,6 +319,12 @@ jobs:
           echo "===== wasmJs ====="; cat wasm-js.log
           wait "$wasm_wasi" || { echo "::error::wasmWasi tests failed"; failed=1; }
           echo "===== wasmWasi ====="; cat wasm-wasi.log
+          for target in wasmJs wasmWasi; do
+            echo "===== HEIC $target ====="
+            tools/run-shards.sh 1 node --input-type=module --eval "$start" \
+              "$PWD/$web/imagekodec-heic${target}Testdebug/kotlin-output/imagekodec-heic_test.mjs" \
+              || { echo "::error::HEIC $target tests failed"; failed=1; }
+          done
           exit $failed
 
   test-linux:
@@ -304,10 +339,14 @@ jobs:
       - uses: ./.github/actions/setup
 
       - name: Link the tests
-        run: ./kotlin task :imagekodec:linkLinuxX64TestRelease
+        run: |
+          ./kotlin task :imagekodec:linkLinuxX64TestRelease
+          ./kotlin task :imagekodec-heic:linkLinuxX64TestRelease
 
       - name: Run the tests
-        run: tools/run-shards.sh 4 build/tasks/_imagekodec_linkLinuxX64TestRelease/imagekodec_test.kexe
+        run: |
+          tools/run-shards.sh 4 build/tasks/_imagekodec_linkLinuxX64TestRelease/imagekodec_test.kexe
+          tools/run-shards.sh 1 build/tasks/_imagekodec-heic_linkLinuxX64TestRelease/imagekodec-heic_test.kexe
 
   # Every platform that a Linux machine builds: Android, JVM, JS, Wasm, the sample app, and the
   # Linux, Windows and androidNative libraries, each with its tests compiled. The Apple
@@ -316,7 +355,8 @@ jobs:
   build:
     name: Build every non-Apple platform, check the public API
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The test kit and the HEIC module add two modules to compile for every platform here.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
@@ -325,12 +365,14 @@ jobs:
       - uses: ./.github/actions/setup
         id: setup
 
+      # One build of all twelve platforms with the HEIC module ran the runner out of memory, which
+      # GitHub reports as a shutdown signal. The native platforms build one at a time.
       - name: Build
-        run: >
-          ./kotlin build
-          -p jvm -p android -p js -p wasmJs -p wasmWasi
-          -p linuxX64 -p linuxArm64 -p mingwX64
-          -p androidNativeArm32 -p androidNativeArm64 -p androidNativeX64 -p androidNativeX86
+        run: |
+          ./kotlin build -p jvm -p android -p js -p wasmJs -p wasmWasi
+          for p in linuxX64 linuxArm64 mingwX64 androidNativeArm32 androidNativeArm64 androidNativeX64 androidNativeX86; do
+            ./kotlin build -p "$p"
+          done
 
       - name: Check the JVM public API
         run: ./kotlin check abi
@@ -363,7 +405,7 @@ jobs:
       # licences of the ported code that ask for their notice in binary copies (#115).
       - name: Check the notices that the jars carry
         run: |
-          for m in imagekodec imagekodec-compose imagekodec-coil; do
+          for m in imagekodec imagekodec-compose imagekodec-coil imagekodec-heic; do
             cmp LICENSE "$m/resources/META-INF/LICENSE"
             cmp NOTICE "$m/resources/META-INF/NOTICE"
           done
@@ -380,6 +422,36 @@ jobs:
         with:
           name: api-docs
           path: build/dokka/html
+
+  # The JVM oracle suites that once differed with Homebrew's newer tools (#110): ffmpeg's
+  # libaom, SVT-AV1, rav1e and dav1d, libtiff with ImageMagick, and OpenJPEG, on a Mac. Run 166
+  # passed the TIFF and JPEG 2000 cases with libtiff 4.7.2 and OpenJPEG 2.5.4 there.
+  test-jvm-macos:
+    name: JVM oracle tests on macOS
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      IMAGEKODEC_REQUIRE_ORACLES: '1'
+      # Every frame must still equal dav1d's, but Homebrew's libaom picks other inter tools from run
+      # to run, so this job lists the tools no sequence used; the Linux jobs require them all.
+      IMAGEKODEC_AV1_TOOL_COVERAGE: report
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # Homebrew's ffmpeg has no libaom or rav1e; ffmpeg-full has every AV1 codec and is keg-only.
+      - name: Install the oracle tools
+        run: |
+          brew install ffmpeg-full libtiff imagemagick openjpeg
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
+
+      - name: AV1, 16-bit TIFF and JPEG 2000 oracle tests
+        run: >
+          ./kotlin test -p jvm -m imagekodec
+          --include-classes='*Av1OracleTest*' --include-classes='*Decode16OracleTest*' --include-classes='*JpxDecode16OracleTest*'
 
   # Apple programs link only on a Mac, and Apple targets are the reason this library exists,
   # so its tests run on two of them.
@@ -399,28 +471,34 @@ jobs:
       - uses: ./.github/actions/setup
 
       - name: Link the tests
-        run: ./kotlin task :imagekodec:link${{ matrix.target }}TestRelease
+        run: |
+          ./kotlin task :imagekodec:link${{ matrix.target }}TestRelease
+          ./kotlin task :imagekodec-heic:link${{ matrix.target }}TestRelease
 
       - name: Run the tests
         run: |
           program=build/tasks/_imagekodec_link${{ matrix.target }}TestRelease/imagekodec_test.kexe
+          heic=build/tasks/_imagekodec-heic_link${{ matrix.target }}TestRelease/imagekodec-heic_test.kexe
           if [ "${{ matrix.target }}" = IosSimulatorArm64 ]; then
             # The program inside a simulator that is not booted.
             device=$(xcrun simctl list devices available | grep -oE 'iPhone [^(]*\([0-9A-F-]{36}\)' | head -n 1 | grep -oE '[0-9A-F-]{36}')
             [ -n "$device" ] || { echo "::error::no iPhone simulator on this runner"; exit 1; }
             tools/run-shards.sh 3 xcrun simctl spawn --standalone "$device" "$PWD/$program"
+            tools/run-shards.sh 1 xcrun simctl spawn --standalone "$device" "$PWD/$heic"
           else
             tools/run-shards.sh 3 "$program"
+            tools/run-shards.sh 1 "$heic"
           fi
 
-  # The Compose and Coil modules each link a release framework for each iOS target. A release
-  # link optimises the whole program for more than two minutes, so each target has its own
-  # machine. Two release links at once do not fit in the memory of a macOS runner and take
+  # The Compose, Coil and HEIC modules each link a release framework for each iOS target. A
+  # release link optimises the whole program for more than two minutes, so each target has its
+  # own machine. Two release links at once do not fit in the memory of a macOS runner and take
   # three times as long, so tools/apple_frameworks.py links them one after the other.
   link-release-frameworks:
     name: ${{ matrix.platform }} release frameworks
     runs-on: macos-latest
-    timeout-minutes: 20
+    # A third release link, the HEIC framework's, adds a few minutes.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -438,14 +516,14 @@ jobs:
 
       - name: Compile the libraries
         run: |
-          for module in imagekodec imagekodec-compose imagekodec-coil; do
+          for module in imagekodec imagekodec-compose imagekodec-coil imagekodec-heic; do
             ./kotlin task ":$module:compile${{ matrix.task }}Debug"
           done
 
-      - name: Link the Compose and Coil release frameworks
+      - name: Link the Compose, Coil and HEIC release frameworks
         run: >
           tools/apple_frameworks.py --build-type release --no-xcframework
-          --platforms ${{ matrix.platform }} --frameworks ImageKodecCompose,ImageKodecCoil
+          --platforms ${{ matrix.platform }} --frameworks ImageKodecCompose,ImageKodecCoil,ImageKodecHeic
 
   # Builds every Apple platform, then links the debug frameworks. A debug link is quick once
   # Kotlin/Native has compiled each dependency for the target, and the toolchain cache keeps

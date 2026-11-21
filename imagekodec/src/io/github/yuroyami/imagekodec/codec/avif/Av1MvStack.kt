@@ -163,10 +163,18 @@ internal class Av1MvStack(private val d: Av1FrameDecoder) {
      * The scan point process. A location not decoded yet in this frame still has IsInters
      * equal to 0, so the add process leaves it out as the specification's check does.
      */
+    /**
+     * scan_point( deltaRow, deltaCol, isCompound ). The specification also asks that RefFrames at the point has been
+     * written for this frame, which only the top right can fail: its 4x4 block may come later in decoding order. A
+     * decoder holds intra there, which adds nothing; the encoder may hold a candidate it tried and dropped (#177), so
+     * the point is read only where the superblock's decoded flags say it was decoded.
+     */
     private fun scanPoint(deltaRow: Int, deltaCol: Int, isCompound: Boolean) {
         val mvRow = d.miRow + deltaRow
         val mvCol = d.miCol + deltaCol
-        if (d.isInside(mvRow, mvCol)) addRefMvCandidate(mvRow, mvCol, isCompound, 4)
+        if (!d.isInside(mvRow, mvCol)) return
+        if (deltaCol > 0 && !d.blockDecodedAt(0, mvRow - (d.miRow and d.sbMask.inv()), mvCol - (d.miCol and d.sbMask.inv()))) return
+        addRefMvCandidate(mvRow, mvCol, isCompound, 4)
     }
 
     private fun temporalScan(isCompound: Boolean) {

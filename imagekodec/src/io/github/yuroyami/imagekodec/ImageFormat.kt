@@ -29,18 +29,28 @@ public enum class ImageFormat {
      * and a version byte of 0 (HD Photo) or 1.
      */
     JXR,
+
+    /**
+     * HEIC: a HEIF file (ISO/IEC 23008-12) whose image is not AV1, normally HEVC. Its `ftyp` names a
+     * brand of the HEVC family (`heic`, `heix`, `heim`, `heis`, `hevc`, `hevx`, `hevm`, `hevs`), or
+     * only `mif1` or `msf1` with a primary item or first track that is not AV1. Decoding the HEVC
+     * pictures needs the `imagekodec-heic` module.
+     */
+    HEIC,
     ;
 
     public companion object {
         /**
          * Identify the format from the first bytes of [data], or null if no known
          * magic matches. Needs at most 12 bytes, except for an ISO base media file
-         * whose AVIF brand is listed among its compatible brands rather than as its
-         * major brand, which needs its whole `ftyp` box; shorter input is never an
+         * whose AVIF or HEVC brand is listed among its compatible brands rather than as
+         * its major brand, which needs its whole `ftyp` box, and a HEIF file that names
+         * only `mif1` or `msf1`, which needs its `meta` box; shorter input is never an
          * error, just an unidentified one.
          */
         public fun sniff(data: ByteArray): ImageFormat? {
             fun at(i: Int): Int = if (i < data.size) data[i].toInt() and 0xFF else -1
+            var heif: ImageFormat? = null
 
             return when {
                 // \x89 P N G \r \n \x1a \n
@@ -79,9 +89,9 @@ public enum class ImageFormat {
                     at(4) == 'J'.code && at(5) == 'X'.code && at(6) == 'L'.code && at(7) == ' '.code &&
                     at(8) == 0x0D && at(9) == 0x0A && at(10) == 0x87 && at(11) == 0x0A -> JXL
 
-                // An 'ftyp' box naming the avif or avis brand, as libavif checks.
+                // An 'ftyp' box naming an AVIF or HEVC brand, or a HEIF brand with a decisive primary item.
                 at(4) == 'f'.code && at(5) == 't'.code && at(6) == 'y'.code && at(7) == 'p'.code &&
-                    AvifContainer.isAvif(data) -> AVIF
+                    AvifContainer.heifFormat(data).also { heif = it } != null -> heif
 
                 // "BM" last; two ASCII letters is the weakest magic of the set.
                 at(0) == 'B'.code && at(1) == 'M'.code -> BMP

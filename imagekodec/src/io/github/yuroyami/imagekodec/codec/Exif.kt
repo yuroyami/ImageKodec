@@ -85,6 +85,50 @@ internal object Exif {
     }
 
     /**
+     * The JPEG thumbnail of an EXIF block [tiff], which starts at its TIFF header: the bytes that
+     * tags 0x0201 and 0x0202 of IFD1, the IFD after IFD0, point at (Exif 2.32, 4.6.3), or null.
+     */
+    fun thumbnailFromTiff(tiff: ByteArray): ByteArray? {
+        if (tiff.size < 8) return null
+        val le = tiff[0] == 'I'.code.toByte() && tiff[1] == 'I'.code.toByte()
+        if (!le && !(tiff[0] == 'M'.code.toByte() && tiff[1] == 'M'.code.toByte())) return null
+        fun u16(at: Int): Int? {
+            if (at < 0 || at > tiff.size - 2) return null
+            val a = tiff[at].toInt() and 0xFF
+            val b = tiff[at + 1].toInt() and 0xFF
+            return if (le) a or (b shl 8) else (a shl 8) or b
+        }
+        fun u32(at: Int): Long? {
+            val lo = u16(if (le) at else at + 2) ?: return null
+            val hi = u16(if (le) at + 2 else at) ?: return null
+            return lo.toLong() or (hi.toLong() shl 16)
+        }
+        if (u16(2) != 42) return null
+        val ifd0 = u32(4) ?: return null
+        if (ifd0 > tiff.size - 2) return null
+        val count0 = u16(ifd0.toInt()) ?: return null
+        if (count0 > 512) return null
+        val ifd1 = u32(ifd0.toInt() + 2 + count0 * 12) ?: return null
+        if (ifd1 == 0L || ifd1 > tiff.size - 2) return null
+        val count1 = u16(ifd1.toInt()) ?: return null
+        if (count1 > 512) return null
+        var offset = -1L
+        var length = -1L
+        for (i in 0 until count1) {
+            val at = ifd1.toInt() + 2 + i * 12
+            val tag = u16(at) ?: return null
+            // Both are LONGs, whose value sits in the entry itself.
+            when (tag) {
+                0x0201 -> offset = u32(at + 8) ?: return null
+                0x0202 -> length = u32(at + 8) ?: return null
+            }
+        }
+        if (offset < 8 || length < 4 || offset > tiff.size - length) return null
+        val jpeg = tiff.copyOfRange(offset.toInt(), (offset + length).toInt())
+        return if ((jpeg[0].toInt() and 0xFF) == 0xFF && (jpeg[1].toInt() and 0xFF) == 0xD8) jpeg else null
+    }
+
+    /**
      * Walk a JPEG's marker stream looking for the EXIF APP1 segment. Stops at
      * SOS (compressed data begins; no more metadata worth having) and is bounded
      * so a corrupt length field can't spin.

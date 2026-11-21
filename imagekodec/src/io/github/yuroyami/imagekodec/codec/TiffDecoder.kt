@@ -36,15 +36,18 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    as libtiff's RGBA interface draws them, or through the page's profile by
  *    [decodeInk]), 6 (**YCbCr**, including chroma subsampling in both the
  *    chunky unit layout and separate planes)
- *  - bits per sample 1, 2, 4, 8 and 16 ([decode] narrows 16-bit to its high byte,
- *    [decode16] keeps it whole), horizontal-differencing predictor (2) for
- *    both 8- and 16-bit samples
+ *  - unsigned and signed integer samples of 1 to 32 bits, and IEEE floating-point
+ *    samples of 16, 24, 32 and 64 bits ([widen]); [decode] narrows samples deeper
+ *    than 8 bits to their high byte, and [decode16] keeps 16 bits of them
+ *  - the horizontal-differencing predictor (2) for samples of 8, 16, 32 and 64
+ *    bits, and the floating-point predictor (3) of Adobe's Photoshop TIFF
+ *    Technical Note 3
  *  - **both planar configurations**: chunky (1) and separate planes (2)
  *  - both FillOrder values, independent of sample byte order and compression
- *  - unsigned integer samples; undefined SampleFormat follows the unsigned default
+ *  - CCITT's uncompressed mode, which T4Options bit 1 allows
  *
- * What is left out is named at the point of failure: floating-point samples have
- * no home in an 8-bit-per-channel bitmap.
+ * What is left out is named at the point of failure, by [sampleRefusal] and
+ * [predictorRefusal] among others, which the probe shares.
  */
 internal object TiffDecoder {
 
@@ -70,6 +73,48 @@ internal object TiffDecoder {
     }
 
     private fun err(msg: String): Nothing = throw ImageDecodeException("TIFF: $msg")
+
+    /**
+     * The SampleFormat (339) of a page: 1 for unsigned integers, 2 for signed ones, 3 for IEEE
+     * floating point, or another value this decoder refuses. TIFF 6.0 section 19 reads 4, undefined
+     * data, as unsigned, and so does libtiff. A page whose samples are of several formats gives -1.
+     */
+    internal fun sampleFormat(formats: List<Long>): Int {
+        val defined = formats.map { if (it == 4L) 1L else it }.distinct()
+        return if (defined.size > 1) -1 else defined.firstOrNull()?.toInt() ?: 1
+    }
+
+    /**
+     * Why samples of [bits] bits in SampleFormat [format] cannot be read on a page of [photometric]
+     * and [compression], or null. TIFF 6.0 indexes a palette and codes YCbCr with unsigned integers,
+     * and no reader takes YCbCr past 8 bits: libtiff's RGBA interface refuses it, ImageMagick hands
+     * the samples on without converting them and ImageIO misreads them, so there is nothing to
+     * check a reading against. Complex samples (5 and 6) have no picture to show.
+     */
+    internal fun sampleRefusal(bits: Int, format: Int, photometric: Int, compression: Int): String? = when {
+        format == -1 -> "samples of several SampleFormat values"
+        format == 5 || format == 6 -> "complex samples (SampleFormat $format)"
+        format !in 1..3 -> "SampleFormat $format"
+        format == 3 && bits !in intArrayOf(16, 24, 32, 64) -> "$bits-bit floating-point samples (16, 24, 32 or 64)"
+        format != 3 && bits !in 1..32 -> "$bits-bit integer samples (1 to 32)"
+        compression == 7 && (format != 1 || (bits != 8 && bits != 12)) -> "JPEG with $bits-bit samples (8 or 12)"
+        compression == 6 && (format != 1 || bits != 8) -> "old-style JPEG with $bits-bit samples (8-bit only)"
+        photometric == 3 && (format != 1 || bits > 16) -> "a palette indexed by $bits-bit ${if (format == 1) "" else "signed or floating-point "}samples"
+        photometric == 6 && compression != 7 && (format != 1 || bits != 8) -> "YCbCr with $bits-bit samples (8-bit only)"
+        else -> null
+    }
+
+    /**
+     * Why [predictor] cannot be undone for samples of [bits] bits in SampleFormat [format], or null.
+     * libtiff differences samples of 8, 16, 32 and 64 bits, and takes the floating-point predictor
+     * for floating-point samples alone; the JPEG codecs set up no predictor at all.
+     */
+    internal fun predictorRefusal(predictor: Int, bits: Int, format: Int, compression: Int): String? = when {
+        predictor == 1 || compression == 6 || compression == 7 -> null
+        predictor == 2 -> if (bits in intArrayOf(8, 16, 32, 64)) null else "predictor 2 with $bits-bit samples"
+        predictor == 3 -> if (format == 3) null else "predictor 3 with integer samples"
+        else -> "predictor $predictor"
+    }
 
     /**
      * Bytes in one row of [width] pixels, each holding [samples] samples of [bits] bits.
@@ -221,8 +266,8 @@ internal object TiffDecoder {
         val spp = single(277, 1).toInt()
         if (spp < 1 || spp > 16) err("samples per pixel $spp out of range")
         val predictor = single(317, 1).toInt()
-        val planar = single(284, 1).toInt()
-        if (planar != 1 && planar != 2) err("unknown planar configuration $planar")
+        val planarTag = single(284, 1).toInt()
+        if (planarTag != 1 && planarTag != 2) err("unknown planar configuration $planarTag")
 
         // TIFF 6.0 specifies exact shapes for these optional fields. Defaults
         // apply to absent tags; a present malformed field cannot supply them.
@@ -233,10 +278,8 @@ internal object TiffDecoder {
                 }
                 values(it)
             }
+        // Bit 1, the uncompressed mode, needs nothing of its own: CcittFax reads it wherever it comes.
         val t4Options = if (compression == 3) optionalValues(292, "T4Options", 4, 1)?.first() ?: 0L else 0L
-        if (compression == 3 && t4Options and 2L != 0L) {
-            throw UnsupportedImageException("TIFF: CCITT G3 uncompressed mode (T4Options bit 1) is not supported")
-        }
         val fillOrder = optionalValues(266, "FillOrder", 3, 1)?.first()?.toInt() ?: 1
         if (fillOrder != 1 && fillOrder != 2) err("unknown FillOrder $fillOrder")
 
@@ -248,9 +291,11 @@ internal object TiffDecoder {
         val bitsEntry = entries[258]?.let { values(it) }?.takeIf { it.isNotEmpty() } ?: longArrayOf(1)
         val bits = bitsEntry[0].toInt()
         if (bitsEntry.any { it != bits.toLong() }) err("heterogeneous bits per sample")
-        if (bits != 1 && bits != 2 && bits != 4 && bits != 8 && bits != 16) {
-            throw UnsupportedImageException("TIFF: $bits bits per sample is not supported (1, 2, 4, 8 or 16)")
-        }
+        if (bits < 1) err("$bits bits per sample")
+        val sampleFormats = optionalValues(339, "SampleFormat", 3, spp.toLong()) ?: longArrayOf(1)
+        val format = sampleFormat(sampleFormats.toList())
+        sampleRefusal(bits, format, photometric, compression)?.let { throw UnsupportedImageException("TIFF: $it is not supported") }
+        predictorRefusal(predictor, bits, format, compression)?.let { throw UnsupportedImageException("TIFF: $it is not supported") }
         // A T.6 reference row can be represented by one bit, regardless of its
         // width. Other compression paths expand stored bytes, including packing.
         if (compression !in 2..4 && !Budget.fits(width, height, data.size, bits * spp)) {
@@ -264,30 +309,21 @@ internal object TiffDecoder {
         }
         val alpha = TiffAlpha(spp, photometric, extraSamples)
 
-        // TIFF 6.0 section 19 treats undefined samples like absent SampleFormat:
-        // unsigned integers. Signed and floating samples need another sample path.
-        val sampleFormats = optionalValues(339, "SampleFormat", 3, spp.toLong()) ?: longArrayOf(1)
-        sampleFormats.firstOrNull { it != 1L && it != 4L }?.let {
-            throw UnsupportedImageException("TIFF: SampleFormat $it is not supported (unsigned integer samples only)")
-        }
-
-        if (jpeg) {
-            if (bits != 8) throw UnsupportedImageException("TIFF: JPEG with $bits-bit samples is not supported (8-bit only)")
-            if (photometric == 6 && planar == 2) {
-                throw UnsupportedImageException("TIFF: JPEG YCbCr in separate planes is not supported")
-            }
-        }
-        // JPEG YCbCr leaves the JPEG decoder as RGB, upsampled and converted the way
-        // libtiff's RGB color mode has libjpeg do it, which is what ImageMagick and
-        // Pillow read; the TIFF fields about subsampling and ranges then describe
-        // nothing that is left.
-        val jpegRgb = jpeg && photometric == 6
+        // A 12-bit JPEG strip leaves the JPEG decoder as 16-bit samples, so the page is laid out at 16.
+        val jpeg12 = jpeg && bits == 12
+        val layoutBits = if (jpeg12) 16 else bits
+        // JPEG YCbCr in one plane leaves the JPEG decoder as RGB, upsampled and converted
+        // the way libtiff's RGB color mode has libjpeg do it, which is what ImageMagick and
+        // Pillow read; the TIFF fields about subsampling and ranges then describe nothing
+        // that is left. In separate planes each plane is a JPEG stream of one component,
+        // chroma at its subsampled size, and libtiff hands the samples on unconverted.
+        val jpegPlanes = jpeg && photometric == 6 && planarTag == 2
+        val jpegRgb = jpeg && photometric == 6 && !jpegPlanes
         val pixels = if (jpegRgb) 2 else photometric
 
         val tiled = entries.containsKey(322)
         val oldJpeg = if (compression == 6) {
             if (bits != 8) throw UnsupportedImageException("TIFF: old-style JPEG with $bits-bit samples is not supported (8-bit only)")
-            if (planar == 2 && spp > 1) throw UnsupportedImageException("TIFF: old-style JPEG in separate planes is not supported")
             if (single(512, 1) == 14L) throw UnsupportedImageException("TIFF: old-style lossless JPEG is not supported")
             val subsampling = if (photometric == 6) optionalValues(530, "YCbCrSubSampling", 3, 2) ?: longArrayOf(2, 2) else longArrayOf(1, 1)
             fun longs(tag: Int) = entries[tag]?.let { values(it) }
@@ -298,6 +334,7 @@ internal object TiffDecoder {
                 strileWidth = if (tiled) single(322).toInt() else width,
                 strileLength = if (tiled) single(323).toInt() else single(278, height.toLong()).coerceAtMost(height.toLong()).toInt(),
                 samples = spp,
+                separate = planarTag == 2 && spp > 1,
                 ycbcr = photometric == 6,
                 tagSubH = subsampling[0].toInt(),
                 tagSubV = subsampling[1].toInt(),
@@ -311,6 +348,8 @@ internal object TiffDecoder {
                 strileCounts = longs(if (tiled) 325 else 279),
             ))
         } else null
+        // An old-style JPEG image comes out of its one frame with every sample of a pixel together.
+        val planar = if (oldJpeg != null) 1 else planarTag
 
         val references = if (pixels == 2 || pixels == 6) entries[532]?.takeUnless { jpegRgb }?.let {
             TiffReferenceBlackWhite.read(data, le, it.type, it.count, it.valueOfs)
@@ -335,13 +374,11 @@ internal object TiffDecoder {
             val inks = optionalValues(334, "NumberOfInks", 3, 1)?.first() ?: 4L
             if (inks != 4L) throw UnsupportedImageException("TIFF: $inks inks are not supported (CMYK only)")
             if (spp < 4) err("CMYK with $spp samples")
-            if (bits != 8 && bits != 16) throw UnsupportedImageException("TIFF: CMYK with $bits-bit samples is not supported (8 or 16)")
         }
         if (photometric == 6) {
             if (subH !in intArrayOf(1, 2, 4) || subV !in intArrayOf(1, 2, 4)) {
                 err("YCbCr subsampling ${subH}x$subV is not legal")
             }
-            if (bits != 8) throw UnsupportedImageException("TIFF: YCbCr needs 8-bit samples")
             if (spp != 3) err("YCbCr with $spp samples")
         }
 
@@ -358,7 +395,7 @@ internal object TiffDecoder {
         val planeRowBytes = if (ycbcrUnits) {
             unitsAcross * unitBytes
         } else {
-            rowBytes(width, samplesPerPlane, bits).toInt()
+            rowBytes(width, samplesPerPlane, layoutBits).toInt()
         }
         val planeRows = if (ycbcrUnits) (height + subV - 1) / subV else height
         if (planeRowBytes.toLong() * planeRows * planes > MAX_BUFFER_BYTES) {
@@ -371,12 +408,12 @@ internal object TiffDecoder {
         if (tiled) {
             if (tileWidth <= 0 || tileLength <= 0) err("bad tile size ${tileWidth}x$tileLength")
             if (tileWidth > MAX_DIMENSION || tileLength > MAX_DIMENSION) err("tile ${tileWidth}x$tileLength too large")
-            if (ycbcrUnits && (tileWidth % subH != 0 || tileLength % subV != 0)) {
+            if ((ycbcrUnits || jpegPlanes) && (tileWidth % subH != 0 || tileLength % subV != 0)) {
                 err("tile ${tileWidth}x$tileLength does not align with YCbCr subsampling ${subH}x$subV")
             }
             val tileBytes = if (ycbcrUnits) {
                 (tileWidth / subH).toLong() * (tileLength / subV) * unitBytes
-            } else rowBytes(tileWidth, samplesPerPlane, bits) * tileLength
+            } else rowBytes(tileWidth, samplesPerPlane, layoutBits) * tileLength
             if (tileBytes > MAX_BUFFER_BYTES) err("tile of $tileBytes bytes exceeds safety limits")
         }
 
@@ -415,7 +452,7 @@ internal object TiffDecoder {
             }
             val len = minOf(counts[index], (data.size - ofs).toLong()).toInt()
             // libtiff never reverses the bits of a JPEG stream, whatever FillOrder says.
-            if (jpeg) return jpegBlock(index, data.copyOfRange(ofs, ofs + len), jpegTables, rows, columns, samplesPerPlane, jpegRgb, cancel)
+            if (jpeg) return jpegBlock(index, data.copyOfRange(ofs, ofs + len), jpegTables, rows, columns, samplesPerPlane, jpegRgb, jpeg12, le, cancel)
             val comp = normalizeFillOrder(data.copyOfRange(ofs, ofs + len), fillOrder)
             fun fax(k: Int, byteAligned: Boolean, endOfLine: Boolean = false): ByteArray {
                 if (bits != 1 || spp != 1) err("CCITT requires one bilevel sample")
@@ -448,8 +485,11 @@ internal object TiffDecoder {
         fun restorePredictor(buffer: ByteArray, rowBytes: Int, rows: Int) {
             // A predictor belongs to the lossless codecs; libtiff's JPEG codec never sets one up.
             if (predictor == 1 || jpeg) return
-            if (predictor != 2) throw UnsupportedImageException("TIFF: predictor $predictor is not supported")
             val stride = samplesPerPlane
+            if (predictor == 3) {
+                floatingPointPredictor(buffer, rowBytes, rows, stride, bits / 8, le)
+                return
+            }
             for (y in 0 until rows) {
                 val ro = y * rowBytes
                 when (bits) {
@@ -465,9 +505,15 @@ internal object TiffDecoder {
                             write16(buffer, ro + i * 2, (cur + prev) and 0xFFFF, le)
                         }
                     }
-                    else -> throw UnsupportedImageException(
-                        "TIFF: predictor 2 with $bits-bit samples is not supported",
-                    )
+                    32 -> for (i in stride until rowBytes / 4) {
+                        val at = ro + i * 4
+                        writeWord(buffer, at, 4, readWord(buffer, at, 4, le) + readWord(buffer, at - stride * 4, 4, le), le)
+                    }
+                    64 -> for (i in stride until rowBytes / 8) {
+                        val at = ro + i * 8
+                        writeWord(buffer, at, 8, readWord(buffer, at, 8, le) + readWord(buffer, at - stride * 8, 8, le), le)
+                    }
+                    else -> err("predictor 2 with $bits-bit samples")
                 }
             }
         }
@@ -481,11 +527,17 @@ internal object TiffDecoder {
             // bottom edges: the padding is real data on the wire, just discarded.
             // Fits an Int: the whole tile passed the buffer ceiling above.
             val tileRowBytes = if (ycbcrUnits) (tileWidth / subH) * unitBytes
-                else rowBytes(tileWidth, samplesPerPlane, bits).toInt()
+                else rowBytes(tileWidth, samplesPerPlane, layoutBits).toInt()
             val tileRows = if (ycbcrUnits) tileLength / subV else tileLength
             val tilesPerPlane = across * down
             for (p in 0 until planes) {
                 val plane = ByteArray(planeRowBytes * planeRows)
+                if (jpegPlanes && p > 0) {
+                    jpegChromaTiles(plane, across, down, tileWidth / subH, tileLength / subV, (width + subH - 1) / subH,
+                        (height + subV - 1) / subV) { index, w, h -> block(p * tilesPerPlane + index, w * h, h, w) }
+                    blocks.add(plane)
+                    continue
+                }
                 for (ty in 0 until down) {
                     for (tx in 0 until across) {
                         val index = p * tilesPerPlane + ty * across + tx
@@ -509,14 +561,21 @@ internal object TiffDecoder {
             }
         } else {
             val stripsPerPlane = (planeRows + rowsPerStrip - 1) / rowsPerStrip
+            if (jpegPlanes && rowsPerStrip < planeRows && rowsPerStrip % subV != 0) {
+                err("strips of $rowsPerStrip rows do not hold whole rows of ${subH}x$subV chroma")
+            }
             for (p in 0 until planes) {
                 val plane = ByteArray(planeRowBytes * planeRows)
                 var at = 0
+                // A chroma plane in a JPEG strip is at its subsampled size, packed from the start.
+                val chroma = jpegPlanes && p > 0
+                val columns = if (chroma) (width + subH - 1) / subH else width
                 for (s in 0 until stripsPerPlane) {
-                    val stripRows = minOf(rowsPerStrip, planeRows - s * rowsPerStrip)
-                    if (stripRows <= 0) break
-                    val expect = planeRowBytes * stripRows
-                    val strip = block(p * stripsPerPlane + s, expect, stripRows, width)
+                    val fullRows = minOf(rowsPerStrip, planeRows - s * rowsPerStrip)
+                    if (fullRows <= 0) break
+                    val stripRows = if (chroma) (fullRows + subV - 1) / subV else fullRows
+                    val expect = if (chroma) columns * stripRows else planeRowBytes * stripRows
+                    val strip = block(p * stripsPerPlane + s, expect, stripRows, columns)
                     restorePredictor(strip, planeRowBytes, stripRows)
                     strip.copyInto(plane, at, 0, minOf(expect, strip.size))
                     at += expect
@@ -526,24 +585,39 @@ internal object TiffDecoder {
         }
 
         // --- sample access --------------------------------------------------------
+        // Samples of any other depth or format become 16-bit unsigned ones here, so what
+        // follows reads one of the five layouts it always has. A 12-bit JPEG strip is
+        // already 16-bit.
+        val widened = !jpeg12 && (format != 1 || bits !in intArrayOf(1, 2, 4, 8, 16))
+        val sampleRowBytes = if (widened) width * samplesPerPlane * 2 else planeRowBytes
+        if (widened) {
+            if (sampleRowBytes.toLong() * planeRows * planes > MAX_BUFFER_BYTES) {
+                err("16-bit samples of ${sampleRowBytes.toLong() * planeRows * planes} bytes exceed safety limits")
+            }
+            for (p in blocks.indices) {
+                blocks[p] = widen(blocks[p], planeRowBytes, planeRows, width * samplesPerPlane, bits, format, le, index = photometric == 3)
+            }
+        }
+        val sBits = if (widened || jpeg12) 16 else bits
+
         /** Sample [c] of pixel ([x], [y]) at its native bit depth. */
         fun sample(x: Int, y: Int, c: Int): Int {
             val plane = if (planar == 2) blocks[c] else blocks[0]
             val index = if (planar == 2) x else x * spp + c
-            val row = y * planeRowBytes
-            return when (bits) {
+            val row = y * sampleRowBytes
+            return when (sBits) {
                 8 -> plane[row + index].toInt() and 0xFF
                 16 -> read16(plane, row + index * 2, le)
                 else -> {
-                    val bitPos = index * bits
+                    val bitPos = index * sBits
                     val byte = plane[row + (bitPos ushr 3)].toInt() and 0xFF
-                    (byte ushr (8 - bits - (bitPos and 7))) and ((1 shl bits) - 1)
+                    (byte ushr (8 - sBits - (bitPos and 7))) and ((1 shl sBits) - 1)
                 }
             }
         }
 
         /** Native-depth sample to 8 bits, by replication for the small depths. */
-        fun scale8(v: Int): Int = when (bits) {
+        fun scale8(v: Int): Int = when (sBits) {
             1 -> v * 255
             2 -> v * 85
             4 -> v * 17
@@ -551,7 +625,7 @@ internal object TiffDecoder {
             else -> v ushr 8                     // 16-bit narrows to its high byte
         }
 
-        val sampleMax = (1 shl bits) - 1
+        val sampleMax = (1 shl sBits) - 1
         fun straight(value: Int, opacity: Int, max: Int = sampleMax): Int {
             if (!alpha.associated) return value
             // TIFF 6.0 section 18 defines zero color for zero associated alpha.
@@ -608,7 +682,7 @@ internal object TiffDecoder {
                 }
                 5 -> for (y in 0 until height) for (x in 0 until width) {
                     val opacity = opacity(x, y)
-                    val rgb = if (alpha.associated && opacity == 0) 0 else if (bits == 8) {
+                    val rgb = if (alpha.associated && opacity == 0) 0 else if (sBits == 8) {
                         // putRGBcontig8bitCMYKtile, truncating as libtiff does.
                         val k = 255 - straight(sample(x, y, 3), opacity)
                         fun channel(c: Int) = k * (255 - straight(sample(x, y, c), opacity)) / 255
@@ -663,7 +737,7 @@ internal object TiffDecoder {
         override fun wide(): KiteBitmap16 {
             // Narrower samples replicate up, as scale8 replicates them to 8 bits, so the
             // high byte of each value is exactly what argb() gives.
-            fun scale16(v: Int): Int = when (bits) {
+            fun scale16(v: Int): Int = when (sBits) {
                 1 -> v * 65535
                 2 -> v * 21845
                 4 -> v * 4369
@@ -723,7 +797,7 @@ internal object TiffDecoder {
                     }
                     KiteBitmap16(width, height, channels, out)
                 }
-                5 -> if (bits == 8) {
+                5 -> if (sBits == 8) {
                     // Exactly what argb() draws, widened.
                     KiteBitmap16.widened(argb(), alpha = withAlpha)
                 } else {
@@ -740,7 +814,7 @@ internal object TiffDecoder {
                     }
                     KiteBitmap16(width, height, channels, out)
                 }
-                // YCbCr is 8-bit only, so its 8-bit conversion widens without loss.
+                // YCbCr is 8-bit here, so its 8-bit conversion widens without loss.
                 else -> KiteBitmap16.widened(argb(), alpha = false)
             }
         }
@@ -760,10 +834,10 @@ internal object TiffDecoder {
                     // Associated alpha over nothing leaves no ink to read.
                     val v = if (alpha.associated && opacity == 0) 0 else straight(sample(x, y, c), opacity)
                     if (ink8 != null) ink8[4 * i + c] = scale8(v).toByte()
-                    else ink16!![4 * i + c] = (if (bits == 8) v * 257 else v).toShort()
+                    else ink16!![4 * i + c] = (if (sBits == 8) v * 257 else v).toShort()
                 }
                 if (alpha8 != null) alpha8[i] = scale8(opacity).toByte()
-                if (alpha16 != null) alpha16[i] = (if (bits == 8) opacity * 257 else opacity).toShort()
+                if (alpha16 != null) alpha16[i] = (if (sBits == 8) opacity * 257 else opacity).toShort()
             }
             return Ink(width, height, ink8, ink16, alpha8, alpha16)
         }
@@ -788,6 +862,8 @@ internal object TiffDecoder {
         columns: Int,
         samples: Int,
         ycbcr: Boolean,
+        wide: Boolean,
+        le: Boolean,
         cancel: (() -> Unit)?,
     ): ByteArray {
         val stream = if (tables == null) block else {
@@ -795,6 +871,7 @@ internal object TiffDecoder {
             val skip = if (block.size >= 2 && marker(block, 0) == 0xD8) 2 else 0
             tables.copyOf(head) + block.copyOfRange(skip, block.size)
         }
+        if (wide) return jpegBlock12(index, stream, rows, columns, samples, ycbcr, le, cancel)
         val decoded = try {
             JpegDecoder.decodeComponents(stream, cancel = cancel)
         } catch (e: UnsupportedImageException) {
@@ -822,6 +899,159 @@ internal object TiffDecoder {
             c.samples.copyInto(out, 0, 0, out.size)
         }
         return out
+    }
+
+    /**
+     * [jpegBlock] for a page of 12-bit samples: the stream must be 12-bit too, and each sample,
+     * converted to RGB with [ycbcr] as libjpeg converts at 12 bits, comes out as a 16-bit one in the
+     * file's byte order, scaled as [widen] scales a sample of 12 bits.
+     */
+    private fun jpegBlock12(
+        index: Int, stream: ByteArray, rows: Int, columns: Int, samples: Int, ycbcr: Boolean, le: Boolean, cancel: (() -> Unit)?,
+    ): ByteArray {
+        val c = try {
+            JpegDecoder.decodeWideComponents(stream, ycbcr, cancel)
+        } catch (e: UnsupportedImageException) {
+            throw UnsupportedImageException("TIFF: JPEG block $index: ${e.message}", e)
+        } catch (e: ImageDecodeException) {
+            throw ImageDecodeException("TIFF: JPEG block $index: ${e.message}", e)
+        }
+        if (c.precision != 12) err("JPEG block $index has ${c.precision}-bit samples on a 12-bit page")
+        if (c.width != columns || c.height < rows) {
+            err("JPEG block $index codes ${c.width}x${c.height} pixels for a ${columns}x$rows block")
+        }
+        if (c.count != samples) err("JPEG block $index has ${c.count} components for $samples samples")
+        val out = ByteArray(columns * rows * samples * 2)
+        for (i in 0 until columns * rows * samples) write16(out, i * 2, scale(c.samples[i].toLong(), 12), le)
+        return out
+    }
+
+    /**
+     * Fills [plane], the subsampled chroma plane of a JPEG page in separate planes and tiles,
+     * [across] by [down] tiles of [tileWidth] by [tileLength] chroma samples, packed in rows of
+     * [width] samples for [height] rows. [tile] decodes one tile by its index in the plane.
+     */
+    private fun jpegChromaTiles(
+        plane: ByteArray, across: Int, down: Int, tileWidth: Int, tileLength: Int, width: Int, height: Int,
+        tile: (index: Int, width: Int, height: Int) -> ByteArray,
+    ) {
+        for (ty in 0 until down) for (tx in 0 until across) {
+            val samples = tile(ty * across + tx, tileWidth, tileLength)
+            val columns = minOf(tileWidth, width - tx * tileWidth)
+            for (row in 0 until minOf(tileLength, height - ty * tileLength)) {
+                samples.copyInto(plane, (ty * tileLength + row) * width + tx * tileWidth, row * tileWidth, row * tileWidth + columns)
+            }
+        }
+    }
+
+    /**
+     * Adobe's floating-point predictor (Photoshop TIFF Technical Note 3), undone in place on [rows]
+     * rows of [rowBytes] bytes, [stride] samples a pixel of [bytes] bytes each. The encoder splits
+     * each row into planes of bytes, the most significant byte of every sample first, and then
+     * differences the bytes with a step of [stride]; the samples come back in the file's byte order.
+     */
+    private fun floatingPointPredictor(buffer: ByteArray, rowBytes: Int, rows: Int, stride: Int, bytes: Int, le: Boolean) {
+        val count = rowBytes / bytes
+        val tmp = ByteArray(count * bytes)
+        for (y in 0 until rows) {
+            val ro = y * rowBytes
+            for (i in stride until count * bytes) buffer[ro + i] = (buffer[ro + i] + buffer[ro + i - stride]).toByte()
+            buffer.copyInto(tmp, 0, ro, ro + count * bytes)
+            for (i in 0 until count) for (b in 0 until bytes) {
+                buffer[ro + i * bytes + (if (le) bytes - 1 - b else b)] = tmp[b * count + i]
+            }
+        }
+    }
+
+    /**
+     * A plane of [rows] rows of [rowBytes] bytes, each row [count] samples of [bits] bits in
+     * SampleFormat [format], as 16-bit unsigned samples in the file's byte order. Samples of a
+     * multiple of 8 bits are in the file's byte order, and other depths are packed from the most
+     * significant bit, as libtiff reads them.
+     *
+     * - An unsigned sample scales to 16 bits rounded, as ImageMagick scales one, which for 1, 2, 4
+     *   and 8 bits is the replication [decode] has always used. A palette [index] keeps its value.
+     * - A signed sample moves up by half its range first, so the most negative value is black and
+     *   zero the middle, as ImageMagick reads signed gray and this library a signed JPEG 2000 sample.
+     * - A floating-point sample is a fraction of full scale, as ImageMagick and ImageIO read it:
+     *   0 or below, and NaN, give 0, and 1 or above give 65535.
+     */
+    private fun widen(plane: ByteArray, rowBytes: Int, rows: Int, count: Int, bits: Int, format: Int, le: Boolean, index: Boolean): ByteArray {
+        val out = ByteArray(rows * count * 2)
+        val whole = bits % 8 == 0
+        val size = bits / 8
+        val mask = if (bits == 64) -1L else (1L shl bits) - 1
+        for (y in 0 until rows) {
+            val row = y * rowBytes
+            for (i in 0 until count) {
+                val raw = if (whole) {
+                    readWord(plane, row + i * size, size, le)
+                } else {
+                    val bit = i.toLong() * bits
+                    val first = row + (bit ushr 3).toInt()
+                    val skip = (bit and 7).toInt()
+                    val span = (skip + bits + 7) / 8
+                    var word = 0L
+                    for (k in 0 until span) word = (word shl 8) or (plane[first + k].toLong() and 0xFF)
+                    (word ushr (span * 8 - skip - bits)) and mask
+                }
+                val v = when {
+                    format == 3 -> fraction16(floatValue(raw, bits))
+                    index -> raw.toInt()
+                    format == 2 -> scale(raw xor (1L shl (bits - 1)), bits)
+                    else -> scale(raw, bits)
+                }
+                write16(out, (y * count + i) * 2, v, le)
+            }
+        }
+        return out
+    }
+
+    /** An unsigned sample of [bits] bits, 1 to 32, at 16 bits: v * 65535 / (2^bits - 1), rounded. */
+    private fun scale(v: Long, bits: Int): Int {
+        if (bits == 16) return v.toInt()
+        val max = (1L shl bits) - 1
+        return ((v * 65535 + max / 2) / max).toInt()
+    }
+
+    /** A fraction of full scale at 16 bits, rounded, with NaN and the values outside 0 to 1 clipped. */
+    private fun fraction16(f: Double): Int = if (!(f > 0)) 0 else if (f >= 1) 65535 else (f * 65535 + 0.5).toInt()
+
+    /**
+     * The value of an IEEE 754 sample of [bits] bits: binary16, binary32, binary64, or the 24-bit
+     * float of Adobe's DNG specification, which has a sign, a 7-bit exponent biased by 63 and a 16-bit
+     * fraction. The shorter ones are widened exactly, so every target reads the same value.
+     */
+    private fun floatValue(raw: Long, bits: Int): Double = when (bits) {
+        64 -> Double.fromBits(raw)
+        32 -> Float.fromBits(raw.toInt()).toDouble()
+        else -> {
+            val fractionBits = if (bits == 16) 10 else 16
+            val exponentBits = bits - 1 - fractionBits
+            val bias = (1 shl (exponentBits - 1)) - 1
+            val e = ((raw ushr fractionBits) and ((1L shl exponentBits) - 1)).toInt()
+            val m = raw and ((1L shl fractionBits) - 1)
+            val sign = if ((raw ushr (bits - 1)) and 1L != 0L) -1.0 else 1.0
+            when (e) {
+                0 -> sign * m * twoTo(1 - bias - fractionBits)
+                (1 shl exponentBits) - 1 -> if (m == 0L) sign * Double.POSITIVE_INFINITY else Double.NaN
+                else -> sign * ((1L shl fractionBits) + m) * twoTo(e - bias - fractionBits)
+            }
+        }
+    }
+
+    /** 2 to the power [e], exactly, for an exponent a binary64 holds as a normal number. */
+    private fun twoTo(e: Int): Double = Double.fromBits((1023L + e) shl 52)
+
+    /** A word of [size] bytes, 1 to 8, at [at] in the byte order [le] says. */
+    private fun readWord(d: ByteArray, at: Int, size: Int, le: Boolean): Long {
+        var v = 0L
+        for (k in 0 until size) v = (v shl 8) or (d[at + if (le) size - 1 - k else k].toLong() and 0xFF)
+        return v
+    }
+
+    private fun writeWord(d: ByteArray, at: Int, size: Int, v: Long, le: Boolean) {
+        for (k in 0 until size) d[at + if (le) k else size - 1 - k] = (v ushr (8 * k)).toByte()
     }
 
     /**

@@ -1,6 +1,8 @@
 # Animation
 
-One type, `KiteAnimation`, covers GIF, APNG, animated WebP, animated AVIF and animated JPEG XL.
+One type, `KiteAnimation`, covers GIF, APNG, animated WebP, animated AVIF, HEIC image sequences and
+animated JPEG XL. A HEIC sequence needs the `imagekodec-heic` module; its frames come in
+presentation order, which for B pictures differs from the order they decode in.
 Every frame is a full composited canvas, with disposal, blending and frame offsets already applied.
 Playback is therefore "draw frame N, wait delay N".
 
@@ -46,8 +48,10 @@ extension for writers such as Pillow that already produce them.
 A delay of 10 ms or less is reported as 100 ms, which matches browsers. So an APNG `fcTL` with
 `delay_num = 0` gives a 100 ms frame.
 
-`KiteFrame.delayRawCentiseconds` is the exact figure that a GIF stated. APNG, WebP, AVIF and JPEG
-XL store no centiseconds, so for them the figure comes from the stated delay.
+`KiteFrame.delayRawCentiseconds` is the exact figure that a GIF stated. APNG, WebP, AVIF, HEIC and
+JPEG XL store no centiseconds, so for them the figure comes from the stated delay. An AVIF or HEIC
+frame lasts from its composition time to the next frame's, and the last frame for its own sample
+duration.
 
 ## GIF background disposal
 
