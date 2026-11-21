@@ -28,7 +28,8 @@ product:
 # The image codec core: format sniffing, the decoders and encoders, the ARGB pixel buffer and the
 # malformed-input guards.
 
-# ArchiveKodec supplies DEFLATE, zlib and CRC-32. Its types stay out of the public API.
+# ArchiveKodec supplies DEFLATE, zlib, CRC-32, LZW, PackBits, Zstandard and LZMA. Its types stay out of the
+# public API.
 dependencies:
   - $libs.archivekodec
 

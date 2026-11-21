@@ -21,7 +21,7 @@ a PDF) therefore has to call per-platform code.
 
 ImageKodec decodes in common Kotlin instead. Every format comes back as non-premultiplied ARGB_8888
 in a plain `IntArray`. The core artifact is pure Kotlin, and its one dependency is ArchiveKodec,
-which supplies DEFLATE, zlib, LZW and PackBits.
+which supplies DEFLATE, zlib, LZW, PackBits, Zstandard and LZMA.
 
 ## Install
 

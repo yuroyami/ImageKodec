@@ -1,10 +1,13 @@
 package io.github.yuroyami.imagekodec.codec
 
 import io.github.yuroyami.archivekodec.ArchiveException
+import io.github.yuroyami.archivekodec.codec.Codec
+import io.github.yuroyami.archivekodec.codec.Codecs
 import io.github.yuroyami.archivekodec.codec.lzw.Lzw
 import io.github.yuroyami.archivekodec.codec.lzw.LzwOptions
 import io.github.yuroyami.archivekodec.codec.packbits.PackBits
 import io.github.yuroyami.archivekodec.codec.packbits.PackBitsOptions
+import io.github.yuroyami.archivekodec.security.ArchiveLimits
 import io.github.yuroyami.imagekodec.ImageDecodeException
 import io.github.yuroyami.imagekodec.KiteBitmap
 import io.github.yuroyami.imagekodec.KiteBitmap16
@@ -25,7 +28,8 @@ import io.github.yuroyami.imagekodec.internal.flate.Zlib
  *    T4Options 1D/mixed 2D (3), G4 (4), the absorbed [CcittFax] codec, TIFF-LZW
  *    with EarlyChange (5), old-style JPEG rebuilt into one stream as libtiff
  *    does it ([TiffOldJpeg], 6), JPEG as Technical Note 2 defines it (7),
- *    Deflate (8 / 32946), PackBits (32773)
+ *    Deflate (8 / 32946), PackBits (32773), LZMA2 in an xz stream (34925) and
+ *    Zstandard (50000), the two libtiff writes with `-c lzma` and `-c zstd`
  *  - photometric 0/1 (bilevel + gray, either polarity, optional alpha), 2 (RGB,
  *    optional associated or straight alpha via ExtraSamples), 3 (palette, 16-bit
  *    ColorMap entries), 5 (**CMYK** separations, InkSet 1, at 8 or 16 bits, drawn
@@ -425,6 +429,8 @@ internal object TiffDecoder {
                     throw ImageDecodeException("TIFF: strip inflate failed: ${e.message}", e)
                 }
                 32773 -> packBits(comp, expect)
+                34925 -> unpack(Codecs.XZ, "LZMA", comp, expect)
+                50000 -> unpack(Codecs.ZSTD, "ZSTD", comp, expect)
                 2 -> fax(k = 0, byteAligned = true)
                 3 -> {
                     // T4Options fill zeros align the end of EOL, not the row cursor.
@@ -938,6 +944,20 @@ internal object TiffDecoder {
         Lzw.decode(input, LzwOptions { expectedSize = expected.toLong() }).output
     } catch (e: ArchiveException) {
         throw ImageDecodeException("TIFF: ${e.message}", e)
+    }
+
+    /**
+     * A strip or tile compressed with [codec], decoded by ArchiveKodec. The block geometry gives the
+     * exact output size, so that size is the limit, and the ratio check is off: a blank strip of
+     * zstd or xz can pass 10,000:1.
+     */
+    private fun unpack(codec: Codec, name: String, input: ByteArray, expected: Int): ByteArray = try {
+        codec.decompress(input, ArchiveLimits {
+            maxUncompressedBytes = maxOf(expected, 1).toLong()
+            maxCompressionRatio = Int.MAX_VALUE
+        })
+    } catch (e: ArchiveException) {
+        throw ImageDecodeException("TIFF: $name strip failed: ${e.message}", e)
     }
 
     /** PackBits (Apple RLE), decoded by ArchiveKodec. */

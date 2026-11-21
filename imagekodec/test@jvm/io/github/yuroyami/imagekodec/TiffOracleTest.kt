@@ -276,6 +276,59 @@ class TiffOracleTest {
     }
 
     @Test
+    fun zstdAndLzmaAgreeWithLibtiff() {
+        // ImageIO reads neither codec, so libtiff's own uncompressed RGBA output is the reference.
+        assumeTrue("TIFF tools not installed", tools() && Tools.hasAll("tiff2rgba"))
+        for (codec in listOf("zstd", "lzma", "zstd:p2", "lzma:p2")) {
+            for (tiled in listOf(false, true)) {
+                val name = "${codec.replace(':', '-')}-${if (tiled) "tiled" else "strips"}"
+                val out = temp(name, ".tif")
+                val layout = if (tiled) arrayOf("-t", "-w", "32", "-l", "32") else arrayOf("-r", "8")
+                assertEquals(0, run(tiffcp.path, "-c", codec, *layout, baseTiff("b-$name").path, out.path), "tiffcp -c $codec")
+                val decoded = temp("$name-rgba", ".tif")
+                assertEquals(0, run(Tools.require("tiff2rgba").path, "-c", "none", out.path, decoded.path))
+                compare(name, out, referenceTiff = decoded)
+                assertTrue(ImageKodec.probe(out.readBytes()).isDecodable, "$name probe")
+            }
+        }
+    }
+
+    @Test
+    fun blankZstdStripPassesTheRatioLimit() {
+        // One 1024 x 1024 white strip: 3 MiB that zstd stores in about 100 bytes, past 10,000:1.
+        // 1024 x 1024 is the pixel count the input-size guard always allows.
+        assumeTrue("TIFF tools not installed", tools())
+        val src = temp("blank", ".tif")
+        assertEquals(0, run(magick.path, "-size", "1024x1024", "xc:white", "-type", "TrueColor", "-depth", "8",
+            "-compress", "none", src.path))
+        for (codec in listOf("zstd", "lzma")) {
+            val out = temp("blank-$codec", ".tif")
+            assertEquals(0, run(tiffcp.path, "-c", codec, "-r", "1024", src.path, out.path), "tiffcp -c $codec")
+            val bytes = out.readBytes()
+            if (codec == "zstd") {
+                val strip = stripByteCount(out)
+                assertTrue(strip < 3 * 1024 * 1024 / 10_000, "zstd: a strip of $strip bytes is not past 10,000:1")
+            }
+            val bitmap = ImageKodec.decode(bytes)
+            assertEquals(1024, bitmap.width)
+            assertTrue(bitmap.argb.all { it == -1 }, "$codec: not all white")
+        }
+    }
+
+    /** StripByteCounts (279) of a one-strip file, read by ImageIO. */
+    private fun stripByteCount(tiff: File): Long {
+        val reader = ImageIO.getImageReadersByFormatName("TIFF").next()
+        try {
+            ImageIO.createImageInputStream(tiff).use { input ->
+                reader.input = input
+                return assertNotNull(TIFFDirectory.createFromMetadata(reader.getImageMetadata(0)).getTIFFField(279)).getAsLong(0)
+            }
+        } finally {
+            reader.dispose()
+        }
+    }
+
+    @Test
     fun predictorWithCompressionAgrees() {
         assumeTrue("TIFF tools not installed", tools())
         for (codec in listOf("lzw:2", "zip:2")) {

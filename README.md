@@ -27,7 +27,7 @@ and chroma subsampling (color stored at a lower resolution than brightness) are 
 you see a pixel.
 
 The core artifact is pure Kotlin. Its one dependency is [ArchiveKodec](https://github.com/yuroyami/ArchiveKodec),
-which supplies DEFLATE, zlib, LZW and PackBits. Compose and Coil bindings come as two optional modules.
+which supplies DEFLATE, zlib, LZW, PackBits, Zstandard and LZMA. Compose and Coil bindings come as two optional modules.
 
 ## Install
 
@@ -205,7 +205,7 @@ Report a security problem as [SECURITY.md](SECURITY.md) describes. Open work is 
 Apache-2.0. ImageKodec combines specification implementations with ports of permissively licensed
 code, including [stb_image](https://github.com/nothings/stb) (public domain or MIT),
 [Apache Commons Imaging](https://github.com/apache/commons-imaging) (Apache-2.0), libwebp and
-libjxl (BSD-3-Clause). The DEFLATE, LZW and PackBits code comes from [ArchiveKodec](https://github.com/yuroyami/ArchiveKodec),
+libjxl (BSD-3-Clause). The DEFLATE, LZW, PackBits, Zstandard and LZMA code comes from [ArchiveKodec](https://github.com/yuroyami/ArchiveKodec),
 the archive library of the same family. [reference/REFERENCES.md](reference/REFERENCES.md) and
 [NOTICE](NOTICE) give the attribution for each codec.
 

@@ -12,6 +12,13 @@ reviewable in the diff.
 
 ## [Unreleased]
 
+### Added
+
+- TIFF decoding reads strips and tiles compressed with Zstandard (compression 50000) and with
+  LZMA2 in an xz stream (compression 34925), the two codecs libtiff writes with `tiffcp -c zstd`
+  and `-c lzma`. ArchiveKodec decodes both, with or without the horizontal predictor. `probe`
+  reports such files as decodable.
+
 ## [0.4.0] - 2026-11-10
 
 ### Added
