@@ -68,11 +68,11 @@ jobs:
           KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./kotlin publish mavenCentral -m imagekodec -m imagekodec-compose -m imagekodec-coil
+        run: ./kotlin publish mavenCentral -m imagekodec -m imagekodec-compose -m imagekodec-coil -m imagekodec-heic
 
       - name: Dry run (build and sign only)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         env:
           KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./kotlin publish mavenLocal -m imagekodec -m imagekodec-compose -m imagekodec-coil
+        run: ./kotlin publish mavenLocal -m imagekodec -m imagekodec-compose -m imagekodec-coil -m imagekodec-heic
