@@ -54,8 +54,9 @@ jobs:
   test-jvm:
     name: JVM tests on Java ${{ matrix.java }}
     runs-on: ubuntu-latest
-    # A build of libjxl's ssimulacra2 on a cold cache takes about ten minutes more.
-    timeout-minutes: 30
+    # Java 11 needs more than 21 minutes for the tests after a 9 minute setup, and a build of
+    # libjxl's ssimulacra2 on a cold cache takes about ten minutes more.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -281,7 +282,8 @@ jobs:
   test-wasm:
     name: wasmJs and wasmWasi tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Usually about 10 minutes, but a slow runner went past 15.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
