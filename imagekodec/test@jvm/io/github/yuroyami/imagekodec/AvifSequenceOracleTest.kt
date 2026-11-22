@@ -160,7 +160,7 @@ class AvifSequenceOracleTest {
     }
 
     /** dav1d's frames of track [stream] of [file], checked sample for sample against [coded]. */
-    private fun checkDav1d(label: String, file: File, stream: Int, coded: List<Coded>, identity: Boolean) {
+    private fun checkDav1d(label: String, file: File, stream: Int, coded: List<Coded>, identity: Boolean, renderW: Int, renderH: Int) {
         val first = coded[0].picture
         val (code, raw) = run(
             Tools.require("ffmpeg").path, "-hide_banner", "-loglevel", "error", "-c:v", "libdav1d", "-i", file.path,
@@ -174,9 +174,13 @@ class AvifSequenceOracleTest {
         fun total(w: Int, h: Int): Long = coded.sumOf { c ->
             c.picture.planes.indices.sumOf { plane -> planeSize(c.picture, plane, w, h).let { (pw, ph) -> pw.toLong() * ph * bytes } }
         }
-        // ffmpeg 8.0.1 (Ubuntu 26.04) writes an odd-sized 4:2:0 track cropped to even width and height;
-        // ffmpeg 8.0 writes it whole. Either way the samples it does write must equal the coded ones.
-        val (w, h) = listOf(first.width to first.height, (first.width and 1.inv()) to (first.height and 1.inv()))
+        // ffmpeg 8.0 writes the whole coded frame. ffmpeg 8.0.1 (Ubuntu 26.04) crops a 4:2:0 track to the
+        // render size, rounded down to even. Either way the samples it does write must equal the coded ones.
+        val (w, h) = listOf(
+            first.width to first.height,
+            (first.width and 1.inv()) to (first.height and 1.inv()),
+            (renderW and 1.inv()) to (renderH and 1.inv()),
+        )
             .firstOrNull { (w, h) -> total(w, h) == raw.size.toLong() }
             ?: error("$label: dav1d's output of track $stream has another number of frames: ${raw.size} bytes, ${total(first.width, first.height)} expected")
         var at = 0
@@ -267,11 +271,11 @@ class AvifSequenceOracleTest {
         // ffmpeg may list the still item before the tracks, so the tracks are the streams of many frames.
         val tracks = trackStreams(file)
         assertEquals(if (c.alpha) 2 else 1, tracks.size, "${c.name}: ffprobe's tracks $tracks")
-        checkDav1d(c.name, file, tracks[0], colour, identity)
+        checkDav1d(c.name, file, tracks[0], colour, identity, c.w, c.h)
         val use = checkOwnDecoder(c.name, colour)
         if (c.alpha) {
             val alpha = recording.tracks[1]
-            checkDav1d("${c.name} alpha", file, tracks[1], alpha, false)
+            checkDav1d("${c.name} alpha", file, tracks[1], alpha, false, c.w, c.h)
             checkOwnDecoder("${c.name} alpha", alpha)
         } else {
             assertEquals(1, recording.tracks.size, "${c.name}: an alpha track for opaque frames")
