@@ -50,11 +50,14 @@ settings:
       apiLevel: 37
       minorApiLevel: 2
     minSdk: 21
-  # Not published until the owner decides on the patent question (#136). The toolchain needs both.
   publishing:
-    enabled: false
-    mavenCentral:
-      enabled: false
+    pom:
+      name: ImageKodec HEIC
+      description: >-
+        HEIC for ImageKodec: reads and writes the photos of recent iPhones and many Android phones. The HEVC
+        decoder and encoder are pure Kotlin, written from ITU-T H.265, with no libheif, libde265 or platform
+        codec underneath. Builds for the same 22 targets as the core. HEVC is covered by patents, so check
+        what applies to your product before you ship this module.
 
 # The same heap as the core's tests, so a size guard and not the allocator rejects a large header.
 test-settings@jvm:

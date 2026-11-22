@@ -308,7 +308,7 @@ reviewable in the diff.
   for `hvc1` items and `hvc1` and `hev1` tracks; a second call changes nothing. It reads the HEVC
   parameter sets and slice segment headers of ITU-T H.265, from `hvcC` or from the sample data, so
   `probe` reports a HEIC file's coded size after the conformance window, its depths, chroma format
-  and VUI colour. The module is not published (#139, #140).
+  and VUI colour. The module is published as `io.github.yuroyami:imagekodec-heic` (#139, #140).
 - `imagekodec-heic` decodes intra HEVC pictures. It reads the CABAC slice data with wavefront rows,
   entry points and several slices, and reconstructs 4:0:0, 4:2:0, 4:2:2 and 4:4:4 pictures with
   scaling lists, transform skip, lossless coding and PCM (#141, #142). It applies the deblocking

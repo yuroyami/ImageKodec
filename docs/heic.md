@@ -25,8 +25,8 @@ val bitmap = ImageKodec.decode(heicBytes)
 second call changes nothing. After it, every entry point of `ImageKodec` reads HEIC like any other
 format.
 
-The module is not published yet. Its publishing waits on the owner's decision about the patents
-on HEVC, so the coordinates above do not resolve until a release names them.
+The module is on Maven Central from 0.4.0 on. HEVC is covered by patents, so read
+[Patents](#patents) before you ship it.
 
 ## Without the module
 

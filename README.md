@@ -173,9 +173,9 @@ See [Keeping a photo's metadata](docs/encoding.md#keeping-a-photos-metadata).
 `Jbig2Decoder` and `CcittFax` decode JBIG2 and CCITT fax data as a PDF embeds it, and `encodeJbig2`
 (generic regions) and `encodeCcitt` (Group 3 and Group 4) write it. Neither format carries a header
 of its own, so both take their parameters explicitly. HEIC decodes and encodes only
-with the separate `imagekodec-heic` module, which is not published yet. [HEIC](docs/heic.md) explains why and
-how to install it. [Reading images](docs/decoding.md#what-each-format-decodes) lists every feature of each
-format.
+with the separate `imagekodec-heic` module. [HEIC](docs/heic.md) explains how to install it, and what
+to check about the patents on HEVC. [Reading images](docs/decoding.md#what-each-format-decodes) lists
+every feature of each format.
 
 ## Platforms
 
