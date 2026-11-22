@@ -40,7 +40,9 @@ settings:
     publishSources: true
     mavenCentral:
       enabled: true
-      publishingMode: auto
+      # The publish workflow reads this too. manual: after Central's checks, the release waits on the
+      # Central Portal until the owner clicks Publish. auto: Central publishes it after the checks.
+      publishingMode: manual
 
 # -Xexport-kdoc keeps the KDoc in the native klibs.
 settings@native:

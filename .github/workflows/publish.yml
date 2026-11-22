@@ -22,8 +22,9 @@ jobs:
   publish:
     name: Publish to Maven Central
     runs-on: macos-latest
-    # The secrets live on the two steps that publish, not on the job, so the setup and the
-    # API check, which download and run the toolchain, never see them.
+    # The secrets live on the steps that sign and upload, not on the job, so the setup and the
+    # API check, which download and run the toolchain, never see them. The toolchain gets the
+    # signing key only, and the upload step gets the Central Portal token only.
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,18 +62,34 @@ jobs:
             -p androidNativeX86 -p linuxX64 -p linuxArm64 -p mingwX64 -p js -p wasmJs -p wasmWasi
           ./kotlin check abi klibAbi
 
-      - name: Publish
+      # The toolchain compiles, signs and zips each module, and the script merges the four zips into
+      # one. Uploaded as one deployment, the release passes Central's checks as a whole and goes out
+      # complete or not at all. A dry run builds the same zip, so it tests all but the upload.
+      - name: Build the Maven Central zip
+        env:
+          KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: scripts/central-zip.sh build/central-bundle.zip imagekodec imagekodec-compose imagekodec-coil imagekodec-heic
+
+      - name: List the files in the Maven Central zip
+        run: zipinfo -1 build/central-bundle.zip
+
+      # publishingMode of library.module-template.yaml sets what Central does after its checks:
+      # auto publishes the deployment, manual waits until the owner clicks Publish on the Central Portal.
+      - name: Upload to Maven Central
         if: ${{ github.event_name == 'release' || !inputs.dry_run }}
         env:
-          KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./kotlin publish mavenCentral -m imagekodec -m imagekodec-compose -m imagekodec-coil -m imagekodec-heic
-
-      - name: Dry run (build and sign only)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-        env:
-          KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./kotlin publish mavenLocal -m imagekodec -m imagekodec-compose -m imagekodec-coil -m imagekodec-heic
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mode=$(awk '/^    mavenCentral:/ { found = 1 } found && /^      publishingMode:/ { print $2; exit }' library.module-template.yaml)
+          case $mode in
+            auto) type=AUTOMATIC ;;
+            manual) type=USER_MANAGED ;;
+            *)
+              echo "::error::publishingMode of library.module-template.yaml is '$mode', not auto or manual"
+              exit 1
+              ;;
+          esac
+          scripts/central-upload.sh build/central-bundle.zip "ImageKodec $VERSION" "$type"
