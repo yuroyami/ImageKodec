@@ -174,12 +174,13 @@ class AvifSequenceOracleTest {
         fun total(w: Int, h: Int): Long = coded.sumOf { c ->
             c.picture.planes.indices.sumOf { plane -> planeSize(c.picture, plane, w, h).let { (pw, ph) -> pw.toLong() * ph * bytes } }
         }
-        // ffmpeg 8.0 writes the whole coded frame. ffmpeg 8.0.1 (Ubuntu 26.04) crops a 4:2:0 track to the
-        // render size, rounded down to even. Either way the samples it does write must equal the coded ones.
+        // ffmpeg 8.0 writes the whole coded frame. ffmpeg 8.0.1 (Ubuntu 26.04) crops a subsampled track to
+        // the render size, rounded down to even in each subsampled direction (both for 4:2:0, width for 4:2:2).
+        // Either way the samples it does write must equal the coded ones.
         val (w, h) = listOf(
             first.width to first.height,
             (first.width and 1.inv()) to (first.height and 1.inv()),
-            (renderW and 1.inv()) to (renderH and 1.inv()),
+            (renderW and first.subX.inv()) to (renderH and first.subY.inv()),
         )
             .firstOrNull { (w, h) -> total(w, h) == raw.size.toLong() }
             ?: error("$label: dav1d's output of track $stream has another number of frames: ${raw.size} bytes, ${total(first.width, first.height)} expected")
