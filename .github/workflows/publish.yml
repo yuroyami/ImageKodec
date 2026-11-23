@@ -22,6 +22,7 @@ jobs:
   publish:
     name: Publish to Maven Central
     runs-on: macos-latest
+    timeout-minutes: 240
     # The secrets live on the steps that sign and upload, not on the job, so the setup and the
     # API check, which download and run the toolchain, never see them. The toolchain gets the
     # signing key only, and the upload step gets the Central Portal token only.
@@ -53,14 +54,38 @@ jobs:
             exit 1
           fi
 
-      # The klib check reads the klibs of every native and web platform, which a Mac builds.
-      - name: Check the public API has not drifted
+      # Only the code a release ships compiles here, in the release variant that the Maven Central zip
+      # reuses. `./kotlin build` also compiled and linked every test source set of every platform,
+      # which ran for hours. The toolchain starts one Kotlin/Native compiler JVM of up to 3 GB per
+      # task with no limit, so each native platform compiles in a call of its own.
+      - name: Compile the native and web platforms, one platform at a time
         run: |
-          ./kotlin build -p iosArm64 -p iosSimulatorArm64 -p iosX64 -p macosArm64 -p tvosArm64 \
-            -p tvosSimulatorArm64 -p watchosArm32 -p watchosArm64 -p watchosDeviceArm64 \
-            -p watchosSimulatorArm64 -p androidNativeArm32 -p androidNativeArm64 -p androidNativeX64 \
-            -p androidNativeX86 -p linuxX64 -p linuxArm64 -p mingwX64 -p js -p wasmJs -p wasmWasi
-          ./kotlin check abi klibAbi
+          compose_platforms=" IosArm64 IosSimulatorArm64 MacosArm64 "
+          for platform in IosArm64 IosSimulatorArm64 IosX64 MacosArm64 TvosArm64 TvosSimulatorArm64 \
+            WatchosArm32 WatchosArm64 WatchosDeviceArm64 WatchosSimulatorArm64 AndroidNativeArm32 \
+            AndroidNativeArm64 AndroidNativeX64 AndroidNativeX86 LinuxX64 LinuxArm64 MingwX64; do
+            echo "::group::$platform"
+            tasks=(":imagekodec:compile${platform}Release" ":imagekodec-heic:compile${platform}Release")
+            # The Compose and Coil modules ship only the platforms of Compose Multiplatform.
+            if [[ $compose_platforms == *" $platform "* ]]; then
+              tasks+=(":imagekodec-compose:compile${platform}Release" ":imagekodec-coil:compile${platform}Release")
+            fi
+            ./kotlin task "${tasks[@]}"
+            echo "::endgroup::"
+          done
+          tasks=()
+          for module in imagekodec imagekodec-heic; do tasks+=(":$module:compileWasmWasi"); done
+          for module in imagekodec imagekodec-heic imagekodec-compose imagekodec-coil; do
+            tasks+=(":$module:compileJs" ":$module:compileWasmJs")
+          done
+          ./kotlin task "${tasks[@]}"
+
+      # A release whose public API differs from the committed references does not go out.
+      - name: Check the public JVM API
+        run: ./kotlin check abi -m imagekodec -m imagekodec-compose -m imagekodec-coil -m imagekodec-heic
+
+      - name: Check the public klib API
+        run: ./kotlin check klibAbi -m imagekodec -m imagekodec-compose -m imagekodec-coil -m imagekodec-heic
 
       # The toolchain compiles, signs and zips each module, and the script merges the four zips into
       # one. Uploaded as one deployment, the release passes Central's checks as a whole and goes out
