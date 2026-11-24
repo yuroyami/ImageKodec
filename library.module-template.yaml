@@ -42,7 +42,7 @@ settings:
       enabled: true
       # The publish workflow reads this too. manual: after Central's checks, the release waits on the
       # Central Portal until the owner clicks Publish. auto: Central publishes it after the checks.
-      publishingMode: manual
+      publishingMode: auto
 
 # -Xexport-kdoc keeps the KDoc in the native klibs.
 settings@native:
