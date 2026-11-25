@@ -52,7 +52,7 @@ The optional modules are `imagekodec-compose` and `imagekodec-coil`, at the same
 > Linux, Windows, tvOS, watchOS, androidNative or wasmWasi resolves the core and then fails to
 > resolve them. Keep them out of any source set that includes those targets.
 
-The optional modules depend on Compose Multiplatform `1.13.0-alpha02`, so dependency resolution
+The optional modules depend on Compose Multiplatform `1.13.0-rc01`, so dependency resolution
 can raise the Compose version of your app to that release. On Android they need `compileSdk` 37.1
 or newer.
 

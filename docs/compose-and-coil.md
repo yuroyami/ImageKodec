@@ -11,7 +11,7 @@ Both modules build for seven targets only: Android, `jvm`, `iosArm64`, `iosSimul
 that source set fails to resolve them. On the web, Compose draws in a browser, so the two modules
 are for browser apps.
 
-Both depend on Compose Multiplatform `1.13.0-alpha02`, so dependency resolution can raise the
+Both depend on Compose Multiplatform `1.13.0-rc01`, so dependency resolution can raise the
 Compose version of an app to that release. Android apps that use them need `compileSdk` 37.1 or
 newer.
 
